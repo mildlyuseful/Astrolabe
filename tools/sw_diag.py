@@ -10,7 +10,7 @@ HOW TO RUN
   1. Open SolidWorks with a part or assembly.
   2. Rotate the view to a clearly tilted ISOMETRIC angle (NOT a flat Front view) and Zoom to Fit,
      so rotations/pans are easy to judge.
-  3. In a terminal:   python sw_diag.py
+  3. In a terminal (from the repo root):   python tools/sw_diag.py
   4. Follow the prompts; after each step say (out loud / in notes) what the viewport did.
 
 It restores each change right after, so your view is left roughly where it started.

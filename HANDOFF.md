@@ -38,7 +38,7 @@ ties them together and covers the things that span more than one component.
 
 A DIY **dual-sensor optical trackball** and the software that makes it useful. Two halves:
 
-- **Firmware** ([`XIAO3389.ino`](XIAO3389.ino)) on a **Seeed XIAO nRF52840** reads **two PMW3389**
+- **Firmware** ([`firmware/XIAO3389/XIAO3389.ino`](firmware/XIAO3389/XIAO3389.ino)) on a **Seeed XIAO nRF52840** reads **two PMW3389**
   optical sensors aimed at the ball, fuses them into **true 3-axis ball rotation**, and presents
   **two things over BLE at once**: a normal **HID mouse**, and a **custom GATT service** that streams
   the fused rotation. It can seamlessly switch between "act like a mouse" and "act like a 3-axis
@@ -58,9 +58,10 @@ wraps it in an app shell + settings UI + the CAD integrations.
 ## 2. Repository map
 
 ```
-XIAO3389.ino                 Firmware: dual-PMW3389 fusion → BLE HID mouse + custom rotation GATT service
+firmware/XIAO3389/XIAO3389.ino   Test-bench firmware: dual-PMW3389 fusion → BLE HID mouse + custom rotation GATT service
+firmware/Astrolabe/Astrolabe.ino Placeholder for the production firmware (different sensors; will replace XIAO3389)
 cube_test.py                 Legacy standalone pygame cube (the math's origin; kept for reference/--debug parity)
-sw_diag.py                   Throwaway SolidWorks COM probe (diagnostics; not part of the package)
+tools/sw_diag.py             Throwaway SolidWorks COM probe (diagnostics; not part of the package)
 requirements.txt / pyproject.toml   Deps + packaging (Nuitka onedir / pip gui-script)
 README_daemon.md             USER-facing: how to run + per-app setup steps
 HANDOFF.md                   THIS FILE — whole-system maintainer handoff
@@ -110,7 +111,7 @@ TLS-WS / COM) with no add-on. That interpreter/transport split is the source of 
 
 ---
 
-## 3. Hardware & firmware ([`XIAO3389.ino`](XIAO3389.ino))
+## 3. Hardware & firmware ([`firmware/XIAO3389/XIAO3389.ino`](firmware/XIAO3389/XIAO3389.ino))
 
 **Wiring** (in the header comment): shared SPI `SCK=D8 MISO=D9 MOSI=D10`; sensor CS `A=D7 B=D6`;
 buttons L/R/M = `D0/D1/D2` to GND; on-board LED for status.
@@ -439,7 +440,7 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
   `daemon.log` (with `TB_ONSHAPE_DEBUG=1` for verbose). These add-on logs are the **only** way to see
   inside the add-on interpreters — lean on them.
 - **Standalone harnesses:** `python -m trackball_daemon.onshape_bridge [--spin] [--force]`;
-  `tools/blender_nav_*.py` (run via `blender --background --python`); `sw_diag.py` for SolidWorks COM.
+  `tools/blender_nav_*.py` (run via `blender --background --python`); `tools/sw_diag.py` for SolidWorks COM.
 
 ---
 
