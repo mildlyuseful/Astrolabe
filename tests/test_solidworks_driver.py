@@ -3,7 +3,7 @@
 The COM layer is mocked: _flush() runs against a fake IModelView / IModelDoc2, and attach
 runs against a monkeypatched win32com.client.GetActiveObject. No SolidWorks is required.
 What still needs a live SolidWorks: the real attach, and that orbit/pan/zoom directions +
-sensitivities feel right (see README_daemon.md and the module's tuning constants).
+sensitivities feel right (see README.md and the module's tuning constants).
 """
 import math
 import time

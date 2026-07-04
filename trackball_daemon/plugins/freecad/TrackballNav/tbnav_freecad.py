@@ -8,7 +8,7 @@ touches the camera (Coin/Qt are main-thread-only).
 This module is imported by ``InitGui.py`` (a thin shim) and started via :func:`start`. The
 pure camera math lives in :mod:`tbnav_camera` (no FreeCAD imports -> unit-testable headless).
 
-Two FreeCAD gotchas shaped this file (see docs/freecad_driver_notes.md):
+Two FreeCAD gotchas shaped this file (see docs/apps/freecad.md):
   * FreeCAD execs ``InitGui.py`` with SEPARATE globals/locals, so a function defined there
     can't see module-level names. The fix is to keep ALL logic in this imported module (a
     normal namespace) and have InitGui.py only ``import`` + call :func:`start`.

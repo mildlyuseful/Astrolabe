@@ -210,7 +210,7 @@ python -m pytest tests -q
 Interactive camera coverage:
 
 ```ruby
-load 'C:/Users/dylan/Downloads/XIAO3389/tools/sketchup_nav_selftest.rb'
+load '<repo>/tools/sketchup_nav_selftest.rb'  # use your checkout's absolute path
 ```
 
 The self-test creates a temporary box inside an abortable operation and currently performs 23 live

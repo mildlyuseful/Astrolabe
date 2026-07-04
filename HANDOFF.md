@@ -63,7 +63,7 @@ firmware/Astrolabe/Astrolabe.ino Placeholder for the production firmware (differ
 cube_test.py                 Legacy standalone pygame cube (the math's origin; kept for reference/--debug parity)
 tools/sw_diag.py             Throwaway SolidWorks COM probe (diagnostics; not part of the package)
 requirements.txt / pyproject.toml   Deps + packaging (Nuitka onedir / pip gui-script)
-README_daemon.md             USER-facing: how to run + per-app setup steps
+README.md             USER-facing: how to run + per-app setup steps
 HANDOFF.md                   THIS FILE — whole-system maintainer handoff
 
 trackball_daemon/            The daemon package
@@ -102,7 +102,8 @@ plugin_src/autocad/          C# source of the AutoCAD NETLOAD plugin (dotnet bui
 tools/blender_nav_*.py       Headless Blender test scripts (math / integration / socket probes)
 tools/sketchup_nav_selftest.rb  Interactive SketchUp Ruby Console camera/raycast/socket self-test
 tests/                       pytest: bit-exact output, SW driver, app routing, blender wiring, integrations
-docs/                        Per-component maintainer guides (see §15)
+docs/apps/<app>.md           Per-app maintainer guides, named by app key (see §15)
+docs/spikes/                 Investigation reports (e.g. the desktop-navlib spike)
 ```
 
 The **daemon Python** and each **add-on** (including SketchUp's embedded Ruby) run in **different interpreters** and
@@ -296,7 +297,7 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
 - **Fusion 360** — *socket add-on* (`plugins/fusion360/TrackballNav`). Reads broker frames via a
   background socket thread, applies on Fusion's main thread via a **CustomEvent**, drives
   `app.activeViewport.camera`. **Set up** copies the add-in; **auto-update** re-copies on a version
-  bump (takes effect on Fusion's next launch). Gotchas in [fusion360-api-gotchas memory] and the code:
+  bump (takes effect on Fusion's next launch). Gotchas in [`docs/apps/fusion360.md`](docs/apps/fusion360.md) and the code:
   no external automation API (verify via `%APPDATA%\TrackballDaemon\fusion_addin.log`), **`adsk.core`
   has no `Point3DList`** (use `ObjectCollection` for `findBRepUsingRay` hit points), the active Design
   isn't reliably `app.activeProduct`. Add-in **0.1.13** adds the **`pointer` orbit pivot /
@@ -312,7 +313,7 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
 - **SolidWorks** — *in-process COM driver* (`solidworks_driver.py`), **no add-in** (those need admin
   registration). Attaches to a **running** SolidWorks via `GetActiveObject`, drives the view with
   native methods. The richest pivot support (origin/object/view/cursor) and the most COM gotchas.
-  → [`docs/solidworks_driver_notes.md`](docs/solidworks_driver_notes.md).
+  → [`docs/apps/solidworks.md`](docs/apps/solidworks.md).
 
 - **AutoCAD** — a bundled **NETLOAD .NET plugin** is the **SOLE transport**
   (`plugin_src/autocad` → `plugins/autocad/TrackballNavAcad.dll`); the *plugin loader*
@@ -336,18 +337,18 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
   fallback it attached before the plugin finished its broker handshake, claimed the first frames of
   each session (flicker + overlay), and could land a stale deferred orbit after the plugin took
   over. Resurrect it only for a target with no in-process path.
-  → [`docs/autocad_driver_notes.md`](docs/autocad_driver_notes.md).
+  → [`docs/apps/autocad.md`](docs/apps/autocad.md).
 
 - **Onshape** — *in-process TLS-WebSocket bridge* (`onshape_bridge.py`) that **impersonates the
   3Dconnexion NL-Proxy** at `127.51.68.120:8181`, speaking WAMP. Onshape's page connects, hands us its
   camera (`view.affine`), and we run the nav model. No add-in/extension; needs a one-time **cert
-  trust**. → [`docs/onshape_bridge_notes.md`](docs/onshape_bridge_notes.md).
+  trust**. → [`docs/apps/onshape.md`](docs/apps/onshape.md).
 
 - **Blender** — *socket add-on* (`plugins/blender/trackball_nav`), the **richest** target: orbit
   (free/turntable, 5 pivots), pan/zoom/dolly/roll, **fly/walk** first-person modes, camera-view
   driving, per-mode/per-axis inverts, an in-Blender **Alt+`** mode toggle, and an "Advanced" settings
-  section. → [`docs/blender_handoff.md`](docs/blender_handoff.md) (read first) +
-  [`docs/blender_nav_notes.md`](docs/blender_nav_notes.md).
+  section. → [`docs/apps/blender.md`](docs/apps/blender.md) (read first) +
+  [`docs/apps/blender_design.md`](docs/apps/blender_design.md).
 
 - **FreeCAD** — *socket add-on* (`plugins/freecad/TrackballNav`), modelled on Fusion/Blender. A
   background socket thread reads broker frames into a queue; a main-thread **PySide `QTimer`** drains
@@ -357,7 +358,7 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
   Blender). Camera math is pure/headless-testable (`tbnav_camera.py`). The FreeCAD-specific traps
   (InitGui's separate-globals/locals exec → thin shim + sibling module; `pivy.coin` must be imported
   before `getCameraNode`; `QTimer.singleShot` deferral gated on `FreeCAD.GuiUp`; versioned user dir)
-  are in [`docs/freecad_driver_notes.md`](docs/freecad_driver_notes.md) (read first) and the code.
+  are in [`docs/apps/freecad.md`](docs/apps/freecad.md) (read first) and the code.
   Verified live on FreeCAD 1.1.1. Add-on **0.1.3** adds the **`pointer` orbit pivot / `to_pointer`
   zoom** (orbit/zoom about the surface under the live mouse pointer — the FIRST app with it, §14): a
   passive `SoLocation2Event` observer caches the pointer pixel (device-px bottom-left, same
@@ -380,7 +381,7 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
   camera axes, and walk horizon-locks look while projecting movement onto world XY. All 23 production
   camera assertions pass live, and `0.2.0` is installed for the next SketchUp restart; physical
   sign/feel remains a calibration TODO. See
-  [`docs/sketchup_driver_notes.md`](docs/sketchup_driver_notes.md).
+  [`docs/apps/sketchup.md`](docs/apps/sketchup.md).
 
 - **Unreal Engine** — *socket add-on* (`plugins/unreal/TrackballNav`), a **content-only Unreal
   plugin** modelled on FreeCAD/Blender. A background socket thread reads broker frames into a queue;
@@ -402,7 +403,7 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
   Unreal-specific traps (left-handed/Z-up/cm/degrees conventions verified live; `Rotator(roll,pitch,
   yaw)` positional order; `make_rot_from_xz` for the rotator rebuild; `HitResult.to_dict()` for trace
   hits; the project-centric/admin install) are in
-  [`docs/unreal_driver_notes.md`](docs/unreal_driver_notes.md) (read first) and the code. **API +
+  [`docs/apps/unreal.md`](docs/apps/unreal.md) (read first) and the code. **API +
   conventions + plugin auto-load verified live, headless, on Unreal Engine 5.8**; the GUI sign/scale
   feel is a live-tune TODO.
 
@@ -646,13 +647,13 @@ and the source of the live-reported bugs fixed here (AutoCAD notes §8.2/§8.3/�
 Everything that was discussed/requested but not finished, so nothing is lost in the handoff.
 
 **Apps & hardware**
-- ~~**FreeCAD integration**~~ — **DONE** (socket add-on, §8 / [`docs/freecad_driver_notes.md`](docs/freecad_driver_notes.md)).
+- ~~**FreeCAD integration**~~ — **DONE** (socket add-on, §8 / [`docs/apps/freecad.md`](docs/apps/freecad.md)).
   This completed the original **5-app plan** (Fusion, SolidWorks, Onshape, Blender, FreeCAD). Remaining
   FreeCAD polish: a **sign/scale calibration pass on real hardware** (the `ORBIT_SCALE`/`PAN_*`/`ZOOM_*`
   defaults in `tbnav_camera.py` are best-guesses; direction is flippable via the per-app Invert
   checkboxes), and the perspective-camera path is lightly exercised live (FreeCAD defaults to ortho).
 - ~~**Unreal Engine integration**~~ — **DONE** (content-only socket add-on, §8 /
-  [`docs/unreal_driver_notes.md`](docs/unreal_driver_notes.md)). The editor Python API, the
+  [`docs/apps/unreal.md`](docs/apps/unreal.md)). The editor Python API, the
   left-handed/Z-up/cm/degrees camera conventions, and the **script-only-plugin auto-load** were all
   verified **live, headless** on Unreal Engine 5.8 (a pythonscript commandlet). Remaining Unreal
   polish: the **live GUI sign/scale calibration** (`ORBIT_SIGN`/`PAN_*`/`ZOOM_*` in
@@ -660,81 +661,27 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
   viewport camera is meaningless without the GUI), and the **install ergonomics** (writing into an
   engine `Engine/Plugins` dir needs admin; the no-admin path is a per-project `Plugins` drop, and the
   plugin must be enabled once in *Edit → Plugins*).
-- ~~**SketchUp Desktop integration**~~ — **DONE** (Ruby socket extension, §8 /
-  [`docs/sketchup_driver_notes.md`](docs/sketchup_driver_notes.md)). SketchUp 2026.2.243 is installed;
-  the eye/target/up camera, Geom rotations, centre `pickray` + `raytest`, repeating `UI.start_timer`,
-  non-blocking socket polling, production `apply()` self-test, and broker hello
-  were all verified live in the GUI/Ruby Console. The user-approved per-year install was then
-  verified by a clean normal launch: the loader started and handshook without a Ruby Console load.
-  Extension `0.2.0` also adds viewpoint/fly/walk with Blender-equivalent per-mode inverts; its 23
-  live camera assertions pass. Remaining SketchUp polish is a physical trackball sign/feel pass for
-  `ORBIT_SCALE`/`PAN_*`/`ZOOM_*`. SketchUp for Web remains
+- ~~**SketchUp Desktop integration**~~ — **DONE** (Ruby socket extension `0.2.0`, verified live on
+  SketchUp 2026.2.243, §8 / [`docs/apps/sketchup.md`](docs/apps/sketchup.md)). Remaining polish: a
+  physical trackball sign/feel pass for `ORBIT_SCALE`/`PAN_*`/`ZOOM_*`. SketchUp for Web remains
   deliberately out of scope because it has no local Ruby hook.
-- ~~**AutoCAD integration**~~ — **DONE** (compiled NETLOAD plugin, the sole transport since daemon
-  0.1.41 — the original in-process COM transport is archived at `archive/autocad_com_transport/`,
-  §8.18 / [`docs/autocad_driver_notes.md`](docs/autocad_driver_notes.md)). The COM era first
-  **verified live on AutoCAD 2026 (ACAD 25.1s)**: attach, turntable/free orbit, pan, zoom
-  (to_center/to_object), the desynced-viewport read + reassign+ZoomCenter model, the ROT attach.
-  Live-reported bugs fixed then: the zoom→orbit jump + VIEWSIZE blowup (destructive `Center=(0,0)`
-  → never set `Center`); the **orbit flash of default zoom** (set `vp.Height` in the reassign); a
-  pivot that could centre empty space after Zoom Extents (seed from **`VIEWCTR`**, not `TARGET`). **v0.1.28: smooth orbit shipped** via the bundled **NETLOAD plugin** (the user authorized
-  a compiled component + the .NET 8 SDK install) using per-frame `Editor.SetCurrentView` — which
-  the user then correctly observed **still regenerated every frame** (WorldDraw-counter-verified:
-  2 WD/frame, ~5–7 ms; the earlier "0.4 ms, no regen" was measured in a near-empty context).
-  **v0.1.29 (plugin v0.2.0): TRUE regen-free orbit** — the plugin drives the viewport's **live
-  GraphicsSystem kernel view** (`ObtainAcGsView(vpn, {"3D Drawing"})`, seeded via
-  `SetViewFromViewport`, `SetView`+`Update` per frame: **~1.6 ms, ZERO WorldDraws over 150
-  frames**) and syncs the DB **once per gesture, also regen-free**
-  (`SetViewportFromView(regenRequired:false)` — WD=0, DB lands exactly on the driven camera, twist
-  included → free-roll). Verified live in the user's own session with the production math
-  (`NavMath.cs` compiled verbatim into probe TbProbeGs3) — notes **§8.15**. **v0.1.30–34 (plugin
-  v0.2.1–0.2.4): the snap-back fixes** — a shadow `CamState` per gesture (mid-gesture GS resets
-  self-heal; `gs-clobber` diagnostic) and, decisive (user-diagnosed): in the **"2D Wireframe"**
-  style the 2D pipeline presents from a projected display list that the regen-free commit never
-  rebuilds → the view snapped back on the next repaint. In-API rebuilds (`SetCurrentView`,
-  `ed.Regen()`, `regenRequired:true`) get optimized away after the GS drive (user-verified), so
-  the 2D commit queues a REAL **`_.REGEN`** via `SendStringToExecute`, gated on
-  `Editor.IsQuiescent` — **one visible regen per gesture** (style detected via
-  `DBVisualStyle.Type == Wireframe2D`; `GetCurrent3dAcGsView` is NOT a valid discriminator and
-  `VSCURRENT` is not a readable sysvar — notes **§8.16**). **CRITICAL: the REGEN and the GS drive
-  must NEVER overlap** — v0.2.3 lacked that interlock and crashed AutoCAD with a native AV
-  (0xc0000005, uncatchable) when the regen rebuilt the kernel views under an active gesture;
-  v0.2.4 HOLDS nav frames while a regen is pending/in-flight (`CommandEnded` + 2 s watchdog).
-  v0.2.5–0.2.8: the wheel-zoom wireframe snap came from the STALE *Active VPORT record (neither
-  SetCurrentView nor REGEN updates it → preemptive regens useless; native zoom consults it).
-  **Two crash traps on the way to the fix: `UpdateTiledViewportsInDatabase` in the 2D commit
-  (erases+recreates the records → dangling kernel view → AV next gesture, v0.2.5) AND plain
-  field writes left un-applied (same AV, v0.2.7). The ONE SAFE ORDER (v0.2.8, crash-tested in a
-  throwaway instance before shipping): write the EXISTING record field-by-field, then
-  IMMEDIATELY `ed.UpdateTiledViewportsFromDatabase()`** — record becomes the source, everything
-  agrees (record-vs-live dot 1.000000), snap gone at the source; the visible REGEN + the
-  one-shot native-op repair watch stay as belt-and-braces — notes §8.16. The plugin is also a first-class
-  `_ADDINS` entry now (version.json generated by the Release build; UI install/update; locked-DLL
-  updates are STAGED and land on AutoCAD's next start via the driver's copy-on-attach).
-  `SetCurrentView`
-  remains the in-plugin fallback (paper space/GS failure). **The COM nav transport is RETIRED
-  (daemon 0.1.41): archived at `archive/autocad_com_transport/`** — as a process-level fallback it
-  attached before the plugin's broker handshake, claimed each session's first frames (regen
-  flicker + the overlay cube) and could land a stale deferred orbit after the plugin took over, so
-  `app.py` now routes autocad frames to the broker unconditionally. What's left of
-  `autocad_driver.py` is the **plugin loader** (ROT attach → copy-to-%APPDATA% + TRUSTEDPATHS +
-  LISP NETLOAD, once per AutoCAD session, zero user steps).
-  **Plugin v0.3.0: the `pointer` orbit pivot / `to_pointer` zoom** (orbit/zoom about the point
-  under the mouse — a passive `Editor.PointMonitor` cache + optional pivots in `NavMath.Apply`;
-  verified live in a throwaway instance incl. the `TBNAVPTRTEST` production-pipeline self-test —
-  notes §8.17).
-  Remaining AutoCAD polish: (1) the **live GUI sign/scale calibration** of the plugin
-  (`OrbitSign/Pan*/Zoom*` in Plugin.cs — best-guesses, pan/zoom scale
-  especially); (2) plugin pivot modes (`origin`/`object` still orbit like `view` — `pointer` is
-  implemented, v0.3.0) and `to_object` zoom are TODO; (3) plugin needs a per-era rebuild when
-  AutoCAD breaks .NET binary compat (2025–2027 are one family), and 2024-or-older needs a .NET
-  Framework variant.
+- ~~**AutoCAD integration**~~ — **DONE** (compiled NETLOAD plugin v0.3.0, the sole transport since
+  daemon 0.1.41; the COM nav transport is archived at `archive/autocad_com_transport/`). The full
+  road there — the COM-era view model, the per-frame-regen discovery, the regen-free GS kernel-view
+  transport, the 2D-Wireframe snap-back/crash taxonomy, and the PointMonitor pointer pivot — is the
+  solved-problem history in [`docs/apps/autocad.md`](docs/apps/autocad.md) **§8.9–§8.18** (read
+  §8.16's crash taxonomy before touching the commit path). Remaining AutoCAD polish: (1) the **live
+  GUI sign/scale calibration** of the plugin (`OrbitSign/Pan*/Zoom*` in Plugin.cs — best-guesses,
+  pan/zoom scale especially); (2) plugin pivot modes (`origin`/`object` still orbit like `view` —
+  `pointer` is implemented, v0.3.0) and `to_object` zoom are TODO; (3) the plugin needs a per-era
+  rebuild when AutoCAD breaks .NET binary compat (2025–2027 are one family), and 2024-or-older
+  needs a .NET Framework variant.
 - **PMW3610 third sensor** — the design anticipates a PMW3610. Firmware currently **emulates** its
   tracking ceiling via `IPS_CAP` (and reports raw peak IPS to spec the real part). Real PMW3610
   support (its own driver class + possibly a 3-sensor fusion solver) is future work.
 - **Generalize the 3Dconnexion NL-Proxy bridge to desktop apps** — **INVESTIGATED (Milestone-0 spike,
   2026-06-30) → not viable as a socket bridge; deferred by decision.** See
-  [`docs/spacemouse_bridge_notes.md`](docs/spacemouse_bridge_notes.md). The leading hypothesis
+  [`docs/spikes/spacemouse_desktop_navlib.md`](docs/spikes/spacemouse_desktop_navlib.md). The leading hypothesis
   (desktop navlib apps connect to a loopback WebSocket on :8181 we could occupy, like the web NL-Proxy)
   is **falsified**: native apps (verified on FreeCAD 1.1 + KiCad 9.0, driver-free) **compile in** the
   navlib C++ accessor wrapper but reach the device through the low-level navlib **C ABI**
@@ -756,8 +703,8 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
   o/p/z; **buttons are handled on-device in HID mode**. Wiring these needs a **new broker message type
   for button events** (and the firmware to forward button state in controller mode). The Blender add-on
   already leaves clean hooks but nothing fires them. (Catalog item "K".)
-- **True cursor-position pivot / "zoom to mouse"** — **IN PROGRESS (one app per section, best-first;
-  see the cursor-orbit-feasibility memory for the ranked plan).** The shared daemon wiring is DONE
+- **True cursor-position pivot / "zoom to mouse"** — **IN PROGRESS (one app at a time, best-first —
+  the ranked remaining apps are at the end of this bullet).** The shared daemon wiring is DONE
   (daemon 0.1.39): new scheme values `pointer` (orbit_pivot) / `to_pointer` (zoom_mode), additive and
   distinct from `cursor`/`to_cursor` (which keep their old fallback meanings), in every ui.py
   dropdown and every broker frame — the only per-app work left is each plugin's pivot resolver.
@@ -828,36 +775,38 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
 
 ## 15. The other docs
 
-- [`README_daemon.md`](README_daemon.md) — **user-facing**: how to run + click-by-click per-app setup.
-- [`docs/solidworks_driver_notes.md`](docs/solidworks_driver_notes.md) — SolidWorks: the verified COM
+- [`README.md`](README.md) — **user-facing**: how to run + click-by-click per-app setup.
+- [`docs/apps/solidworks.md`](docs/apps/solidworks.md) — SolidWorks: the verified COM
   view-transform model + every pywin32/late-dispatch/`SelectByRay` gotcha. Read before touching the
   driver.
-- [`docs/onshape_bridge_notes.md`](docs/onshape_bridge_notes.md) — Onshape: the reverse-engineered
+- [`docs/apps/onshape.md`](docs/apps/onshape.md) — Onshape: the reverse-engineered
   WAMP/navlib protocol, the affine convention, cert trust, and the solved-problem history.
-- [`docs/autocad_driver_notes.md`](docs/autocad_driver_notes.md) — AutoCAD: the verified ActiveX view
+- [`docs/apps/autocad.md`](docs/apps/autocad.md) — AutoCAD: the verified ActiveX view
   model (read from sysvars, write via the reassign commit ritual), the ROT attach, SAFEARRAY
   marshaling, the auto-level/no-roll + no-raycast limitations, and how to test live. **Read before
   touching the driver.**
-- [`docs/blender_handoff.md`](docs/blender_handoff.md) — Blender: architecture, the full gotcha +
+- [`docs/apps/blender.md`](docs/apps/blender.md) — Blender: architecture, the full gotcha +
   solved-problem history, testing. **Read first** for Blender.
-- [`docs/blender_nav_notes.md`](docs/blender_nav_notes.md) — Blender design rationale: the full mode
+- [`docs/apps/blender_design.md`](docs/apps/blender_design.md) — Blender design rationale: the full mode
   catalog, the generic-scheme↔Blender reconciliation, and verified Blender-API facts.
-- [`docs/freecad_driver_notes.md`](docs/freecad_driver_notes.md) — FreeCAD: the verified Coin camera
+- [`docs/apps/freecad.md`](docs/apps/freecad.md) — FreeCAD: the verified Coin camera
   model + the FreeCAD-specific gotchas (InitGui separate-globals/locals exec, `pivy.coin` SWIG load,
   `GuiUp`/`QTimer` deferral, versioned user Mod dir) and how to test live. **Read before touching the
   add-on.**
-- [`docs/sketchup_driver_notes.md`](docs/sketchup_driver_notes.md) — SketchUp: the live-verified Ruby
+- [`docs/apps/sketchup.md`](docs/apps/sketchup.md) — SketchUp: the live-verified Ruby
   eye/target/up camera, single-main-thread `UI.start_timer` socket poll, `pickray`/`raytest` held
   pivot, annual Plugins install, interactive self-test, and startup/Length/logical-pixel gotchas.
   **Read before touching the extension.**
-- [`docs/unreal_driver_notes.md`](docs/unreal_driver_notes.md) — Unreal Engine: the verified free-fly
+- [`docs/apps/unreal.md`](docs/apps/unreal.md) — Unreal Engine: the verified free-fly
   editor-camera model + conventions (left-handed/Z-up/cm/degrees), the Unreal-specific gotchas
   (`Rotator(roll,pitch,yaw)` positional order, `compose_rotators` misbehaving, `HitResult.to_dict()`,
   `make_rot_from_xz` rebuild), the project-centric/admin install reality + what auto-loads, and how to
   live-probe the editor Python API **headless**. **Read before touching the add-on.**
-- The **Fusion** integration has no separate doc; its gotchas are in the add-in's code comments and in
-  the Claude "fusion360-api-gotchas" memory (no external automation → verify via `fusion_addin.log`;
-  no `Point3DList`; `activeProduct` isn't reliably the Design).
+- [`docs/apps/fusion360.md`](docs/apps/fusion360.md) — Fusion 360: the CustomEvent socket add-in
+  architecture, the no-external-automation reality (verify via `fusion_addin.log`), the
+  `ObjectCollection`/`activeProduct` API traps, the modal-Command rejection, and the live-verified
+  mixed logical/physical DPI coordinate model behind the pointer pivot. **Read before touching the
+  add-in.**
 
 > When you change something that "you couldn't have known by reading the code," add it to the relevant
 > doc's gotcha/solved-problem section **and** (if it spans components) here. That discipline is why

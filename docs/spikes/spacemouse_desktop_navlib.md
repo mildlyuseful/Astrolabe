@@ -3,7 +3,7 @@
 Status: **SPIKE COMPLETE — feasibility decision pending.** This documents the reverse-engineering of
 how native desktop CAD apps consume 3Dconnexion SpaceMouse input, the go/no-go per the Milestone 0
 plan, and the one viable driver-free path. **No bridge code has been written** — per the task, the
-build is gated behind this spike's decision. Companion: [`onshape_bridge_notes.md`](onshape_bridge_notes.md)
+build is gated behind this spike's decision. Companion: [`apps/onshape.md`](../apps/onshape.md)
 (the *web* navlib bridge, which this was supposed to generalize).
 
 > TL;DR: The task's leading hypothesis — "desktop navlib apps connect to a loopback WebSocket on

@@ -3,7 +3,7 @@
 The COM layer is mocked: _flush() runs against a fake AutoCAD.Application / Document / Viewport, and
 attach runs against a monkeypatched _find_running_acad. No AutoCAD is required. What still needs a
 live AutoCAD: the real attach and that orbit/pan/zoom directions + sensitivities feel right (see
-docs/autocad_driver_notes.md and the module's tuning constants).
+docs/apps/autocad.md and the module's tuning constants).
 
 Key verified facts these fakes encode: the driver READS the view from sysvars (VIEWDIR/TARGET/
 VIEWSIZE/EXTMIN/EXTMAX), never from the viewport clone; it WRITES via the reassign commit ritual

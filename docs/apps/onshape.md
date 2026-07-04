@@ -5,7 +5,7 @@ what the bridge does, the reverse-engineered protocol, and — most importantly 
 solved problems you would not discover by reading the code alone** (§8). If you only read one
 section, read §8.
 
-Primary code: [`trackball_daemon/onshape_bridge.py`](../trackball_daemon/onshape_bridge.py). Wiring:
+Primary code: [`trackball_daemon/onshape_bridge.py`](../../trackball_daemon/onshape_bridge.py). Wiring:
 `app.py`, `config.py`, `integrations.py`, `ui.py`, `winfocus.py`.
 
 ---

@@ -1,14 +1,22 @@
-# Trackball Daemon
+# Astrolabe
 
-A background **system-tray app** that connects to the BLE trackball, injects mouse
-movement, and (in 3D mode) drives 3D-app navigation. It replaces the old `cube_test.py`
-pygame window with a real app shell + settings UI. The BLE data path and the
-mouse/3D output math are unchanged — only the shell and the settings surface are new.
+A DIY **dual-sensor optical trackball** that acts as both a Bluetooth mouse and a 3-axis
+3D controller — plus the software that makes it useful:
+
+- **Firmware** ([`firmware/XIAO3389/`](firmware/XIAO3389/XIAO3389.ino), Seeed XIAO nRF52840):
+  fuses two optical sensors into true 3-axis ball rotation and presents a BLE HID mouse and a
+  custom rotation stream simultaneously.
+- **Trackball Daemon** (`trackball_daemon/`, Python, Windows): a background **system-tray app**
+  that consumes the rotation stream and either injects mouse movement (cursor mode) or drives a
+  3D app's camera like a SpaceMouse (3D mode) — **Fusion 360, SolidWorks, AutoCAD, Onshape,
+  Blender, FreeCAD, SketchUp Desktop, and Unreal Engine**, routed to whichever app is focused.
+
+This README is the user-facing run/setup guide for the daemon.
 
 > **Taking over or new to the whole project?** Start with [`HANDOFF.md`](HANDOFF.md) — the
 > master maintainer guide covering the firmware + daemon + every integration, the cross-cutting
-> gotchas you can't see in the code, and the full list of unfinished/future work. This README is
-> the user-facing run/setup guide.
+> gotchas you can't see in the code, and the full list of unfinished/future work. Per-app
+> maintainer deep-dives live in [`docs/apps/`](docs/apps/).
 
 ## Run
 
@@ -93,105 +101,45 @@ and moves the active view's camera.
    `GetActiveObject("SldWorks.Application")` (it never *launches* SolidWorks); the row flips
    to **active • connected** and the tray shows `Apps: solidworks v…`. Spin the ball to
    orbit; hold **Shift** to pan/zoom.
-3. Camera control uses SolidWorks' **native** view operations — `RotateAboutAxis` (orbit),
-   setting `Translation3` (pan), and `ZoomByFactor` (zoom **about the view center**, so the
-   model doesn't drift off-screen). Orbit is **camera-relative**: the camera axes are the
-   **columns** of the view's `Orientation3` matrix every frame, so it tracks the current view
-   instead of the global X/Y/Z, and all channels compose into **one** rotation per frame.
-   *(Verified live against SolidWorks 2025 — columns are the camera axes, and orbit/pan/zoom
-   each drive the viewport correctly.)* Tuning: the same **Per-App Bindings** (gains + Invert axes)
-   as the other apps, plus intrinsic constants at the top of `solidworks_driver.py`:
-   - `ORBIT_SIGN` — direction of each orbit channel (pitch/yaw/roll). Defaults mirror the
-     Fusion add-in (X/Y inverted); flip any axis that spins the wrong way.
-   - `PAN_SCALE` / `PAN_SIGN` — pan magnitude (raise if too slow, lower if it flies off) and
-     direction. `Translation3` is screen-relative (meters in the graphics-area plane), so pan
-     is **not** divided by the zoom scale.
-   - `ZOOM_SCALE` / `ZOOM_SIGN` — zoom rate and direction.
-   - `WORLD_UP` — turntable azimuth axis (SolidWorks Y-up → `(0,1,0)`).
-   - `FORCE_REDRAW` — force a redraw each frame. If motion stays visible with it `False`,
-     leaving it `False` raises the refresh rate.
+3. Camera control uses SolidWorks' **native** view operations, verified live against
+   SolidWorks 2025. Tuning: the same **Per-App Bindings** (gains + Invert axes) as the other
+   apps, plus intrinsic constants at the top of `solidworks_driver.py` (`ORBIT_SIGN`,
+   `PAN_SCALE`/`PAN_SIGN`, `ZOOM_SCALE`/`ZOOM_SIGN`, `WORLD_UP`, `FORCE_REDRAW`) — flip a sign
+   there if an axis feels backwards, or just use the Invert checkboxes.
 4. **Control scheme** (the **Orbit pivot / Orbit style / Zoom mode** dropdowns in Per-App
    Bindings, same as the other apps — set per app or leave on **Default** to inherit General →
-   3D control scheme). For SolidWorks **all three are applied**, verified live with **zero drift** of
-   the held point and at the normal frame rate:
-   - **Orbit pivot** — four modes:
-     - `origin` rotates about the **model origin** with **zero view translation** — the original
-       behaviour (pure rotation, the lightest path).
-     - `object` (and `cursor`, which falls back to it) rotates about the model **bounding-box centre**
-       (parts via `GetPartBox`, assemblies via `GetBox`). The centre is a fixed point, so it's held
-       exactly every frame.
-     - `view` rotates about the point on the surface **under the centre of the screen**, found by a
-       screen-centre **raycast** (`IModelDocExtension.SelectByRay`) — exactly like SolidWorks' own
-       middle-drag orbit. Why a raycast: the camera target sits on the optical axis at an *arbitrary*
-       depth, so pinning the screen centre at the object-centre depth makes the model swing when that
-       depth ≠ the surface you're looking at; the ray pins the pivot at the **true surface depth** under
-       the crosshair. The aperture (ray cylinder) starts tiny and grows ×3 until it hits (so the
-       smallest, most accurate hit wins), each hit is validated against the bounding box, and on a miss
-       it **falls back to the object-centre depth** (the old behaviour). The ray runs **once per
-       gesture** (~16 ms; then the pivot is held), and it saves/restores your current selection so it
-       never disturbs your work. SolidWorks' `RotateAboutAxis` ignores its point argument and always
-       pivots about the model origin, so `object`/`view` rotate **and then pan** to hold their point.
-       The pan is `dT = Scale2·((col_before − col_after)·pivot)`, which *exactly* compensates the
-       rotation — the held point stays put to ~1e-16 (machine precision, verified live), so there's no
-       discrete-order drift. It's smooth because the expensive COM reads are cached
-       (`ActiveDoc`/`ActiveView`, tracked `Translation3`/`Scale2`) and the post-rotation axes are
-       predicted analytically, so the pan adds almost no round-trips.
-     - The `view` pivot is **captured once and held** through a gesture (like native middle-drag sets
-       the rotation centre on mouse-down), and re-raycast only when it actually changes: when the view
-       is **panned or zoomed**, or after it's been **still** past the configurable hold time below.
-   - **View-pivot hold (s)** (Per-App Bindings, `view` pivot only) — seconds the view must be still
-     (no orbit/pan/zoom) before the `view` pivot re-raycasts the surface under the current centre.
-     Default **0.5**; `0` recomputes at the start of every orbit. (A pan/zoom always recomputes it
-     immediately, since those are guaranteed to move it.)
+   3D control scheme). All three are applied, verified live with zero drift of the held point:
+   - **Orbit pivot** — `origin` rotates about the model origin (the lightest path); `object`
+     (and `cursor`, which falls back to it) rotates about the model's bounding-box centre;
+     `view` rotates about the surface **under the centre of the screen** — found by a raycast,
+     exactly like SolidWorks' own middle-drag orbit — and **holds it for the whole gesture**,
+     falling back to the object centre when the crosshair is off-model.
+   - **View-pivot hold (s)** (Per-App Bindings, `view` pivot only) — seconds the view must be
+     still before the `view` pivot re-raycasts. Default **0.5**; `0` recomputes at the start of
+     every orbit; a pan/zoom always recomputes it immediately.
    - **Orbit style** — `free` (all three axes, with roll) or `turntable` (yaw about world-up +
-     pitch about camera-right, **roll dropped** so the model never tilts). One rotation per frame.
-   - **Zoom mode** — `to_center` (default) zooms about the view centre (one `ZoomByFactor`, the
-     original behaviour). `to_object` keeps the model **bounding-box centre** fixed while zooming;
-     drift-free. `to_cursor` **falls back to to_center** (no SW hit-test).
+     pitch about camera-right, roll dropped so the model never tilts).
+   - **Zoom mode** — `to_center` (default) zooms about the view centre; `to_object` keeps the
+     bounding-box centre fixed; `to_cursor` falls back to to_center (no SW hit-test).
    - Switching the orbit pivot takes effect immediately (any held pivot is dropped).
-
-   > pywin32 note: `GetActiveObject` returns a late-bound dispatch that mis-resolves a few
-   > SolidWorks members. The driver handles this — `GetMathUtility`/`CreateVector`/`GetPartBox`/
-   > `GetBox`/`SelectByRay`/`GetSelectionPoint2` are flagged as methods (`_FlagAsMethod`) and the
-   > `CreateVector` array is passed as a `VT_ARRAY|VT_R8` VARIANT. `SelectByRay` is especially fussy:
-   > its `Tol` argument must be an explicit **`VT_I4` integer** (a double silently selects nothing),
-   > and the selection count comes from `GetSelectedObjectCount2` (`GetSelectionCount` isn't a
-   > resolvable name on that dispatch) — both found by live probing.
 
    There is **no add-in** to update, so the daemon never auto-copies anything for SolidWorks.
 
 > Requires `pywin32` (Windows). If it's missing the driver disables itself and logs once;
-> the rest of the daemon runs normally.
+> the rest of the daemon runs normally. One failing camera op is logged to `daemon.log` and
+> skipped rather than disconnecting — if one axis stops working, look there for a
+> `solidworks: … step failed` line.
 >
-> **Resilience.** Each camera op (orbit / pan / zoom / redraw) is applied independently, so one
-> failing COM call is logged once to `daemon.log` and skipped — it can't blank the viewport or
-> force a disconnect (only the running app actually closing does that). If one axis of control
-> stops working, check `daemon.log` for a `solidworks: … step failed` line.
->
-> **Smoothness / latency.** Each frame **freezes the viewport** (`IModelView.EnableGraphicsUpdate =
-> False`) around the camera ops and re-enables + redraws once at the end, so the rotate + recenter pan
-> show as **one** repaint instead of flickering through the intermediate origin-rotated state. That
-> removes the jitter *and* cuts a whole repaint per frame — measured **~133 → ~76 ms/frame (≈2×)** on
-> a heavy part, live. Orbit also composes all channels into one `RotateAboutAxis` (plus, for a
-> non-origin pivot, one recenter pan) on a **fixed-cadence** worker loop (it sleeps only the time left
-> in each period *after* the COM work). The remaining cost over out-of-process COM is **property
-> reads** (`ActiveDoc`/`ActiveView`/`Translation3` ~17–20 ms *each*; the redraw is ~5 ms), so the
-> driver **caches** the view handles and **tracks** `Translation3`/`Scale2` across its own writes
-> (re-validating ~once a second) and predicts post-rotation axes analytically — no extra reads. For
-> the lowest latency use the `origin` pivot (rotate only, no pan). The **Viewport refresh rate**
-> (Per-App Bindings) sets the loop's target period, but actual throughput is bounded by SolidWorks, so
-> setting it far above what the part allows just runs as fast as SolidWorks can; lower it (or set
-> `FORCE_REDRAW = False`) if it
-> ever lags. This out-of-process ceiling is below an in-process add-in (3Dconnexion's own SolidWorks
-> SpaceMouse support is an add-in for exactly this reason). Building one is a **proven, viable path**
-> — the AutoCAD integration ships exactly such a compiled add-in with zero user friction (pre-built
-> DLL bundled with the daemon, auto-loaded, HKCU registration needs no admin) — and is the planned
-> upgrade if the COM rate ever limits real use.
+> **Performance.** Throughput is bounded by SolidWorks' out-of-process COM rate, not the
+> daemon: setting the **Viewport refresh rate** far above what the part allows just runs as
+> fast as SolidWorks can. If it lags, lower the rate (or set `FORCE_REDRAW = False`); the
+> `origin` pivot is the lowest-latency mode. The eventual upgrade past this ceiling is an
+> in-process add-in, the pattern the AutoCAD integration already proved.
 
-> Maintainer's guide (the verified COM view-transform model, every pywin32/late-dispatch gotcha, the
-> `SelectByRay` raycast pitfalls, and how to test against live SolidWorks):
-> [`docs/solidworks_driver_notes.md`](docs/solidworks_driver_notes.md). **Read it before changing the
-> driver** — most of what matters there is not visible in the code.
+> Maintainer's guide (the verified COM view-transform model, the exact-compensation pivot
+> math, the caching/latency engineering, every pywin32/late-dispatch/`SelectByRay` gotcha, and
+> how to test against live SolidWorks): [`docs/apps/solidworks.md`](docs/apps/solidworks.md).
+> **Read it before changing the driver** — most of what matters there is not visible in the code.
 
 ### AutoCAD (implemented — bundled in-process plugin, the sole transport)
 AutoCAD **is** driven by a compiled in-process plugin — and this turned out to be the *right* call,
@@ -249,7 +197,7 @@ Architecture, Mechanical) are all `acad.exe` and expose the same automation obje
 
 > Maintainer's guide (the live-GS-view transport, the 2D-wireframe commit saga and its crash taxonomy,
 > the verified ActiveX view model the archived COM transport used, the ROT attach, and how to test
-> against live AutoCAD): [`docs/autocad_driver_notes.md`](docs/autocad_driver_notes.md). **Read it
+> against live AutoCAD): [`docs/apps/autocad.md`](docs/apps/autocad.md). **Read it
 > before changing the plugin or loader** — most of what matters there is not visible in the code.
 
 ### Onshape (implemented — browser bridge, no add-in, no extension)
@@ -259,7 +207,7 @@ mouse drags, the daemon stands up its **own** local server impersonating the 3Dc
 `127.51.68.120:8181` speaking the WAMP-based "3DxWare for web" protocol. Onshape connects, hands us
 its camera, and the in-process bridge (`onshape_bridge.py`, parallel to the broker) applies the
 trackball's orbit/pan/zoom and writes the new camera back. (Full reverse-engineered protocol +
-cert/trust details: [`docs/onshape_bridge_notes.md`](docs/onshape_bridge_notes.md).)
+cert/trust details: [`docs/apps/onshape.md`](docs/apps/onshape.md).)
 
 1. Settings → **3D Apps** → Onshape → **Enable**. This generates a self-signed TLS cert for
    `127.51.68.120` in `%APPDATA%\TrackballDaemon\` (it does **not** touch any trust store) and shows
@@ -336,7 +284,7 @@ daemon: relaunch it, then restart FreeCAD.
 > Maintainer's guide (the verified Coin camera model, the FreeCAD-specific gotchas — `InitGui.py`'s
 > separate-globals/locals exec, the `pivy.coin` SWIG-load requirement, the `GuiUp`/`QTimer` deferral,
 > the versioned user-dir — and how to test against live FreeCAD):
-> [`docs/freecad_driver_notes.md`](docs/freecad_driver_notes.md). **Read it before changing the
+> [`docs/apps/freecad.md`](docs/apps/freecad.md). **Read it before changing the
 > add-on.**
 
 ### SketchUp Desktop (implemented — Ruby socket extension)
@@ -365,7 +313,7 @@ Add-on updates are version-gated and take effect on SketchUp's next launch. View
 added in extension `0.2.0`.
 
 > Maintainer guide, verified live on SketchUp 2026.2.243:
-> [`docs/sketchup_driver_notes.md`](docs/sketchup_driver_notes.md).
+> [`docs/apps/sketchup.md`](docs/apps/sketchup.md).
 
 ### Unreal Engine (implemented — socket add-on, a content-only editor plugin)
 Unreal's **Editor** exposes Python (the built-in **Python Editor Script Plugin**), so it's driven by
@@ -412,16 +360,26 @@ the editor's **next launch**. So after updating the daemon: relaunch it, then re
 > Maintainer's guide (the verified free-fly editor-camera model + conventions, the Unreal-specific
 > gotchas — `Rotator(roll,pitch,yaw)` positional order, `make_rot_from_xz` for the rotator rebuild,
 > `HitResult.to_dict()` for trace hits, the project-centric/admin install reality — and how to
-> live-probe the editor Python API **headless**): [`docs/unreal_driver_notes.md`](docs/unreal_driver_notes.md).
+> live-probe the editor Python API **headless**): [`docs/apps/unreal.md`](docs/apps/unreal.md).
 > **Read it before changing the add-on.**
 
 Blender is also **implemented** (a rich socket add-on — orbit/pan/zoom plus fly/walk, camera-view
 driving, and more); see [`HANDOFF.md`](HANDOFF.md) §8 and
-[`docs/blender_handoff.md`](docs/blender_handoff.md) for its setup and tuning.
+[`docs/apps/blender.md`](docs/apps/blender.md) for its setup and tuning.
 
 ## Project layout (packaging-ready)
 
 ```
+firmware/
+  XIAO3389/XIAO3389.ino               test-bench firmware (dual PMW3389; current hardware)
+  Astrolabe/Astrolabe.ino             placeholder for the production firmware (different sensors)
+docs/
+  apps/<app>.md                       per-app maintainer guides, named by app key
+  spikes/                             investigation reports
+plugin_src/
+  autocad/                            C# source of the bundled AutoCAD NETLOAD plugin
+tools/                                headless probes + diagnostics (Blender/FreeCAD/SketchUp/SolidWorks)
+tests/                                pytest suite
 trackball_daemon/
   ble.py          BLE / data ingestion        (unchanged behavior)
   output.py       SendInput + quaternion + routing math (unchanged; numbers from config)

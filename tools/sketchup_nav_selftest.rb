@@ -3,7 +3,7 @@
 # Interactive SketchUp camera test. In SketchUp Desktop open:
 #   Extensions -> Developer -> Ruby Console
 # then run:
-#   load 'C:/Users/dylan/Downloads/XIAO3389/tools/sketchup_nav_selftest.rb'
+#   load '<repo>/tools/sketchup_nav_selftest.rb'   (use your checkout's absolute path)
 #
 # This exercises the real production apply() path. SketchUp has no headless Ruby-API mode.
 module TrackballNavSelfTest

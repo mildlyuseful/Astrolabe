@@ -4,7 +4,7 @@ This is the **"what you can't see by reading the code"** document for the Blende
 Trackball Daemon: the architecture, the non-obvious gotchas, and the full history of problems we hit
 and how/why we solved them. If you just want the design catalog (every nav mode, the
 generic-scheme↔Blender reconciliation, the verified Blender-API facts), read its companion
-[`blender_nav_notes.md`](blender_nav_notes.md). This file is the one to read **first** when taking over.
+[`blender_design.md`](blender_design.md). This file is the one to read **first** when taking over.
 
 Current versions at handoff: **add-on `0.1.9`**, daemon `__version__` `0.1.19`, Blender on the dev
 machine **5.1.1**.
@@ -60,7 +60,7 @@ socket-reader + main-thread-marshal shape — but much larger because Blender do
 | `trackball_daemon/integrations.py` | `install_blender` (multi-version copy + startup shim), the `_ADDINS["blender"]` registry entry, version readers, `auto_update`. |
 | `trackball_daemon/ui.py` | The Tkinter UI. The **merged** Blender section lives under *Per-App Bindings → blender* (`_blender_bindings_fields`), and the bindings tab is scrollable. |
 | `tools/blender_nav_*.py` | Headless test scripts (math / integration / socket probes). Not part of the shipped package. |
-| `docs/blender_nav_notes.md` | Design rationale: full mode catalog, scheme reconciliation, verified Blender-API facts. |
+| `docs/apps/blender_design.md` | Design rationale: full mode catalog, scheme reconciliation, verified Blender-API facts. |
 
 The daemon process and the add-on are **two different Python interpreters** (daemon Python vs Blender's
 bundled Python). They only talk over the broker socket. This split is the source of half the gotchas.

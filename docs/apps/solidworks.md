@@ -6,11 +6,11 @@ importantly — the **gotchas and solved problems you would not discover by read
 (§8). Almost every fact here cost real debugging time and/or live probing against SolidWorks. **If
 you only read one section, read §8.**
 
-Primary code: [`trackball_daemon/solidworks_driver.py`](../trackball_daemon/solidworks_driver.py).
-Tests: [`tests/test_solidworks_driver.py`](../tests/test_solidworks_driver.py),
-[`tests/test_app_routing.py`](../tests/test_app_routing.py). Wiring: `app.py`, `config.py`,
+Primary code: [`trackball_daemon/solidworks_driver.py`](../../trackball_daemon/solidworks_driver.py).
+Tests: [`tests/test_solidworks_driver.py`](../../tests/test_solidworks_driver.py),
+[`tests/test_app_routing.py`](../../tests/test_app_routing.py). Wiring: `app.py`, `config.py`,
 `integrations.py`, `ui.py`, `winfocus.py`. User-facing summary: the SolidWorks section of
-[`README_daemon.md`](../README_daemon.md). (Current at daemon `__version__` 0.1.16.)
+[`README.md`](../../README.md). (Current at daemon `__version__` 0.1.16.)
 
 ---
 

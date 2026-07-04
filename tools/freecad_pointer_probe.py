@@ -5,7 +5,7 @@ Run (it opens the real FreeCAD GUI briefly, then self-closes):
     & 'C:\\Program Files\\FreeCAD 1.1\\bin\\freecad.exe' tools\\freecad_pointer_probe.py
 
 Results land in %TEMP%\\tbnav_pointer_probe.log (override with TBNAV_PROBE_LOG). Stdout is
-useless for a FreeCAD GUI probe (see docs/freecad_driver_notes.md §9) -- read the log.
+useless for a FreeCAD GUI probe (see docs/apps/freecad.md §9) -- read the log.
 
 What it verifies, by driving synthetic QMouseEvents through the REAL Qt -> Quarter -> Coin
 pipeline (the same code path a physical mouse takes), so no human mouse is needed:

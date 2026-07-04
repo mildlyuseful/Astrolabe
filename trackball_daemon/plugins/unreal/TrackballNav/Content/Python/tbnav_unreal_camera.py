@@ -6,7 +6,7 @@ plain ``python`` interpreter (see tests/test_unreal_nav_math.py). The add-on
 (eye location + an orthonormal basis), calls these helpers, then writes location+rotator back.
 
 Conventions (VERIFIED live against Unreal Engine 5.8 via a headless pythonscript probe -- see
-docs/unreal_driver_notes.md; do NOT re-derive from algebra, they were OBSERVED):
+docs/apps/unreal.md; do NOT re-derive from algebra, they were OBSERVED):
   * Unreal is LEFT-HANDED, Z-up, world units are CENTIMETRES.
       identity FRotator(pitch=0,yaw=0,roll=0)  ->  forward = +X, right = +Y, up = +Z
   * FRotator is (Pitch about Y, Yaw about Z, Roll about X) in DEGREES. Observed facts the

@@ -6,13 +6,13 @@ the **gotchas and solved problems you would not discover by reading the code alo
 here was **probed live against a running AutoCAD 2026 (ACAD 25.1s)** on the dev box, not assumed from
 docs. **If you only read one section, read §8.**
 
-Primary code: the compiled plugin [`plugin_src/autocad/TrackballNavAcad`](../plugin_src/autocad/TrackballNavAcad)
-(`Plugin.cs` + `NavMath.cs`) and the loader [`trackball_daemon/autocad_driver.py`](../trackball_daemon/autocad_driver.py).
-Tests: [`tests/test_autocad_loader.py`](../tests/test_autocad_loader.py),
-[`tests/test_integrations_autocad.py`](../tests/test_integrations_autocad.py),
-[`tests/test_app_routing.py`](../tests/test_app_routing.py). Wiring: `app.py`, `config.py`,
+Primary code: the compiled plugin [`plugin_src/autocad/TrackballNavAcad`](../../plugin_src/autocad/TrackballNavAcad)
+(`Plugin.cs` + `NavMath.cs`) and the loader [`trackball_daemon/autocad_driver.py`](../../trackball_daemon/autocad_driver.py).
+Tests: [`tests/test_autocad_loader.py`](../../tests/test_autocad_loader.py),
+[`tests/test_integrations_autocad.py`](../../tests/test_integrations_autocad.py),
+[`tests/test_app_routing.py`](../../tests/test_app_routing.py). Wiring: `app.py`, `config.py`,
 `integrations.py`, `ui.py`, `winfocus.py`. User-facing summary: the AutoCAD section of
-[`README_daemon.md`](../README_daemon.md). (Current at daemon `__version__` 0.1.41, plugin 0.3.0.)
+[`README.md`](../../README.md). (Current at daemon `__version__` 0.1.41, plugin 0.3.0.)
 
 ---
 
@@ -443,7 +443,7 @@ ceiling. The v0.1.x plugin applied every frame with `Editor.SetCurrentView(ViewT
   seed it (verified: camera unchanged after seeding). `GetCurrent3dAcGsView` returns **null** in
   2D wireframe. But this is a fact about THOSE ACCESSORS, not about the graphics system — the
   kernel-descriptor accessor returns the real live view (§8.15).
-- **Plugin architecture** ([`plugin_src/autocad/TrackballNavAcad`](../plugin_src/autocad/TrackballNavAcad)):
+- **Plugin architecture** ([`plugin_src/autocad/TrackballNavAcad`](../../plugin_src/autocad/TrackballNavAcad)):
   a .NET 8 class library referencing the INSTALLED AutoCAD's `acmgd/acdbmgd/accoremgd` (no ObjectARX
   SDK). Background socket thread speaks the standard nav-broker protocol (hello + o/p/z/op/os/zm
   frames, like Fusion/Blender/FreeCAD/Unreal); a WinForms 10 ms timer on the UI thread drains and

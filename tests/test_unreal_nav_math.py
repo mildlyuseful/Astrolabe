@@ -5,7 +5,7 @@ Blender add-on, which needs `blender --background`). The add-on reads the live e
 camera (eye location + FRotator) into the duck-typed Camera, calls these helpers, then writes
 location + rotator back; here we drive the helpers directly and assert the geometry.
 
-Conventions VERIFIED live against Unreal Engine 5.8 (docs/unreal_driver_notes.md) -- not derived
+Conventions VERIFIED live against Unreal Engine 5.8 (docs/apps/unreal.md) -- not derived
 from algebra, OBSERVED via a headless pythonscript probe:
   left-handed, Z-up, centimetres, FRotator in degrees;
   identity rotator -> forward +X / right +Y / up +Z;  yaw+90 -> forward +Y;  pitch+90 -> forward +Z.

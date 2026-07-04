@@ -22,7 +22,7 @@ becomes a no-op; the daemon runs with the AutoCAD integration simply unavailable
 
 ======================================================================================
 THE VERIFIED AutoCAD COM VIEW MODEL (probed live against AutoCAD 2026 / ACAD 25.1s; see
-docs/autocad_driver_notes.md for the full write-up and the gotchas each fact cost).
+docs/apps/autocad.md for the full write-up and the gotchas each fact cost).
 ======================================================================================
   * Attach: enumerate the Running Object Table (win32com GetActiveObject can return
     "Operation unavailable" even when AutoCAD is up). Each ROT dispatch's .Application

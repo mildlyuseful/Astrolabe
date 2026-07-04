@@ -1,6 +1,6 @@
 # Blender 3D-navigation framework — design notes
 
-> **Taking over this project?** Read [`blender_handoff.md`](blender_handoff.md) first — it's the
+> **Taking over this project?** Read [`blender.md`](blender.md) first — it's the
 > maintainer's guide (architecture, gotchas, the full solved-problem history, testing). This file is
 > the design rationale it refers back to.
 

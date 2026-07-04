@@ -1,7 +1,7 @@
 // TrackballNav AutoCAD plugin -- the smooth-orbit half of the AutoCAD integration.
 //
 // WHY THIS EXISTS: over external COM automation, ANY change to AutoCAD's 3D view direction forces a
-// full regen + ~34 ms of marshaling (verified exhaustively -- docs/autocad_driver_notes.md
+// full regen + ~34 ms of marshaling (verified exhaustively -- docs/apps/autocad.md
 // 8.10/8.13). In-process there are two tiers (both verified live with a WorldDraw-counting
 // DrawableOverrule, docs 8.15):
 //

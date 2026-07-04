@@ -1,7 +1,7 @@
 """Tiny always-on-top rotating-cube overlay -- the AutoCAD deferred-orbit "gap closer".
 
 WHY: over COM, changing AutoCAD's 3D view direction regenerates the drawing every time (see
-autocad_driver.py's docstring and docs/autocad_driver_notes.md 8.10/8.13 -- a full second sweep of
+autocad_driver.py's docstring and docs/apps/autocad.md 8.10/8.13 -- a full second sweep of
 the type library found no regen-free rotation, and the ObjectARX route needs a compiler this machine
 doesn't have). So the driver's deferred mode applies the orbit only when the gesture PAUSES -- which
 leaves the viewport frozen DURING the gesture. This overlay closes that gap: a small wireframe cube

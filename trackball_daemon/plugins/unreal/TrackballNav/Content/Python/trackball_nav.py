@@ -13,7 +13,7 @@ editor startup for every enabled plugin's Content/Python). The pure camera math 
 The editor viewport camera is a FREE-FLY eye+rotator (``get/set_level_viewport_camera_info``),
 NOT a view-distance/orbit model, so orbit-about-a-pivot and zoom are SYNTHESISED here and the
 location+rotator are written back every frame. Conventions (left-handed, Z-up, cm, degrees)
-were verified live -- see docs/unreal_driver_notes.md. The signs in tbnav_unreal_camera are
+were verified live -- see docs/apps/unreal.md. The signs in tbnav_unreal_camera are
 BASELINE GUESSES to settle on the device.
 """
 import json

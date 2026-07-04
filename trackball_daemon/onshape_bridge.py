@@ -5,7 +5,7 @@ Onshape runs in a browser and has NATIVE 3Dconnexion SpaceMouse support: its pag
 / "3DxWare for web" bridge -- at the loopback endpoint ``127.51.68.120:8181`` over a TLS
 WebSocket. We don't own a SpaceMouse, so instead of synthesizing mouse drags we stand up OUR OWN
 server impersonating that service: Onshape connects to us, hands us its camera, and we feed in the
-trackball's orbit/pan/zoom. See ``docs/onshape_bridge_notes.md`` for the full reverse-engineered
+trackball's orbit/pan/zoom. See ``docs/apps/onshape.md`` for the full reverse-engineered
 protocol + the cert/trust setup (and the prior art it is based on: RmStorm/spacenav-ws).
 
 This driver lives inside the daemon process, parallel to the broker and the SolidWorks driver, and

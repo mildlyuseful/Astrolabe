@@ -54,7 +54,7 @@ _DEFAULT_BLENDER_INVERT = {
 #     configs WITHOUT a CONFIG_VERSION bump. The parts that map to the generic scheme are NOT
 #     duplicated here -- orbit method <-> scheme.orbit_style (free/turntable) and orbit-around <->
 #     scheme.orbit_pivot (with a Blender-only extra value "viewpoint") stay the single source of
-#     truth. See docs/blender_nav_notes.md for the reconciliation table.
+#     truth. See docs/apps/blender_design.md for the reconciliation table.
 _DEFAULT_BLENDER_ADVANCED = {
     "nav_mode": "orbit",            # orbit | fly | walk
     "lock_horizon": False,          # keep the horizon level even in trackball (NDOF "Lock Horizon")

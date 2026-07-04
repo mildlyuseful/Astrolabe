@@ -6,7 +6,7 @@ whose getObjectInfo returns a known hit per pixel. This proves the offline math 
 raycast -> bbox-validated pivot, the per-gesture hold, and the fallbacks -- exactly as
 tests/test_freecad_nav_math.py proves the camera math. What it CANNOT prove is that the
 SoLocation2Event observer tracks the real mouse in a live viewport (see the live-probe notes in
-docs/freecad_driver_notes.md).
+docs/apps/freecad.md).
 """
 import os
 import sys

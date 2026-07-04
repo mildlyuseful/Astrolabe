@@ -5,7 +5,7 @@ tbnav_camera has NO FreeCAD/pivy/PySide imports, so unlike the Blender add-on (w
 into the duck-typed Camera, calls these helpers, and writes the fields back; here we drive the
 helpers directly and assert the geometry.
 
-Conventions verified live against FreeCAD 1.1 / Coin3D (docs/freecad_driver_notes.md):
+Conventions verified live against FreeCAD 1.1 / Coin3D (docs/apps/freecad.md):
   quaternions are (x,y,z,w); q_rotate matches Coin SbRotation.multVec; Z is world up.
 """
 import math

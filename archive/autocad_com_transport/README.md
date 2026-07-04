@@ -29,7 +29,7 @@ extending TRUSTEDPATHS, and NETLOADing it into a running AutoCAD (once per sessi
 
 - `autocad_driver.py`'s module docstring is the verified COM view model (ROT attach, sysvar
   ground truth, the reassign/regen ceiling, the treacherous `Center` property, SAFEARRAY
-  marshalling). The same facts live in `docs/autocad_driver_notes.md` §1–§8.13.
+  marshalling). The same facts live in `docs/apps/autocad.md` §1–§8.13.
 - `acad_overlay.py` is a self-contained click-through layered-window wireframe cube
   (pure Win32 via ctypes) — reusable for any "preview while the app catches up" need.
 

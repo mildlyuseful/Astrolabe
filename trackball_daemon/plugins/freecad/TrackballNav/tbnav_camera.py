@@ -5,7 +5,7 @@ headless with a plain ``python`` interpreter (see tests/test_freecad_nav_math.py
 add-on (``tbnav_freecad.py``) reads the live Coin ``SoCamera`` into a duck-typed
 :class:`Camera`, calls these helpers, then writes the fields back.
 
-Conventions (VERIFIED live against FreeCAD 1.1 / Coin3D -- see docs/freecad_driver_notes.md):
+Conventions (VERIFIED live against FreeCAD 1.1 / Coin3D -- see docs/apps/freecad.md):
   * Quaternions are ``(x, y, z, w)`` tuples -- the component order Coin's
     ``SbRotation.getValue()`` returns (w last).
   * ``q_rotate`` matches Coin's ``SbRotation.multVec`` (validated: +90 deg about Z maps
@@ -21,7 +21,7 @@ import math
 # --- baseline sign/scale (the add-on's intrinsic feel). The daemon's Per-App Bindings
 #     (gain 1.0 == this baseline) scale from here and the Invert checkboxes flip further, so
 #     DO NOT also scale/invert in the daemon. SIGNS ARE STARTING GUESSES -- calibrate live with
-#     the trackball (docs/freecad_driver_notes.md "Live calibration"). ----------------------
+#     the trackball (docs/apps/freecad.md "Live calibration"). ----------------------
 ORBIT_SCALE = (1.0, 1.0, 1.0)   # (pitch o[0] about right, yaw o[1] about up, twist o[2] about fwd).
                                 # 1.0 = rotate the view by the FULL broker angle, so Sensitivity 1.0 is
                                 # a true 1:1 ball->view orbit (matches the --debug cube AND the other
