@@ -1,0 +1,13 @@
+{
+    "autodeskProduct": "Fusion360",
+    "type": "addin",
+    "id": "TrackballNav_DIY",
+    "author": "DIY",
+    "description": {
+        "": "Trackball 3-axis navigation bridge for the dual-sensor trackball."
+    },
+    "version": "0.1.13",
+    "runOnStartup": false,
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# .NET build outputs (plugin_src is source; the shipping DLL is bundled under
+# trackball_daemon/plugins/ and IS committed)
+plugin_src/**/bin/
+plugin_src/**/obj/
+
+# Per-user Claude Code settings (personal permissions, not project config)
+.claude/settings.local.json

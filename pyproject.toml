@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trackball-daemon"
+version = "0.1.0"
+description = "System-tray daemon for the dual-sensor BLE trackball (mouse + 3D navigation)."
+requires-python = ">=3.9"
+dependencies = [
+    "bleak>=0.21.0",
+    "pystray>=0.19.5",
+    "Pillow>=10.0.0",
+    "pywin32>=306; sys_platform == 'win32'",   # SolidWorks COM automation (win32com)
+]
+
+[project.optional-dependencies]
+debug = ["pygame>=2.5.0", "PyOpenGL>=3.1.7"]
+
+# GUI script -> launched without a console window on Windows.
+[project.gui-scripts]
+trackball-daemon = "trackball_daemon.__main__:main"
+
+[tool.setuptools]
+packages = ["trackball_daemon"]
+
+# Ship the bundled CAD add-ins (e.g. the Fusion 360 add-in) inside the package so
+# "Set up" can copy them out, and so Nuitka onedir includes them.
+[tool.setuptools.package-data]
+trackball_daemon = ["plugins/**/*"]
+
+# Keep test collection inside tests/ -- otherwise pytest's default *_test.py glob would also
+# import the standalone cube_test.py demo (pulls in pygame, slow, side-effects).
+[tool.pytest.ini_options]
+testpaths = ["tests"]

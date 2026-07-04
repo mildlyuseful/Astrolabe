@@ -1,0 +1,7 @@
+# Normalize line endings across the mixed toolchain (Python, C#, Ruby, Arduino, Markdown).
+* text=auto
+
+# Binaries — never normalize.
+*.dll binary
+*.png binary
+*.ico binary

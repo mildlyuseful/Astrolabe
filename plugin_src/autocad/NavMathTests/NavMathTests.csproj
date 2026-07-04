@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Offline unit tests for the AutoCAD plugin's pure camera math (NavMath.cs).
+
+       NavMath.cs is compiled VERBATIM into this test executable against minimal stand-ins for
+       the Autodesk geometry types (Stubs.cs): acdbmgd.dll cannot be loaded outside acad.exe, so
+       stubs are the only way to run the shipped math headless. The stubs implement the standard
+       right-handed vector/rotation semantics AutoCAD's Point3d/Vector3d/Matrix3d use; the
+       null-pivot code path was additionally verified live against a running AutoCAD (docs 8.15),
+       and the pivot path live via the TBNAVPTRTEST in-process self-test.
+
+       Run:  dotnet run -c Release - -project plugin_src/autocad/NavMathTests   (exit 0 = pass)
+       Wired into pytest via tests/test_acad_navmath_pointer.py (skips if no dotnet SDK). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>NavMathTests</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\TrackballNavAcad\NavMath.cs" Link="NavMath.cs" />
+  </ItemGroup>
+</Project>

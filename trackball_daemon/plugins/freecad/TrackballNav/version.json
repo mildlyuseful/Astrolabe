@@ -1,0 +1,4 @@
+{
+  "version": "0.1.3",
+  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_freecad.py. The daemon's integrations._ADDINS['freecad'] reads this (like Fusion's TrackballNav.manifest / Blender's version.json) to drive auto_update. 0.1.1: PAN_SCALE fix (pan ~100x too small). 0.1.2: ORBIT_SCALE 0.5->1.0 (true 1:1 orbit). 0.1.3: 'pointer' orbit pivot + 'to_pointer' zoom (surface under the mouse pointer)."
+}

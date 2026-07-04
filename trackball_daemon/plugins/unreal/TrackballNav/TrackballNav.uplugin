@@ -1,0 +1,24 @@
+{
+	"FileVersion": 3,
+	"Version": 2,
+	"VersionName": "0.2.0",
+	"FriendlyName": "Trackball Nav",
+	"Description": "Drive the Unreal Editor perspective viewport camera from the Trackball Daemon (orbit / pan / zoom / fly), like a 3Dconnexion SpaceMouse. Script-only (no C++): a bundled Python add-on connects to the daemon's local nav broker.",
+	"Category": "Input",
+	"CreatedBy": "Trackball Daemon",
+	"CreatedByURL": "",
+	"DocsURL": "",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"EnabledByDefault": false,
+	"Plugins": [
+		{
+			"Name": "PythonScriptPlugin",
+			"Enabled": true
+		}
+	]
+}

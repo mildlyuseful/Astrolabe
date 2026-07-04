@@ -1,0 +1,16 @@
+# Trackball Daemon (tray app)  --  run:  python -m trackball_daemon   (pythonw = no console)
+# Tkinter is part of the standard library (no pip install needed).
+bleak>=0.21.0          # BLE
+pystray>=0.19.5        # system-tray icon
+Pillow>=10.0.0         # tray icon image (pystray dependency)
+pywin32>=306 ; sys_platform == "win32"   # SolidWorks COM automation (win32com / pythoncom)
+
+# Onshape bridge: generate the loopback TLS cert the browser's 3Dconnexion client connects to.
+# The WSS server itself uses only stdlib `ssl` + a hand-rolled WebSocket (no FastAPI/uvicorn/numpy).
+# cryptography is the clean cert-generation path; if it's absent the bridge falls back to the
+# `openssl` CLI, so this is recommended-but-optional.
+cryptography>=41.0 ; sys_platform == "win32"
+
+# Optional: only needed for the --debug cube verification window.
+pygame>=2.5.0
+PyOpenGL>=3.1.7
