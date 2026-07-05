@@ -11,6 +11,7 @@ pywin32>=306 ; sys_platform == "win32"   # SolidWorks COM automation (win32com /
 # `openssl` CLI, so this is recommended-but-optional.
 cryptography>=41.0 ; sys_platform == "win32"
 
-# Optional: only needed for the --debug cube verification window.
+# Dev-box convenience: only the --debug cube verification window uses these. The packaged
+# build treats them as the optional [debug] extra -- delete these two lines for a lean install.
 pygame>=2.5.0
 PyOpenGL>=3.1.7

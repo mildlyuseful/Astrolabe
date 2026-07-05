@@ -1,9 +1,13 @@
-"""3D-app integration registry: detect installed apps and run their setup.
+"""3D-app integration registry: detect installed apps, install/enable each integration,
+and auto-update the bundled add-ons.
 
-Detection is best-effort via common Windows install paths. "Set up" records the
-integration as installed/enabled in config; the actual add-on payload (e.g. a Blender
-add-on or a SolidWorks macro) is intentionally left as a TODO -- this layer is the shell
-the UI drives, not the plugin itself.
+Detection is best-effort via common Windows install paths. Every registered app has a real
+`setup`: the socket-add-on apps (Fusion, Blender, FreeCAD, SketchUp, Unreal) copy their
+bundled add-on into the host app's add-on directory, AutoCAD stages its bundled NETLOAD
+plugin, and the in-process apps (SolidWorks, Onshape) verify prerequisites and enable the
+driver (no file copy). `auto_update` re-copies a bundled add-on only when its bundled
+version is newer than the installed one (version-gated -- see HANDOFF 12.11), preserving
+the user's enabled state.
 """
 import glob
 import json
@@ -687,5 +691,7 @@ def install(appdef: AppDef, cfg) -> tuple[bool, str]:
     cfg.data["apps"][appdef.key]["enabled"] = True
     cfg.save()
     if appdef.needs_plugin:
-        return True, f"{appdef.name} integration enabled.\n(Add-on payload install is a TODO.)"
+        # Generic path for a future AppDef registered without its own setup; every
+        # current app has one, so this is unreachable today.
+        return True, f"{appdef.name} integration enabled.\n(No bundled add-on -- nothing was copied.)"
     return True, f"{appdef.name} gesture profile enabled."

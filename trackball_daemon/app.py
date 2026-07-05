@@ -1,10 +1,15 @@
-"""Orchestrator: wires config + output engine + BLE thread + tray + settings window.
+"""Orchestrator: wires config + output engine + BLE thread + tray + settings window +
+the nav transports (broker / SolidWorks / Onshape / AutoCAD loader).
 
 Threading model (Windows):
-  * main thread  -> hidden Tk root + mainloop (owns all GUI; window shown/hidden on demand)
-  * tray thread  -> pystray icon loop (menu callbacks marshalled to Tk via root.after)
-  * ble thread   -> asyncio BLE loop (unchanged data path)
-  * debug thread -> optional pygame cube (--debug)
+  * main thread       -> hidden Tk root + mainloop (owns all GUI; window shown/hidden on demand)
+  * tray thread       -> pystray icon loop (menu callbacks marshalled to Tk via root.after)
+  * ble thread        -> asyncio BLE loop (unchanged data path)
+  * broker threads    -> NavBroker accept + sender (streams frames to the socket add-ons)
+  * SolidWorks worker -> its own CoInitialize'd COM thread (in-process driver)
+  * AutoCAD worker    -> its own CoInitialize'd COM thread (plugin loader; delivery only)
+  * Onshape threads   -> TLS accept + per-connection WAMP reader + nav worker (in-process bridge)
+  * debug thread      -> optional pygame cube (--debug)
 The process stays alive on the Tk mainloop and exits only when tray -> Quit tears it down.
 """
 import json

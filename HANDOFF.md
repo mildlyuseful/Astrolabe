@@ -9,7 +9,7 @@ ties them together and covers the things that span more than one component.
 > Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.43**, Fusion
 > add-in **0.1.13**, Blender add-on **0.1.9**, FreeCAD add-on **0.1.3**, SketchUp extension
 > **0.2.0**, Unreal add-on **0.2.0**,
-> `pyproject` **0.1.0** (packaging not yet cut). Dev machine: Windows 11, Blender 5.1.1, SolidWorks
+> `pyproject` version is dynamic (single-sourced from `__version__`; packaging not yet cut). Dev machine: Windows 11, Blender 5.1.1, SolidWorks
 > 2025, Fusion 360, FreeCAD 1.1.1, SketchUp 2026.2, Unreal Engine 5.8, AutoCAD 2026 installed. The firmware has no
 > version field.
 
@@ -762,7 +762,8 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
 
 **Daemon / UX**
 - **Packaging** — cut the actual **Nuitka onedir** build (and/or the pip gui-script) for end users who
-  have neither Python nor git. `pyproject` is still at `0.1.0`.
+  have neither Python nor git. The `pyproject` version is dynamic (reads `__version__`), so a cut
+  build inherits the daemon build number automatically.
 - **Auto-start on login** — `apps.<key>.start_automatically` exists in config but the daemon's own
   run-at-login isn't wired.
 - **Auto mode switching** — cursor↔3D is a manual global toggle; it could auto-switch to 3D when a CAD

@@ -9,7 +9,12 @@ or installs from GitHub without source changes):
   output       - UNCHANGED output/injection math (SendInput + quaternion + routing),
                  reading its numbers from config instead of module constants
   ble          - UNCHANGED BLE/data-ingestion loop (scan/connect/subscribe/reconnect)
-  integrations - 3D-app registry (detect / set up)
+  winfocus     - foreground-window process detection (route nav to the focused app)
+  navbroker    - 127.0.0.1 socket broker streaming nav deltas to the socket add-ons
+  solidworks_driver - in-process SolidWorks COM driver (no add-in)
+  onshape_bridge    - in-process Onshape TLS-WebSocket bridge (NL-Proxy emulator)
+  autocad_driver    - AutoCAD plugin loader (COM NETLOAD delivery only)
+  integrations - 3D-app registry (detect / install / enable / auto-update add-ons)
   tray         - pystray system-tray icon + menu (process lifecycle)
   ui           - Tkinter settings window (hides to tray on close)
   debugview    - optional pygame cube window (--debug only)
