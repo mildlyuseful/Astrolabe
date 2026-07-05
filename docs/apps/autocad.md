@@ -12,7 +12,7 @@ Tests: [`tests/test_autocad_loader.py`](../../tests/test_autocad_loader.py),
 [`tests/test_integrations_autocad.py`](../../tests/test_integrations_autocad.py),
 [`tests/test_app_routing.py`](../../tests/test_app_routing.py). Wiring: `app.py`, `config.py`,
 `integrations.py`, `ui.py`, `winfocus.py`. User-facing summary: the AutoCAD section of
-[`README.md`](../../README.md). (Current at daemon `__version__` 0.1.41, plugin 0.3.0.)
+[`README.md`](../../README.md). (Current at daemon `__version__` 0.1.44, plugin 0.3.1.)
 
 ---
 
@@ -206,16 +206,16 @@ and tracks `_dir/_size/_center` across its own writes**, re-reading direction+si
 3D point we `ZoomCenter` on each orbit frame):
 
 - **`origin`** — the WCS origin `(0,0,0)`.
-- **`object`** (and **`cursor`**, which falls back to it) — the **drawing-extents centre**
+- **`object`** (and **`selection`**, which falls back to it) — the **drawing-extents centre**
   (`EXTMIN`/`EXTMAX` midpoint, cached ~0.5 s), falling back to the tracked `_center` if extents are
   unavailable.
 - **`view`** (the general default) — the tracked **`_center`** (the point currently screen-centred).
   AutoCAD has **no COM screen-centre raycast**, so unlike SolidWorks/Fusion/Onshape there is no true
   "surface under the crosshair" pivot; `view` orbits about whatever is centred. (See §8.6.)
-- **`pointer`** — TRUE under-the-mouse orbit, but **only in the NETLOAD plugin** (v0.3.0+, §8.17: an
-  in-process `Editor.PointMonitor` caches the cursor point; `to_pointer` zoom rides the same cache).
-  This COM fallback has no cursor hit-test, so here `pointer` degrades to the extents centre like
-  `cursor` — in practice the plugin owns the frames whenever it's loaded, so the fallback path is
+- **`cursor`** — TRUE under-the-mouse orbit, but **only in the NETLOAD plugin** (§8.17: an
+  in-process `Editor.PointMonitor` caches the cursor point; `to_cursor` zoom rides the same cache).
+  This COM fallback has no cursor hit-test, so here `cursor` degrades to the extents centre like
+  `selection` — in practice the plugin owns the frames whenever it's loaded, so the fallback path is
   rarely what the user feels.
 
 Orbit **style**: `free` rotates about the composed camera axis (`right·vx + up·vy + forward·vz`);
@@ -309,12 +309,12 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   (§8.4) — the driver never calls `SetVariable` on the view, and even if it recurred the guard logs it
   once and the next frame recovers.
 
-### 8.6 No COM screen-centre raycast → `view`/`cursor` pivots are not true surface pivots
+### 8.6 No COM screen-centre raycast → `view`/`selection` pivots are not true surface pivots
 - Unlike SolidWorks (`SelectByRay`), Fusion (`findBRepUsingRay`), Onshape (navlib `hit.lookat`),
   Blender (`scene.ray_cast`) and FreeCAD (`getObjectInfo`), **AutoCAD exposes no cheap COM screen-centre
   pick** for the model-space viewport. So `view` orbits about the current **Target** (AutoCAD's native
-  target orbit), and `cursor` falls back to **object** (extents centre). The trackball pipeline is
-  relative anyway (no cursor pixel to unproject), so this matches the cross-app `cursor` limitation
+  target orbit), and `selection` falls back to **object** (extents centre). The trackball pipeline is
+  relative anyway (no cursor pixel to unproject), so this matches the cross-app `selection` limitation
   (HANDOFF §14).
 
 ### 8.7 A freshly `Documents.Add()`ed doc mis-resolves properties → re-fetch `ActiveDocument`
@@ -621,7 +621,7 @@ on daemon start, and `install_autocad` STAGES the copy when the DLL is locked by
 AutoCAD (it lands via the loader's copy-on-attach at the next AutoCAD start). The loader's
 `_netload_plugin` copies `version.json` alongside the DLL.
 
-### 8.17 The `pointer` orbit pivot / `to_pointer` zoom (plugin v0.3.0) — verified live
+### 8.17 The `cursor` orbit pivot / `to_cursor` zoom (plugin v0.3.0, values renamed in v0.3.1) — verified live
 
 Orbit about the point **under the mouse cursor** (the SpaceMouse "rotation center = cursor"
 behaviour). Two halves, both in the plugin (the retired COM transport had no cursor access — §6):
@@ -646,24 +646,24 @@ behaviour). Two halves, both in the plugin (the retired COM transport had no cur
   cache to the log to check exactly this.
 - **Half B (the pivot):** `NavMath.Apply` grew optional `orbitPivot`/`zoomPivot` args (null = the
   old orbit-about-target exactly): a rigid rotation about P (`tgt' = P + m·(tgt−P)`; the eye
-  follows via `tgt' + dir'·dist`, so P keeps its exact screen position), and parallel `to_pointer`
+  follows via `tgt' + dir'·dist`, so P keeps its exact screen position), and parallel `to_cursor`
   zoom slides the target toward P by `1/factor` (perspective falls back to the plain dolly).
   Per-gesture hold in `TryApplyGs`: the pivot is captured ONCE at the first orbit frame of a
   gesture from the cache — validated against the drawing extents +10 % of the diagonal (a cursor
   over empty space intersects the UCS plane arbitrarily far away → out-of-bounds falls back to
   target orbit) — and held; a pan/zoom frame invalidates the orbit hold (re-captured at the live
   cursor on the next orbit frame), gesture end resets both. The legacy `SetCurrentView` fallback
-  path does NOT support the pointer pivot (view-centre orbit as before).
+  path does NOT support the cursor pivot (view-centre orbit as before).
 - **Verification (throwaway instance, headless — no human mouse):** NETLOAD in a COM-launched
   fresh AutoCAD; the log showed the PointMonitor subscribe + **a real `SetCursorPos` sweep over
   the canvas caching points** (WM_MOUSEMOVE drives PointMonitor fine); **`TBNAVPTRTEST`** seeds a
-  synthetic pivot inside the extents, forces `op=pointer`, injects 120 orbit frames through the
+  synthetic pivot inside the extents, forces `op=cursor`, injects 120 orbit frames through the
   EXACT production pipeline and asserts on the gesture's seed/end shadows: `|tgt−P|` and `|pos−P|`
   preserved (16.4412→16.4412 / 74.2704→74.2704), the target swept 16.7 units, **P's screen offset
   (5, 7.5)→(5, 7.5) exact, and the committed DB `TARGET` error = 0** — PASS in BOTH commit
   flavours (2D-Wireframe REGEN path and the regen-free Realistic path). The offline math twin
   lives in `plugin_src/autocad/NavMathTests` (NavMath.cs compiled VERBATIM against stub geometry
-  types — acdbmgd can't load outside acad.exe; run by `tests/test_acad_navmath_pointer.py`,
+  types — acdbmgd can't load outside acad.exe; run by `tests/test_autocad_navmath_cursor.py`,
   skips without the .NET SDK). **Not yet verified: the human feel** (hover + orbit with the real
   trackball); and osnap-assisted capture (path 1) is code-only — exercise it live when tuning.
 
@@ -743,7 +743,7 @@ real COM behaviour — that's what this section's live testing is for.
 
 - **Working & live-verified** (AutoCAD 2026 / ACAD 25.1s): the plugin transport end-to-end —
   regen-free GS orbit/pan/zoom/roll in 3D visual styles, the 2D-Wireframe record-write commit +
-  one visible REGEN per gesture (§8.16, crash-tested), `pointer`/`to_pointer` (§8.17), broker
+  one visible REGEN per gesture (§8.16, crash-tested), `cursor`/`to_cursor` (§8.17), broker
   handshake + focus gating; the loader's zero-friction delivery (ROT attach → copy → trust →
   NETLOAD, once per session); the settings-UI install/update flow with locked-DLL staging.
 - **Needs a feel/sign pass on hardware** if anything feels off: the plugin's

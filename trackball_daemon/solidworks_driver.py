@@ -54,8 +54,9 @@ re-read), is what lets the orbit pan to hold an arbitrary pivot every frame and 
 
 Control scheme (mirrors the broker / Fusion add-in via set_scheme) -- all applied for SolidWorks:
   * orbit PIVOT:
-      origin          -> rotate ONLY about the world origin, ZERO view translation (the original feel).
-      object / cursor -> hold the model bounding-box CENTRE (a fixed point -> exact). cursor == object.
+      origin             -> rotate ONLY about the world origin, ZERO view translation (the original feel).
+      object / selection -> hold the model bounding-box CENTRE (a fixed point -> exact); "cursor"
+                            (under the mouse; no SW hit-test yet) falls back here too.
       view            -> hold the SCREEN-CENTRE point at the TRUE surface depth under the crosshair,
                          found by a screen-centre raycast (SelectByRay; like SW's own middle-drag orbit),
                          falling back to the object-centre depth when the ray misses. Captured once and
@@ -65,7 +66,8 @@ Control scheme (mirrors the broker / Fusion add-in via set_scheme) -- all applie
     the rotation (held point stays put to ~1e-16 -- no discrete-order error). Switching the pivot
     takes effect immediately (set_scheme drops any held pivot).
   * orbit STYLE: free | turntable.
-  * zoom MODE: to_center | to_object (centre held); to_cursor falls back to to_center (no hit-test).
+  * zoom MODE: to_center | to_object (centre held); to_cursor (under the mouse) falls back to
+    to_center (no hit-test).
 
 pywin32 gotcha: GetActiveObject returns a late-bound (dynamic) dispatch that mis-resolves a few
 SolidWorks members -- GetMathUtility()/CreateVector raise unless flagged with _FlagAsMethod, and
@@ -258,8 +260,8 @@ class SolidWorksDriver:
         self._ext = None
         self._selmgr = None
         # "view" orbit pivot held across a gesture: captured when orbit resumes after the view has
-        # been idle for >= _pivot_hold_sec, then held (so it doesn't chase a moving target). object/
-        # cursor orbit takes NO pivot (pure rotation, zero translation).
+        # been idle for >= _pivot_hold_sec, then held (so it doesn't chase a moving target). origin
+        # orbit takes NO pivot (pure rotation, zero translation).
         self._orbit_pivot = None
         self._pivot_hold_sec = DEFAULT_PIVOT_HOLD
         self._last_activity_t = 0.0                           # monotonic time of the last orbit/pan/zoom
@@ -279,13 +281,15 @@ class SolidWorksDriver:
     def set_scheme(self, orbit_pivot, orbit_style, zoom_mode):
         """Set the control scheme applied on the next flush. Parallels NavBroker.set_scheme so
         app._apply_schemes() drives SolidWorks the same way it drives the socket add-ons.
-          orbit_pivot: origin | object | view | cursor
-              origin -> rotate about the model origin, no view translation (the original behaviour);
-              object -> rotate about the model bounding-box centre;
-              view   -> rotate about the screen-centre point at the true surface depth (raycast; held);
-              cursor -> falls back to object (no SW cursor hit-test yet).
+          orbit_pivot: origin | object | view | selection | cursor
+              origin    -> rotate about the model origin, no view translation (the original behaviour);
+              object    -> rotate about the model bounding-box centre;
+              view      -> rotate about the screen-centre point at the true surface depth (raycast; held);
+              selection -> falls back to object (bounding-box centre);
+              cursor    -> under the mouse; falls back to object (no SW cursor hit-test yet).
           orbit_style: free | turntable
-          zoom_mode:   to_center | to_object | to_cursor   (to_cursor falls back to to_center)"""
+          zoom_mode:   to_center | to_object | to_cursor   (to_cursor = under the mouse; falls
+                       back to to_center -- no SW hit-test)"""
         self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode}
         self._orbit_pivot = None             # drop any held pivot so a pivot switch takes effect now
 
@@ -573,8 +577,9 @@ class SolidWorksDriver:
         Pivot modes:
           origin          -> rotate ONLY (no pan): the original behaviour -- the model spins about the
                              world origin with ZERO view translation.
-          object / cursor -> hold the model bounding-box CENTRE (a fixed point, so it's exact every
-                             frame). cursor == object (no SW cursor hit-test).
+          object / selection / cursor -> hold the model bounding-box CENTRE (a fixed point, so it's
+                             exact every frame; selection and under-mouse cursor both fall back
+                             here -- no SW hit-test for either yet).
           view            -> hold the SCREEN-CENTRE point. Captured once and HELD through the gesture
                              (recomputed only after the view is idle >= _pivot_hold_sec, or when a pan/
                              zoom invalidates it -- see _flush), so it never chases a moving target.
@@ -618,7 +623,7 @@ class SolidWorksDriver:
             if self._orbit_pivot is None or idle >= self._pivot_hold_sec:
                 self._orbit_pivot = self._view_pivot(c0, c1, c2, model)   # capture + hold
             pivot = self._orbit_pivot
-        else:                                       # object / cursor -> bounding-box centre (fixed point)
+        else:                          # object / selection / cursor -> bounding-box centre (fixed point)
             pivot = self._object_center(model)
 
         view.RotateAboutAxis(angle, 0.0, 0.0, 0.0, ax, ay, az)   # pivots about origin
@@ -744,7 +749,8 @@ class SolidWorksDriver:
     def _apply_zoom(self, view, zoom, scheme, model):
         """Zoom by factor. to_center (default) = native ZoomByFactor (zooms about the view centre).
         to_object keeps the model bounding-box centre fixed: ZoomByFactor, then pan it back by
-        (Scale2_before - Scale2_after)*(col.C). to_cursor falls back to to_center (no SW hit-test).
+        (Scale2_before - Scale2_after)*(col.C). to_cursor (under the mouse) falls back to
+        to_center (no SW hit-test).
         ZoomByFactor changes Scale2 (and Translation3) itself, so we resync the tracked view state."""
         factor = 1.0 + ZOOM_SIGN * zoom * ZOOM_SCALE
         if factor <= 1e-3:                          # guard against a non-positive scale factor

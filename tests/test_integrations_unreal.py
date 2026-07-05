@@ -31,7 +31,7 @@ def _patch_unreal(monkeypatch, exe):
 
 def test_unreal_is_a_bundled_addin():
     assert "unreal" in integrations.ADDIN_KEYS
-    assert integrations.bundled_addin_version("unreal") == "0.2.0"
+    assert integrations.bundled_addin_version("unreal") == "0.2.1"
     assert integrations.APPS_BY_KEY["unreal"].setup is integrations.install_unreal
 
 
@@ -53,7 +53,7 @@ def test_install_copies_plugin_and_enables(isolated_config, tmp_path, monkeypatc
     assert ok is True
     u = cfg.data["apps"]["unreal"]
     assert u["installed"] is True and u["enabled"] is True
-    assert u["addin_version"] == "0.2.0"
+    assert u["addin_version"] == "0.2.1"
     dest = integrations.unreal_plugin_dir()
     # the whole plugin must be copied: the .uplugin descriptor, the version manifest the daemon
     # reads, and the Content/Python payload Unreal auto-runs.
@@ -61,7 +61,7 @@ def test_install_copies_plugin_and_enables(isolated_config, tmp_path, monkeypatc
     assert (dest / "version.json").exists()
     for name in ("init_unreal.py", "trackball_nav.py", "tbnav_unreal_camera.py"):
         assert (dest / "Content" / "Python" / name).exists(), f"missing {name}"
-    assert integrations.installed_addin_version("unreal") == "0.2.0"
+    assert integrations.installed_addin_version("unreal") == "0.2.1"
 
 
 def test_install_fails_when_unreal_absent(isolated_config, monkeypatch):

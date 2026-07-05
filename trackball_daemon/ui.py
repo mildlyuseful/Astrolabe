@@ -403,22 +403,20 @@ class SettingsWindow:
 
         ttk.Label(parent, text="Control scheme (Default = use the General default):",
                   foreground="#555").pack(anchor="w", padx=10, pady=(10, 0))
-        # DISPLAY labels vs STORED values (user feedback: call the under-mouse pivot "cursor", not
-        # "pointer" -- and never show both words at once). The under-mouse pivot is SHOWN as
-        # "cursor" but STORED as "pointer"/"to_pointer" (the internal value predates the rename;
-        # every plugin + broker frame speaks it -- do NOT rename the stored value). The LEGACY
-        # stored value "cursor" (selection / 3D-cursor fallback) is shown as "selection"; legacy
-        # "to_cursor" (a to_center alias in every app) is no longer offered -- a config that still
-        # stores one keeps working (the combo just shows the first entry until changed).
+        # Stored values match the labels since the v3 config migration: "cursor"/"to_cursor" =
+        # the under-mouse pivot (pre-v3 "pointer"/"to_pointer"), "selection" = the old stored
+        # "cursor" (selection fallback; Blender's 3D cursor is its own "cursor_3d" value in the
+        # Blender panel). The retired legacy to_cursor (a to_center alias) migrated to
+        # to_center and is no longer offered.
         self._mapped_combo_row(parent, "Orbit pivot", base + ("scheme", "orbit_pivot"),
                                [("default", "default"), ("view", "view"),
-                                ("cursor (under mouse)", "pointer"), ("object", "object"),
-                                ("origin", "origin"), ("selection", "cursor")])
+                                ("cursor (under mouse)", "cursor"), ("object", "object"),
+                                ("origin", "origin"), ("selection", "selection")])
         self._combo_row(parent, "Orbit style", base + ("scheme", "orbit_style"),
                         values=["default", "free", "turntable"])
         self._mapped_combo_row(parent, "Zoom mode", base + ("scheme", "zoom_mode"),
                                [("default", "default"), ("to_center", "to_center"),
-                                ("to_object", "to_object"), ("to_cursor (under mouse)", "to_pointer")])
+                                ("to_object", "to_object"), ("to_cursor (under mouse)", "to_cursor")])
         self._entry_row(parent, "View-pivot hold (s)", ("apps", app_key, "view_pivot_hold_sec"),
                         hint="'view' pivot only (SolidWorks): seconds still before it re-raycasts the "
                              "surface under the centre")
@@ -473,9 +471,9 @@ class SettingsWindow:
                                 ("Turntable", "turntable")])
         self._mapped_combo_row(s2, "Orbit around", base + ("scheme", "orbit_pivot"),
                                [("Default (General)", "default"), ("Viewpoint", "viewpoint"),
-                                ("Auto Depth (surface)", "view"), ("Under Cursor (mouse)", "pointer"),
+                                ("Auto Depth (surface)", "view"), ("Under Cursor (mouse)", "cursor"),
                                 ("Selection", "object"),
-                                ("3D Cursor", "cursor"), ("World Origin", "origin")])
+                                ("3D Cursor", "cursor_3d"), ("World Origin", "origin")])
         self._combo_row(s2, "Twist action", adv + ("twist_action",),
                         values=["roll", "zoom", "dolly", "none"])
         self._bool_row(s2, "Lock horizon (keep level even in trackball)", adv + ("lock_horizon",))
@@ -549,7 +547,7 @@ class SettingsWindow:
         self._mapped_combo_row(s2, "Orbit around", base + ("scheme", "orbit_pivot"),
                                [("Default (General)", "default"),
                                 ("Viewpoint (turn in place)", "viewpoint"),
-                                ("Auto Depth (surface)", "view"), ("Under Cursor (mouse)", "pointer"),
+                                ("Auto Depth (surface)", "view"), ("Under Cursor (mouse)", "cursor"),
                                 ("Model Centre", "object"),
                                 ("World Origin", "origin")])
         self._bool_row(s2, "Lock horizon (keep level in free orbit)", adv + ("lock_horizon",))
@@ -619,14 +617,14 @@ class SettingsWindow:
                                 ("Turntable", "turntable")])
         self._mapped_combo_row(s2, "Orbit around", base + ("scheme", "orbit_pivot"),
                                [("Default (General)", "default"), ("Viewpoint (turn in place)", "viewpoint"),
-                                ("Auto Depth (surface)", "view"), ("Under Cursor (mouse)", "pointer"),
+                                ("Auto Depth (surface)", "view"), ("Under Cursor (mouse)", "cursor"),
                                 ("Selection", "object"),
-                                ("3D Cursor (→ Selection)", "cursor"), ("World Origin", "origin")])
+                                ("World Origin", "origin")])
         self._combo_row(s2, "Twist action", adv + ("twist_action",),
                         values=["roll", "zoom", "dolly", "none"])
         self._bool_row(s2, "Lock horizon (keep level even in free orbit)", adv + ("lock_horizon",))
-        ttk.Label(s2, text="Unreal has no 3D cursor, so \"3D Cursor\" orbits the selection (same as "
-                           "Selection). \"Auto Depth\" raycasts the surface under screen-centre.",
+        ttk.Label(s2, text="Unreal has no 3D cursor, so no 3D-cursor option is shown. "
+                           "\"Auto Depth\" raycasts the surface under screen-centre.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s3 = ttk.LabelFrame(parent, text="Pan / Zoom")
@@ -671,21 +669,21 @@ class SettingsWindow:
         secS = ttk.LabelFrame(outer, text="3D control scheme (defaults)")
         secS.pack(fill="x", padx=10, pady=6)
         self._mapped_combo_row(secS, "Orbit pivot", ("general", "scheme", "orbit_pivot"),
-                               [("view", "view"), ("cursor (under mouse)", "pointer"),
+                               [("view", "view"), ("cursor (under mouse)", "cursor"),
                                 ("object", "object"), ("origin", "origin"),
-                                ("selection", "cursor")])
+                                ("selection", "selection")])
         self._combo_row(secS, "Orbit style", ("general", "scheme", "orbit_style"),
                         values=["free", "turntable"])
         self._mapped_combo_row(secS, "Zoom mode", ("general", "scheme", "zoom_mode"),
                                [("to_center", "to_center"), ("to_object", "to_object"),
-                                ("to_cursor (under mouse)", "to_pointer")])
+                                ("to_cursor (under mouse)", "to_cursor")])
         ttk.Label(secS, text="Per-app overrides in Per-App Bindings. origin = rotate about the world "
                              "origin (no translation); object = about the model centre; view = about "
                              "the surface under the screen centre (like native middle-drag orbit); "
                              "cursor / to_cursor = about the surface under the MOUSE CURSOR (FreeCAD, "
                              "AutoCAD + Fusion today; other apps fall back to their view/object "
-                             "pivot); selection = the selection / 3D-cursor pivot (falls back to the "
-                             "model centre where the app has neither).",
+                             "pivot); selection = the selection pivot (falls back to the model "
+                             "centre; Blender's 3D cursor is its own option in the Blender panel).",
                   foreground="#888", wraplength=600).pack(anchor="w", padx=10, pady=(2, 6))
 
         sec2 = ttk.LabelFrame(outer, text="Pointer / scroll (cursor mode)")

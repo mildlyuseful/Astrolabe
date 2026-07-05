@@ -129,7 +129,7 @@ Each non-empty frame, on the worker thread:
 
 Pan (`_apply_pan`): add `PAN_SIGN * delta * PAN_SCALE` to the tracked `Translation3` and SET it.
 Zoom (`_apply_zoom`): `to_center` is a bare `ZoomByFactor`; `to_object` zooms then pans the
-bounding-box centre back by `(Scale2_before − Scale2_after)·(col·C)`; `to_cursor` falls back to
+bounding-box centre back by `(Scale2_before − Scale2_after)·(col·C)`; `to_cursor` (under the mouse; no SW hit-test) falls back to
 `to_center` (no hit-test for zoom). After a bare `ZoomByFactor` we force a resync (`_view_ts = 0`)
 because it changes both `Scale2` and `Translation3` itself.
 
@@ -144,7 +144,7 @@ one — see `config.effective_scheme`). **Four pivot modes**, all built on §4's
 - **`origin`** — rotate **only**, no pan: the model spins about the world origin with **zero view
   translation**. The original behaviour, and the lightest path. (Re-added as a distinct mode after it
   was conflated with `object` — see §8.6.)
-- **`object`** (and **`cursor`**, which falls back to it) — hold the **bounding-box centre**, a fixed
+- **`object`** (and **`selection`** / under-mouse **`cursor`**, which fall back to it) — hold the **bounding-box centre**, a fixed
   point, so it's exact every frame and needs no per-gesture capture.
 - **`view`** — hold the **screen-centre point at the true surface depth** under the crosshair, found
   by a raycast (§7). Captured once and **held** through a gesture; recomputed only after the view is
@@ -337,8 +337,8 @@ that blocks everything else).
   practice (a small radius still hits the face right there). Retune via `_RAY_APERTURE_FRACS` /
   `_RAY_PUSH` / `_RAY_BBOX_MARGIN` if needed.
 
-### 8.13 `cursor` pivot is not a real cursor pivot
-- The trackball pipeline is **relative** — there's no cursor pixel to unproject — so `cursor` falls
+### 8.13 `cursor` (under-mouse) has no SW resolver yet -- and `selection` is the bbox centre
+- There is no SW cursor hit-test wired yet (`IMouse` is the candidate route) — so `cursor` falls
   back to `object` (bbox centre). A true cursor-position pivot would need the screen cursor piped into
   the driver and unprojected onto the optical axis (then the same raycast as `view`, offset to the
   cursor). Not implemented.
@@ -427,7 +427,7 @@ the real COM behaviour — that's what §10's live testing is for.
   exact pivot hold (~1e-16).
 - **Needs a feel/sign pass on hardware** if anything feels off: `*_SIGN` / `*_SCALE` magnitudes and
   the turntable `WORLD_UP` axis.
-- **Limitations:** no true cursor-position pivot (`cursor` == `object`; §8.13); `to_cursor` zoom falls
+- **Limitations:** no true cursor-position pivot yet (`cursor` == `object`; §8.13); `to_cursor` zoom falls
   back to `to_center`; the raycast aperture is bbox-scaled, not viewport-scaled (§8.12); drawings have
   no box (pivots degrade gracefully). The out-of-process COM rate is below an in-process add-in's, by
   design (§8.14).

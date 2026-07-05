@@ -273,8 +273,10 @@ module TrackballNav
           eye.clone
         when 'origin'
           ORIGIN.clone
-        when 'object', 'cursor'
+        when 'object', 'selection'
           object_center(model, target)
+        # under-mouse 'cursor' has no SketchUp resolver yet (GetCursorPos via Fiddle is the
+        # planned route) -> falls to the object-centre else-branch below
         when 'view'
           if @gesture_pivot.nil? || idle > PIVOT_HOLD_IDLE
             hit = screen_center_pivot(model, view)

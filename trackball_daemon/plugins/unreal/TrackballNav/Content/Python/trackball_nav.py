@@ -28,7 +28,8 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.0"          # reported in the hello handshake (shown in the daemon's tray); keep
+ADDIN_VERSION = "0.2.1"          # 0.2.1: scheme values renamed (cursor->selection; under-mouse
+                                 # cursor unsupported, C++-only). Reported in the hello handshake; keep
                                  # in sync with version.json AND TrackballNav.uplugin VersionName.
                                  # 0.2.0: Blender-parity scheme (orbit/fly/walk modes, viewpoint pivot,
                                  # twist_action, lock_horizon, per-mode inverts) + orbit baseline x2.
@@ -316,8 +317,9 @@ def _orbit_pivot(op, cam, idle):
                 _gesture["pivot"] = center if center is not None else _forward_point(cam)
             _gesture["invalid"] = False
         return _gesture["pivot"]
-    if op in ("object", "cursor"):           # Unreal has NO 3D cursor (verified: no such Python API),
-        return center if center is not None else _forward_point(cam)   # so cursor -> selection centre
+    if op in ("object", "selection"):        # selected actors' bounding-box centre
+        return center if center is not None else _forward_point(cam)
+    # under-mouse "cursor" is C++-only in the editor (no Python mouse/hit API) -> falls through
     return _forward_point(cam)               # unknown -> a sane orbit point in front of the camera
 
 
@@ -325,7 +327,7 @@ def _zoom_toward(zm):
     if zm == "to_object":
         center, _bb = _selection_center()
         return center                        # may be None -> dolly straight along forward
-    return None                              # to_center / to_cursor -> dolly along forward
+    return None                              # to_center (and unresolvable to_cursor) -> dolly along forward
 
 
 # ======================================================================================

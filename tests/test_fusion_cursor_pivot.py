@@ -1,4 +1,4 @@
-"""Headless unit tests for the Fusion add-in's "pointer" pivot (pixel -> ray -> pivot).
+"""Headless unit tests for the Fusion add-in's "cursor" pivot (pixel -> ray -> pivot).
 
 Fusion has NO external automation, so the add-in normally can't be exercised outside the GUI at
 all. TrackballNav.py only touches `adsk` through a small surface, though, so a stub `adsk` package
@@ -11,7 +11,7 @@ pixel; ortho ray = parallel to the view axis through it, pushed back), the behin
 the screenToView -> client-rect mapping chain, bbox validation, the per-gesture hold + fallbacks,
 and that the refactor didn't change the "view" pivot. What it CANNOT prove (flagged in the add-in,
 needs the Fusion GUI): the real coordinate spaces of screenToView/viewToModelSpace and live
-pointer tracking.
+cursor tracking.
 """
 import os
 import sys
@@ -205,29 +205,29 @@ def _wire(monkeypatch, vp, design, cursor=(800.0, 450.0), scale=1.0):
 
 
 # --- the screen -> viewport pixel mapping chain --------------------------------------------
-def test_pointer_pixel_prefers_screen_to_view(monkeypatch):
+def test_cursor_pixel_prefers_screen_to_view(monkeypatch):
     vp = FakeVP(s2v=lambda x, y: (x - 100.0, y - 50.0))       # in range for cursor (800,450)
     _wire(monkeypatch, vp, None)
-    assert tn._pointer_view_pixel(vp) == (700.0, 400.0)
+    assert tn._cursor_view_pixel(vp) == (700.0, 400.0)
 
 
-def test_pointer_pixel_falls_back_to_client_mapping(monkeypatch):
+def test_cursor_pixel_falls_back_to_client_mapping(monkeypatch):
     vp = FakeVP(s2v=lambda x, y: (-5000.0, -5000.0))          # out of range -> distrust
     _wire(monkeypatch, vp, None)
     monkeypatch.setattr(tn, "_client_view_pixel", lambda sx, sy, v, s: (123.0, 456.0))
-    assert tn._pointer_view_pixel(vp) == (123.0, 456.0)
+    assert tn._cursor_view_pixel(vp) == (123.0, 456.0)
 
 
-def test_pointer_pixel_none_when_nothing_maps(monkeypatch):
+def test_cursor_pixel_none_when_nothing_maps(monkeypatch):
     vp = FakeVP(s2v=None)                                     # screenToView raises
     _wire(monkeypatch, vp, None)
     monkeypatch.setattr(tn, "_client_view_pixel", lambda sx, sy, v, s: None)
-    assert tn._pointer_view_pixel(vp) is None
+    assert tn._cursor_view_pixel(vp) is None
     monkeypatch.setattr(tn, "_cursor_screen_pos", lambda: None)   # no cursor at all
-    assert tn._pointer_view_pixel(vp) is None
+    assert tn._cursor_view_pixel(vp) is None
 
 
-def test_pointer_pixel_dpi_scaling(monkeypatch):
+def test_cursor_pixel_dpi_scaling(monkeypatch):
     # THE first user-reported live bug (0.1.11 -> 0.1.12): GetCursorPos is PHYSICAL px but
     # screenToView's INPUT is LOGICAL screen coords -- at 125% the pivot landed down-right of the
     # cursor. The physical cursor must be divided by the monitor scale BEFORE screenToView.
@@ -239,11 +239,11 @@ def test_pointer_pixel_dpi_scaling(monkeypatch):
 
     vp = FakeVP(s2v=s2v)
     _wire(monkeypatch, vp, None, cursor=(1000.0, 500.0), scale=1.25)
-    assert tn._pointer_view_pixel(vp) == (700.0, 350.0)       # (1000,500)/1.25 = (800,400) mapped
+    assert tn._cursor_view_pixel(vp) == (700.0, 350.0)       # (1000,500)/1.25 = (800,400) mapped
     assert seen["input"] == (800.0, 400.0)                    # logical, not physical
 
 
-def test_pointer_pixel_right_band_uses_physical_bounds(monkeypatch):
+def test_cursor_pixel_right_band_uses_physical_bounds(monkeypatch):
     # THE second user-reported live bug (0.1.12 -> 0.1.13): screenToView's OUTPUT is PHYSICAL
     # viewport px while vp.width/height are LOGICAL, so validating against the logical size
     # wrongly rejected the right/bottom ~20% band at 125% ("fails to target and falls back").
@@ -252,21 +252,21 @@ def test_pointer_pixel_right_band_uses_physical_bounds(monkeypatch):
     vp = FakeVP(width=1136, height=722, s2v=lambda x, y: (1300.0, 800.0))
     _wire(monkeypatch, vp, None, cursor=(1440.0, 1004.0), scale=1.25)
     # physical bounds = 1136*1.25 x 722*1.25 = 1420 x 902.5 -> (1300, 800) is IN range
-    assert tn._pointer_view_pixel(vp) == (1300.0, 800.0)
+    assert tn._cursor_view_pixel(vp) == (1300.0, 800.0)
     # but beyond the PHYSICAL bounds it is still rejected (genuinely off-viewport)
     vp2 = FakeVP(width=1136, height=722, s2v=lambda x, y: (1500.0, 800.0))
     _wire(monkeypatch, vp2, None, cursor=(1440.0, 1004.0), scale=1.25)
     monkeypatch.setattr(tn, "_client_view_pixel", lambda sx, sy, v, s: None)
-    assert tn._pointer_view_pixel(vp2) is None
+    assert tn._cursor_view_pixel(vp2) is None
 
 
 # --- ray construction: perspective from the eye, ortho parallel + pushed back --------------
-def test_pointer_pivot_perspective_ray(monkeypatch):
+def test_cursor_pivot_perspective_ray(monkeypatch):
     root = FakeRoot(hits=[(4.0, 2.4, 18.0)])
     vp = FakeVP(s2v=lambda x, y: (x, y), v2m=lambda x, y: (5.0, 3.0, 40.0))
     _wire(monkeypatch, vp, FakeDesign(root))
     cam = FakeCam(eye=(0, 0, 50), tgt=(0, 0, 0), extents=10.0)
-    hit = tn._pointer_pivot(cam)
+    hit = tn._cursor_pivot(cam)
     assert hit is not None and vclose((hit.x, hit.y, hit.z), (4.0, 2.4, 18.0))
     origin, d, tol = root.calls[0]
     assert vclose(origin, (0.0, 0.0, 50.0))                   # ray starts at the eye
@@ -274,12 +274,12 @@ def test_pointer_pivot_perspective_ray(monkeypatch):
     assert vclose(d, (5.0 / n, 3.0 / n, -10.0 / n))
     assert abs(tol - tn.APERTURE_FRACS[0] * 5.0) < 1e-12      # half_h = extents/2
 
-def test_pointer_pivot_ortho_ray(monkeypatch):
+def test_cursor_pivot_ortho_ray(monkeypatch):
     root = FakeRoot(hits=[(5.0, 3.0, 17.0)])
     vp = FakeVP(s2v=lambda x, y: (x, y), v2m=lambda x, y: (5.0, 3.0, 40.0))
     _wire(monkeypatch, vp, FakeDesign(root))
     cam = FakeCam(eye=(0, 0, 50), tgt=(0, 0, 0), extents=10.0, ortho=True)
-    hit = tn._pointer_pivot(cam)
+    hit = tn._cursor_pivot(cam)
     assert hit is not None and vclose((hit.x, hit.y, hit.z), (5.0, 3.0, 17.0))
     origin, d, _tol = root.calls[0]
     assert vclose(d, (0.0, 0.0, -1.0))                        # parallel to the view axis
@@ -287,30 +287,30 @@ def test_pointer_pivot_ortho_ray(monkeypatch):
     assert vclose(origin, (5.0, 3.0, 40.0 + 40.0))
 
 
-def test_pointer_pivot_behind_eye_is_rejected(monkeypatch):
+def test_cursor_pivot_behind_eye_is_rejected(monkeypatch):
     root = FakeRoot(hits=[(0.0, 0.0, 0.0)])
     vp = FakeVP(s2v=lambda x, y: (x, y), v2m=lambda x, y: (0.0, 0.0, 60.0))  # behind eye z=50
     _wire(monkeypatch, vp, FakeDesign(root))
     cam = FakeCam(eye=(0, 0, 50), tgt=(0, 0, 0))
-    assert tn._pointer_pivot(cam) is None
+    assert tn._cursor_pivot(cam) is None
     assert root.calls == []                                   # never raycast a bogus unproject
 
 
-def test_pointer_pivot_bbox_rejects_stray_hit(monkeypatch):
+def test_cursor_pivot_bbox_rejects_stray_hit(monkeypatch):
     root = FakeRoot(hits=[(500.0, 0.0, 0.0)])                 # far outside the bbox
     vp = FakeVP(s2v=lambda x, y: (x, y), v2m=lambda x, y: (5.0, 3.0, 40.0))
     _wire(monkeypatch, vp, FakeDesign(root))
     cam = FakeCam(eye=(0, 0, 50), tgt=(0, 0, 0))
-    assert tn._pointer_pivot(cam) is None
+    assert tn._cursor_pivot(cam) is None
     assert len(root.calls) == len(tn.APERTURE_FRACS)          # tried every aperture
 
 
-def test_pointer_pivot_none_without_pixel(monkeypatch):
+def test_cursor_pivot_none_without_pixel(monkeypatch):
     root = FakeRoot(hits=[(1.0, 1.0, 1.0)])
     vp = FakeVP(s2v=None, v2m=lambda x, y: (0.0, 0.0, 0.0))
     _wire(monkeypatch, vp, FakeDesign(root), cursor=None)
     monkeypatch.setattr(tn, "_cursor_screen_pos", lambda: None)
-    assert tn._pointer_pivot(FakeCam(eye=(0, 0, 50), tgt=(0, 0, 0))) is None
+    assert tn._cursor_pivot(FakeCam(eye=(0, 0, 50), tgt=(0, 0, 0))) is None
 
 
 # --- _orbit_pivot / _zoom_pivot: hold semantics + fallbacks --------------------------------
@@ -318,48 +318,48 @@ def _pt(x, y, z):
     return tn.adsk.core.Point3D.create(x, y, z)
 
 
-def test_orbit_pivot_pointer_holds_and_recasts(monkeypatch):
+def test_orbit_pivot_cursor_holds_and_recasts(monkeypatch):
     returns = [_pt(1, 1, 1), _pt(2, 2, 2)]
-    monkeypatch.setattr(tn, "_pointer_pivot", lambda cam: returns.pop(0))
+    monkeypatch.setattr(tn, "_cursor_pivot", lambda cam: returns.pop(0))
     monkeypatch.setattr(tn, "_object_center", lambda tgt: _pt(9, 9, 9))
     cam, tgt = object(), _pt(0, 0, 0)
-    p1 = tn._orbit_pivot("pointer", cam, tgt, idle=10.0)
+    p1 = tn._orbit_pivot("cursor", cam, tgt, idle=10.0)
     assert (p1.x, p1.y, p1.z) == (1, 1, 1)
-    p2 = tn._orbit_pivot("pointer", cam, tgt, idle=0.0)       # mid-gesture -> HELD
+    p2 = tn._orbit_pivot("cursor", cam, tgt, idle=0.0)       # mid-gesture -> HELD
     assert p2 is p1
-    p3 = tn._orbit_pivot("pointer", cam, tgt, idle=tn.PIVOT_HOLD_IDLE + 0.01)
+    p3 = tn._orbit_pivot("cursor", cam, tgt, idle=tn.PIVOT_HOLD_IDLE + 0.01)
     assert (p3.x, p3.y, p3.z) == (2, 2, 2)                    # gesture over -> re-cast
 
 
-def test_orbit_pivot_pointer_falls_back_to_object_centre(monkeypatch):
-    monkeypatch.setattr(tn, "_pointer_pivot", lambda cam: None)
+def test_orbit_pivot_cursor_falls_back_to_object_centre(monkeypatch):
+    monkeypatch.setattr(tn, "_cursor_pivot", lambda cam: None)
     monkeypatch.setattr(tn, "_object_center", lambda tgt: _pt(9, 9, 9))
-    p = tn._orbit_pivot("pointer", object(), _pt(0, 0, 0), idle=10.0)
+    p = tn._orbit_pivot("cursor", object(), _pt(0, 0, 0), idle=10.0)
     assert (p.x, p.y, p.z) == (9, 9, 9)
 
 
 def test_orbit_pivot_view_still_uses_screen_centre(monkeypatch):
     # regression: the _raycast_pivot refactor must not change the "view" pivot's source
     monkeypatch.setattr(tn, "_screen_center_pivot", lambda cam: _pt(7, 7, 7))
-    monkeypatch.setattr(tn, "_pointer_pivot",
+    monkeypatch.setattr(tn, "_cursor_pivot",
                         lambda cam: (_ for _ in ()).throw(AssertionError("wrong path")))
     p = tn._orbit_pivot("view", object(), _pt(0, 0, 0), idle=10.0)
     assert (p.x, p.y, p.z) == (7, 7, 7)
 
 
-def test_zoom_pivot_to_pointer_holds_and_falls_back(monkeypatch):
+def test_zoom_pivot_to_cursor_holds_and_falls_back(monkeypatch):
     returns = [_pt(3, 3, 3), _pt(4, 4, 4)]
-    monkeypatch.setattr(tn, "_pointer_pivot", lambda cam: returns.pop(0))
+    monkeypatch.setattr(tn, "_cursor_pivot", lambda cam: returns.pop(0))
     tgt = _pt(0, 0, 0)
-    p1 = tn._zoom_pivot("to_pointer", object(), tgt, idle=10.0)
+    p1 = tn._zoom_pivot("to_cursor", object(), tgt, idle=10.0)
     assert (p1.x, p1.y, p1.z) == (3, 3, 3)
-    assert tn._zoom_pivot("to_pointer", object(), tgt, idle=0.0) is p1     # held
-    p3 = tn._zoom_pivot("to_pointer", object(), tgt, idle=tn.PIVOT_HOLD_IDLE + 0.01)
+    assert tn._zoom_pivot("to_cursor", object(), tgt, idle=0.0) is p1     # held
+    p3 = tn._zoom_pivot("to_cursor", object(), tgt, idle=tn.PIVOT_HOLD_IDLE + 0.01)
     assert (p3.x, p3.y, p3.z) == (4, 4, 4)
     # miss -> the view target (to_center behaviour)
     tn._zoom_gesture.update(pivot=None)
-    monkeypatch.setattr(tn, "_pointer_pivot", lambda cam: None)
-    assert tn._zoom_pivot("to_pointer", object(), tgt, idle=10.0) is tgt
+    monkeypatch.setattr(tn, "_cursor_pivot", lambda cam: None)
+    assert tn._zoom_pivot("to_cursor", object(), tgt, idle=10.0) is tgt
 
 
 def test_zoom_pivot_to_center_unchanged():

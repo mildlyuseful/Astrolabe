@@ -162,8 +162,9 @@ broker frame — see §5.1), interpreted for the editor's free-fly camera. `conf
 - **Pivots** (`scheme.orbit_pivot`): `viewpoint` → the **eye** (turn the camera in place / free-fly);
   `origin` → (0,0,0); `object` → median of the **selected actors'** bounding-box centres
   (`EditorActorSubsystem.get_selected_level_actors()` → `actor.get_actor_bounds(False)`), cached
-  ~0.5 s; `cursor` → **falls back to `object`** — **Unreal has NO 3D cursor** (verified: no such Python
-  API; all `*cursor*` names are mouse/UI/gizmo), so "3D Cursor" orbits the selection; `view` → the
+  ~0.5 s; `selection` → **falls back to `object`** — **Unreal has NO 3D cursor** (verified: no such Python
+  API; all `*cursor*` names are mouse/UI/gizmo, and no 3D-cursor option is shown for Unreal);
+  the under-mouse `cursor` pivot is unsupported too (C++-only) and falls through; `view` → the
   surface under the **screen centre** via `SystemLibrary.line_trace_single` down the camera forward
   axis into the **editor world** (`sub.get_editor_world()`), validated against the selection bbox and
   **held for the gesture** (re-raycast on pan/zoom or after a ~0.35 s idle). Everything falls back
@@ -172,7 +173,7 @@ broker frame — see §5.1), interpreted for the editor's free-fly camera. `conf
   is under the cursor / selected.
 - **Orbit style** (`scheme.orbit_style`): `free` (about the camera's own right/up/fwd, twist allowed)
   or `turntable` (yaw about WORLD Z + pitch about camera-right, **roll dropped**).
-- **Zoom mode** (`scheme.zoom_mode`): `to_center`/`to_cursor` → dolly along forward; `to_object` →
+- **Zoom mode** (`scheme.zoom_mode`): `to_center` (and unresolvable `to_cursor`) → dolly along forward; `to_object` →
   dolly toward the selection centre.
 - **Per-mode inverts** (`advanced.invert.<orbit|viewpoint|fly|walk>.<axis>`): applied **in the add-on**
   (like Blender, §12.9) — the same physical channel means different things per mode, so independent
@@ -277,8 +278,8 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
    doctrine, on purpose, by hardware observation.)
 5c. **Unreal has NO 3D cursor.** Probed the whole `unreal` namespace + `LevelEditorSubsystem`/
    `EditorActorSubsystem` — there is no queryable Blender-style 3D-cursor / editor-pivot point (every
-   `*cursor*` name is the mouse cursor / a UI gizmo). So the `cursor` orbit pivot **falls back to the
-   selection centre** (identical to `object`); the UI labels it "3D Cursor (→ Selection)".
+   `*cursor*` name is the mouse cursor / a UI gizmo). So the `selection` orbit pivot **falls back to the
+   selection centre** (identical to `object`), and the daemon UI shows no 3D-cursor option for Unreal.
 5d. **fly ≠ walk** (don't collapse them). Verified: fly look BANKS on twist and moves along the
    camera's 3D forward (dives when pitched); walk look is horizon-locked (twist dropped) and moves in
    the ground plane + world-Z. They coincide only when level and un-twisted.

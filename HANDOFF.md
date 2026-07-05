@@ -6,9 +6,9 @@ cannot see by reading the code**, and the **full list of future plans / requeste
 options**. Per-component deep dives live in their own docs (linked in §15); this file is the map that
 ties them together and covers the things that span more than one component.
 
-> Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.43**, Fusion
-> add-in **0.1.13**, Blender add-on **0.1.9**, FreeCAD add-on **0.1.3**, SketchUp extension
-> **0.2.0**, Unreal add-on **0.2.0**,
+> Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.44**, Fusion
+> add-in **0.1.14**, Blender add-on **0.1.10**, FreeCAD add-on **0.1.4**, SketchUp extension
+> **0.2.1**, Unreal add-on **0.2.1**, AutoCAD plugin **0.3.1**,
 > `pyproject` version is dynamic (single-sourced from `__version__`; packaging not yet cut). Dev machine: Windows 11, Blender 5.1.1, SolidWorks
 > 2025, Fusion 360, FreeCAD 1.1.1, SketchUp 2026.2, Unreal Engine 5.8, AutoCAD 2026 installed. The firmware has no
 > version field.
@@ -138,7 +138,7 @@ peripheral links** (e.g. Windows HID + the daemon). LED: slow blink = disconnect
 controller mode, solid = mouse mode.
 
 **Cursor/scroll mapping in mouse mode** (firmware-side, when not in controller mode): horizontal ball
-motion → pointer; **yaw twist** dominating (via `YAW_DEADZONE`/`YAW_DOMINANCE_RATIO`) → scroll wheel
+motion → cursor; **yaw twist** dominating (via `YAW_DEADZONE`/`YAW_DOMINANCE_RATIO`) → scroll wheel
 with an 80 ms hold. This is the on-device version of what the daemon's cursor mode also does — but in
 normal use the daemon is subscribed, so the firmware is in controller mode and the **daemon** does the
 cursor mapping.
@@ -226,8 +226,8 @@ the BLE loop.
 `OutputEngine.mode` is `MODE_CURSOR` or `MODE_CUBE`, toggled from the tray (and chosen at startup by
 `general.default_mode`). It is a **global** software switch (not per-app).
 
-- **Cursor mode** — each packet's rotation becomes pointer/wheel input via `SendInput` (pure ctypes,
-  no dependency). Yaw-dominant twist → scroll (with deadzone/dominance), otherwise → pointer move.
+- **Cursor mode** — each packet's rotation becomes cursor/wheel input via `SendInput` (pure ctypes,
+  no dependency). Yaw-dominant twist → scroll (with deadzone/dominance), otherwise → cursor move.
   Sub-pixel/notch remainders are carried.
 - **3D (cube) mode** — each packet becomes an **orbit** increment (axis-angle → delta quaternion,
   composed in world frame) that rotates the internal view **and** is emitted to `nav_sink`. Holding
@@ -261,20 +261,18 @@ and the tab title is the document name, not "Onshape" (§12.8) — so Onshape is
 is foreground **AND** the bridge is connected, with Onshape's own **focus** signal as the fine gate.
 Nav only flows in **3D mode** and only to an **enabled** app.
 
-**Control scheme** (`config.effective_scheme`): `orbit_pivot` (view/**pointer**/object/origin/cursor,
-plus `viewpoint` in Blender/SketchUp/Unreal), `orbit_style` (free/turntable), `zoom_mode`
-(to_center/to_object/to_cursor/**to_pointer**). `pointer`/`to_pointer` (daemon 0.1.39, additive — no
-CONFIG_VERSION bump) = orbit/zoom about the surface under the **MOUSE POINTER**, deliberately
-DISTINCT from `cursor`/`to_cursor` (selection / Blender's 3D cursor, unchanged); the daemon wires the
-value through every dropdown + broker frame once, and each app only needs a plugin-side pivot
-resolver — implemented so far in **FreeCAD (add-on 0.1.3)**, **AutoCAD (NETLOAD plugin 0.3.0,
-PointMonitor)**, and **Fusion (add-in 0.1.12, GetCursorPos + screenToView)**; apps without one fall
-back to their view/object pivot. **UI labels ≠ stored values here (user-requested rename):** the
-dropdowns SHOW the under-mouse pivot as **"cursor (under mouse)"** / "Under Cursor (mouse)" and the
-legacy `cursor` value as **"selection"** (so only one cursor-named option exists), but the STORED
-scheme values remain `pointer`/`to_pointer`/`cursor` — every plugin and broker frame speaks the old
-names; do not rename the values. Legacy `to_cursor` (a to_center alias everywhere) is no longer
-offered in the dropdowns but still parses. Set in
+**Control scheme** (`config.effective_scheme`): `orbit_pivot` (view/**cursor**/object/origin/
+selection, plus `viewpoint` in Blender/SketchUp/Unreal and `cursor_3d` in Blender), `orbit_style`
+(free/turntable), `zoom_mode` (to_center/to_object/**to_cursor**). `cursor`/`to_cursor` =
+orbit/zoom about the surface under the **MOUSE CURSOR**; the daemon wires the value through every
+dropdown + broker frame once, and each app only needs a plugin-side pivot resolver — implemented
+so far in **FreeCAD**, **AutoCAD (PointMonitor)**, and **Fusion (GetCursorPos + screenToView)**;
+apps without one fall back to their view/object pivot. `selection` is the selection/bbox pivot
+and `cursor_3d` is Blender's 3D cursor. **Stored values match the UI labels since daemon 0.1.44
+(config v3):** the under-mouse pivot was born as `pointer`/`to_pointer` (daemon 0.1.39, when the
+UI was relabelled but the values kept the old names) and the old `cursor` value meant
+selection/3D-cursor — the v3 migration renamed everything to the current scheme and retired the
+legacy `to_cursor` alias of to_center (old configs migrate automatically). Set in
 General (default) or per app (per-app `"default"` inherits General). `app._apply_schemes` pushes the
 focused app's effective scheme to its driver; the **focused broker app's** `advanced` block (Blender's
 or Unreal's) is attached to the broker scheme (§12.9).
@@ -300,8 +298,8 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
   bump (takes effect on Fusion's next launch). Gotchas in [`docs/apps/fusion360.md`](docs/apps/fusion360.md) and the code:
   no external automation API (verify via `%APPDATA%\TrackballDaemon\fusion_addin.log`), **`adsk.core`
   has no `Point3DList`** (use `ObjectCollection` for `findBRepUsingRay` hit points), the active Design
-  isn't reliably `app.activeProduct`. Add-in **0.1.13** adds the **`pointer` orbit pivot /
-  `to_pointer` zoom** (shown as "cursor (under mouse)" in the UI; raycast the surface under the
+  isn't reliably `app.activeProduct`. The add-in carries the under-mouse **`cursor` orbit pivot /
+  `to_cursor` zoom** (raycast the surface under the
   mouse cursor): the cursor is read on-demand at gesture start via ctypes `GetCursorPos` — NOT a
   mouseMove Command (modal → intrusive). Fusion's MIXED coordinate model was pinned by two live
   user passes at 125%: **`screenToView` takes LOGICAL screen px but returns PHYSICAL viewport px;
@@ -329,7 +327,7 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
   presents from a projected cache (notes §8.16 — read the crash taxonomy before touching it;
   `GetCurrentAcGsView` is a trap, the kernel-descriptor accessor is the live one). Rebuild:
   `dotnet build -c Release plugin_src/autocad/TrackballNavAcad` (.NET 8 SDK; AutoCAD 2025–2027
-  binary-compatible). Plugin **0.3.0** adds the **`pointer` orbit pivot / `to_pointer` zoom**
+  binary-compatible). The plugin carries the under-mouse **`cursor` orbit pivot / `to_cursor` zoom**
   (orbit/zoom about the point under the mouse via a passive `Editor.PointMonitor` cache — §14 /
   notes §8.17). The old **COM nav transport** (reassign-commit orbit + deferred-orbit overlay cube;
   regens ~50 ms per orbit commit, `Center` property destructive, no `VIEWTWIST`, no raycast — the
@@ -359,9 +357,9 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
   (InitGui's separate-globals/locals exec → thin shim + sibling module; `pivy.coin` must be imported
   before `getCameraNode`; `QTimer.singleShot` deferral gated on `FreeCAD.GuiUp`; versioned user dir)
   are in [`docs/apps/freecad.md`](docs/apps/freecad.md) (read first) and the code.
-  Verified live on FreeCAD 1.1.1. Add-on **0.1.3** adds the **`pointer` orbit pivot / `to_pointer`
-  zoom** (orbit/zoom about the surface under the live mouse pointer — the FIRST app with it, §14): a
-  passive `SoLocation2Event` observer caches the pointer pixel (device-px bottom-left, same
+  Verified live on FreeCAD 1.1.1. The add-on carries the under-mouse **`cursor` orbit pivot /
+  `to_cursor` zoom** (orbit/zoom about the surface under the live mouse cursor — the FIRST app
+  with it, §14): a passive `SoLocation2Event` observer caches the cursor pixel (device-px bottom-left, same
   convention `getObjectInfo` takes — no y-flip, verified live) and the `view`-pivot raycast/hold
   machinery reuses it.
 
@@ -495,7 +493,7 @@ same time on Windows: a paired HID peripheral stops advertising the way bleak ne
 "device not found" / can't attach. Early attempts to "let Windows do the mouse and the daemon do 3D"
 failed for exactly this reason. **Resolution:** the daemon owns the BLE link, the **firmware's CCCD
 toggle** suppresses its own HID mouse while the daemon is subscribed (§3), and the **daemon injects the
-pointer via `SendInput`**. The firmware's native HID is the standalone fallback when the daemon is
+cursor via `SendInput`**. The firmware's native HID is the standalone fallback when the daemon is
 closed. **Operational rule: don't also pair the trackball in Windows Bluetooth while the daemon runs.**
 
 ### 12.3 The `cannot access local variable 'device'` bug
@@ -668,12 +666,12 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
 - ~~**AutoCAD integration**~~ — **DONE** (compiled NETLOAD plugin v0.3.0, the sole transport since
   daemon 0.1.41; the COM nav transport is archived at `archive/autocad_com_transport/`). The full
   road there — the COM-era view model, the per-frame-regen discovery, the regen-free GS kernel-view
-  transport, the 2D-Wireframe snap-back/crash taxonomy, and the PointMonitor pointer pivot — is the
+  transport, the 2D-Wireframe snap-back/crash taxonomy, and the PointMonitor cursor pivot — is the
   solved-problem history in [`docs/apps/autocad.md`](docs/apps/autocad.md) **§8.9–§8.18** (read
   §8.16's crash taxonomy before touching the commit path). Remaining AutoCAD polish: (1) the **live
   GUI sign/scale calibration** of the plugin (`OrbitSign/Pan*/Zoom*` in Plugin.cs — best-guesses,
   pan/zoom scale especially); (2) plugin pivot modes (`origin`/`object` still orbit like `view` —
-  `pointer` is implemented, v0.3.0) and `to_object` zoom are TODO; (3) the plugin needs a per-era
+  the under-mouse `cursor` is implemented) and `to_object` zoom are TODO; (3) the plugin needs a per-era
   rebuild when AutoCAD breaks .NET binary compat (2025–2027 are one family), and 2024-or-older
   needs a .NET Framework variant.
 - **PMW3610 third sensor** — the design anticipates a PMW3610. Firmware currently **emulates** its
@@ -705,41 +703,41 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
   already leaves clean hooks but nothing fires them. (Catalog item "K".)
 - **True cursor-position pivot / "zoom to mouse"** — **IN PROGRESS (one app at a time, best-first —
   the ranked remaining apps are at the end of this bullet).** The shared daemon wiring is DONE
-  (daemon 0.1.39): new scheme values `pointer` (orbit_pivot) / `to_pointer` (zoom_mode), additive and
-  distinct from `cursor`/`to_cursor` (which keep their old fallback meanings), in every ui.py
-  dropdown and every broker frame — the only per-app work left is each plugin's pivot resolver.
+  (daemon 0.1.39, values renamed to `cursor`/`to_cursor` in 0.1.44 — see §7): the under-mouse
+  scheme values flow through every ui.py dropdown and every broker frame — the only per-app work
+  left is each plugin's pivot resolver.
   **FreeCAD — DONE (add-on 0.1.3, verified live):** a passive `SoLocation2Event` observer caches the
-  live pointer pixel; `getObjectInfo(pixel)` raycasts it with the same bbox validation + per-gesture
-  hold as `view`; `to_pointer` zoom holds the point under the pointer. Verified with synthetic
+  live cursor pixel; `getObjectInfo(pixel)` raycasts it with the same bbox validation + per-gesture
+  hold as `view`; `to_cursor` zoom holds the point under the cursor. Verified with synthetic
   QMouseEvents through the real Qt→Quarter→Coin pipeline + an end-to-end broker run (notes §8/§9);
   only the human hover-and-orbit feel pass remains. **AutoCAD — DONE (NETLOAD plugin 0.3.0, verified
   live in a throwaway instance):** a passive `Editor.PointMonitor` caches the cursor's WCS point
   (osnap > picked-entity depth along the view ray > UCS-plane point), extents-validated + held per
   gesture; `NavMath.Apply` grew optional orbit/zoom pivots (rigid orbit about P, parallel
-  to_pointer zoom); `TBNAVPTRTEST` proved the full pipeline (P's screen offset exact, DB target
+  to_cursor zoom); `TBNAVPTRTEST` proved the full pipeline (P's screen offset exact, DB target
   err 0, both commit flavours) and a real cursor sweep fed the cache — human feel pass remains
   (AutoCAD notes §8.17). **Fusion — DONE (add-in 0.1.13, live-verified by the user over two
   passes; right/bottom-band fix awaiting a spot re-check):** the mouseMove-Command route was
   REJECTED as intrusive (a Fusion Command is modal — it owns clicks and any tool activation
-  terminates it, so an always-on tracker fights normal modeling); instead the pointer is read
+  terminates it, so an always-on tracker fights normal modeling); instead the cursor is read
   ON-DEMAND at gesture start — ctypes `GetCursorPos` → ÷ the monitor's effective DPI scale →
   `Viewport.screenToView` (output validated against `vp.size × scale`, with a window-under-cursor
   client-rect mapping as fallback) → `viewToModelSpace` to AIM a ray (perspective: eye→point;
   ortho: parallel, pushed back) → the existing `findBRepUsingRay` pick with the same
-  aperture/bbox/hold machinery as `view`; `to_pointer` zoom rides the same raycast. The two live
+  aperture/bbox/hold machinery as `view`; `to_cursor` zoom rides the same raycast. The two live
   passes at 125% scaling pinned **Fusion's mixed coordinate model** (fit `view = 1.25·logical_in −
   physical_origin`, exact on every logged sample): `screenToView` = LOGICAL screen px IN →
   PHYSICAL viewport px OUT; `viewToModelSpace` = PHYSICAL in; `vp.width/height` = LOGICAL. Pass 1
   (0.1.11) caught the input scale (hits down-right of the cursor → 0.1.12 divides the input);
   pass 2 (0.1.12, "works very precisely") caught the OUTPUT bounds (the logical-size range check
   wrongly rejected the right/bottom ~20% band → 0.1.13 validates against `vp.size × scale`).
-  A `pointer map:` log line prints screen px → scale → view px for diagnosis. Pixel→ray→pivot
+  A `cursor map:` log line prints screen px → scale → view px for diagnosis. Pixel→ray→pivot
   math + hold + both DPI cases are unit-tested against a stubbed `adsk`
-  (tests/test_fusion_pointer_pivot.py). Remaining apps: Onshape (cursor→canvas mapping),
+  (tests/test_fusion_cursor_pivot.py). Remaining apps: Onshape (cursor→canvas mapping),
   SolidWorks (IMouse), SketchUp (`GetCursorPos` via Fiddle), Blender (modal operator or Win32 —
-  no on-demand mouse getter in a timer), Unreal (C++-only — skip). Blender's `cursor` stays the
-  3D cursor.
-- **"Viewport under the pointer" targeting** (Blender quad-view) — same live-mouse limitation; v1
+  no on-demand mouse getter in a timer), Unreal (C++-only — skip). Blender's 3D cursor is its own
+  `cursor_3d` pivot.
+- **"Viewport under the cursor" targeting** (Blender quad-view) — same live-mouse limitation; v1
   targets the active/largest VIEW_3D.
 
 **Per-app polish (mostly hardware sign/feel passes)**
@@ -806,7 +804,7 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
 - [`docs/apps/fusion360.md`](docs/apps/fusion360.md) — Fusion 360: the CustomEvent socket add-in
   architecture, the no-external-automation reality (verify via `fusion_addin.log`), the
   `ObjectCollection`/`activeProduct` API traps, the modal-Command rejection, and the live-verified
-  mixed logical/physical DPI coordinate model behind the pointer pivot. **Read before touching the
+  mixed logical/physical DPI coordinate model behind the cursor pivot. **Read before touching the
   add-in.**
 
 > When you change something that "you couldn't have known by reading the code," add it to the relevant

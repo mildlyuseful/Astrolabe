@@ -32,7 +32,7 @@ python -m trackball_daemon --debug    # also opens the cube verification window
 - **Closing the settings window hides it to the tray** — the app keeps running. It exits
   **only** via tray → **Quit**.
 - Don't pair the trackball in Windows Bluetooth while the daemon runs (the daemon is the
-  BLE consumer and synthesizes pointer input). The firmware's native HID mouse still works
+  BLE consumer and synthesizes cursor input). The firmware's native HID mouse still works
   standalone with the daemon closed.
 
 ## Configuration
@@ -50,7 +50,7 @@ reflected in the UI. Defaults reproduce the original `cube_test.py` behavior exa
 The daemon drives CAD apps like a 3Dconnexion SpaceMouse: a local **nav broker** streams
 orbit/pan/zoom deltas over `127.0.0.1`, and a thin per-app **add-on** applies them to that
 app's camera. Navigation is routed to whichever supported app is **focused** (and enabled),
-and only flows in **3D mode** (tray → Mode), so the pointer is untouched in cursor mode.
+and only flows in **3D mode** (tray → Mode), so the mouse cursor is untouched in cursor mode.
 
 ### Fusion 360 (implemented)
 1. Settings → **3D Apps** → Fusion 360 → **Set up**. This copies the `TrackballNav` add-in
@@ -76,10 +76,9 @@ and only flows in **3D mode** (tray → Mode), so the pointer is untouched in cu
      instead** — hover the feature you care about and spin the ball — and **"to_cursor (under
      mouse)"** zooms about it (the cursor is read fresh at each gesture start; if it isn't over
      the viewport, it falls back to the model centre). "selection" falls back to the model
-     centre. (Internally these store the scheme values `pointer`/`to_pointer` — the dropdowns
-     were relabelled; display-scaling is handled since 0.1.12/0.1.13: Fusion's screenToView takes
-     logical screen px but returns physical viewport px, so both the input and the bounds check
-     are scale-aware.)
+     centre. (Stored scheme values: `cursor`/`to_cursor`. Display-scaling is handled: Fusion's
+     screenToView takes logical screen px but returns physical viewport px, so both the input
+     and the bounds check are scale-aware.)
 
 **Add-in updates.** Each add-in carries a version (its `.manifest`). When a newer daemon
 ships a newer add-in, the daemon **auto-copies it on startup** (preserving your enabled
@@ -110,7 +109,8 @@ and moves the active view's camera.
    Bindings, same as the other apps — set per app or leave on **Default** to inherit General →
    3D control scheme). All three are applied, verified live with zero drift of the held point:
    - **Orbit pivot** — `origin` rotates about the model origin (the lightest path); `object`
-     (and `cursor`, which falls back to it) rotates about the model's bounding-box centre;
+     (and `selection` / `cursor`, which fall back to it — no SW hit-test for either yet)
+     rotates about the model's bounding-box centre;
      `view` rotates about the surface **under the centre of the screen** — found by a raycast,
      exactly like SolidWorks' own middle-drag orbit — and **holds it for the whole gesture**,
      falling back to the object centre when the crosshair is off-model.
@@ -171,18 +171,16 @@ Architecture, Mechanical) are all `acad.exe` and expose the same automation obje
 4. **Control scheme** (the **Orbit pivot / Orbit style / Zoom mode** dropdowns in Per-App Bindings,
    same as the other apps — per app or **Default** to inherit General):
    - **Orbit pivot** — `origin` (WCS origin), `object` (drawing-extents centre), `view` (the current
-     view **target** — AutoCAD's native target orbit), `cursor` (falls back to object), and
-     **"cursor (under mouse)" — orbit about the point under the MOUSE CURSOR** (stored as the
-     scheme value `pointer`; plugin v0.3.0+: the plugin
+     view **target** — AutoCAD's native target orbit), `selection` (falls back to object), and
+     **`cursor` — orbit about the point under the MOUSE CURSOR** (the plugin
      watches the cursor via `PointMonitor`, holds the point under it when a gesture starts, and
-     orbits the view rigidly around it; `to_pointer` zoom keeps that point fixed while zooming. In a
+     orbits the view rigidly around it; `to_cursor` zoom keeps that point fixed while zooming. In a
      shaded visual style the depth comes from the entity under the cursor; in 2D wireframe faces
      don't pick, so mid-face hovers use the construction-plane point — still under the cursor).
    - **Orbit style** — `free` or `turntable` (yaw about world-up + pitch about camera-right; AutoCAD
      is **Z-up**). Unlike the old COM path, the plugin sets `VIEWTWIST` directly, so free-roll works.
    - **Zoom mode** — `to_center` (default), `to_object` (zoom about the drawing-extents centre), or
-     `to_pointer` (zoom about the point under the mouse, parallel projection); `to_cursor` falls
-     back to `to_center`.
+     `to_cursor` (zoom about the point under the mouse, parallel projection).
 
 > Requires `pywin32` (Windows) for the NETLOAD delivery only. If it's missing the loader disables
 > itself and logs once; the plugin can still be loaded by hand (`NETLOAD` →
@@ -269,7 +267,7 @@ the active 3D view's **Coin (pivy) camera**.
    FreeCAD's `getObjectInfo`) and holds it for the gesture, exactly like native middle-drag orbit;
    the **"cursor (under mouse)" pivot raycasts the surface under the MOUSE CURSOR** instead (and
    **"to_cursor (under mouse)"** zooms about it) — hover the point you care about and spin the
-   ball (stored as the scheme values `pointer`/`to_pointer`); "selection" pivots on the current
+   ball; "selection" pivots on the current
    selection's centre. FreeCAD is
    **Z-up**, so turntable keeps verticals vertical. Intrinsic per-axis orientation/feel lives in the
    add-on's `tbnav_camera.py` (`ORBIT_SCALE`/`PAN_SIGN`/`PAN_SCALE`/`ZOOM_SCALE`/`ZOOM_SIGN`); the

@@ -25,7 +25,9 @@ import traceback
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.3"          # reported in the hello handshake (shown in the daemon's tray); keep
+ADDIN_VERSION = "0.1.4"          # 0.1.4: scheme values renamed (pointer->cursor,
+                                 # cursor->selection, to_pointer->to_cursor; daemon config v3).
+                                 # reported in the hello handshake (shown in the daemon's tray); keep
                                  # in sync with version.json. 0.1.1: pan scale fix (was ~100x too
                                  # small). 0.1.2: orbit scale 0.5->1.0 (true 1:1; was half-speed from
                                  # copying Blender's RegionView3D halving). 0.1.3: "pointer" orbit
@@ -38,11 +40,11 @@ PUMP_MS = 11                     # ~90 Hz main-thread queue drain
 PIVOT_HOLD_IDLE = 0.35           # s without frames that ends a gesture -> re-raycast "view" pivot
 OBJ_CACHE_SEC = 0.5              # object bounding-box centre cache lifetime
 BBOX_MARGIN = 0.10               # accept a "view" hit inside the model bbox grown by this * diagonal
-PTR_HOOK_CHECK_SEC = 0.5         # how often the pump re-checks the pointer observer's view binding
-POINTER_Y_FLIP = False           # SoLocation2Event.getPosition() and getObjectInfo() both use Coin's
+CURSOR_HOOK_CHECK_SEC = 0.5         # how often the pump re-checks the cursor observer's view binding
+CURSOR_Y_FLIP = False           # SoLocation2Event.getPosition() and getObjectInfo() both use Coin's
                                  # BOTTOM-left pixel origin, so the cached pixel feeds getObjectInfo
                                  # unflipped. Flip to True (y' = getSize()[1] - y) if a FreeCAD/Coin
-                                 # change ever makes pointer hits land vertically mirrored.
+                                 # change ever makes cursor hits land vertically mirrored.
 
 # --- runtime state ---------------------------------------------------------------------
 _stop = threading.Event()
@@ -54,20 +56,20 @@ _QtCore = None
 _QT_FLAVOUR = "?"
 _host = "?"
 
-# "view"/"pointer" pivot: raycast the surface under the screen centre / mouse pointer ONCE per
+# "view"/"cursor" pivot: raycast the surface under the screen centre / mouse cursor ONCE per
 # gesture and HOLD it, so that point stays put while orbiting. Invalidated on pan/zoom or after an
 # idle gap.
 _gesture = {"t": 0.0, "pivot": None}
-_zoom_gesture = {"pivot": None}   # "to_pointer" zoom's own per-gesture hold (reset on orbit/pan)
+_zoom_gesture = {"pivot": None}   # "to_cursor" zoom's own per-gesture hold (reset on orbit/pan)
 _obj_cache = {"t": 0.0, "center": None, "bbox": None}
 _last_scheme = {"v": None}
 
-# Live pointer pixel (Coin viewport coords, bottom-left origin), cached by a passive
+# Live cursor pixel (Coin viewport coords, bottom-left origin), cached by a passive
 # SoLocation2Event observer on the active view -- the pump reads it on demand. `view` is the view
 # the observer is currently registered on (View3DInventorPy identity is stable: FreeCAD caches one
 # Python object per MDI view, so `is` detects a view change).
-_pointer = {"px": None, "t": 0.0}
-_ptr_hook = {"view": None, "checked": 0.0}
+_cursor = {"px": None, "t": 0.0}
+_cursor_hook = {"view": None, "checked": 0.0}
 
 
 # ======================================================================================
@@ -258,56 +260,56 @@ def _screen_center_pivot(view, bbox):
     return p
 
 
-def _pointer_event_cb(event_cb):
-    """Passive SoLocation2Event observer: cache the pointer's viewport pixel. Runs inside Coin's
+def _cursor_event_cb(event_cb):
+    """Passive SoLocation2Event observer: cache the cursor's viewport pixel. Runs inside Coin's
     event traversal on the GUI thread -- do NOTHING here but read + store (never touch the camera,
     never raise, never setHandled(), so FreeCAD's own navigation still sees the event)."""
     try:
         pos = event_cb.getEvent().getPosition().getValue()
-        _pointer["px"] = (int(pos[0]), int(pos[1]))
-        _pointer["t"] = time.time()
+        _cursor["px"] = (int(pos[0]), int(pos[1]))
+        _cursor["t"] = time.time()
     except Exception:
         pass
 
 
-def _ensure_pointer_hook(view):
+def _ensure_cursor_hook(view):
     """Keep the SoLocation2Event observer registered on the CURRENT active view (main thread).
     Re-registers when the active view changes; a cached pixel from the old view is dropped
     (its coordinates are meaningless in the new one)."""
-    if view is _ptr_hook["view"]:
+    if view is _cursor_hook["view"]:
         return
     try:
         from pivy import coin
     except Exception:
-        return                                # no Coin -> no pointer pivot (falls back)
-    old = _ptr_hook["view"]
+        return                                # no Coin -> no cursor pivot (falls back)
+    old = _cursor_hook["view"]
     if old is not None:
         try:
-            old.removeEventCallbackPivy(coin.SoLocation2Event.getClassTypeId(), _pointer_event_cb)
+            old.removeEventCallbackPivy(coin.SoLocation2Event.getClassTypeId(), _cursor_event_cb)
         except Exception:
             pass
-    _pointer["px"] = None
+    _cursor["px"] = None
     try:
-        view.addEventCallbackPivy(coin.SoLocation2Event.getClassTypeId(), _pointer_event_cb)
-        _ptr_hook["view"] = view
-        _log("pointer: SoLocation2Event observer registered on the active 3D view")
+        view.addEventCallbackPivy(coin.SoLocation2Event.getClassTypeId(), _cursor_event_cb)
+        _cursor_hook["view"] = view
+        _log("cursor: SoLocation2Event observer registered on the active 3D view")
     except Exception:
-        _ptr_hook["view"] = None
-        _log_rl("ptrhook", "pointer: could not register the SoLocation2Event observer "
-                           "-> 'pointer' pivot will fall back")
+        _cursor_hook["view"] = None
+        _log_rl("ptrhook", "cursor: could not register the SoLocation2Event observer "
+                           "-> 'cursor' pivot will fall back")
 
 
-def _pointer_pivot(view, bbox):
-    """Raycast the surface under the LIVE mouse pointer (the observer-cached pixel) via
-    getObjectInfo -- the same pick _screen_center_pivot does, fed the pointer pixel instead of
-    the centre. Returns a world point, or None to fall back (no pointer seen over this view yet /
+def _cursor_pivot(view, bbox):
+    """Raycast the surface under the LIVE mouse cursor (the observer-cached pixel) via
+    getObjectInfo -- the same pick _screen_center_pivot does, fed the cursor pixel instead of
+    the centre. Returns a world point, or None to fall back (no cursor seen over this view yet /
     off-model / outside the model bbox)."""
-    px = _pointer["px"]
+    px = _cursor["px"]
     if px is None:
-        _log_rl("ppivot", "pointer-pivot: no pointer pixel cached yet -> fallback")
+        _log_rl("ppivot", "cursor-pivot: no cursor pixel cached yet -> fallback")
         return None
     x, y = px
-    if POINTER_Y_FLIP:
+    if CURSOR_Y_FLIP:
         try:
             y = int(view.getSize()[1]) - y
         except Exception:
@@ -317,16 +319,16 @@ def _pointer_pivot(view, bbox):
     except Exception:
         info = None
     if not info:
-        _log_rl("ppivot", "pointer-pivot: nothing under the pointer -> fallback")
+        _log_rl("ppivot", "cursor-pivot: nothing under the cursor -> fallback")
         return None
     try:
         p = (float(info["x"]), float(info["y"]), float(info["z"]))
     except Exception:
         return None
     if not _in_bbox(p, bbox):
-        _log_rl("ppivot", "pointer-pivot: hit outside model bbox -> fallback")
+        _log_rl("ppivot", "cursor-pivot: hit outside model bbox -> fallback")
         return None
-    _log_rl("ppivot", "pointer-pivot: surface hit -> (%.2f,%.2f,%.2f)" % p)
+    _log_rl("ppivot", "cursor-pivot: surface hit -> (%.2f,%.2f,%.2f)" % p)
     return p
 
 
@@ -361,13 +363,13 @@ def _orbit_pivot(op, view, doc, camera, idle):
             if _gesture["pivot"] is None:
                 _gesture["pivot"] = center
         return _gesture["pivot"] if _gesture["pivot"] is not None else cammath.look_at(camera)
-    if op == "pointer":
+    if op == "cursor":
         if _gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _pointer_pivot(view, bbox)
+            _gesture["pivot"] = _cursor_pivot(view, bbox)
             if _gesture["pivot"] is None:
                 _gesture["pivot"] = center
         return _gesture["pivot"] if _gesture["pivot"] is not None else cammath.look_at(camera)
-    if op == "cursor":
+    if op == "selection":
         return _selection_center(doc) or center or cammath.look_at(camera)
     # "object" and unknowns -> model centre
     return center if center is not None else cammath.look_at(camera)
@@ -377,15 +379,15 @@ def _zoom_pivot(zm, view, doc, idle):
     if zm == "to_object":
         center, _bb = _object_center(doc)
         return center                      # may be None -> zoom about the look-at
-    if zm == "to_pointer":
+    if zm == "to_cursor":
         # Keep the surface point under the MOUSE POINTER fixed on screen while zooming
         # (cammath.zoom already holds an off-centre pivot). Same per-gesture hold as the orbit
         # pivot, in its own slot so orbit/zoom gestures don't clobber each other's pivot.
         if _zoom_gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
             _center, bbox = _object_center(doc)
-            _zoom_gesture["pivot"] = _pointer_pivot(view, bbox)
-        return _zoom_gesture["pivot"]      # None (miss/no pointer) -> zoom about the look-at
-    return None                            # to_center / to_cursor -> look-at (screen centre)
+            _zoom_gesture["pivot"] = _cursor_pivot(view, bbox)
+        return _zoom_gesture["pivot"]      # None (miss/no cursor) -> zoom about the look-at
+    return None                            # to_center -> look-at (screen centre)
 
 
 # ======================================================================================
@@ -438,15 +440,15 @@ def _apply(view, frame, idle):
 def _pump():
     """Main-thread pump: drain queued frames and apply them to the active 3D view."""
     try:
-        # Keep the passive pointer observer bound to the active view even while idle, so the
-        # pointer pixel is already cached when the FIRST gesture of a session starts. Rate-limited
+        # Keep the passive cursor observer bound to the active view even while idle, so the
+        # cursor pixel is already cached when the FIRST gesture of a session starts. Rate-limited
         # -- the common tick does one time comparison.
         now = time.time()
-        if now - _ptr_hook["checked"] > PTR_HOOK_CHECK_SEC:
-            _ptr_hook["checked"] = now
+        if now - _cursor_hook["checked"] > CURSOR_HOOK_CHECK_SEC:
+            _cursor_hook["checked"] = now
             v = _active_view()
             if v is not None:
-                _ensure_pointer_hook(v)
+                _ensure_cursor_hook(v)
         frames = []
         while True:
             try:

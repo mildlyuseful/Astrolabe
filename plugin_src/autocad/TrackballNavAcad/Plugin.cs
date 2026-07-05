@@ -57,7 +57,9 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.0";   // keep in sync with the csproj <Version>
+        public const string PluginVersion = "0.3.1";   // keep in sync with the csproj <Version>
+                                                       // 0.3.1: scheme values renamed (pointer->cursor,
+                                                       // to_pointer->to_cursor; daemon config v3).
                                                        // 0.3.0: "pointer" orbit pivot + "to_pointer"
                                                        // zoom (orbit/zoom about the point under the
                                                        // mouse, cached by an Editor.PointMonitor)
@@ -113,7 +115,7 @@ namespace TrackballNav
         static volatile bool s_gsBroken;   // any GS failure -> legacy transport for the session
         static Plugin s_instance;          // the one IExtensionApplication (for diagnostics)
 
-        // --- the live pointer cache (half A of the "pointer" pivot; UI thread only -------------
+        // --- the live cursor cache (half A of the "cursor" pivot; UI thread only ----------------
         // PointMonitor fires on AutoCAD's UI thread, same as the timer, so no locking).
         // _ptrPoint = the WCS point under the mouse cursor, with the best depth available:
         // an active object snap > the picked entity's depth along the view ray > the raw
@@ -123,7 +125,7 @@ namespace TrackballNav
         Point3d _ptrPoint;
         DateTime _ptrAt;
 
-        // "pointer"/"to_pointer" per-gesture holds: captured at the first orbit/zoom frame of a
+        // "cursor"/"to_cursor" per-gesture holds: captured at the first orbit/zoom frame of a
         // gesture from the pointer cache (null = no/off-model cursor point -> plain target orbit),
         // then HELD so the pivot never chases a moving target. A pan/zoom frame invalidates the
         // orbit hold (the view moved under the cursor); orbit/pan invalidate the zoom hold; a
@@ -204,7 +206,7 @@ namespace TrackballNav
         }
 
         // Pointer-pivot self-test: seed a SYNTHETIC cursor point (no mouse needed), force the
-        // "pointer" scheme, and run a synthetic orbit through the EXACT production pipeline
+        // "cursor" scheme, and run a synthetic orbit through the EXACT production pipeline
         // (accumulate -> timer -> gesture pivot hold -> NavMath -> GS drive -> idle commit).
         // The report asserts the pivot invariants on the gesture's seed/end shadow cameras:
         // rigid rotation about P (|tgt-P| and |pos-P| preserved), the target actually swept,
@@ -233,7 +235,7 @@ namespace TrackballNav
             inst._ptrAt = DateTime.UtcNow;
             inst._ptrTestPivot = P;
             inst._ptrTestSeeded = false;
-            lock (inst._lock) { inst._opPivot = "pointer"; }
+            lock (inst._lock) { inst._opPivot = "cursor"; }
             s_ptrTestArm = true;
             s_ptrTestFramesLeft = 120;                 // ~1.2 s of motion at the 10 ms timer
             doc.Editor.WriteMessage($"\nTrackballNav: pointer-pivot test started (P=({P.X:0.##},{P.Y:0.##},{P.Z:0.##}))\n");
@@ -503,7 +505,7 @@ namespace TrackballNav
             Log(msg);
         }
 
-        // --- half A of the "pointer" pivot: the live cursor point via Editor.PointMonitor -------
+        // --- half A of the "cursor" pivot: the live cursor point via Editor.PointMonitor --------
         // A passive per-document subscription (the AutoCAD analogue of FreeCAD's SoLocation2Event
         // observer): the handler only reads the input context and caches one point. Kept bound to
         // the ACTIVE document from the timer, so the cache is warm before the first gesture.
@@ -595,7 +597,7 @@ namespace TrackballNav
             catch { return null; }             // odd pick (erased id, zero extents) -> plane point
         }
 
-        // The held "pointer" pivot: the cached cursor point, validated against the drawing
+        // The held "cursor" pivot: the cached cursor point, validated against the drawing
         // extents grown by 10% of their diagonal (a cursor over empty space intersects the UCS
         // plane arbitrarily far away when the view is oblique). null -> plain target orbit.
         Point3d? CapturePointerPivot()
@@ -672,18 +674,18 @@ namespace TrackballNav
                         LogOnce("gs-clobber",
                                 new System.Exception("GS view externally reset mid-gesture (self-healed from shadow)"));
                 }
-                // "pointer"/"to_pointer": resolve the held pivots (capture once, hold; see the
-                // field comments). Perspective to_pointer falls back to the plain dolly.
+                // "cursor"/"to_cursor": resolve the held pivots (capture once, hold; see the
+                // field comments). Perspective to_cursor falls back to the plain dolly.
                 bool hasOrbit = d[0] != 0 || d[1] != 0 || d[2] != 0;
                 bool hasPan = d[3] != 0 || d[4] != 0;
                 bool hasZoom = d[5] != 0;
                 Point3d? orbitPivot = null, zoomPivot = null;
-                if (hasOrbit && opv == "pointer")
+                if (hasOrbit && opv == "cursor")
                 {
                     if (!_heldOrbitSet) { _heldOrbitPivot = CapturePointerPivot(); _heldOrbitSet = true; }
                     orbitPivot = _heldOrbitPivot;
                 }
-                if (hasZoom && zmv == "to_pointer" && !_cam.Persp)
+                if (hasZoom && zmv == "to_cursor" && !_cam.Persp)
                 {
                     if (!_heldZoomSet) { _heldZoomPivot = CapturePointerPivot(); _heldZoomSet = true; }
                     zoomPivot = _heldZoomPivot;

@@ -1,21 +1,21 @@
-"""Live FreeCAD GUI probe for the "pointer" orbit pivot's half A (the live pointer pixel).
+"""Live FreeCAD GUI probe for the "cursor" orbit pivot's half A (the live cursor pixel).
 
 Run (it opens the real FreeCAD GUI briefly, then self-closes):
 
-    & 'C:\\Program Files\\FreeCAD 1.1\\bin\\freecad.exe' tools\\freecad_pointer_probe.py
+    & 'C:\\Program Files\\FreeCAD 1.1\\bin\\freecad.exe' tools\\freecad_cursor_probe.py
 
-Results land in %TEMP%\\tbnav_pointer_probe.log (override with TBNAV_PROBE_LOG). Stdout is
+Results land in %TEMP%\\tbnav_cursor_probe.log (override with TBNAV_PROBE_LOG). Stdout is
 useless for a FreeCAD GUI probe (see docs/apps/freecad.md §9) -- read the log.
 
 What it verifies, by driving synthetic QMouseEvents through the REAL Qt -> Quarter -> Coin
 pipeline (the same code path a physical mouse takes), so no human mouse is needed:
   1. `Gui.ActiveDocument.ActiveView` returns a STABLE Python object (`is`-identity) -- the
-     add-on's _ensure_pointer_hook uses `is` to detect a view change.
+     add-on's _ensure_cursor_hook uses `is` to detect a view change.
   2. `addEventCallbackPivy(SoLocation2Event)` registers, FIRES on mouse moves, and what
      coordinate convention `getPosition()` reports (bottom-left vs top-left origin; logical vs
      device pixels vs `view.getSize()`).
-  3. `view.getObjectInfo(<cached pointer pixel>)` hits the model at an off-centre pixel and the
-     hit differs from the screen-centre hit (pointer != centre changes the pivot).
+  3. `view.getObjectInfo(<cached cursor pixel>)` hits the model at an off-centre pixel and the
+     hit differs from the screen-centre hit (cursor != centre changes the pivot).
 
 The one thing this cannot prove: the FEEL of a human hovering + orbiting simultaneously
 (synthetic events are the same objects, but do a live pass with the trackball anyway).
@@ -25,7 +25,7 @@ import time
 import traceback
 
 LOG = os.environ.get("TBNAV_PROBE_LOG") or os.path.join(
-    os.environ.get("TEMP", "."), "tbnav_pointer_probe.log")
+    os.environ.get("TEMP", "."), "tbnav_cursor_probe.log")
 
 
 def log(msg):
@@ -77,7 +77,7 @@ def _run():
     view.fitAll()
     Gui.updateGui()
 
-    # --- 1. ActiveView identity stability (what _ensure_pointer_hook's `is` check needs)
+    # --- 1. ActiveView identity stability (what _ensure_cursor_hook's `is` check needs)
     log("ActiveView identity stable across reads: %r"
         % (view is Gui.ActiveDocument.ActiveView))
 
@@ -127,7 +127,7 @@ def _run():
     if "err" in cache:
         log("cb error: " + cache["err"].strip().replace("\n", " | "))
 
-    # --- 3. raycast the cached pointer pixel vs the screen centre
+    # --- 3. raycast the cached cursor pixel vs the screen centre
     cx, cy = int(size[0] / 2), int(size[1] / 2)
     centre_hit = view.getObjectInfo((cx, cy))
     log("getObjectInfo(centre (%d,%d)) = %s" % (cx, cy, _fmt_hit(centre_hit)))
@@ -150,7 +150,7 @@ def _run():
                 % (int(px[0]), int(size[1]) - int(px[1]), _fmt_hit(flip_hit)))
             if ptr_hit and centre_hit:
                 diff = any(abs(float(ptr_hit[k]) - float(centre_hit[k])) > 1e-6 for k in "xyz")
-                log("pointer hit differs from centre hit: %r" % diff)
+                log("cursor hit differs from centre hit: %r" % diff)
     else:
         log("NO candidate widget produced a SoLocation2Event -- observer NOT verified")
 

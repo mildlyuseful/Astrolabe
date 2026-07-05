@@ -93,7 +93,7 @@ parts that map, and put **only genuinely Blender-only** options in `apps.blender
 | `viewpoint` *(new, Blender-only)* | Viewpoint (default) | the **eye** — turns the camera in place (look around), independent of the orbit-point distance. (v0.1.4; was `view_location`, which sits far in front after fly/look and felt like orbiting an arbitrary point.) |
 | `view` | Auto Depth | **raycast** the surface under the screen centre (per-gesture hold) |
 | `object` | Selection | median of `selected_objects` world origins |
-| `cursor` | 3D Cursor | `scene.cursor.location` |
+| `cursor_3d` | 3D Cursor | `scene.cursor.location` |
 | `origin` | World origin | `(0,0,0)` |
 
 > Decision: rather than duplicate an `orbit_around` key in `advanced` (which would create a second
@@ -230,7 +230,7 @@ Same shape as Fusion's socket-thread + CustomEvent, but Blender's main-thread ho
 
 **Target VIEW_3D** (`_resolve_target`): iterate `window_manager.windows[].screen.areas[]` for
 `type=='VIEW_3D'`, take the `WINDOW` region + `space.region_3d`. Prefer the largest (and remember the
-last one used for stability). No-ops cleanly when none is open. (See §6 for "under the pointer".)
+last one used for stability). No-ops cleanly when none is open. (See §6 for "under the cursor".)
 
 ---
 
@@ -241,7 +241,7 @@ last one used for stability). No-ops cleanly when none is open. (See §6 for "un
   the add-on (buttons are handled on-device in HID mode; the broker streams only continuous o/p/z).
   Wiring these needs a new broker message type; the add-on leaves clean hooks but does **not** fire
   them yet. Deferred, documented here.
-* **"Under the pointer" targeting & true "zoom to mouse"** need the live mouse position, which is not
+* **"Under the cursor" targeting & true "zoom to mouse"** need the live mouse position, which is not
   available from a `bpy.app.timers` callback (only inside modal/event handlers). v1 targets the
   active/largest VIEW_3D and zooms toward the **screen-centre** surface. A future refinement can map
   the OS cursor (`GetCursorPos`) through `window.x/y` + area geometry to recover region coords.

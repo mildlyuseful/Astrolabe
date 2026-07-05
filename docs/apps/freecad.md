@@ -5,8 +5,8 @@ Daemon: the architecture, the verified Coin camera model, and the FreeCAD-specif
 real live debugging. FreeCAD is a **socket add-on** integration (like Fusion/Blender), not an
 in-process driver (SolidWorks/Onshape). Read this before touching the add-on.
 
-Verified live on the dev machine: **FreeCAD 1.1.1**, PySide6, Coin3D/pivy. Add-on `0.1.3`, daemon
-`__version__` `0.1.39`.
+Verified live on the dev machine: **FreeCAD 1.1.1**, PySide6, Coin3D/pivy. Add-on `0.1.4`, daemon
+`__version__` `0.1.44`.
 
 ---
 
@@ -55,8 +55,8 @@ embedded-interpreter quirks.
 | `…/TrackballNav/version.json` | Version the daemon reads for `auto_update` (like Fusion's `.manifest`). Keep in sync with `ADDIN_VERSION`. |
 | `trackball_daemon/integrations.py` | `install_freecad` (resolve the user Mod dir + copytree), `freecad_user_mod_dir`, the `_ADDINS["freecad"]` registry entry, `auto_update`. |
 | `trackball_daemon/navbroker.py` / `app.py` / `config.py` / `ui.py` | Generic broker-app plumbing — **no FreeCAD-specific code** (FreeCAD rides the same path as Fusion). |
-| `tests/test_freecad_nav_math.py` / `tests/test_freecad_pointer_pivot.py` / `tests/test_integrations_freecad.py` | The pure-math + pointer-pivot + wiring tests. |
-| `tools/freecad_pointer_probe.py` | Live GUI probe for the `pointer` pivot's event chain (synthetic QMouseEvents; see §9). |
+| `tests/test_freecad_nav_math.py` / `tests/test_freecad_cursor_pivot.py` / `tests/test_integrations_freecad.py` | The pure-math + cursor-pivot + wiring tests. |
+| `tools/freecad_cursor_probe.py` | Live GUI probe for the `cursor` pivot's event chain (synthetic QMouseEvents; see §9). |
 
 The daemon process and the add-on are **two different Python interpreters** (daemon Python vs
 FreeCAD's bundled Python). They only talk over the broker socket.
@@ -126,26 +126,25 @@ view.redraw()                               # force a repaint (needed when drive
 ## 5. The control model
 
 - **Pivots** (`scheme.orbit_pivot`): `origin` → (0,0,0); `object` → aggregate model bbox centre
-  (Part `Shape.BoundBox` ∪ Mesh `Mesh.BoundBox`, cached ~0.5 s); `cursor` → mean of the **selection**
+  (Part `Shape.BoundBox` ∪ Mesh `Mesh.BoundBox`, cached ~0.5 s); `selection` → mean of the **selection**
   bbox centres (`Gui.Selection.getSelection()`), falling back to the object centre; `view` → the
   surface under the **screen centre** via `view.getObjectInfo((w/2, h/2))`, validated against the
   model bbox (+10 % of its diagonal) and **held for the whole gesture** (re-raycast on pan/zoom or
-  after a ~0.35 s idle gap); `pointer` (add-on 0.1.3) → the surface under the **live MOUSE POINTER**:
+  after a ~0.35 s idle gap); `cursor` → the surface under the **live MOUSE CURSOR**:
   a passive `SoLocation2Event` observer on the active view caches the last viewport pixel
-  (`_pointer_event_cb`, re-bound to the current view every 0.5 s by the pump via
-  `_ensure_pointer_hook`), and `_pointer_pivot` feeds that pixel to the SAME `getObjectInfo` pick,
+  (`_cursor_event_cb`, re-bound to the current view every 0.5 s by the pump via
+  `_ensure_cursor_hook`), and `_cursor_pivot` feeds that pixel to the SAME `getObjectInfo` pick,
   bbox validation, and per-gesture hold as `view`. Everything ultimately falls back to the model
-  centre, then the camera look-at, so orbit always has a sane pivot. (`view`/`pointer` is FreeCAD's
+  centre, then the camera look-at, so orbit always has a sane pivot. (`view`/`cursor` is FreeCAD's
   *easiest* raycast of the apps — `getObjectInfo` does the pick and hands back world coords; no ray
   construction needed.)
 - **Orbit style** (`scheme.orbit_style`): `free` (rotate about the camera's own right/up/fwd, twist
   allowed) or `turntable` (yaw about WORLD Z + pitch about camera-right, **roll dropped** so the
   horizon stays level).
 - **Zoom mode** (`scheme.zoom_mode`): `to_center` (about the look-at) / `to_object` (about the model
-  centre) / `to_pointer` (add-on 0.1.3: about the surface under the mouse pointer — the same
-  `_pointer_pivot` raycast with its own per-gesture hold `_zoom_gesture`, so the point under the
-  pointer stays put on screen while zooming; a miss falls back to the look-at) / `to_cursor` → falls
-  back to `to_center`.
+  centre) / `to_cursor` (about the surface under the mouse cursor — the same
+  `_cursor_pivot` raycast with its own per-gesture hold `_zoom_gesture`, so the point under the
+  cursor stays put on screen while zooming; a miss falls back to the look-at).
 
 `config.apps.freecad` is the lean generic shape (`_app()`); there is **no** Blender-style `advanced`
 block.
@@ -230,9 +229,9 @@ with plain `python` — **no FreeCAD needed at all** (a step better than Blender
 10. **Two interpreters → two reload rules.** A change to the add-on (`tbnav_*.py`) needs **FreeCAD
     restarted**; a change to the daemon needs the **daemon restarted**. A change to both needs both.
 11. **`SoLocation2Event.getPosition()` and `getObjectInfo()` share Coin's coordinate system** —
-    **device pixels, BOTTOM-left origin** — so the cached pointer pixel feeds `getObjectInfo`
-    **unflipped** (`POINTER_Y_FLIP = False`), even at 125 % display scaling. Verified live
-    (`tools/freecad_pointer_probe.py`): widget 1270×683 logical @ dpr 1.25 ↔ `view.getSize()`
+    **device pixels, BOTTOM-left origin** — so the cached cursor pixel feeds `getObjectInfo`
+    **unflipped** (`CURSOR_Y_FLIP = False`), even at 125 % display scaling. Verified live
+    (`tools/freecad_cursor_probe.py`): widget 1270×683 logical @ dpr 1.25 ↔ `view.getSize()`
     1587×853 device; a Qt event near the widget TOP (y=10) cached as y=840 (bottom-up); and a pixel
     ABOVE centre hit the box's TOP edge (z=10) unflipped while the flipped query hit mid-face —
     bottom-left on both sides. Don't "fix" the y axis; the flag exists in case a FreeCAD/Quarter
@@ -242,14 +241,14 @@ with plain `python` — **no FreeCAD needed at all** (a step better than Blender
     itself do NOT produce `SoLocation2Event`s — its **`viewport()`** widget does (that's where real
     mouse moves land too). Only matters for synthetic-event probes; a physical mouse just works.
 13. **`Gui.ActiveDocument.ActiveView` returns a STABLE Python object** (verified: `view is
-    Gui.ActiveDocument.ActiveView` → True across reads), so `_ensure_pointer_hook` detects a view
+    Gui.ActiveDocument.ActiveView` → True across reads), so `_ensure_cursor_hook` detects a view
     change with a plain `is` and re-binds the observer (dropping the cached pixel — the old view's
     coordinates are meaningless in the new one).
-14. **The pointer cache has no "mouse left the viewport" signal.** `SoLocation2Event` only fires
-    over the 3D view, so the cache keeps the last in-viewport pixel when the pointer leaves. The
+14. **The cursor cache has no "mouse left the viewport" signal.** `SoLocation2Event` only fires
+    over the 3D view, so the cache keeps the last in-viewport pixel when the cursor leaves. The
     bbox validation bounds the damage (a stale pixel still resolves to a point ON the model or falls
     back). Live nuance, seen in the e2e run: after big orbits the model can rotate out from under a
-    stationary pointer — the raycast then misses and falls back (by design).
+    stationary cursor — the raycast then misses and falls back (by design).
 
 ---
 
@@ -277,22 +276,22 @@ the camera orientation measurably changed. Pan and zoom land the same way (`rx p
 > a framed part. **When calibrating a scale, measure the camera position/height delta, not just that
 > `applied` fired.**
 
-> **Pointer pivot (0.1.2 → 0.1.3): how it was verified without a human mouse.** Two live passes,
+> **Cursor pivot (0.1.2 → 0.1.3): how it was verified without a human mouse.** Two live passes,
 > both scripted (FreeCAD GUI opens briefly and self-closes):
-> 1. `tools/freecad_pointer_probe.py` (`freecad.exe tools\freecad_pointer_probe.py`, log in
->    `%TEMP%\tbnav_pointer_probe.log`) drives **synthetic `QMouseEvent`s through the real
+> 1. `tools/freecad_cursor_probe.py` (`freecad.exe tools\freecad_cursor_probe.py`, log in
+>    `%TEMP%\tbnav_cursor_probe.log`) drives **synthetic `QMouseEvent`s through the real
 >    Qt → Quarter → Coin pipeline** — the same code path a physical mouse takes — and established
 >    Gotchas #11–#13 (coordinate convention, viewport() target, ActiveView identity) plus
->    pointer-hit ≠ centre-hit on a real box.
+>    cursor-hit ≠ centre-hit on a real box.
 > 2. An end-to-end run with the INSTALLED 0.1.3 add-on: a scratch `NavBroker` on 47900 with
->    `set_scheme("pointer", "free", "to_pointer")` + a FreeCAD-side script posting pointer moves at
->    pixel P1, then P2. `freecad_addin.log` showed the full chain: `pointer: SoLocation2Event
->    observer registered` → `scheme: pivot=pointer` → gesture 1 `pointer-pivot: surface hit ->
+>    `set_scheme("cursor", "free", "to_cursor")` + a FreeCAD-side script posting cursor moves at
+>    pixel P1, then P2. `freecad_addin.log` showed the full chain: `cursor: SoLocation2Event
+>    observer registered` → `scheme: pivot=cursor` → gesture 1 `cursor-pivot: surface hit ->
 >    (10.00,4.55,9.83)` held for the burst → after the idle gap, gesture 2 re-cast at P2 to a
 >    DIFFERENT point `(6.55,10.00,5.38)` → `applied` with the eye→pivot distance preserved
 >    (~244 units before/after, eye moved ≈ 244·0.02 for a 0.02 rad yaw — rigid orbit about the
->    pointer hit). The `to_pointer` zoom gesture exercised the MISS fallback live (the model had
->    rotated out from under the stationary pointer → look-at zoom, by design).
+>    cursor hit). The `to_cursor` zoom gesture exercised the MISS fallback live (the model had
+>    rotated out from under the stationary cursor → look-at zoom, by design).
 > **Still wants a human pass:** the interactive feel of hovering the real mouse while orbiting with
 > the real trackball (synthetic events are the same objects, but nobody has *felt* it yet).
 
@@ -312,11 +311,11 @@ the camera orientation measurably changed. Pan and zoom land the same way (`rx p
 
 - **Headless (fast, no FreeCAD):** `tests/test_freecad_nav_math.py` covers the pure math — orbit
   free + turntable (incl. horizon-lock and that turntable drops twist), orbit-about-pivot rigidity,
-  pan, and zoom (ortho + perspective). `tests/test_freecad_pointer_pivot.py` covers the `pointer`
+  pan, and zoom (ortho + perspective). `tests/test_freecad_cursor_pivot.py` covers the `cursor`
   pivot resolvers with a SYNTHETIC pixel (a stubbed `getObjectInfo`): the observer callback caches,
-  the hook registers/re-binds (fake pivy) and is a no-op without pivy, pointer ≠ centre changes the
+  the hook registers/re-binds (fake pivy) and is a no-op without pivy, cursor ≠ centre changes the
   pivot, the per-gesture hold + idle re-cast, bbox-validated fallbacks, the y-flip math, and the
-  `to_pointer` zoom hold. `tests/test_integrations_freecad.py` covers the daemon wiring
+  `to_cursor` zoom hold. `tests/test_integrations_freecad.py` covers the daemon wiring
   (FreeCAD is an `_ADDINS` app; install copies the add-on + marks enabled; `auto_update` re-copies on
   a bump; versioned vs flat Mod-dir resolution; detection). `python -m pytest tests -q` is green.
 - **Live (the only thing tests can't cover):** install via the daemon's **Set up**, run the daemon,
@@ -336,13 +335,14 @@ the camera orientation measurably changed. Pan and zoom land the same way (`rx p
   arrived — distinguishes a daemon/Shift issue from an add-on issue), `view-pivot: surface hit|…
   fallback`, `applied` (the camera actually changed). The tray's `Apps: freecad v…` confirms the
   hello handshake.
-- ~~True cursor-pixel pivot~~ — **DONE in add-on 0.1.3** as the `pointer` orbit pivot +
-  `to_pointer` zoom (FreeCAD is the FIRST app with it; `cursor`/`to_cursor` keep their old
-  selection/centre meaning untouched). Known limitation: no "mouse left the viewport" signal
+- ~~True cursor-pixel pivot~~ — **DONE in add-on 0.1.3** as the under-mouse orbit pivot +
+  zoom (FreeCAD is the FIRST app with it; born as `cursor`/`to_cursor`, renamed to
+  `cursor`/`to_cursor` in add-on 0.1.4 / daemon config v3, when the old `cursor` value became
+  `selection`). Known limitation: no "mouse left the viewport" signal
   (Gotcha #14) — the last in-viewport pixel is used, bounded by the bbox validation.
 - **Deferred / not done:** **discrete view ops** (Frame Selected, axis snaps) need a button-event
   channel the broker doesn't have yet.
 - **Verify-live items:** the per-axis **sign/scale** defaults; perspective-camera feel (FreeCAD
   defaults to ortho, so the persp path is lightly exercised live); the **human-feel pass** on the
-  `pointer` pivot (hover + orbit with the physical trackball — the event chain itself is verified,
+  `cursor` pivot (hover + orbit with the physical trackball — the event chain itself is verified,
   §9).

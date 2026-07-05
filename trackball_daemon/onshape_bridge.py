@@ -99,7 +99,8 @@ ZOOM_SIGN = 1.0                   # twist -> zoom direction
 # pan ever come out transposed or coupled against a different app, flip this.
 AFFINE_TRANSLATION_IN_COLUMN = False
 
-# "view"/"cursor" orbit pivot uses Onshape's navlib hit-test: raycast down the screen centre and
+# "view"/"selection"/"cursor" orbit pivot uses Onshape's navlib hit-test: raycast down the screen
+# centre and
 # pivot about the first surface hit (like Onshape's own right-click orbit). These are the ray
 # aperture (cone diameter) as fractions of the view half-extent, tried smallest-first -- a narrow
 # centre ray, widening until something is hit. If none hit at the widest, we fall back to the model
@@ -1009,10 +1010,11 @@ class OnshapeBridge:
         op = scheme.get("op", "view")
         if op == "origin":
             return (0.0, 0.0, 0.0)
-        if op in ("view", "cursor"):
+        if op in ("view", "selection", "cursor"):
             # Orbit about what's under the screen centre (like Onshape's own right-click orbit):
-            # raycast there via the navlib hit-test. (No pointer accessor exists, so "cursor" uses
-            # the screen centre too.) Nothing hit -> fall through to model-centre orbit.
+            # raycast there via the navlib hit-test. navlib has no mouse-position accessor, so
+            # "cursor" (under the mouse) uses the screen centre too until a cursor->canvas mapping
+            # exists; "selection" likewise. Nothing hit -> fall through to model-centre orbit.
             hit = self._hit_center(conn, eye, right, up, back)
             if hit is not None:
                 return hit

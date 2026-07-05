@@ -7,10 +7,10 @@ Fusion's embedded CPython, connects to the daemon's nav broker, and drives
 `app.activeViewport.camera`.
 
 Primary code: [`trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py`](../../trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py)
-(+ `TrackballNav.manifest`). Tests: [`tests/test_fusion_pointer_pivot.py`](../../tests/test_fusion_pointer_pivot.py)
+(+ `TrackballNav.manifest`). Tests: [`tests/test_fusion_cursor_pivot.py`](../../tests/test_fusion_cursor_pivot.py)
 (pixel→ray→pivot math against a stubbed `adsk`). Wiring: `app.py`, `config.py`, `integrations.py`
 (`install_fusion` / auto-update), `ui.py`. User-facing setup: the Fusion section of
-[`README.md`](../../README.md). (Current at add-in `0.1.13`.)
+[`README.md`](../../README.md). (Current at add-in `0.1.14`, daemon `0.1.44`.)
 
 ---
 
@@ -54,7 +54,7 @@ top of `TrackballNav.py`; the daemon's Per-App Bindings scale from that baseline
 4. **A Fusion `Command` is modal — never use one for passive tracking.** The documented
    mouse-tracking hook is `Command.mouseMove`, but an active Command owns clicks and ANY tool
    activation (or Esc) terminates it. An always-on tracker command fights normal modeling. The
-   pointer pivot instead reads the cursor **on-demand at gesture start** via ctypes
+   cursor pivot instead reads the cursor **on-demand at gesture start** via ctypes
    `GetCursorPos` (the add-in runs in-process, so Win32 is available).
 5. **Fusion's MIXED coordinate/DPI model** (pinned by two live passes at 125% scaling; the fit
    `view = 1.25·logical_in − physical_origin` was exact on every logged sample):
@@ -64,13 +64,13 @@ top of `TrackballNav.py`; the daemon's Per-App Bindings scale from that baseline
    So the `GetCursorPos` pixel (physical) is **÷ the monitor's effective DPI scale** before
    `screenToView` (0.1.12 — unfixed, hits landed down-right of the cursor), and the output
    bounds check validates against **`vp.size × scale`** (0.1.13 — the logical-size check wrongly
-   rejected the right/bottom ~20% band). A `pointer map:` log line prints screen px → scale →
+   rejected the right/bottom ~20% band). A `cursor map:` log line prints screen px → scale →
    view px for diagnosis. Mixed-DPI multi-monitor is bounded by the range check + fallback but
    not fully verified.
 6. **`findBRepUsingRay` on the root component may miss bodies inside assembly occurrences**
    (degrades to the object-centre fallback). Revisit if assembly orbit feels off.
 
-## 4. The view-pivot / pointer-pivot raycast
+## 4. The view-pivot / cursor-pivot raycast
 
 Shared concept (HANDOFF §7): pivot on the real surface depth, validate against the model bbox,
 fall back to the model centre on a miss, hold the pivot for the whole gesture (re-cast on
@@ -78,7 +78,8 @@ pan/zoom or after the idle hold time). Fusion specifics:
 
 - `view` pivot: ray down the **screen centre** via `findBRepUsingRay` (aperture grows ×3 until a
   hit, smallest wins).
-- `pointer` pivot / `to_pointer` zoom (0.1.11–0.1.13): `GetCursorPos` → DPI divide →
+- `cursor` pivot / `to_cursor` zoom (born 0.1.11–0.1.13 as `pointer`/`to_pointer`; renamed in
+  0.1.14 with the daemon's config v3): `GetCursorPos` → DPI divide →
   `screenToView` → `viewToModelSpace` to aim the ray (perspective: eye→point; ortho: parallel,
   pushed back), then the same pick/validate/hold machinery. If `screenToView` output fails the
   physical-bounds check, a window-under-cursor client-rect mapping is the fallback, then the
@@ -89,11 +90,11 @@ pan/zoom or after the idle hold time). Fusion specifics:
 ## 5. Testing
 
 ```sh
-python -m pytest tests/test_fusion_pointer_pivot.py -q   # pixel->ray->pivot + hold, both DPI cases, stubbed adsk
+python -m pytest tests/test_fusion_cursor_pivot.py -q   # pixel->ray->pivot + hold, both DPI cases, stubbed adsk
 python -m pytest tests -q                                # daemon wiring + regressions
 ```
 
 There is no headless Fusion, so live verification = install the add-in, watch
-`fusion_addin.log`, and use the `pointer map:` line to confirm the coordinate mapping on the
+`fusion_addin.log`, and use the `cursor map:` line to confirm the coordinate mapping on the
 actual monitor scale. Still to verify live: the 0.1.13 right/bottom-band re-check (hover near
 the right/bottom viewport edges and orbit).

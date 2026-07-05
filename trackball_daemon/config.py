@@ -25,11 +25,14 @@ _DEFAULT_3D_BINDINGS = {
     # per-axis direction flips (user preference, on top of the base signs). All default off.
     "invert": {"orbit": [False, False, False], "pan": [False, False], "zoom": False},
     # per-app control scheme; "default" inherits the General default (see DEFAULTS["general"]).
-    # orbit_pivot: view | pointer | object | origin | cursor (+ viewpoint in Blender/SketchUp/
-    # Unreal); zoom_mode: to_center | to_object | to_cursor | to_pointer. "pointer"/"to_pointer"
-    # (added additively -- no CONFIG_VERSION bump) target the surface under the MOUSE POINTER;
-    # apps without a pointer resolver fall back to their view/object pivot. effective_scheme
-    # passes values through untouched, so no daemon-side whitelist gates these.
+    # orbit_pivot: view | cursor | object | origin | selection (+ viewpoint in Blender/SketchUp/
+    # Unreal, + cursor_3d in Blender); zoom_mode: to_center | to_object | to_cursor.
+    # "cursor"/"to_cursor" target the surface under the MOUSE CURSOR; apps without a cursor
+    # resolver fall back to their view/object pivot. "selection" is the selection/bbox pivot;
+    # "cursor_3d" is Blender's 3D cursor. (v3 migration renamed pointer->cursor,
+    # cursor->selection/cursor_3d, to_pointer->to_cursor; the retired to_cursor alias of
+    # to_center migrated to to_center.) effective_scheme passes values through untouched, so
+    # no daemon-side whitelist gates these.
     "scheme": {"orbit_pivot": "default", "orbit_style": "default", "zoom_mode": "default"},
 }
 
@@ -168,7 +171,7 @@ def _sketchup_app():
     return a
 
 
-CONFIG_VERSION = 2
+CONFIG_VERSION = 3
 
 DEFAULTS = {
     "version": CONFIG_VERSION,
@@ -257,6 +260,31 @@ class Config:
             # (otherwise the old saved corrections would double the baked-in ones).
             for app in self.data["apps"].values():
                 app["bindings"] = copy.deepcopy(_DEFAULT_3D_BINDINGS)
+            changed = True
+        if from_version < 3:
+            # v3: scheme values renamed to match the UI labels. Under-mouse "pointer"/
+            # "to_pointer" became "cursor"/"to_cursor"; the old "cursor" (selection fallback,
+            # 3D cursor in Blender) split into "selection" / Blender-only "cursor_3d"; the
+            # retired legacy "to_cursor" (a to_center alias everywhere) maps to "to_center".
+            # Order matters: retire old to_cursor BEFORE to_pointer takes that name.
+            pivot_map = {"pointer": "cursor", "cursor": "selection"}
+            zoom_map = {"to_cursor": "to_center", "to_pointer": "to_cursor"}
+
+            def _remap(scheme, blender=False):
+                if not isinstance(scheme, dict):
+                    return
+                op = scheme.get("orbit_pivot")
+                if blender and op == "cursor":
+                    scheme["orbit_pivot"] = "cursor_3d"   # Blender's old "cursor" = its 3D cursor
+                elif op in pivot_map:
+                    scheme["orbit_pivot"] = pivot_map[op]
+                zm = scheme.get("zoom_mode")
+                if zm in zoom_map:
+                    scheme["zoom_mode"] = zoom_map[zm]
+
+            _remap(self.data["general"].get("scheme"))
+            for key, app in self.data["apps"].items():
+                _remap(app.get("bindings", {}).get("scheme"), blender=(key == "blender"))
             changed = True
         self.data["version"] = CONFIG_VERSION
         return changed

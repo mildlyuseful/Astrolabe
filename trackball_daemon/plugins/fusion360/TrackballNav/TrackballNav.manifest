@@ -6,7 +6,7 @@
     "description": {
         "": "Trackball 3-axis navigation bridge for the dual-sensor trackball."
     },
-    "version": "0.1.13",
+    "version": "0.1.14",
     "runOnStartup": false,
     "supportedOS": "windows|mac",
     "editEnabled": true

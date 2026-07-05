@@ -1,6 +1,6 @@
-// Offline unit tests for NavMath.Apply's "pointer" pivot path (orbitPivot / zoomPivot), feeding a
+// Offline unit tests for NavMath.Apply's "cursor" pivot path (orbitPivot / zoomPivot), feeding a
 // SYNTHETIC pivot point -- the pure-math half of what TBNAVPTRTEST verifies in-process. Exit 0 on
-// pass, 1 on failure (run by tests/test_acad_navmath_pointer.py).
+// pass, 1 on failure (run by tests/test_autocad_navmath_cursor.py).
 using System;
 using Autodesk.AutoCAD.Geometry;
 using TrackballNav;
@@ -109,21 +109,21 @@ static class Tests
         OrbitAboutPivotRigid("free");
         OrbitAboutPivotRigid("turntable");
 
-        // --- to_pointer zoom (parallel): P's screen position is fixed while the field shrinks --
+        // --- to_cursor zoom (parallel): P's screen position is fixed while the field shrinks --
         {
             var c0 = Cam();
             var P = new Point3d(9.0, 1.0, 4.0);
             var c1 = Apply(c0, D(z: 0.8), "free", zoomPivot: P);
             double factor = 1.0 + ZoomSign * 0.8 * ZoomScale;
-            CheckClose(c1.Fh, c0.Fh / factor, 1e-12, "to_pointer zoom: field shrinks by 1/factor");
+            CheckClose(c1.Fh, c0.Fh / factor, 1e-12, "to_cursor zoom: field shrinks by 1/factor");
             var b0 = Basis(c0);
             var b1 = Basis(c1);
             CheckClose((P - c1.Tgt).DotProduct(b1.right) / c1.Fh,
                        (P - c0.Tgt).DotProduct(b0.right) / c0.Fh, 1e-12,
-                       "to_pointer zoom: P screen-x fraction fixed");
+                       "to_cursor zoom: P screen-x fraction fixed");
             CheckClose((P - c1.Tgt).DotProduct(b1.up) / c1.Fh,
                        (P - c0.Tgt).DotProduct(b0.up) / c0.Fh, 1e-12,
-                       "to_pointer zoom: P screen-y fraction fixed");
+                       "to_cursor zoom: P screen-y fraction fixed");
         }
 
         // --- zoom without a pivot: the target must not move (to_center behaviour) -------------
@@ -138,8 +138,8 @@ static class Tests
             var c0 = Cam(persp: true);
             var P = new Point3d(9.0, 1.0, 4.0);
             var c1 = Apply(c0, D(z: 0.8), "free", zoomPivot: P);
-            CheckClose((c1.Tgt - c0.Tgt).Length, 0.0, 1e-12, "persp to_pointer: target fixed (dolly)");
-            Check((c1.Pos - c1.Tgt).Length < 25.0, "persp to_pointer: dollied in");
+            CheckClose((c1.Tgt - c0.Tgt).Length, 0.0, 1e-12, "persp to_cursor: target fixed (dolly)");
+            Check((c1.Pos - c1.Tgt).Length < 25.0, "persp to_cursor: dollied in");
         }
 
         // --- pan is unaffected by an orbit pivot (independent channels) -----------------------

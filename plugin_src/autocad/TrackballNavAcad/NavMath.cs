@@ -60,9 +60,9 @@ namespace TrackballNav
         // Pivots (both optional; the null defaults are the pre-0.3.0 behaviour exactly):
         //   orbitPivot -- orbit rigidly about this WORLD point instead of the camera target: the
         //                 target rotates around it too, so the point keeps its screen position
-        //                 (the "pointer" scheme -- the point under the mouse stays put).
+        //                 (the "cursor" scheme -- the point under the mouse stays put).
         //   zoomPivot  -- parallel zoom keeps this WORLD point's screen position fixed by sliding
-        //                 the target toward it ("to_pointer"). Perspective zoom is a dolly toward
+        //                 the target toward it ("to_cursor"). Perspective zoom is a dolly toward
         //                 the target; holding an off-axis point fixed there would need an
         //                 off-axis dolly -- not supported, it falls back to the plain dolly.
         public static CamState Apply(CamState c, double[] d, string style,

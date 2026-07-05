@@ -37,7 +37,9 @@ PAN_SCALE = 0.14                 # broker pan delta -> fraction of view extents 
 ZOOM_SCALE = 0.25                # broker zoom delta -> fraction of view extents (baseline zoom feel)
 ZOOM_SIGN = 1.0                  # twist->zoom direction
 
-ADDIN_VERSION = "0.1.13"         # reported in the handshake so the daemon shows the LOADED version.
+ADDIN_VERSION = "0.1.14"         # reported in the handshake so the daemon shows the LOADED version.
+                                 # 0.1.14: scheme values renamed (pointer->cursor, cursor->selection,
+                                 # to_pointer->to_cursor) to match the daemon v3 config migration.
                                  # 0.1.11: "pointer" orbit pivot + "to_pointer" zoom (orbit/zoom about
                                  # the surface under the MOUSE POINTER; GetCursorPos + screenToView +
                                  # viewToModelSpace ray -- see the POINTER PIVOT block below).
@@ -98,18 +100,19 @@ _obj_cache = {"t": 0.0, "p": None}      # cached object bounding-box center (rec
 # thing you're looking at stays put during orbit -- like native right/middle-drag orbit. Computed ONCE
 # per gesture and HELD; re-cast only after the view moves (pan/zoom) or the gesture ends (idle).
 _gesture = {"t": 0.0, "pivot": None}    # last-frame time + held orbit pivot (Point3D | None)
-_zoom_gesture = {"pivot": None}          # "to_pointer" zoom's own held pivot (reset on orbit/pan)
+_zoom_gesture = {"pivot": None}          # "to_cursor" zoom's own held pivot (reset on orbit/pan)
 PIVOT_HOLD_IDLE = 0.35                   # s without frames that ends a gesture -> re-raycast next orbit
 APERTURE_FRACS = (0.03, 0.10, 0.30)      # ray thickness tried, as a fraction of the view half-height
 RAY_PUSHBACK = 8.0                       # start the ray this many half-heights behind screen-centre
 BBOX_MARGIN = 0.10                       # accept a hit inside the bbox grown by this fraction of its diag
 
-# --- POINTER PIVOT (op == "pointer" / zm == "to_pointer"): orbit/zoom about the surface under the
+# --- CURSOR PIVOT (op == "cursor" / zm == "to_cursor"; pre-0.1.14 values "pointer"/"to_pointer"):
+# orbit/zoom about the surface under the
 # live MOUSE POINTER. Design decision -- Fusion's documented mouse-tracking hook is Command.mouseMove,
 # but a Command is MODAL: while active it owns clicks, and the user activating ANY other tool (or
 # Esc) terminates it, so an always-on tracker command would fight normal modeling (and auto-
 # relaunching it would kill whatever tool the user just picked). Least-intrusive variant instead:
-# read the pointer ON-DEMAND at gesture start -- the add-in runs inside Fusion's CPython, so ctypes
+# read the cursor ON-DEMAND at gesture start -- the add-in runs inside Fusion's CPython, so ctypes
 # GetCursorPos gives the screen pixel, Viewport.screenToView maps it into the viewport, and
 # viewToModelSpace unprojects it for the ray. Zero UI hijack, and the pixel is always FRESH (no
 # cache to go stale). If the GUI pass ever disproves the screenToView mapping, the fallbacks are the
@@ -119,13 +122,13 @@ BBOX_MARGIN = 0.10                       # accept a hit inside the bbox grown by
 # WORKS (tracking, per-gesture hold, fallbacks) but hits landed DOWN-RIGHT of the cursor. Pass 2
 # (0.1.12): "works very precisely", EXCEPT the right/bottom band failed to target. Fitting the
 # logged samples (view = 1.25*logical_in - physical_origin, exact across all of them) pinned the
-# full coordinate model -- see _pointer_view_pixel's docstring: screenToView takes LOGICAL screen
+# full coordinate model -- see _cursor_view_pixel's docstring: screenToView takes LOGICAL screen
 # px and returns PHYSICAL viewport px; viewToModelSpace consumes PHYSICAL; vp.width/height are
 # LOGICAL. 0.1.12 fixed the input scale; 0.1.13 fixed the OUTPUT bounds check (validate against
 # vp.size * scale -- the logical bounds rejected correct physical values in the right/bottom ~20%,
 # precisely the region the 0.1.11 bug used to map off-screen). STILL TO VERIFY LIVE: the 0.1.13
 # right/bottom band re-check (hover near the right/bottom viewport edges and orbit; watch the
-# "pointer map:" line), and mixed-DPI multi-monitor setups (the range check + object-centre
+# "cursor map:" line), and mixed-DPI multi-monitor setups (the range check + object-centre
 # fallback bound the damage).
 
 
@@ -206,7 +209,7 @@ def _nearest_ray_hit(root, origin, direction, tol):
 
 
 def _raycast_pivot(design, origin, d, half_h, label):
-    """Shared aperture-expanding raycast used by BOTH the screen-centre ("view") and the pointer
+    """Shared aperture-expanding raycast used by BOTH the screen-centre ("view") and the cursor
     pivots: try small->large ray thickness to catch thin/edge features, validate the hit against the
     model bbox, return the nearest surface Point3D or None (-> object-centre fallback)."""
     root = design.rootComponent
@@ -214,7 +217,7 @@ def _raycast_pivot(design, origin, d, half_h, label):
     for frac in APERTURE_FRACS:
         hit = _nearest_ray_hit(root, origin, d, frac * half_h)
         if hit is not None and _in_bbox(hit, bb):
-            # rate-limit key = label, so a pointer re-cast is never silenced by a recent view-cast
+            # rate-limit key = label, so a cursor re-cast is never silenced by a recent view-cast
             # log line (and vice versa) -- a suppressed hit line made a live log read confusingly
             _log_rl(label, "%s: surface hit (aperture=%.3f cm) -> (%.2f,%.2f,%.2f)"
                     % (label, frac * half_h, hit.x, hit.y, hit.z))
@@ -279,7 +282,7 @@ def _client_view_pixel(sx, sy, vp, scale):
     accepted only when that window's LOGICAL client size matches the viewport size (then it must
     be the 3D canvas). Guards against mapping into some other Fusion child window. Returns
     PHYSICAL client px -- viewToModelSpace consumes physical viewport pixels (see the coordinate
-    model in _pointer_view_pixel)."""
+    model in _cursor_view_pixel)."""
     try:
         import ctypes
         from ctypes import wintypes
@@ -301,9 +304,9 @@ def _client_view_pixel(sx, sy, vp, scale):
         return None
 
 
-def _pointer_view_pixel(vp):
-    """The live mouse pointer as a viewport pixel (0,0 = viewport top-left; PHYSICAL px -- what
-    viewToModelSpace consumes), or None when the pointer isn't over the viewport / no mapping
+def _cursor_view_pixel(vp):
+    """The live mouse cursor as a viewport pixel (0,0 = viewport top-left; PHYSICAL px -- what
+    viewToModelSpace consumes), or None when the cursor isn't over the viewport / no mapping
     works.
 
     FUSION'S MIXED COORDINATE MODEL -- fully determined by the user's two live passes at 125%
@@ -330,23 +333,23 @@ def _pointer_view_pixel(vp):
     try:
         v = vp.screenToView(adsk.core.Point2D.create(lx, ly))
         if 0.0 <= v.x <= ws and 0.0 <= v.y <= hs:
-            _log_rl("ptrmap", "pointer map: screen=(%.0f,%.0f) scale=%.2f -> logical=(%.1f,%.1f) "
+            _log_rl("ptrmap", "cursor map: screen=(%.0f,%.0f) scale=%.2f -> logical=(%.1f,%.1f) "
                               "-> view=(%.1f,%.1f) of %dx%d phys"
                     % (sp[0], sp[1], scale, lx, ly, v.x, v.y, ws, hs))
             return (float(v.x), float(v.y))
     except Exception:
-        _log_rl("ptr_s2v", "pointer: screenToView failed -> trying the client-rect mapping")
+        _log_rl("ptr_s2v", "cursor: screenToView failed -> trying the client-rect mapping")
     px = _client_view_pixel(sp[0], sp[1], vp, scale)
     if px is not None and 0.0 <= px[0] <= ws and 0.0 <= px[1] <= hs:
-        _log_rl("ptrmap", "pointer map (client-rect): screen=(%.0f,%.0f) scale=%.2f -> view=(%.1f,%.1f) phys"
+        _log_rl("ptrmap", "cursor map (client-rect): screen=(%.0f,%.0f) scale=%.2f -> view=(%.1f,%.1f) phys"
                 % (sp[0], sp[1], scale, px[0], px[1]))
         return px
     return None
 
 
-def _pointer_pivot(cam):
-    """Raycast the surface under the LIVE mouse pointer -- the same pick as _screen_center_pivot,
-    aimed through the pointer pixel instead of the optical axis. Ray construction: unproject the
+def _cursor_pivot(cam):
+    """Raycast the surface under the LIVE mouse cursor -- the same pick as _screen_center_pivot,
+    aimed through the cursor pixel instead of the optical axis. Ray construction: unproject the
     pixel with viewToModelSpace (its depth doesn't matter -- the point only AIMS the ray);
     perspective rays run from the eye through it, ortho rays run parallel to the view axis through
     it (pushed back like the centre ray). Returns a Point3D or None (-> object-centre fallback)."""
@@ -354,14 +357,14 @@ def _pointer_pivot(cam):
     vp = app.activeViewport
     if design is None or not vp:
         return None
-    px = _pointer_view_pixel(vp)
+    px = _cursor_view_pixel(vp)
     if px is None:
-        _log_rl("ppivot", "pointer-pivot: pointer not over the viewport (or mapping failed) -> fallback")
+        _log_rl("ppivot", "cursor-pivot: cursor not over the viewport (or mapping failed) -> fallback")
         return None
     try:
         pm = vp.viewToModelSpace(adsk.core.Point2D.create(px[0], px[1]))
     except Exception:
-        _log_rl("ppivot", "pointer-pivot: viewToModelSpace FAILED -> fallback")
+        _log_rl("ppivot", "cursor-pivot: viewToModelSpace FAILED -> fallback")
         return None
     eye, tgt = cam.eye, cam.target
     fwd = adsk.core.Vector3D.create(tgt.x - eye.x, tgt.y - eye.y, tgt.z - eye.z)
@@ -384,10 +387,10 @@ def _pointer_pivot(cam):
             return None
         d.normalize()
         if d.x * fwd.x + d.y * fwd.y + d.z * fwd.z <= 1e-6:
-            _log_rl("ppivot", "pointer-pivot: unprojected point behind the eye -> fallback")
+            _log_rl("ppivot", "cursor-pivot: unprojected point behind the eye -> fallback")
             return None
         origin = adsk.core.Point3D.create(eye.x, eye.y, eye.z)
-    return _raycast_pivot(design, origin, d, half_h, "pointer-pivot")
+    return _raycast_pivot(design, origin, d, half_h, "cursor-pivot")
 
 
 def _orbit_pivot(op, cam, tgt, idle):
@@ -395,33 +398,33 @@ def _orbit_pivot(op, cam, tgt, idle):
       view            -> raycast down the screen centre to the real surface depth, computed ONCE per
                          gesture and HELD (so the point under the crosshair stays put) -- like native
                          right-drag orbit. Re-cast when the gesture ends (idle) or the view moves.
-      pointer         -> raycast the surface under the LIVE MOUSE POINTER (read fresh at gesture
+      cursor          -> raycast the surface under the LIVE MOUSE CURSOR (read fresh at gesture
                          start), same per-gesture hold + fallbacks as `view`.
-      object / cursor -> model bounding-box centre (cursor hit-testing not implemented -> object).
+      object / selection -> model bounding-box centre.
     Everything falls back to the model centre, then the view target, when nothing is available."""
     if op == "view":
         if _gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
             _gesture["pivot"] = _screen_center_pivot(cam) or _object_center(tgt)
         return _gesture["pivot"]
-    if op == "pointer":
+    if op == "cursor":
         if _gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _pointer_pivot(cam) or _object_center(tgt)
+            _gesture["pivot"] = _cursor_pivot(cam) or _object_center(tgt)
         return _gesture["pivot"]
-    if op in ("object", "cursor"):
+    if op in ("object", "selection"):
         return _object_center(tgt)
     return tgt
 
 
 def _zoom_pivot(zm, cam, tgt, idle):
-    # "to_object" zooms toward the model center; "to_pointer" toward the surface under the mouse
-    # pointer (the zoom branch already keeps an arbitrary P fixed on screen; per-gesture hold in its
+    # "to_object" zooms toward the model center; "to_cursor" toward the surface under the mouse
+    # cursor (the zoom branch already keeps an arbitrary P fixed on screen; per-gesture hold in its
     # own slot so orbit/zoom gestures don't clobber each other's pivot, miss -> view centre);
-    # "to_center"/"to_cursor" keep the view center ("to_cursor" hit-testing not implemented).
+    # "to_center" keeps the view center.
     if zm == "to_object":
         return _object_center(tgt)
-    if zm == "to_pointer":
+    if zm == "to_cursor":
         if _zoom_gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
-            _zoom_gesture["pivot"] = _pointer_pivot(cam)
+            _zoom_gesture["pivot"] = _cursor_pivot(cam)
         return _zoom_gesture["pivot"] or tgt
     return tgt
 

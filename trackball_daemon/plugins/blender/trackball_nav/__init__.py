@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 9),                 # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 10),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,9 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.9"                    # reported in the handshake (shown in the daemon's tray)
+ADDIN_VERSION = "0.1.10"                   # reported in the handshake (shown in the daemon's tray)
+                                           # 0.1.10: 3D-cursor pivot value renamed cursor->cursor_3d
+                                           # (daemon config v3; "cursor" now means under-the-mouse).
 
 # --- tuning: Blender's intrinsic axis orientation + baseline sensitivity. These bake in the
 #     starting feel; the daemon's Per-App Bindings (gain 1.0 = this baseline) scale from here and
@@ -224,7 +226,7 @@ def _selection_median_from(locations):
 # ======================================================================================
 def _resolve_target():
     """The VIEW_3D to drive: the largest open 3D viewport (last-used wins ties), with its WINDOW
-    region + region_3d + space. None when no 3D viewport is open. (Targeting 'under the pointer'
+    region + region_3d + space. None when no 3D viewport is open. (Targeting 'under the cursor'
     needs a live mouse position unavailable from a timer -- see notes; we drive the active view.)"""
     best = None
     best_area = 0
@@ -299,7 +301,9 @@ def _orbit_pivot(op, rv, region, idle):
                    far in front after fly/look or at a large view distance -> felt like orbiting an
                    arbitrary point; rotating about the eye is "turn the camera".)
       view      -> auto-depth raycast (per-gesture HOLD)
-      object    -> selection median         cursor -> 3D cursor        origin -> world origin
+      object    -> selection median      cursor_3d -> 3D cursor        origin -> world origin
+      (the under-mouse "cursor" pivot has no Blender resolver -- no live mouse getter in a
+      timer -- so it falls through to the view_location default, like any unknown value)
     Anything unavailable falls back to None (orbit about view_location, Blender's default)."""
     if op == "viewpoint":
         return _eye(rv)
@@ -310,11 +314,11 @@ def _orbit_pivot(op, rv, region, idle):
         return _gesture["pivot"]
     if op == "object":
         return _selection_median()
-    if op == "cursor":
+    if op == "cursor_3d":
         return _cursor_location()
     if op == "origin":
         return Vector((0.0, 0.0, 0.0))
-    return None                                    # "viewpoint" and unknowns
+    return None                                    # under-mouse "cursor" and unknowns
 
 
 def _sync_camera_to_view(rv, scene):

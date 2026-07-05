@@ -149,7 +149,7 @@ then `view_location = pivot + R @ (view_location - pivot)` so the eye rotates ri
 
 ### 5.2 Pivots (`scheme.orbit_pivot`, relabelled "Orbit around" in the UI)
 `viewpoint` → the **eye** (turn in place — see Solved Problem #5); `view` → **auto-depth** raycast
-under the screen centre (held per gesture); `object` → selection median; `cursor` → 3D cursor;
+under the screen centre (held per gesture); `object` → selection median; `cursor_3d` → 3D cursor;
 `origin` → world origin; unknown → `view_location` (Blender default). `viewpoint` is a Blender-only
 value added to the generic `orbit_pivot` enum.
 
@@ -243,7 +243,7 @@ the config dict) to the broker scheme on every push, `NavBroker._build_frame` se
    `scene.camera` object and ignores `view_rotation/location/distance`. Navigating *looks dead*. The
    add-on detects this and either exits to perspective (lock off) or drives the camera (lock on).
 4. **No mouse position in a timer.** `bpy.app.timers` callbacks have no event/mouse context, so
-   "viewport under the pointer" targeting and true "zoom to mouse" aren't possible; we use the active
+   "viewport under the cursor" targeting and true "zoom to mouse" aren't possible; we use the active
    view and the screen centre. (A future option: `GetCursorPos` + `window.x/y` + area geometry.)
 5. **You cannot drive Blender's *native* Walk/Fly.** `view3d.walk`/`view3d.fly` are modal operators
    that read the mouse/keyboard directly and ignore our `RegionView3D` edits — the whole reason the
@@ -299,7 +299,7 @@ These were all found via live trackball testing; the fixes are in the code but t
 5. **"Viewpoint" orbit swung around a seemingly arbitrary point instead of turning the camera.**
    *Root cause:* it orbited `view_location`, which sits far in front after any fly/look or at a large
    view distance. *Fix:* the `viewpoint` pivot now rotates about the **eye** — "turn the camera in
-   place." (`view`/`object`/`cursor`/`origin` still orbit external points.)
+   place." (`view`/`object`/`cursor_3d`/`origin` still orbit external points.)
 6. **Shift-to-move did nothing in fly/walk.**
    *Two root causes:* (a) the camera-view bug (#2); (b) the mapping/scale — pushing the ball forward
    *strafed vertically* and movement was scaled purely by `view_distance` (→ ~0 when zoomed in close).
@@ -355,7 +355,7 @@ These were all found via live trackball testing; the fixes are in the code but t
   - **Discrete view ops** (Frame Selected, axis snaps, 15° steps) — need a *button-event* channel the
     broker doesn't have yet (it streams only continuous o/p/z; buttons are on-device HID). Clean hooks
     exist but nothing fires them.
-  - **"Under the pointer" targeting & true zoom-to-mouse** — need a live mouse position a timer can't
+  - **"Under the cursor" targeting & true zoom-to-mouse** (the under-mouse `cursor` pivot) — need a live mouse position a timer can't
     get (Gotcha #4); we use the active view / screen centre.
   - **Walk gravity/teleport** — not implemented (no physics step); walk is horizon-locked look +
     horizontal move only.

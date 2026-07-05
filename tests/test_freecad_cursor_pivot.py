@@ -1,8 +1,8 @@
-"""Headless unit tests for the FreeCAD add-on's "pointer" orbit pivot / "to_pointer" zoom.
+"""Headless unit tests for the FreeCAD add-on's "cursor" orbit pivot / "to_cursor" zoom.
 
 tbnav_freecad imports only stdlib + tbnav_camera at module level (FreeCAD/pivy/PySide imports all
 live inside functions), so the pivot RESOLVERS run under plain pytest with a synthetic view: a stub
-whose getObjectInfo returns a known hit per pixel. This proves the offline math -- pointer pixel ->
+whose getObjectInfo returns a known hit per pixel. This proves the offline math -- cursor pixel ->
 raycast -> bbox-validated pivot, the per-gesture hold, and the fallbacks -- exactly as
 tests/test_freecad_nav_math.py proves the camera math. What it CANNOT prove is that the
 SoLocation2Event observer tracks the real mouse in a live viewport (see the live-probe notes in
@@ -98,13 +98,13 @@ def _reset_addon_state():
     fc._gesture.update(t=0.0, pivot=None)
     fc._zoom_gesture.update(pivot=None)
     fc._obj_cache.update(t=0.0, center=None, bbox=None)
-    fc._pointer.update(px=None, t=0.0)
-    fc._ptr_hook.update(view=None, checked=0.0)
+    fc._cursor.update(px=None, t=0.0)
+    fc._cursor_hook.update(view=None, checked=0.0)
     yield
 
 
 # --- the observer callback + hook lifecycle ----------------------------------------------
-def test_pointer_event_cb_caches_pixel():
+def test_cursor_event_cb_caches_pixel():
     class Pos:
         def getValue(self):
             return (123, 456)
@@ -117,14 +117,14 @@ def test_pointer_event_cb_caches_pixel():
         def getEvent(self):
             return Ev()
 
-    fc._pointer_event_cb(EvCB())
-    assert fc._pointer["px"] == (123, 456)
-    assert fc._pointer["t"] > 0.0
+    fc._cursor_event_cb(EvCB())
+    assert fc._cursor["px"] == (123, 456)
+    assert fc._cursor["t"] > 0.0
 
 
-def test_pointer_event_cb_never_raises():
-    fc._pointer_event_cb(object())            # wrong shape -> swallowed, cache untouched
-    assert fc._pointer["px"] is None
+def test_cursor_event_cb_never_raises():
+    fc._cursor_event_cb(object())            # wrong shape -> swallowed, cache untouched
+    assert fc._cursor["px"] is None
 
 
 class HookView:
@@ -141,7 +141,7 @@ class HookView:
 
 @pytest.fixture()
 def fake_pivy(monkeypatch):
-    """A stand-in pivy so _ensure_pointer_hook's `from pivy import coin` works headless."""
+    """A stand-in pivy so _ensure_cursor_hook's `from pivy import coin` works headless."""
     class SoLoc:
         @staticmethod
         def getClassTypeId():
@@ -153,142 +153,142 @@ def fake_pivy(monkeypatch):
     return pivy
 
 
-def test_ensure_pointer_hook_registers_once(fake_pivy):
+def test_ensure_cursor_hook_registers_once(fake_pivy):
     v = HookView()
-    fc._ensure_pointer_hook(v)
-    fc._ensure_pointer_hook(v)                # same view -> no re-registration
-    assert len(v.added) == 1 and v.added[0][1] is fc._pointer_event_cb
-    assert fc._ptr_hook["view"] is v
+    fc._ensure_cursor_hook(v)
+    fc._ensure_cursor_hook(v)                # same view -> no re-registration
+    assert len(v.added) == 1 and v.added[0][1] is fc._cursor_event_cb
+    assert fc._cursor_hook["view"] is v
 
 
-def test_ensure_pointer_hook_rebinds_on_view_change(fake_pivy):
+def test_ensure_cursor_hook_rebinds_on_view_change(fake_pivy):
     v1, v2 = HookView(), HookView()
-    fc._ensure_pointer_hook(v1)
-    fc._pointer["px"] = (10, 20)
-    fc._ensure_pointer_hook(v2)
+    fc._ensure_cursor_hook(v1)
+    fc._cursor["px"] = (10, 20)
+    fc._ensure_cursor_hook(v2)
     assert len(v1.removed) == 1               # observer detached from the old view
     assert len(v2.added) == 1
-    assert fc._ptr_hook["view"] is v2
-    assert fc._pointer["px"] is None          # old view's pixel is meaningless in the new one
+    assert fc._cursor_hook["view"] is v2
+    assert fc._cursor["px"] is None          # old view's pixel is meaningless in the new one
 
 
-def test_ensure_pointer_hook_without_pivy_is_a_noop(monkeypatch):
+def test_ensure_cursor_hook_without_pivy_is_a_noop(monkeypatch):
     monkeypatch.setitem(sys.modules, "pivy", None)   # import pivy -> ImportError
     v = HookView()
-    fc._ensure_pointer_hook(v)                # must not raise
-    assert v.added == [] and fc._ptr_hook["view"] is None
+    fc._ensure_cursor_hook(v)                # must not raise
+    assert v.added == [] and fc._cursor_hook["view"] is None
 
 
-# --- _pointer_pivot: the raycast-under-the-pointer ---------------------------------------
-def test_pointer_pivot_raycasts_cached_pixel_not_centre():
+# --- _cursor_pivot: the raycast-under-the-cursor ---------------------------------------
+def test_cursor_pivot_raycasts_cached_pixel_not_centre():
     view = _view_both_hits()
-    fc._pointer.update(px=PTR_PX)
+    fc._cursor.update(px=PTR_PX)
     bbox = ((0, 0, 0), (10, 10, 10))
-    assert fc._pointer_pivot(view, bbox) == PTR_HIT
+    assert fc._cursor_pivot(view, bbox) == PTR_HIT
     assert fc._screen_center_pivot(view, bbox) == CENTER_HIT
-    assert PTR_HIT != CENTER_HIT              # the pointer pixel changes the pivot
+    assert PTR_HIT != CENTER_HIT              # the cursor pixel changes the pivot
 
 
-def test_pointer_pivot_none_without_cached_pixel():
-    assert fc._pointer_pivot(_view_both_hits(), None) is None
+def test_cursor_pivot_none_without_cached_pixel():
+    assert fc._cursor_pivot(_view_both_hits(), None) is None
 
 
-def test_pointer_pivot_none_off_model():
+def test_cursor_pivot_none_off_model():
     view = FakeView(hits={})                  # getObjectInfo -> None everywhere
-    fc._pointer.update(px=PTR_PX)
-    assert fc._pointer_pivot(view, None) is None
+    fc._cursor.update(px=PTR_PX)
+    assert fc._cursor_pivot(view, None) is None
 
 
-def test_pointer_pivot_rejects_hit_outside_bbox():
+def test_cursor_pivot_rejects_hit_outside_bbox():
     view = FakeView(hits={PTR_PX: _hit(100.0, 100.0, 100.0)})
-    fc._pointer.update(px=PTR_PX)
-    assert fc._pointer_pivot(view, ((0, 0, 0), (10, 10, 10))) is None
+    fc._cursor.update(px=PTR_PX)
+    assert fc._cursor_pivot(view, ((0, 0, 0), (10, 10, 10))) is None
 
 
-def test_pointer_pivot_y_flip_path():
-    # POINTER_Y_FLIP=True must feed getObjectInfo (x, height - y). Default is False (Coin's
+def test_cursor_pivot_y_flip_path():
+    # CURSOR_Y_FLIP=True must feed getObjectInfo (x, height - y). Default is False (Coin's
     # SoLocation2Event and getObjectInfo share the bottom-left origin); this locks the flip MATH
     # in case a FreeCAD change ever needs it turned on.
     view = FakeView(size=(800, 600), hits={(100, 450): _hit(*PTR_HIT)})
-    fc._pointer.update(px=(100, 150))
-    old = fc.POINTER_Y_FLIP
-    fc.POINTER_Y_FLIP = True
+    fc._cursor.update(px=(100, 150))
+    old = fc.CURSOR_Y_FLIP
+    fc.CURSOR_Y_FLIP = True
     try:
-        assert fc._pointer_pivot(view, None) == PTR_HIT
+        assert fc._cursor_pivot(view, None) == PTR_HIT
         assert view.pick_calls == [(100, 450)]
     finally:
-        fc.POINTER_Y_FLIP = old
+        fc.CURSOR_Y_FLIP = old
 
 
-# --- _orbit_pivot op=="pointer": per-gesture hold + fallbacks ------------------------------
-def test_orbit_pivot_pointer_differs_from_view():
+# --- _orbit_pivot op=="cursor": per-gesture hold + fallbacks ------------------------------
+def test_orbit_pivot_cursor_differs_from_view():
     view = _view_both_hits()
-    fc._pointer.update(px=PTR_PX)
-    p_ptr = fc._orbit_pivot("pointer", view, DOC, _ortho_cam(), idle=10.0)
+    fc._cursor.update(px=PTR_PX)
+    p_ptr = fc._orbit_pivot("cursor", view, DOC, _ortho_cam(), idle=10.0)
     fc._gesture.update(pivot=None)            # fresh gesture for the other scheme
     p_view = fc._orbit_pivot("view", view, DOC, _ortho_cam(), idle=10.0)
     assert p_ptr == PTR_HIT and p_view == CENTER_HIT and p_ptr != p_view
 
 
-def test_orbit_pivot_pointer_holds_for_the_gesture():
+def test_orbit_pivot_cursor_holds_for_the_gesture():
     view = _view_both_hits()
     view.hits[(200, 200)] = _hit(6.0, 6.0, 6.0)
-    fc._pointer.update(px=PTR_PX)
-    assert fc._orbit_pivot("pointer", view, DOC, _ortho_cam(), idle=10.0) == PTR_HIT
-    fc._pointer.update(px=(200, 200))         # mouse moves MID-gesture...
-    assert fc._orbit_pivot("pointer", view, DOC, _ortho_cam(), idle=0.0) == PTR_HIT   # ...held
-    # after the idle gap (gesture over) the pivot re-raycasts at the new pointer position
-    assert fc._orbit_pivot("pointer", view, DOC, _ortho_cam(),
+    fc._cursor.update(px=PTR_PX)
+    assert fc._orbit_pivot("cursor", view, DOC, _ortho_cam(), idle=10.0) == PTR_HIT
+    fc._cursor.update(px=(200, 200))         # mouse moves MID-gesture...
+    assert fc._orbit_pivot("cursor", view, DOC, _ortho_cam(), idle=0.0) == PTR_HIT   # ...held
+    # after the idle gap (gesture over) the pivot re-raycasts at the new cursor position
+    assert fc._orbit_pivot("cursor", view, DOC, _ortho_cam(),
                            idle=fc.PIVOT_HOLD_IDLE + 0.01) == (6.0, 6.0, 6.0)
 
 
-def test_orbit_pivot_pointer_recasts_when_hold_cleared():
+def test_orbit_pivot_cursor_recasts_when_hold_cleared():
     # pan/zoom clear _gesture["pivot"] (see _apply); a cleared hold must re-raycast immediately
     view = _view_both_hits()
-    fc._pointer.update(px=PTR_PX)
-    assert fc._orbit_pivot("pointer", view, DOC, _ortho_cam(), idle=10.0) == PTR_HIT
+    fc._cursor.update(px=PTR_PX)
+    assert fc._orbit_pivot("cursor", view, DOC, _ortho_cam(), idle=10.0) == PTR_HIT
     view.hits[PTR_PX] = _hit(1.0, 1.0, 1.0)
     fc._gesture.update(pivot=None)            # what the pan/zoom branches do
-    assert fc._orbit_pivot("pointer", view, DOC, _ortho_cam(), idle=0.0) == (1.0, 1.0, 1.0)
+    assert fc._orbit_pivot("cursor", view, DOC, _ortho_cam(), idle=0.0) == (1.0, 1.0, 1.0)
 
 
-def test_orbit_pivot_pointer_falls_back_to_object_centre_on_miss():
-    view = FakeView(hits={})                  # nothing under the pointer
-    fc._pointer.update(px=PTR_PX)
-    assert fc._orbit_pivot("pointer", view, DOC, _ortho_cam(), idle=10.0) == CENTER
-    # and with no pointer cached at all (mouse never over the viewport)
+def test_orbit_pivot_cursor_falls_back_to_object_centre_on_miss():
+    view = FakeView(hits={})                  # nothing under the cursor
+    fc._cursor.update(px=PTR_PX)
+    assert fc._orbit_pivot("cursor", view, DOC, _ortho_cam(), idle=10.0) == CENTER
+    # and with no cursor cached at all (mouse never over the viewport)
     fc._gesture.update(pivot=None)
-    fc._pointer.update(px=None)
-    assert fc._orbit_pivot("pointer", view, DOC, _ortho_cam(), idle=10.0) == CENTER
+    fc._cursor.update(px=None)
+    assert fc._orbit_pivot("cursor", view, DOC, _ortho_cam(), idle=10.0) == CENTER
 
 
-def test_orbit_pivot_pointer_last_resort_is_look_at():
+def test_orbit_pivot_cursor_last_resort_is_look_at():
     view = FakeView(hits={})
     empty_doc = FakeDoc([])                   # no model -> no centre either
     c = _ortho_cam()
-    assert fc._orbit_pivot("pointer", view, empty_doc, c, idle=10.0) == cam.look_at(c)
+    assert fc._orbit_pivot("cursor", view, empty_doc, c, idle=10.0) == cam.look_at(c)
 
 
-# --- _zoom_pivot zm=="to_pointer" ----------------------------------------------------------
-def test_zoom_pivot_to_pointer_uses_pointer_hit():
+# --- _zoom_pivot zm=="to_cursor" ----------------------------------------------------------
+def test_zoom_pivot_to_cursor_uses_cursor_hit():
     view = _view_both_hits()
-    fc._pointer.update(px=PTR_PX)
-    assert fc._zoom_pivot("to_pointer", view, DOC, idle=10.0) == PTR_HIT
+    fc._cursor.update(px=PTR_PX)
+    assert fc._zoom_pivot("to_cursor", view, DOC, idle=10.0) == PTR_HIT
     assert fc._zoom_pivot("to_center", view, DOC, idle=10.0) is None
 
 
-def test_zoom_pivot_to_pointer_holds_per_gesture():
+def test_zoom_pivot_to_cursor_holds_per_gesture():
     view = _view_both_hits()
     view.hits[(200, 200)] = _hit(6.0, 6.0, 6.0)
-    fc._pointer.update(px=PTR_PX)
-    assert fc._zoom_pivot("to_pointer", view, DOC, idle=10.0) == PTR_HIT
-    fc._pointer.update(px=(200, 200))
-    assert fc._zoom_pivot("to_pointer", view, DOC, idle=0.0) == PTR_HIT          # held
-    assert fc._zoom_pivot("to_pointer", view, DOC,
+    fc._cursor.update(px=PTR_PX)
+    assert fc._zoom_pivot("to_cursor", view, DOC, idle=10.0) == PTR_HIT
+    fc._cursor.update(px=(200, 200))
+    assert fc._zoom_pivot("to_cursor", view, DOC, idle=0.0) == PTR_HIT          # held
+    assert fc._zoom_pivot("to_cursor", view, DOC,
                           idle=fc.PIVOT_HOLD_IDLE + 0.01) == (6.0, 6.0, 6.0)     # re-cast
 
 
-def test_zoom_pivot_to_pointer_miss_zooms_about_look_at():
+def test_zoom_pivot_to_cursor_miss_zooms_about_look_at():
     view = FakeView(hits={})
-    fc._pointer.update(px=PTR_PX)
-    assert fc._zoom_pivot("to_pointer", view, DOC, idle=10.0) is None
+    fc._cursor.update(px=PTR_PX)
+    assert fc._zoom_pivot("to_cursor", view, DOC, idle=10.0) is None

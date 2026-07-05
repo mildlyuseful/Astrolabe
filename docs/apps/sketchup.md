@@ -158,7 +158,8 @@ where the active mode is known.
 - `origin` → `ORIGIN`
 - `viewpoint` → camera eye (turn in place)
 - `object` → `model.bounds.center`
-- `cursor` → object centre (the broker pipeline has no cursor pixel)
+- `selection` → object centre; the under-mouse `cursor` falls back there too (no cursor-pixel
+  resolver yet — `GetCursorPos` via Fiddle is the planned route)
 - `view` → surface under the viewport centre, else object centre
 
 The live Ruby Console probe created a temporary box, aimed the camera at it, and verified:
