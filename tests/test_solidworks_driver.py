@@ -150,7 +150,9 @@ class FakeExtension:
     def SelectByRay(self, x, y, z, vx, vy, vz, radius, tol, opt, append, mark):
         val = lambda a: getattr(a, "value", a)      # unwrap VARIANT (pywin32) or pass through
         r = float(val(radius))
-        self.ray_calls.append({"radius": r, "tol": val(tol), "append": val(append)})
+        self.ray_calls.append({"radius": r, "tol": val(tol), "append": val(append),
+                               "origin": (float(val(x)), float(val(y)), float(val(z))),
+                               "dir": (float(val(vx)), float(val(vy)), float(val(vz)))})
         chosen = [pt for (min_r, pt) in self._hits if min_r <= r]
         if not chosen:
             return False
@@ -649,3 +651,160 @@ def test_worker_thread_flushes_and_zeros(monkeypatch):
     assert holder.get("model") is not None
     assert holder["model"].redraws >= 1                     # the worker applied a frame
     assert drv._acc == [0.0] * 6                            # accumulator drained after flush
+
+
+# --- 'cursor' pivot: OS cursor -> Transform inverse -> (a,b) -> SelectByRay ---------------
+# _cursor_client_point (the ctypes Win32 chain) is monkeypatched with a synthetic cursor px;
+# everything downstream -- the IModelView.Transform inversion (verified live: a model->screen-
+# PIXEL map whose column-rows are +c0 / -c1 and whose output space matches GetCursorPos) ->
+# (a, b) -> ray -> held pivot -- is real code.
+_BOX = (-0.1, -0.1, -0.1, 0.1, 0.1, 0.1)          # 0.2 m cube: diag ~0.3464, centre (0,0,0)
+
+# identity camera (c0=X, c1=Y, c2=Z): px = 4000*(c0.P) + 760, 4000*(-c1.P) + 400 (y-down)
+_XF_S, _XF_T = 4000.0, (760.0, 400.0)
+_XF = (1.0, 0.0, 0.0,  0.0, -1.0, 0.0,  0.0, 0.0, -1.0,
+       _XF_T[0], _XF_T[1], 0.0,  _XF_S,  0.0, 0.0, 0.0)
+
+
+def _cursor_px(a, b):
+    """The desktop pixel where a ray with in-plane offsets (a, b) sits under _XF."""
+    return (_XF_S * a + _XF_T[0], -_XF_S * b + _XF_T[1])
+
+
+def _cursor_setup(drv, ray_hits=None, a=0.00635, b=0.003175):
+    model, view = _attach_fakes(drv, box=_BOX, ray_hits=ray_hits)
+    view.Transform = FakeTransform(_XF)
+    drv._cursor_client_point = lambda: _cursor_px(a, b)
+    return model, view
+
+
+def test_cursor_screen_ab_inverts_view_transform():
+    drv = SolidWorksDriver()
+    view = FakeView()
+    view.Transform = FakeTransform(_XF)
+    drv._cursor_client_point = lambda: _cursor_px(0.007, -0.016)
+    a, b = drv._cursor_screen_ab(view, (1, 0, 0), (0, 1, 0))
+    assert a == pytest.approx(0.007)
+    assert b == pytest.approx(-0.016)              # the y-down flip is resolved per capture
+
+
+def test_cursor_screen_ab_resolves_row_signs():
+    # a transform whose in-plane rows are -c0 / +c1 (opposite handedness) still maps correctly
+    drv = SolidWorksDriver()
+    view = FakeView()
+    view.Transform = FakeTransform((-1.0, 0.0, 0.0,  0.0, 1.0, 0.0,  0.0, 0.0, 1.0,
+                                    _XF_T[0], _XF_T[1], 0.0,  _XF_S,  0.0, 0.0, 0.0))
+    # px for (a,b) under THIS transform: u = s*(-a)+t0, v = s*(+b)+t1
+    drv._cursor_client_point = lambda: (_XF_S * -0.007 + _XF_T[0], _XF_S * -0.016 + _XF_T[1])
+    a, b = drv._cursor_screen_ab(view, (1, 0, 0), (0, 1, 0))
+    assert a == pytest.approx(0.007)
+    assert b == pytest.approx(-0.016)
+
+
+def test_cursor_screen_ab_rejects_misaligned_transform():
+    # Transform rows not aligned with the camera axes (model changed / stale read) -> None,
+    # never a silently-wrong pivot.
+    drv = SolidWorksDriver()
+    view = FakeView()
+    s2 = math.sqrt(0.5)
+    view.Transform = FakeTransform((s2, -s2, 0.0,  s2, s2, 0.0,  0.0, 0.0, 1.0,
+                                    _XF_T[0], _XF_T[1], 0.0,  _XF_S,  0.0, 0.0, 0.0))
+    drv._cursor_client_point = lambda: (800.0, 380.0)
+    assert drv._cursor_screen_ab(view, (1, 0, 0), (0, 1, 0)) is None
+
+
+def test_cursor_screen_ab_none_without_cursor():
+    drv = SolidWorksDriver()
+    view = FakeView()
+    view.Transform = FakeTransform(_XF)
+    drv._cursor_client_point = lambda: None       # not over the view window / Win32 failure
+    assert drv._cursor_screen_ab(view, (1, 0, 0), (0, 1, 0)) is None
+
+
+def test_cursor_orbit_raycasts_through_cursor_pixel():
+    drv = SolidWorksDriver(); drv.set_scheme("cursor", "free", "to_center")
+    a, b = 0.00635, 0.003175
+    _model, view = _cursor_setup(drv, ray_hits=[(0.0, (0.006, 0.003, 0.1))], a=a, b=b)
+    drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
+    call = _model._ext.ray_calls[0]
+    assert call["dir"] == pytest.approx((0.0, 0.0, -1.0))    # into the screen (-c2)
+    diag = math.sqrt(3 * 0.2 ** 2)
+    push = solidworks_driver._RAY_PUSH * diag                # anchored at obj depth 0, pushed back
+    assert call["origin"] == pytest.approx((a, b, push))
+    # pivot = a*c0 + b*c1 + depth*c2 with depth = c2.hit = 0.1
+    assert drv._orbit_pivot == pytest.approx((a, b, 0.1))
+    assert len(view.rotations) == 1                          # and the orbit still happened
+
+
+def test_cursor_orbit_holds_pivot_within_threshold():
+    drv = SolidWorksDriver(); drv.set_scheme("cursor", "free", "to_center")
+    drv.set_pivot_hold(0.5)
+    _model, _view = _cursor_setup(drv, ray_hits=[(0.0, (0.006, 0.003, 0.1))])
+    drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
+    p1 = drv._orbit_pivot
+    n_calls = len(_model._ext.ray_calls)
+    drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))             # immediate -> held, NO new raycast
+    assert drv._orbit_pivot is p1
+    assert len(_model._ext.ray_calls) == n_calls
+    drv._last_activity_t -= 10.0                            # gesture over -> re-raycast
+    drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
+    assert len(_model._ext.ray_calls) > n_calls
+
+
+def test_cursor_orbit_miss_falls_back_to_object_centre():
+    drv = SolidWorksDriver(); drv.set_scheme("cursor", "free", "to_center")
+    _model, _view = _cursor_setup(drv, ray_hits=None)        # nothing under the cursor
+    drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
+    assert drv._orbit_pivot == pytest.approx((0.0, 0.0, 0.0))   # the box centre, held
+
+
+def test_cursor_orbit_unmappable_cursor_falls_back_without_raycast():
+    drv = SolidWorksDriver(); drv.set_scheme("cursor", "free", "to_center")
+    _model, _view = _cursor_setup(drv, ray_hits=[(0.0, (0.0, 0.0, 0.1))])
+    drv._cursor_client_point = lambda: None                 # over another window / Win32 failure
+    drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
+    assert _model._ext.ray_calls == []                       # never raycast a bogus mapping
+    assert drv._orbit_pivot == pytest.approx((0.0, 0.0, 0.0))
+
+
+def test_zoom_to_cursor_holds_cursor_point():
+    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_cursor")
+    a, b = 0.00635, 0.003175
+    _model, view = _cursor_setup(drv, ray_hits=[(0.0, (0.006, 0.003, 0.1))], a=a, b=b)
+    drv._flush((0, 0, 0, 0, 0, 0.5))
+    factor = 1.0 + solidworks_driver.ZOOM_SIGN * 0.5 * solidworks_driver.ZOOM_SCALE
+    assert view.zooms == [pytest.approx(factor)]
+    # recenter pan holds the cursor point P: dT = (s_before - s_after) * (col.P)
+    ds = 4.0 - 4.0 * factor
+    assert view.translation_sets, "to_cursor zoom must recenter the held point"
+    assert tuple(view.translation_sets[-1].data) == pytest.approx((ds * a, ds * b, 0.0))
+    # a second zoom within the hold window reuses the pivot (no new raycast)
+    n_calls = len(_model._ext.ray_calls)
+    drv._flush((0, 0, 0, 0, 0, 0.2))
+    assert len(_model._ext.ray_calls) == n_calls
+
+
+def test_zoom_to_cursor_miss_is_plain_center_zoom():
+    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_cursor")
+    _model, view = _cursor_setup(drv, ray_hits=None)
+    drv._flush((0, 0, 0, 0, 0, 0.5))
+    assert len(view.zooms) == 1
+    assert view.translation_sets == []                       # no recenter -> native centre zoom
+
+
+def test_orbit_and_pan_reset_zoom_cursor_pivot():
+    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_cursor")
+    _model, _view = _cursor_setup(drv)
+    drv._zoom_pivot = (1.0, 2.0, 3.0)
+    drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))             # orbit -> reset
+    assert drv._zoom_pivot is None
+    drv._zoom_pivot = (1.0, 2.0, 3.0)
+    drv._flush((0.0, 0.0, 0.0, 0.3, 0.0, 0.0))              # pan -> reset
+    assert drv._zoom_pivot is None
+
+
+def test_set_scheme_releases_zoom_pivot():
+    drv = SolidWorksDriver()
+    drv._zoom_pivot = (1.0, 2.0, 3.0)
+    drv.set_scheme("view", "free", "to_center")
+    assert drv._zoom_pivot is None

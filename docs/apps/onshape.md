@@ -119,7 +119,9 @@ self:update motion         false
 - **Write:** `view.affine`, `view.extents`, `hit.lookfrom` / `hit.direction` / `hit.aperture`
   (write-only inputs — reading them returns "unknown property", which is **expected**),
   `hit.selectionOnly`, `motion`, `transaction`, `pivot.position`, `pivot.visible`.
-- **Not exposed:** `pointer` (so true cursor-position pivot is impossible — see §5/§8.6).
+- **Not exposed:** `pointer` — navlib gives us no cursor position, so the daemon reads the **OS**
+  cursor itself (`GetCursorPos`) and maps it into the canvas to aim the hit-test (§8.14). navlib's
+  hit-test happily accepts an arbitrary ray, so the missing `pointer` accessor is *not* a blocker.
 - Best-effort props (`motion`/`transaction`/`pivot.*`) are sent via `write_best_effort`: a
   CALLERROR is swallowed (logged once) and never disconnects. **Only `view.affine` must land.**
 
@@ -152,16 +154,23 @@ Then re-encode (`_encode_affine`, same layout) and write `view.affine`.
 
 ---
 
-## 6. The "view" orbit pivot: navlib hit-test raycast (`_hit_center`, `_pivot`, `_gesture_pivot`)
+## 6. The orbit pivots: navlib hit-test raycast (`_hit_center`, `_hit_cursor`, `_hit_ray`, `_pivot`)
 
-`view` (and `cursor`) orbit pivots about **what's under the center of the screen**, like Onshape's
-own right-drag orbit. We use the navlib **hit-test**: write the ray (`hit.lookfrom` origin,
-`hit.direction`, `hit.aperture` = ray **thickness**, `hit.selectionOnly=false`) and read `hit.lookat`
-(the surface hit point). **Onshape does the actual raycast** (GPU/BVH — cheap on their side).
+`view` orbits about **what's under the center of the screen** and `cursor` about **what's under the
+mouse** — both like Onshape's own right-drag orbit. We use the navlib **hit-test**: write the ray
+(`hit.lookfrom` origin, `hit.direction`, `hit.aperture` = ray **thickness**, `hit.selectionOnly=false`)
+and read `hit.lookat` (the surface hit point). **Onshape does the actual raycast** (GPU/BVH — cheap on
+their side). The ray-aim + aperture loop live in the shared `_hit_ray`; `_hit_center` and `_hit_cursor`
+just build the ray.
 
 Algorithm:
-1. Ray = screen-center optical axis: `direction = normalize(-back)`, `lookfrom = eye - dir*(view_half*8)`
-   (started on the viewer side, outside the model).
+1. **Build the ray from a canvas point** (`_pixel_ray`): given the point in NDC (x right, y up, both
+   in [-1,1]), the ray runs along `direction = normalize(-back)` through the point offset
+   `ndc_x·half_x` right + `ndc_y·half_y` up from the view center, with `lookfrom` pulled `view_half*8`
+   back along forward (started outside the model). This is the **orthographic** ray (Onshape is ortho
+   by default, §8.8); NDC = (0,0) reproduces the old screen-center ray exactly.
+   - `view` / `selection` → NDC (0,0) (screen center).
+   - `cursor` → the OS cursor mapped to canvas NDC (§8.14); off-canvas ⇒ **fall back to the center**.
 2. Try apertures smallest-first (`HIT_APERTURES = (0.03, 0.1, 0.3)` × view half-extent), widening
    until something is hit ("expand the radius until it hits").
 3. Validate the hit is a finite 3-point **inside `model.extents` expanded ~10% of its diagonal**
@@ -171,8 +180,8 @@ Algorithm:
    reused every frame, re-picked only after a pan/zoom or idle > 0.35s. The hit-test therefore runs
    **once per gesture (~5 round-trips), not per frame.**
 
-Other pivots: `origin` = world origin; `object`/`cursor` fall back to model center when no hit. The
-scheme comes from `set_scheme` (General → 3D control scheme, or per-app Onshape override).
+Other pivots: `origin` = world origin; `object` falls back to model center when no hit. The scheme
+comes from `set_scheme` (General → 3D control scheme, or per-app Onshape override).
 
 ---
 
@@ -255,8 +264,9 @@ These are the non-obvious things, each as *symptom → cause → fix*. Most cost
 ### 8.6 navlib hit-test specifics that aren't obvious
 - `hit.lookfrom`/`hit.direction`/`hit.aperture` are **write-only**; reading them returns "unknown
   property" — that is expected, **not** a failure.
-- `pointer` is **not exposed**, so a true cursor-position pivot is impossible; `cursor` uses screen
-  center (same as `view`).
+- `pointer` is **not exposed**, but the hit-test accepts an **arbitrary ray**, so a cursor-position
+  pivot IS possible: the daemon reads the OS cursor and aims the ray through it (`cursor` pivot,
+  §8.14). It's the mouse→canvas mapping that's fuzzy, not the hit-test.
 - A **no-hit** result is not clearly signalled, so always validate `hit.lookat` against the model
   bbox (`_valid_hit`).
 - **Cache-poisoning trap:** do **not** read `hit.lookat` through the caching `conn.read()` — a no-hit
@@ -295,6 +305,83 @@ These are the non-obvious things, each as *symptom → cause → fix*. Most cost
 - If the client doesn't answer a read/write within `_RPC_TIMEOUT` (2s), we treat the connection as
   dead and drop it. A wedged/backgrounded tab will disconnect rather than hang the worker.
 
+### 8.14 Under-cursor orbit: mapping the OS cursor into the canvas (⚠ NEEDS LIVE-GUI VERIFY)
+The `cursor` pivot orbits about the surface **under the mouse** (like a SpaceMouse's "rotation center
+= cursor"). Two halves, mirroring the other apps:
+- **Half B (the ray) — solid.** navlib's hit-test takes an arbitrary ray, so we just aim it through
+  the cursor's canvas point instead of the center (`_hit_cursor` → `_pixel_ray` → `_hit_ray`). Same
+  code path, aperture loop, bbox validation, and per-gesture hold as `view`.
+- **Half A (the mouse → canvas mapping) — the fuzzy part.** navlib exposes no cursor, and the daemon
+  can't read the browser DOM, so we read the **OS** cursor with `GetCursorPos` and map it ourselves:
+  1. cursor's **fraction across the web-content window's client area** (`_cursor_client_fraction`):
+     `GetCursorPos` + **`WindowFromPoint`** (the window *under* the cursor — for a Chromium/Firefox
+     browser that's the web-content child window, so its client rect **excludes the browser chrome**
+     (tab strip + address bar) and that top inset drops out automatically — the SketchUp add-on's
+     technique) + `GetClientRect`/`ClientToScreen`. Gated: `GetAncestor(hwnd, GA_ROOT) ==
+     GetForegroundWindow()` so the cursor is really over the focused Onshape browser (else `None`).
+  2. remap that fraction by the **canvas insets** (`CANVAS_INSET` = left/top/right/bottom fractions of
+     the *web-content* area that Onshape's own in-page toolbar + feature-tree/property panels eat) →
+     canvas NDC (`_client_fraction_to_ndc`, with the top-left→y-up flip). A cursor **outside** the
+     canvas (over a panel) returns `None` and the pivot falls back to the screen center.
+- **The DPI fix — the "down-and-right" bug.** The fraction is only scale-invariant if the
+  cursor and the client rect are read in the **same** coordinate space. The daemon is DPI-unaware but
+  a browser is per-monitor-aware, so an unaware read mixes the cursor (thread-context/logical px) with
+  the window's client width (physical px) → the fraction inflates and the pivot lands **down-and-right**
+  at >100% display scaling (exactly the Fusion/SolidWorks DPI bug). Fix: the Onshape **worker thread is
+  per-monitor-v2 DPI aware** (`_make_thread_dpi_aware`, thread-local so the Tk UI is untouched) → both
+  reads are physical px → the fraction is exact at any scale. `WindowFromPoint` (above) also removes the
+  browser chrome, so what's left for `CANVAS_INSET` is only Onshape's **in-page** panels.
+- **The left feature-tree panel is AUTO-TRACKED (no calibration).** The panel is resizable and was the
+  dominant residual offset (pivot drifts right, worse the wider the panel). We can't read its width from
+  outside the browser — but **Onshape keeps `view.extents`' aspect equal to the visible canvas's pixel
+  aspect**, so the panel width falls out of the aspect + the web-content window size
+  (`_effective_canvas_inset`, `canvas_auto_left` on by default):
+  `canvas_w_frac = (half_x/half_y)·(win_h/win_w)·(1−top−bottom)`, `left = 1 − right − canvas_w_frac`.
+  As you drag the panel, the aspect changes and the left inset follows **live**. (Assumes the canvas is
+  flush to the window's right & bottom; set Right/Bottom if a right/bottom panel is open, or turn
+  auto-track off to use a manual Left.)
+- **⚠ The `top` toolbar inset MUST be correct — it feeds the left, so a wrong top *gains* the
+  horizontal.** Because `canvas_w_frac` includes `(1−top−bottom)`, a `top` that's too small makes the
+  computed canvas too wide and the left too small → the pivot offset then **scales with cursor-x and can
+  cross zero** (not a flat offset — the symptom the user reported). Set it to the toolbar's fraction of
+  the window height (**~0.05–0.09**). It's the one value to calibrate, and it *also* removes the small
+  "slightly low" vertical offset.
+- **Calibrate live in the daemon UI** (no restart): *3D Apps → Onshape → Under-Cursor pivot — canvas
+  calibration* has **Auto-track left panel** + **Top/Left/Right/Bottom** fields, stored in
+  `config.data["onshape"]["canvas_inset"]`/`["canvas_auto_left"]` (these **supersede** the
+  `TB_ONSHAPE_CANVAS_*` env vars). Adjust **Top** while orbiting until the pivot sits under the cursor at
+  any panel width. `TB_ONSHAPE_DEBUG=1` logs `onshape cursor: frac=… win=WxH inset=(L,T,R,B) ndc=…` each
+  gesture (a cursor at the canvas centre → `ndc ≈ (0,0)`). The zero-calibration ideal would read the
+  real canvas rect from the page (a userscript / `getBoundingClientRect`), out of scope for the
+  daemon-only bridge.
+
+- **Verified offline** (`tests/test_onshape_cursor_pivot.py`): `_pixel_ray` (center reproduces the old
+  ray; off-center offsets along right/up by `ndc·half`), `_client_fraction_to_ndc` (y-flip, inset
+  remap, out-of-canvas rejection), `_effective_canvas_inset` (auto-left recovers a closed/25%/50%
+  panel from the aspect), `_hit_cursor` end-to-end (fraction→ndc→ray→hit; `None` off-canvas), and
+  `_pivot("cursor")`'s cursor→center→model fallback chain. **Un-verified (needs a live Onshape
+  browser):** that the mapping lands on the WebGL canvas, the auto-left aspect assumption holds, and the
+  hit returns the surface under the mouse. To verify: open a document, set Orbit pivot = *cursor
+  (under mouse)*, orbit while pointing at different faces, watch the on-screen pivot marker /
+  `TB_ONSHAPE_DEBUG=1` (`onshape cursor: …`); the pivot should sit under the cursor at any panel width,
+  and only a small top-toolbar residual should need `TB_ONSHAPE_CANVAS_TOP`.
+
+### 8.15 "Connects in Firefox but not Chrome/Edge" — Private Network Access
+- **Symptom:** the bridge links from Firefox but a Chromium browser (Chrome/Edge) never connects, even
+  with the cert trusted in the Windows store.
+- **Cause:** Chromium enforces **Private Network Access (PNA)** — a page on a *public* origin
+  (`cad.onshape.com`) connecting to a *loopback* address (`127.51.68.120`) is blocked unless the local
+  server opts in. Chromium sends an `OPTIONS` **preflight** carrying
+  `Access-Control-Request-Private-Network: true` and requires `Access-Control-Allow-Private-Network:
+  true` in the response. Firefox doesn't enforce PNA yet, so it "just works" there — the classic
+  split-by-browser tell. (Cert trust is a *separate*, per-browser axis, §8.9 — Chrome reads the Windows
+  store, Firefox its own; both must be satisfied.)
+- **Fix:** the bridge now sends `Access-Control-Allow-Private-Network: true` on **every** CORS response
+  (`_http`), harmless to Firefox. `TB_ONSHAPE_DEBUG=1` logs each `onshape HTTP< METHOD /path
+  (origin=… pna_req=…)` so you can see the preflight arrive. If Chrome still won't connect, check its
+  **DevTools → Console/Network** for a cert error (`NET::ERR_CERT_*` → re-trust the cert in the Windows
+  store, §7) vs. a PNA error, and that the SpaceMouse/3Dconnexion option is enabled in Onshape.
+
 ---
 
 ## 9. Tuning knobs (top of `onshape_bridge.py`)
@@ -309,6 +396,8 @@ Current values (expect a sign/feel pass on real hardware — flip signs if a cha
 | `ZOOM_SIGN` / `ZOOM_SCALE` | `1.0` / `0.25` | zoom direction / magnitude |
 | `AFFINE_TRANSLATION_IN_COLUMN` | `False` | §8.1 — row-vector for Onshape |
 | `HIT_APERTURES` | `(0.03,0.1,0.3)` | hit-test ray thicknesses (× view half-extent), widened in order |
+| `CANVAS_INSET` | `(0,0,0,0)` | §8.14 — env DEFAULT for the `cursor`-pivot canvas insets (L,T,R,B); the **config/UI** `onshape.canvas_inset` supersedes it. Top toolbar ≈ the only one to set (~0.05–0.09) — a wrong top *gains* the horizontal |
+| `CANVAS_AUTO_LEFT` | `True` | §8.14 — env DEFAULT; config/UI `onshape.canvas_auto_left` supersedes. Auto-track the resizable left panel from the view aspect (needs a correct Top) |
 | `_MOTION_IDLE` | `0.35` | seconds idle before the gesture ends / pivot re-picks |
 | `_RPC_TIMEOUT` | `2.0` | §8.13 |
 

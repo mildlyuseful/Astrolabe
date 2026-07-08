@@ -6,9 +6,9 @@ cannot see by reading the code**, and the **full list of future plans / requeste
 options**. Per-component deep dives live in their own docs (linked in §15); this file is the map that
 ties them together and covers the things that span more than one component.
 
-> Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.44**, Fusion
-> add-in **0.1.14**, Blender add-on **0.1.10**, FreeCAD add-on **0.1.4**, SketchUp extension
-> **0.2.1**, Unreal add-on **0.2.1**, AutoCAD plugin **0.3.1**,
+> Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.53**, Fusion
+> add-in **0.1.14**, Blender add-on **0.1.11**, FreeCAD add-on **0.1.4**, SketchUp extension
+> **0.2.2**, Unreal add-on **0.2.2**, AutoCAD plugin **0.3.1**,
 > `pyproject` version is dynamic (single-sourced from `__version__`; packaging not yet cut). Dev machine: Windows 11, Blender 5.1.1, SolidWorks
 > 2025, Fusion 360, FreeCAD 1.1.1, SketchUp 2026.2, Unreal Engine 5.8, AutoCAD 2026 installed. The firmware has no
 > version field.
@@ -310,7 +310,10 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
 
 - **SolidWorks** — *in-process COM driver* (`solidworks_driver.py`), **no add-in** (those need admin
   registration). Attaches to a **running** SolidWorks via `GetActiveObject`, drives the view with
-  native methods. The richest pivot support (origin/object/view/cursor) and the most COM gotchas.
+  native methods. The richest pivot support (origin/object/view/**cursor**/selection) and the most
+  COM gotchas. The **`cursor`** pivot (daemon 0.1.46) inverts `IModelView.Transform` — whose pixels
+  are **client-relative + physical** (screenshot-verified; worker thread made DPI-aware) — to aim
+  the `view` raycast through the mouse cursor; verified to < 0.1 mm (§14).
   → [`docs/apps/solidworks.md`](docs/apps/solidworks.md).
 
 - **AutoCAD** — a bundled **NETLOAD .NET plugin** is the **SOLE transport**
@@ -340,12 +343,24 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
 - **Onshape** — *in-process TLS-WebSocket bridge* (`onshape_bridge.py`) that **impersonates the
   3Dconnexion NL-Proxy** at `127.51.68.120:8181`, speaking WAMP. Onshape's page connects, hands us its
   camera (`view.affine`), and we run the nav model. No add-in/extension; needs a one-time **cert
-  trust**. → [`docs/apps/onshape.md`](docs/apps/onshape.md).
+  trust**. The under-mouse **`cursor` orbit pivot** (daemon 0.1.48) aims navlib's hit-test through the
+  OS cursor (mapped into the canvas daemon-side) — done in code; the DPI "down-and-right" offset (same
+  as Fusion/SW) was fixed by making the worker thread per-monitor-v2 aware + reading the web-content
+  window (`WindowFromPoint`, so browser chrome drops out); the **resizable left feature-tree panel is
+  auto-tracked** from the `view.extents` aspect (`canvas_auto_left`, no calibration) — but the **`top`
+  toolbar inset feeds that formula**, so a wrong top *gains* the horizontal (offset scales with cursor-x
+  / crosses zero, the user's symptom); the canvas insets are now **live-configurable** (`config.onshape.
+  canvas_inset`/`canvas_auto_left` → `set_canvas`, UI fields), so Top is dialed in once. Chrome/Edge
+  **wouldn't link** (Firefox did) → Chromium **Private Network Access** needs
+  `Access-Control-Allow-Private-Network: true` on the CORS preflight (added; cert trust is a separate
+  per-browser axis). → [`docs/apps/onshape.md`](docs/apps/onshape.md) §8.14–8.15.
 
 - **Blender** — *socket add-on* (`plugins/blender/trackball_nav`), the **richest** target: orbit
-  (free/turntable, 5 pivots), pan/zoom/dolly/roll, **fly/walk** first-person modes, camera-view
+  (free/turntable, 6 pivots), pan/zoom/dolly/roll, **fly/walk** first-person modes, camera-view
   driving, per-mode/per-axis inverts, an in-Blender **Alt+`** mode toggle, and an "Advanced" settings
-  section. → [`docs/apps/blender.md`](docs/apps/blender.md) (read first) +
+  section. The under-mouse **`cursor` orbit pivot** (add-on 0.1.11) is served by a passive modal-operator
+  mouse tracker (Blender has no on-demand mouse getter) — done in code, needs live-GUI verify (§4.5).
+  → [`docs/apps/blender.md`](docs/apps/blender.md) (read first) +
   [`docs/apps/blender_design.md`](docs/apps/blender_design.md).
 
 - **FreeCAD** — *socket add-on* (`plugins/freecad/TrackballNav`), modelled on Fusion/Blender. A
@@ -393,8 +408,11 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
   horizon-locked + ground-plane — verified they differ), **viewpoint** pivot (turn in place),
   `twist_action`, `lock_horizon`, and **per-mode inverts** — the same additive `"adv"` object Blender
   uses (now attached per-focused-app, §12.9). Unreal has **no 3D cursor** (probed), so `cursor` orbits
-  the selection; and its default orbit baseline is **doubled** (`ORBIT_SCALE=2.0`) because the device
-  felt half at 1.0. **Set up** copies the plugin into each detected engine's
+  the selection — and the under-mouse **`cursor` orbit was investigated & PARKED (add-on 0.2.2):** UE
+  5.8 Python *does* now deproject an editor-viewport pixel (`UnrealEditorSubsystem.screen_to_world`)
+  but does *not* expose the editor-viewport mouse pixel, so it needs a one-getter C++ helper or an
+  Editor Utility Widget (docs gotcha #13). Its default orbit baseline is **doubled** (`ORBIT_SCALE=2.0`)
+  because the device felt half at 1.0. **Set up** copies the plugin into each detected engine's
   `Engine/Plugins` (writing there needs **admin** → falls back to printed manual steps / a project
   `Plugins` dir), and the user **enables it once** in *Edit → Plugins → "Trackball" → restart* (the
   plugin depends on the Python Editor Script Plugin, so enabling ours enables Python too). The
@@ -733,10 +751,67 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
   wrongly rejected the right/bottom ~20% band → 0.1.13 validates against `vp.size × scale`).
   A `cursor map:` log line prints screen px → scale → view px for diagnosis. Pixel→ray→pivot
   math + hold + both DPI cases are unit-tested against a stubbed `adsk`
-  (tests/test_fusion_cursor_pivot.py). Remaining apps: Onshape (cursor→canvas mapping),
-  SolidWorks (IMouse), SketchUp (`GetCursorPos` via Fiddle), Blender (modal operator or Win32 —
-  no on-demand mouse getter in a timer), Unreal (C++-only — skip). Blender's 3D cursor is its own
-  `cursor_3d` pivot.
+  (tests/test_fusion_cursor_pivot.py). **SolidWorks — DONE (daemon 0.1.46, GUI-verified to
+  <0.1 mm):** the in-process COM driver reads the OS cursor on demand (`GetCursorPos`, gated on the
+  cursor being inside `GetViewHWnd`'s client rect — **not** `WindowFromPoint` identity, which
+  returns SW's inner render child), maps it through `ScreenToClient(GetViewHWnd)`, and inverts
+  **`IModelView.Transform`** to the in-plane `(a,b)` offsets, then runs the SAME `SelectByRay`
+  raycast as `view`; `to_cursor` zoom rides it. The `IMouse` event-sink route was rejected (SW
+  dispatches have no typeinfo → makepy the whole typelib, plus a cross-process COM callback per
+  mouse-move). **`Transform`'s pixel space had two traps that a first (tautological) test missed
+  and the user caught live** — its pixels are **client-relative** (to `GetViewHWnd`, not desktop:
+  map via `ScreenToClient`) and **physical** (so the worker thread is made per-monitor DPI-aware via
+  `SetThreadDpiAwarenessContext`, thread-local — the Tk UI is untouched); both screenshot-verified
+  at 125% scaling. Honest re-verify: driving the OS cursor to each corner's true on-screen position
+  and mapping back independently returned 4/4 corners < 0.1 mm (SW notes §7.5/§8.13); resize/
+  maximize-resistant; only the human-orbit feel is un-exercised. **SketchUp — DONE IN CODE (add-on
+  0.2.2), offline-tested, NEEDS a live-GUI verify:** the `Tool#onMouseMove` route was rejected (a
+  SketchUp Tool *replaces* the user's active tool — no passive mouse observer exists in the API), so
+  `cursor.rb`'s `CursorTracker` reads the OS cursor on demand via Win32 `GetCursorPos` (Fiddle) and
+  maps screen→viewport by the cursor's **fraction across `WindowFromPoint`'s client rect × the
+  logical viewport size** — DPI-scale-free (the ratio cancels), gated by aspect-match + foreground +
+  in-range + bbox. `camera.rb` stays pure so the pixel→pivot math self-tests (synthetic pixel in
+  `sketchup_nav_selftest.rb`); **SketchUp computer-control access was declined this cycle, so
+  half A (the live window mapping) is un-verified** — the user runs
+  `TrackballNav::CursorTracker.selftest` in the Ruby Console to confirm (SketchUp notes §5.5). This
+  is the one app in the series verified only offline; both halves rest on proven primitives
+  (`pickray`/`raytest` live-verified; the `GetCursorPos`+`WindowFromPoint`+client-rect mapping proven
+  in the SolidWorks driver). **Onshape — DONE IN CODE (daemon 0.1.48), offline-tested, NEEDS a
+  live-GUI verify:** navlib exposes no cursor, but its hit-test takes an arbitrary ray, so Half B just
+  aims the existing hit-test through the mouse (`_hit_cursor`→`_pixel_ray`→shared `_hit_ray`; `cursor`
+  falls back to the screen-center hit off-canvas). Half A reads the OS cursor (`GetCursorPos`) and maps
+  it by the cursor's **fraction across the foreground window's client area** (`ClientToScreen` — again
+  DPI-scale-free), then remaps by `CANVAS_INSET` (the toolbar/panel insets Onshape eats out of the
+  browser) → canvas NDC. **The mouse→canvas mapping is the fuzzy part** — `CANVAS_INSET` defaults to 0
+  and needs live calibration (env `TB_ONSHAPE_CANVAS_{LEFT,TOP,RIGHT,BOTTOM}`); the daemon can't read
+  the browser DOM. Offline tests (`test_onshape_cursor_pivot.py`) cover the ray build, the
+  fraction→NDC remap/rejection, `_hit_cursor` end-to-end, and the cursor→center→model fallback; the
+  live canvas landing + hit are un-verified (Onshape notes §8.14). **Blender — DONE IN CODE (add-on
+  0.1.11), headless-tested, NEEDS a live-GUI verify:** the "no on-demand mouse getter" claim was
+  RE-CONFIRMED empirically (headless `bl_rna` probe — no mouse/cursor/pointer property anywhere;
+  `Event.mouse_*` only inside a modal op; Window has cursor setters only). So a **passive window-wide
+  modal operator** (`TRACKBALL_NAV_OT_mouse_tracker`, `{'PASS_THROUGH'}` so it never consumes events)
+  caches `event.mouse_x/y` + `window.as_pointer()` on MOUSEMOVE; the timer maps it into the region
+  (pure `_region_pixel_from_window`) and raycasts (`_raycast_pixel`, refactor of `_raycast_center`),
+  holding per gesture with a selection-median fallback. It does NOT fight the pump (both main-thread,
+  never concurrent). Lifecycle friction handled: deferred invoke (register's context is restricted),
+  `@persistent load_post` restart (modal ops die on file load) with a `_tracker["gen"]` supersede,
+  and `bpy.app.background` skip. Headless probes (`blender_nav_math_test.py` +
+  `_integration_probe.py`) cover the mapping, arbitrary-pixel raycast, and an e2e `op="cursor"` orbit;
+  the live modal MOUSEMOVE tracking + file-load lifecycle are un-verified (Blender notes §4.5).
+  Blender's 3D cursor is its own `cursor_3d` pivot. **Unreal — INVESTIGATED & PARKED (add-on 0.2.2),
+  needs C++/EUW.** Re-probed UE 5.8 Python headlessly rather than trusting the old "editor deproject
+  not in Python" note: **Half B is now free** — `UnrealEditorSubsystem.screen_to_world(px)->(pos,dir)`
+  deprojects an editor-viewport pixel to a world ray with no C++/PIE. **Half A is the sole blocker** —
+  the editor-viewport *mouse pixel* still isn't in Python (viewport-local mouse getters are PIE-only;
+  `get_mouse_position_on_platform` is absolute-desktop and the viewport's screen origin isn't exposed to
+  localise it; `EditorViewportClient`/`EditorViewportSubsystem` absent). So it needs **either (a) a
+  tiny C++ editor module** exposing the active `FEditorViewportClient` `FViewport::GetMouseX/Y` to
+  Python (then Python does screen_to_world+trace — one C++ getter), **or (b) an Editor Utility Widget**
+  overlay that writes the cursor pixel/world-hit where Python polls. Did NOT fake a cursor —
+  `cursor` falls back to the selection centre (Unreal notes gotcha #13). **The cursor-orbit series is
+  now COMPLETE: 4 verified (FreeCAD/AutoCAD/Fusion/SolidWorks), 3 done-in-code pending live-GUI verify
+  (SketchUp/Onshape/Blender), Unreal parked with a clear C++/EUW path.**
 - **"Viewport under the cursor" targeting** (Blender quad-view) — same live-mouse limitation; v1
   targets the active/largest VIEW_3D.
 

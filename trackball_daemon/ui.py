@@ -421,10 +421,35 @@ class SettingsWindow:
                         hint="'view' pivot only (SolidWorks): seconds still before it re-raycasts the "
                              "surface under the centre")
 
+        if app_key == "onshape":
+            self._onshape_canvas_fields(parent)
+
         ttk.Label(parent,
                   text="Which received axis feeds orbit/pan/zoom lives in the config file; "
                        "edits here apply live.",
                   foreground="#888", wraplength=600).pack(anchor="w", padx=10, pady=(10, 2))
+
+    def _onshape_canvas_fields(self, parent):
+        """Under-cursor pivot calibration for Onshape (the 'cursor' orbit pivot). The daemon can't
+        read the browser DOM, so it positions the 3D canvas inside the browser window from these
+        insets; the resizable left feature-tree panel is auto-tracked from the view aspect (so usually
+        only Top needs setting). All apply live -- watch the pivot while you adjust."""
+        box = ttk.LabelFrame(parent, text="Under-Cursor pivot — canvas calibration")
+        box.pack(fill="x", padx=10, pady=(12, 4))
+        ttk.Label(box, text="Only for Orbit pivot = 'cursor (under mouse)'. The 3D canvas sits below "
+                            "Onshape's top toolbar and beside its panels. Set Top to the toolbar's "
+                            "fraction of the window height (~0.05–0.09); the left feature-tree panel "
+                            "is tracked automatically. Tip: set TB_ONSHAPE_DEBUG=1 to log the mapping.",
+                  foreground="#555", wraplength=600).pack(anchor="w", padx=10, pady=(4, 2))
+        self._bool_row(box, "Auto-track left panel (feature tree) from the view aspect",
+                       ("onshape", "canvas_auto_left"))
+        self._entry_row(box, "Top inset (toolbar)", ("onshape", "canvas_inset", 1),
+                        hint="fraction of window height; the key value to calibrate")
+        self._entry_row(box, "Left inset", ("onshape", "canvas_inset", 0),
+                        hint="only used when Auto-track is OFF")
+        self._entry_row(box, "Right inset", ("onshape", "canvas_inset", 2),
+                        hint="set only if a right panel (Appearance/…) is open")
+        self._entry_row(box, "Bottom inset", ("onshape", "canvas_inset", 3), hint="usually 0")
 
     def _invert_row(self, parent, label, base_keys, items):
         """A labelled row of inline invert checkboxes. `items` = [(text, key), ...] under base_keys."""
@@ -484,7 +509,7 @@ class SettingsWindow:
         self._bool_row(s3, "Zoom to mouse (screen-centre surface)", adv + ("zoom_to_mouse",))
         self._bool_row(s3, "Pan scales with view distance", adv + ("pan_scales_with_distance",))
         self._entry_row(s3, "Auto-depth hold (s)", ("apps", "blender", "view_pivot_hold_sec"),
-                        hint="'Auto Depth' pivot: seconds still before it re-raycasts")
+                        hint="'Auto Depth' / 'Under Cursor' pivot: seconds still before it re-raycasts")
 
         s4 = ttk.LabelFrame(parent, text="Camera view")
         s4.pack(fill="x", padx=10, pady=6)
@@ -556,8 +581,9 @@ class SettingsWindow:
         s3.pack(fill="x", padx=10, pady=6)
         self._entry_row(s3, "Auto-depth hold (s)", ("apps", "sketchup", "view_pivot_hold_sec"),
                         hint="'Auto Depth' pivot: seconds still before it re-raycasts")
-        ttk.Label(s3, text="SketchUp has no 3D cursor target here. Auto Depth uses the surface "
-                           "under the viewport centre; Model Centre uses model.bounds.",
+        ttk.Label(s3, text="SketchUp has no 3D cursor target here. Auto Depth raycasts the surface "
+                           "under the viewport centre; Under Cursor raycasts the surface under the "
+                           "MOUSE (both held per gesture); Model Centre uses model.bounds.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s5 = ttk.LabelFrame(parent, text="Invert directions — independent per mode")
@@ -624,7 +650,9 @@ class SettingsWindow:
                         values=["roll", "zoom", "dolly", "none"])
         self._bool_row(s2, "Lock horizon (keep level even in free orbit)", adv + ("lock_horizon",))
         ttk.Label(s2, text="Unreal has no 3D cursor, so no 3D-cursor option is shown. "
-                           "\"Auto Depth\" raycasts the surface under screen-centre.",
+                           "\"Auto Depth\" raycasts the surface under screen-centre. \"Under Cursor\" "
+                           "is not yet supported in Unreal (no editor-viewport mouse in the Python "
+                           "API) — it falls back to Selection.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s3 = ttk.LabelFrame(parent, text="Pan / Zoom")

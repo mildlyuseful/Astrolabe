@@ -28,7 +28,11 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.1"          # 0.2.1: scheme values renamed (cursor->selection; under-mouse
+ADDIN_VERSION = "0.2.2"          # 0.2.2: under-mouse "cursor" pivot investigated + PARKED -- UE 5.8
+                                 # Python exposes the editor-viewport deproject but NOT the viewport
+                                 # mouse pixel (needs a C++/EUW helper; docs/apps/unreal.md); cursor
+                                 # falls back to the selection centre.
+                                 # 0.2.1: scheme values renamed (cursor->selection; under-mouse
                                  # cursor unsupported, C++-only). Reported in the hello handshake; keep
                                  # in sync with version.json AND TrackballNav.uplugin VersionName.
                                  # 0.2.0: Blender-parity scheme (orbit/fly/walk modes, viewpoint pivot,
@@ -317,9 +321,14 @@ def _orbit_pivot(op, cam, idle):
                 _gesture["pivot"] = center if center is not None else _forward_point(cam)
             _gesture["invalid"] = False
         return _gesture["pivot"]
-    if op in ("object", "selection"):        # selected actors' bounding-box centre
+    if op in ("object", "selection", "cursor"):
+        # "cursor" (under-mouse) is PARKED, not shipped. UE 5.8 Python DOES expose the editor-viewport
+        # DEPROJECT (UnrealEditorSubsystem.screen_to_world(px)->ray, verified) -- but NOT the
+        # editor-viewport MOUSE PIXEL (no editor-viewport mouse getter; get_mouse_position_on_platform
+        # is absolute-desktop, and the viewport widget's screen origin isn't exposed to localize it).
+        # So the ray can't be aimed at the cursor from Python alone -> needs a C++/EUW helper (see
+        # docs/apps/unreal.md). It's ACCEPTED and falls back to the selection centre, like "object".
         return center if center is not None else _forward_point(cam)
-    # under-mouse "cursor" is C++-only in the editor (no Python mouse/hit API) -> falls through
     return _forward_point(cam)               # unknown -> a sane orbit point in front of the camera
 
 

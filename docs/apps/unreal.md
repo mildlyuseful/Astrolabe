@@ -7,8 +7,9 @@ add-on** integration (like Fusion/Blender/FreeCAD), not an in-process driver. Re
 touching the add-on.
 
 Verified live on the dev machine: **Unreal Engine 5.8** (`5.8.0-55116800+++UE5+Release-5.8`), the
-built-in **Python Editor Script Plugin**. Add-on `0.2.0` (Blender-parity scheme: orbit/fly/walk,
-viewpoint pivot, twist action, lock-horizon, per-mode inverts), daemon `__version__` `0.1.22`.
+built-in **Python Editor Script Plugin**. Add-on `0.2.2` (Blender-parity scheme: orbit/fly/walk,
+viewpoint pivot, twist action, lock-horizon, per-mode inverts; under-mouse `cursor` orbit
+**investigated & PARKED** — gotcha #13).
 
 ---
 
@@ -164,7 +165,9 @@ broker frame — see §5.1), interpreted for the editor's free-fly camera. `conf
   (`EditorActorSubsystem.get_selected_level_actors()` → `actor.get_actor_bounds(False)`), cached
   ~0.5 s; `selection` → **falls back to `object`** — **Unreal has NO 3D cursor** (verified: no such Python
   API; all `*cursor*` names are mouse/UI/gizmo, and no 3D-cursor option is shown for Unreal);
-  the under-mouse `cursor` pivot is unsupported too (C++-only) and falls through; `view` → the
+  the under-mouse `cursor` pivot is **PARKED** (investigated — gotcha #13 — the editor-viewport
+  *deproject* is now in the Python API but the viewport *mouse pixel* isn't) and **falls back to the
+  selection centre**, like `object`; `view` → the
   surface under the **screen centre** via `SystemLibrary.line_trace_single` down the camera forward
   axis into the **editor world** (`sub.get_editor_world()`), validated against the selection bbox and
   **held for the gesture** (re-raycast on pan/zoom or after a ~0.35 s idle). Everything falls back
@@ -302,6 +305,38 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
 12. **Two interpreters → two reload rules.** A change to the add-on (`Content/Python/*.py`) needs the
     **editor restarted** (no Python-add-on reload); a change to the daemon needs the **daemon
     restarted**. A change to both needs both.
+13. **Under-cursor (`cursor`) orbit — investigated, PARKED (needs C++ or an EUW).** Re-probed the UE
+    5.8 Python API headlessly (`scratchpad` throwaway project — same method as §9) rather than trusting
+    the old "editor-viewport cursor + deproject aren't in Python" note. The picture is **more nuanced
+    than that and worth re-checking before anyone builds this**:
+    - **Half B — the deproject — IS now in Python (news).** `UnrealEditorSubsystem.screen_to_world(
+      screen_position: Vector2D) -> (world_position, world_direction) | None` "using the **primary level
+      editor viewport**" (+ the inverse `world_to_screen`). So you can turn an editor-viewport pixel into
+      a world ray with **no C++ and no PIE** — then `line_trace_single` it (exactly the `view`-pivot
+      machinery). Headless it returns `None` (no realised viewport), so it's GUI-usable, API-present.
+    - **Half A — the editor-viewport MOUSE PIXEL — is still NOT in Python (the blocker).** Every
+      mouse/deproject getter that gives *viewport-local* coords is **PIE-only** (`PlayerController.
+      get_mouse_position` / `deproject_mouse_position_to_world` / `get_hit_result_under_cursor`;
+      `WidgetLayoutLibrary.get_mouse_position_on_viewport(world_context)`; `GameplayStatics.
+      deproject_screen_to_world(PlayerController, …)`). The one editor-usable mouse getter,
+      `WidgetLayoutLibrary.get_mouse_position_on_platform()`, returns the **absolute desktop** cursor —
+      but the level-editor viewport's **screen origin isn't exposed** (only `get_level_viewport_size()`
+      = w×h), so you can't localise the desktop cursor into the viewport pixel that `screen_to_world`
+      wants. And the editor viewport client itself is absent from Python (`EditorViewportSubsystem` /
+      `LevelEditorViewportClient` / `EditorViewportClient` / `EditorViewportLibrary` all return
+      `CLASS_ABSENT`).
+    - **Net:** the deproject half is *done*; the whole feature now hinges on **one missing datum — the
+      editor-viewport mouse pixel.** Two real ways to supply it (both need C++/Blueprint + the GUI, so
+      out of scope for the Python-only add-on):
+      - **(a) A tiny C++ helper** (a small editor module) exposing the active `FEditorViewportClient`'s
+        `FViewport::GetMouseX/GetMouseY` (viewport-local pixel) to Python via a `UFUNCTION`. Then Python
+        does `screen_to_world(pixel)` + `line_trace` — the C++ surface is literally one getter.
+      - **(b) An Editor Utility Widget** overlaying the viewport that captures `OnMouseMove` and writes
+        the cursor pixel (or its own deprojected world hit) somewhere the Python add-on polls. Heavier,
+        and a full-viewport capture widget risks intercepting clicks — the C++ getter is cleaner.
+    - **Do NOT fake a cursor.** Until (a)/(b) exists, `cursor` is accepted and falls back to the
+      selection centre (like `object`). (`get_mouse_position_on_platform` + a *calibrated* viewport rect
+      would be a hack, not a fix — no reliable viewport screen origin.)
 
 ---
 

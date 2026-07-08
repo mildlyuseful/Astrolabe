@@ -4,7 +4,7 @@ require 'sketchup.rb'
 require 'extensions.rb'
 
 module TrackballNav
-  ADDIN_VERSION = '0.2.1' unless const_defined?(:ADDIN_VERSION, false)
+  ADDIN_VERSION = '0.2.2' unless const_defined?(:ADDIN_VERSION, false)
 
   unless file_loaded?(__FILE__)
     extension = SketchupExtension.new('Trackball Nav', 'trackball_nav/main')

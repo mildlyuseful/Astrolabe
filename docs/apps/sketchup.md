@@ -7,7 +7,9 @@ explicit eye/target/up camera. SketchUp for Web is not supported because it has 
 Verified live on this machine against **SketchUp 2026.2.243**, bundled **Ruby 3.2.2**, add-on
 `0.2.0`, daemon `0.1.38`. The API probe and production self-test were run from *Extensions →
 Developer → Ruby Console*. The production add-on also completed its broker hello; `daemon.log`
-reported the loaded SketchUp build through its versioned hello.
+reported the loaded SketchUp build through its versioned hello. Add-on **0.2.2** adds the under-mouse
+`cursor` pivot (§5.5); its offline pixel→pivot math is self-tested, but the live Win32 cursor→
+viewport mapping is **not yet GUI-verified** (SketchUp computer-control access was declined).
 
 ## 1. File map
 
@@ -15,7 +17,8 @@ reported the loaded SketchUp build through its versioned hello.
 |---|---|
 | `trackball_daemon/plugins/sketchup/trackball_nav_loader.rb` | Top-level Plugins loader. Registers and auto-enables the extension in Extension Manager. |
 | `…/trackball_nav/main.rb` | Single-threaded non-blocking socket client, hello handshake, reconnect, `UI.start_timer` pump, logging. |
-| `…/trackball_nav/camera.rb` | Focused camera math: orbit/pan/zoom, pivots, raytest validation, gesture hold. |
+| `…/trackball_nav/camera.rb` | Focused camera math: orbit/pan/zoom, pivots, raytest validation, gesture hold. Pure (no Win32) so it self-tests headlessly. |
+| `…/trackball_nav/cursor.rb` | Under-mouse `cursor` pivot's Half A: Win32 `GetCursorPos` via Fiddle → viewport pixel (§5.5). Non-hijacking; no-op off-Windows. |
 | `…/trackball_nav/version.json` | Bundled/installed version read by daemon auto-update. Keep in sync with both Ruby `ADDIN_VERSION` constants. |
 | `tools/sketchup_nav_selftest.rb` | Interactive Ruby Console test of the real production `TrackballNav.apply` path. |
 | `tests/test_integrations_sketchup.py` | Headless daemon install/detect/version/update tests. |
@@ -158,9 +161,15 @@ where the active mode is known.
 - `origin` → `ORIGIN`
 - `viewpoint` → camera eye (turn in place)
 - `object` → `model.bounds.center`
-- `selection` → object centre; the under-mouse `cursor` falls back there too (no cursor-pixel
-  resolver yet — `GetCursorPos` via Fiddle is the planned route)
-- `view` → surface under the viewport centre, else object centre
+- `selection` → object centre
+- `view` → surface under the viewport **centre**, else object centre
+- `cursor` → surface under the **mouse cursor** (add-on 0.2.2) — the same `pickray`/`raytest` as
+  `view`, aimed through the live cursor pixel instead of the centre. See §5.5.
+
+Both `view` and `cursor` share `held_raycast_pivot`: the hit is captured once and **held** through
+the orbit gesture, reacquired after pan/zoom or 0.35 s idle (so the pivot never chases the moving
+surface), and validated only inside `model.bounds` expanded by 10% of its diagonal — else the
+object centre.
 
 The live Ruby Console probe created a temporary box, aimed the camera at it, and verified:
 
@@ -170,9 +179,40 @@ hit = model.raytest(ray) # [Geom::Point3d, instance_path] or nil
 ```
 
 SketchUp 2025+ returns logical-pixel `Float` viewport dimensions and accepts Float coordinates in
-`pickray`; the 2026 probe observed `1176.8 × 767.2`. A hit is accepted only inside `model.bounds`
-expanded by 10% of its diagonal. The chosen point is held through the orbit gesture and reacquired
-after pan/zoom or 0.35 seconds idle, preventing the pivot from chasing the moving surface.
+`pickray`; the 2026 probe observed `1176.8 × 767.2`.
+
+### 5.5 The `cursor` pivot — under-mouse orbit (`cursor.rb`, add-on 0.2.2)
+
+Half B (pixel → surface) is trivial here: `pickray` already takes any viewport pixel, so
+`cursor_pivot` is `screen_center_pivot` fed the cursor pixel. **Half A — the live cursor — was the
+real choice.** SketchUp's only in-API on-demand mouse source is `Tool#onMouseMove`, but a Tool is
+*the* active interaction handler: selecting one **replaces the user's current tool** (Select/Line/…),
+so the user can no longer click to draw while we track. There is no passive mouse observer in the
+Ruby API. So `CursorTracker` reads the OS cursor **on demand** with Win32 `GetCursorPos` via
+**Fiddle** — non-hijacking, and the pixel is always fresh (read only at gesture start, when the pivot
+is (re)captured). `camera.rb` stays pure (no Win32) so it unit-tests headlessly; the tracker pushes
+the pixel in via `CameraDriver.cursor_refresh`.
+
+**Screen px → viewport px:** `WindowFromPoint(cursor)` gives the graphics window; the viewport pixel
+is the cursor's **fraction** across that window's client rect (`ScreenToClient` / `GetClientRect`)
+times the logical viewport size. The fraction is **DPI-scale-free** — `client_x / client_width`
+cancels the logical-vs-physical factor — so unlike the SolidWorks driver this needs **no** per-monitor
+DPI handling. A stray window is rejected: it must sit under SketchUp's foreground frame
+(`GetAncestor(GA_ROOT) == GetForegroundWindow`) **and** share the viewport's aspect ratio, and the
+mapped pixel must land in-range; the raytest's bbox validation catches anything left; any miss falls
+back to the object centre.
+
+> **⚠ NEEDS LIVE-GUI VERIFY.** SketchUp computer-control access was declined this session, so the
+> tracker is implemented to the API and unit-tested only for the offline pixel→pivot math
+> (`sketchup_nav_selftest.rb` feeds a synthetic pixel). A GUI pass must confirm (1) `WindowFromPoint`
+> over the drawing area returns the GL window whose client rect **is** the viewport (origin at its
+> top-left, no inset), and (2) the pivot lands under the cursor while orbiting. If (1) is off, the
+> aspect gate + bbox validation degrade to the object-centre fallback rather than mispivoting. Run
+> `TrackballNav::CursorTracker.selftest` in the Ruby Console, hover a face, and read the add-on log to
+> check the reported viewport pixel. (This is the one app in the series verified only offline — the
+> two halves each rest on a proven primitive: `pickray`/`raytest` is live-verified, and the
+> `GetCursorPos`+`WindowFromPoint`+client-rect mapping is the same one proven in the SolidWorks
+> driver this cycle.)
 
 ## 6. Install, loading, and versioning
 
@@ -214,11 +254,19 @@ Interactive camera coverage:
 load '<repo>/tools/sketchup_nav_selftest.rb'  # use your checkout's absolute path
 ```
 
-The self-test creates a temporary box inside an abortable operation and currently performs 23 live
+The self-test creates a temporary box inside an abortable operation and currently performs 28 live
 assertions: the original orbit/pan/zoom/raycast checks plus viewpoint eye/focal hold, independent
 viewpoint pitch reversal, fly look/move/vector preservation, fly-forward inversion, walk horizon
-lock, and ground-plane walk movement. It writes `%TEMP%\sketchup_nav_selftest.log`, restores the
-original camera, and restarts the socket timer in `ensure`.
+lock, ground-plane walk movement, and — new in 0.2.2 — the **`cursor` pivot** (a synthetic
+off-centre pixel raycasts a *different* surface point than the centre, nil pixel yields no pivot,
+and a held cursor pivot stays rigid vs the eye through an orbit). It writes
+`%TEMP%\sketchup_nav_selftest.log`, restores the original camera, and restarts the socket timer in
+`ensure`.
+
+**The `cursor` pivot's Half A (the live Win32 cursor → viewport mapping in `cursor.rb`) is NOT yet
+GUI-verified** — computer-control access to SketchUp was declined this cycle. Run
+`TrackballNav::CursorTracker.selftest` in the Ruby Console, hover a face, and read the add-on log to
+confirm the reported viewport pixel matches the cursor before trusting live tracking (§5.5).
 
 Verified on this machine:
 
@@ -229,6 +277,8 @@ Verified on this machine:
 - production Ruby Console self-test: pass;
 - automatic loader from the real Plugins directory: pass (fresh normal launch produced a new
   `start` log and daemon handshake after selecting the blank template);
+- **`cursor` pivot offline math (synthetic pixel): pass in the self-test; the live Win32 cursor→
+  viewport mapping (`cursor.rb`) is UN-verified (SketchUp access declined) — see §5.5;**
 - physical trackball sign/feel calibration: TODO. The magnitudes follow the established eye-camera
   baselines, but the baseline direction signs remain a live hardware pass.
 
@@ -247,3 +297,10 @@ Verified on this machine:
 6. **Units are inches.** Do not copy metre/cm constants blindly. Pan is based on visible span to
    avoid a fixed-inch speed that vanishes on architectural models.
 7. **SketchUp for Web is out of scope.** It cannot load the local Ruby extension.
+8. **A `Tool` is not a passive observer.** `Tool#onMouseMove` is the obvious way to read the cursor,
+   but selecting a tool *replaces* the user's active tool — you cannot track passively that way. The
+   `cursor` pivot uses Win32 `GetCursorPos` (Fiddle) instead (§5.5). If SketchUp ever adds a real
+   passive mouse observer, revisit.
+9. **Cursor→viewport mapping uses a client-rect FRACTION, so no DPI math is needed** — the
+   `client_x / client_width` ratio cancels logical-vs-physical, unlike the SolidWorks driver whose
+   `IModelView.Transform` returns physical pixels. Do not "add DPI handling" here.

@@ -1,4 +1,4 @@
 {
-  "version": "0.2.1",
+  "version": "0.2.2",
   "_comment": "Kept in sync with ADDIN_VERSION in Content/Python/trackball_nav.py AND VersionName in TrackballNav.uplugin. The daemon's integrations._ADDINS['unreal'] reads this (like Fusion's TrackballNav.manifest / Blender's & FreeCAD's version.json) to drive auto_update. Bump on any add-on change so auto_update re-copies; reload = restart the Unreal Editor. 0.2.0: Blender-parity scheme (orbit/fly/walk modes, viewpoint pivot, twist action, lock-horizon, per-mode inverts) + orbit baseline x2."
 }

@@ -136,6 +136,38 @@ then `view_location = pivot + R @ (view_location - pivot)` so the eye rotates ri
 (eye = `view_location + back*distance` follows automatically). `pivot=None` ⇒ orbit about
 `view_location`.
 
+### 4.5 The under-mouse `cursor` pivot — the passive mouse tracker (⚠ live tracking needs the GUI)
+The `cursor` pivot orbits about the surface **under the mouse** (a SpaceMouse's "rotation center =
+cursor"). Two halves, like the other apps:
+- **Half B (the raycast) — solid, headless-tested.** `region_2d_to_origin_3d` + `region_2d_to_vector_3d`
+  + `scene.ray_cast` already unproject *any* region pixel; `_raycast_center` was refactored into
+  `_raycast_pixel(rv, region, x, y)` (+ a thin centre wrapper). `scene.ray_cast` returns only real
+  geometry hits (no sentinel), so no bbox gate is needed. The integration probe raycasts an arbitrary
+  pixel (centre hits the cube, a corner misses) headlessly.
+- **Half A (the live mouse) — the architectural friction.** Blender has no on-demand mouse getter
+  (Gotcha #4), so a **passive, window-wide modal operator** `TRACKBALL_NAV_OT_mouse_tracker` caches
+  the cursor's **window-space** position (`event.mouse_x/y`, bottom-left origin) + the window's stable
+  `as_pointer()` on every `MOUSEMOVE`, and returns `{'PASS_THROUGH'}` so it **never consumes events**
+  (normal select/orbit/draw are untouched). The timer maps the cache into the target region on demand:
+  `_region_pixel_from_window` (pure: `mouse - region.x/y`, in-range check) → `_raycast_cursor`. Off the
+  viewport / over empty space / not cached yet → **selection-median fallback**.
+- **Lifecycle friction (real, documented, handled).** A modal operator (a) **can't be invoked from the
+  restricted `register()` context** → deferred via a `0.2 s` timer; (b) is **cancelled on file load** →
+  a `@persistent` `load_post` handler restarts it (and `_tracker["gen"]` supersedes any straggler so
+  the cache never has two writers); (c) is **skipped in `--background`** (`bpy.app.background`) since
+  there's no interactive event loop. It does **not fight the timer pump** — both run on Blender's main
+  thread, never concurrently, sharing only the `_cursor` dict (modal writes, timer reads).
+- **Verified headless** (`tools/blender_nav_math_test.py` + `_integration_probe.py`): the pure
+  window→region mapping (in-range, margin, out-of-range → None), arbitrary-pixel raycast, the full
+  `_cursor` → `_raycast_cursor` path with a synthetic cached position (centre hits the cube, off-region
+  → None), and an end-to-end `op="cursor"` orbit that moves `view_location`. **Un-verified (needs the
+  GUI):** that the modal operator actually receives `MOUSEMOVE` and tracks the live cursor while
+  orbiting, and its lifecycle across real file loads. To verify live: set Orbit around = *Under Cursor
+  (mouse)*, hover different faces while orbiting, and watch `blender_addin.log` for the
+  `under-cursor hit @px(...)` line. Alternative Half A (not taken): Win32 `GetCursorPos` mapped via the
+  Blender window's screen rect — but Blender doesn't expose the window's screen origin, so it'd need
+  Win32 window-geometry too; the modal operator keeps everything in Blender's own coordinate space.
+
 ---
 
 ## 5. The control model
@@ -149,9 +181,12 @@ then `view_location = pivot + R @ (view_location - pivot)` so the eye rotates ri
 
 ### 5.2 Pivots (`scheme.orbit_pivot`, relabelled "Orbit around" in the UI)
 `viewpoint` → the **eye** (turn in place — see Solved Problem #5); `view` → **auto-depth** raycast
-under the screen centre (held per gesture); `object` → selection median; `cursor_3d` → 3D cursor;
-`origin` → world origin; unknown → `view_location` (Blender default). `viewpoint` is a Blender-only
-value added to the generic `orbit_pivot` enum.
+under the screen centre (held per gesture); `cursor` → **under-mouse** raycast (auto-depth under the
+*mouse*, held per gesture; needs the modal mouse tracker — see §4.5 / Gotcha #4 — with a
+selection-median fallback); `object` → selection median; `cursor_3d` → 3D cursor; `origin` → world
+origin; unknown → `view_location` (Blender default). `viewpoint` is a Blender-only value added to the
+generic `orbit_pivot` enum. `view` and `cursor` **share the one per-gesture hold slot** (`_gesture`),
+which is fine because only one pivot is active at a time.
 
 ### 5.3 Baseline constants (top of the add-on — tune here, not in the daemon)
 | Const | Meaning / why |
@@ -242,9 +277,13 @@ the config dict) to the broker scheme on every push, `NavBroker._build_frame` se
 3. **Camera view ignores `rv` edits.** When `view_perspective=='CAMERA'`, Blender renders through the
    `scene.camera` object and ignores `view_rotation/location/distance`. Navigating *looks dead*. The
    add-on detects this and either exits to perspective (lock off) or drives the camera (lock on).
-4. **No mouse position in a timer.** `bpy.app.timers` callbacks have no event/mouse context, so
-   "viewport under the cursor" targeting and true "zoom to mouse" aren't possible; we use the active
-   view and the screen centre. (A future option: `GetCursorPos` + `window.x/y` + area geometry.)
+4. **No on-demand mouse position — verified.** `bpy.app.timers` callbacks (and any code outside a
+   modal operator / event handler) have **no live mouse position**: as of Blender 5.1.1 there is *no*
+   `mouse`/`cursor`/`pointer` property on `Window`/`Screen`/`Area`/`Region`/`RegionView3D`/`Context`;
+   `Event.mouse_*` exists **only inside a modal operator**; `Window` has cursor *setters* only
+   (`cursor_warp`/`cursor_set`). So the **under-mouse `cursor` pivot** needs the passive modal mouse
+   tracker (§4.5). *Viewport-under-the-cursor targeting* (`_resolve_target` picking the hovered area)
+   and true *zoom-to-mouse* are still not done — they'd need the same tracker wired into those paths.
 5. **You cannot drive Blender's *native* Walk/Fly.** `view3d.walk`/`view3d.fly` are modal operators
    that read the mouse/keyboard directly and ignore our `RegionView3D` edits — the whole reason the
    add-on DIYs fly/walk. Tell users to use the daemon's Mode / the Alt+\` toggle, **not** Blender's

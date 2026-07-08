@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 10),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 11),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,9 +43,12 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.10"                   # reported in the handshake (shown in the daemon's tray)
+ADDIN_VERSION = "0.1.11"                   # reported in the handshake (shown in the daemon's tray)
                                            # 0.1.10: 3D-cursor pivot value renamed cursor->cursor_3d
                                            # (daemon config v3; "cursor" now means under-the-mouse).
+                                           # 0.1.11: under-mouse "cursor" pivot implemented via a
+                                           # passive modal-operator mouse tracker (no on-demand
+                                           # mouse getter exists in the bpy API -- verified).
 
 # --- tuning: Blender's intrinsic axis orientation + baseline sensitivity. These bake in the
 #     starting feel; the daemon's Per-App Bindings (gain 1.0 = this baseline) scale from here and
@@ -76,7 +79,18 @@ _TIMER_INTERVAL = 1.0 / 90.0    # main-thread poll rate (cheap queue drain)
 
 # auto-depth ("view" pivot): raycast the surface under the screen centre ONCE per gesture and
 # HOLD it (so the point under the crosshair stays put during orbit). Invalidated on pan/zoom/idle.
+# The under-mouse "cursor" pivot shares this hold slot (only one pivot is active at a time).
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
+# Under-mouse "cursor" pivot: Blender has NO on-demand mouse getter (verified 2026-07-06 -- no
+# mouse/cursor/pointer property on Window/Screen/Area/Region/RegionView3D/Context; Event.mouse_* only
+# exists INSIDE a modal operator/event handler; Window has cursor SETTERS only). So a passive,
+# window-wide modal operator (TRACKBALL_NAV_OT_mouse_tracker) caches the cursor's WINDOW-space
+# position on every MOUSEMOVE and the timer maps it into the target region on demand. `win` is the
+# window's stable C pointer (as_pointer(), identity-stable across Python wrapper churn). `ok` flips
+# true after the first MOUSEMOVE. _tracker["gen"] supersedes stale trackers: modal operators are
+# cancelled on file load, so load_post restarts one and bumps gen so any straggler self-cancels.
+_cursor = {"win": None, "x": 0.0, "y": 0.0, "t": 0.0, "ok": False}
+_tracker = {"gen": 0}
 _last_target = {"key": None}    # stabilise which VIEW_3D we drive across ties
 _last_scheme = {"v": None}
 _host = "?"                     # Blender version string, captured on the main thread in register()
@@ -258,11 +272,14 @@ def _resolve_target():
     return best
 
 
-def _raycast_center(rv, region):
-    """Auto-depth pivot: raycast the surface under the region centre. World Vector or None."""
+def _raycast_pixel(rv, region, x, y):
+    """Raycast the surface under region pixel (x, y) (region bottom-left origin, like Blender's own
+    `region_2d_*`). Returns a world Vector (a real geometry hit -- `scene.ray_cast` returns no
+    sentinel, so no bbox gate is needed), or None. Shared by the auto-depth centre and the
+    under-mouse cursor pivots."""
     try:
         from bpy_extras import view3d_utils as v3d
-        coord = (region.width * 0.5, region.height * 0.5)
+        coord = (x, y)
         origin = v3d.region_2d_to_origin_3d(region, rv, coord)
         direction = v3d.region_2d_to_vector_3d(region, rv, coord)
         if origin is None or direction is None:
@@ -270,12 +287,56 @@ def _raycast_center(rv, region):
         depsgraph = bpy.context.evaluated_depsgraph_get()
         result, location, _n, _i, _o, _m = bpy.context.scene.ray_cast(depsgraph, origin, direction)
         if result:
-            _log_rl("vpivot", "auto-depth hit -> (%.2f,%.2f,%.2f)" % (location.x, location.y, location.z))
             return location.copy()
-        _log_rl("vpivot", "auto-depth: no surface under centre -> viewpoint fallback")
     except Exception:
         _log_rl("ray", "ray_cast FAILED: " + traceback.format_exc().strip().replace("\n", " | "))
     return None
+
+
+def _raycast_center(rv, region):
+    """Auto-depth pivot: raycast the surface under the region centre. World Vector or None."""
+    hit = _raycast_pixel(rv, region, region.width * 0.5, region.height * 0.5)
+    _log_rl("vpivot", ("auto-depth hit -> (%.2f,%.2f,%.2f)" % (hit.x, hit.y, hit.z)) if hit is not None
+            else "auto-depth: no surface under centre -> viewpoint fallback")
+    return hit
+
+
+def _region_pixel_from_window(region_x, region_y, region_w, region_h, mouse_x, mouse_y):
+    """Map a WINDOW-space mouse position (bottom-left origin, as Event.mouse_x/y report) into
+    REGION-space pixels for a region at (region_x, region_y) sized region_w x region_h. Returns
+    (rx, ry) if the cursor is inside the region (a small margin absorbs edge rounding), else None
+    (cursor is over another area/region -> no under-mouse pivot). Pure -> unit-testable headless."""
+    rx = mouse_x - region_x
+    ry = mouse_y - region_y
+    m = 2.0
+    if -m <= rx <= region_w + m and -m <= ry <= region_h + m:
+        return (rx, ry)
+    return None
+
+
+def _cursor_region_pixel(region, win):
+    """The cached OS-cursor position as REGION pixels for `region`, or None (no cursor cached yet /
+    cursor is in a different window / cursor is outside this region). `win` is the target window."""
+    c = _cursor
+    if not c["ok"] or win is None or c["win"] != win.as_pointer():
+        return None
+    return _region_pixel_from_window(region.x, region.y, region.width, region.height, c["x"], c["y"])
+
+
+def _raycast_cursor(rv, region, win):
+    """Under-mouse pivot: raycast the surface under the LIVE cursor (its cached window-space position
+    mapped into the region). World Vector, or None (no cursor cached / cursor outside this region /
+    nothing under it)."""
+    pix = _cursor_region_pixel(region, win)
+    if pix is None:
+        _log_rl("cpivot", "under-cursor: no cached cursor in this region -> selection fallback")
+        return None
+    hit = _raycast_pixel(rv, region, pix[0], pix[1])
+    _log_rl("cpivot", ("under-cursor hit @px(%.0f,%.0f) -> (%.2f,%.2f,%.2f)"
+                       % (pix[0], pix[1], hit.x, hit.y, hit.z)) if hit is not None
+            else "under-cursor: no surface under cursor px(%.0f,%.0f) -> selection fallback"
+                 % (pix[0], pix[1]))
+    return hit
 
 
 def _selection_median():
@@ -294,16 +355,17 @@ def _cursor_location():
         return None
 
 
-def _orbit_pivot(op, rv, region, idle):
+def _orbit_pivot(op, rv, region, idle, win=None):
     """Resolve the orbit pivot Vector for pivot id `op`, or None (== orbit about view_location).
       viewpoint -> the EYE: turns the camera in place (look around), independent of how far the orbit
                    point/view_location happens to be. (Earlier this orbited view_location, which sits
                    far in front after fly/look or at a large view distance -> felt like orbiting an
                    arbitrary point; rotating about the eye is "turn the camera".)
-      view      -> auto-depth raycast (per-gesture HOLD)
+      view      -> auto-depth raycast under the screen centre (per-gesture HOLD)
+      cursor    -> auto-depth raycast under the MOUSE (per-gesture HOLD; needs the modal mouse
+                   tracker's cached position -> selection-median fallback when the cursor is off the
+                   viewport / over empty space / not cached yet)
       object    -> selection median      cursor_3d -> 3D cursor        origin -> world origin
-      (the under-mouse "cursor" pivot has no Blender resolver -- no live mouse getter in a
-      timer -- so it falls through to the view_location default, like any unknown value)
     Anything unavailable falls back to None (orbit about view_location, Blender's default)."""
     if op == "viewpoint":
         return _eye(rv)
@@ -312,13 +374,21 @@ def _orbit_pivot(op, rv, region, idle):
             _gesture["pivot"] = _raycast_center(rv, region)
             _gesture["invalid"] = False
         return _gesture["pivot"]
+    if op == "cursor":
+        if _gesture["pivot"] is None or _gesture["invalid"] or idle > PIVOT_HOLD_IDLE:
+            hit = _raycast_cursor(rv, region, win)
+            if hit is None:
+                hit = _selection_median()          # cursor off-viewport / off-geometry -> selection
+            _gesture["pivot"] = hit
+            _gesture["invalid"] = False
+        return _gesture["pivot"]
     if op == "object":
         return _selection_median()
     if op == "cursor_3d":
         return _cursor_location()
     if op == "origin":
         return Vector((0.0, 0.0, 0.0))
-    return None                                    # under-mouse "cursor" and unknowns
+    return None                                    # unknowns -> orbit about view_location
 
 
 def _sync_camera_to_view(rv, scene):
@@ -333,7 +403,7 @@ def _sync_camera_to_view(rv, scene):
 # ======================================================================================
 # Frame application (main thread)
 # ======================================================================================
-def _apply_orbit(rv, region, o, frame, adv, idle):
+def _apply_orbit(win, rv, region, o, frame, adv, idle):
     style = frame.get("os", "free")
     lock = bool(adv.get("lock_horizon", False))
     twist_action = adv.get("twist_action", "roll")
@@ -355,7 +425,7 @@ def _apply_orbit(rv, region, o, frame, adv, idle):
     if pitch or yaw or roll:
         turntable = (style == "turntable") or lock
         R = _orbit_R(rv, pitch, yaw, roll, turntable)
-        _apply_world_rotation(rv, R, _orbit_pivot(op, rv, region, idle))
+        _apply_world_rotation(rv, R, _orbit_pivot(op, rv, region, idle, win))
 
 
 def _move_scale(base, speed, rv):
@@ -481,7 +551,7 @@ def _apply(target, frame, idle):
             _gesture["invalid"] = True
     else:                                           # orbit mode
         if o[0] or o[1] or o[2]:
-            _apply_orbit(rv, region, o, frame, adv, idle)
+            _apply_orbit(_win, rv, region, o, frame, adv, idle)
         elif p[0] or p[1]:
             _pan(rv, p[0], p[1], bool(adv.get("pan_scales_with_distance", True)))
             _gesture["invalid"] = True              # view moved -> recast auto-depth next orbit
@@ -647,6 +717,74 @@ def _unregister_keymap():
 
 
 # ======================================================================================
+# Passive mouse tracker (Half A of the under-mouse "cursor" pivot). Blender has no on-demand mouse
+# getter, so a window-wide modal operator caches the cursor's window-space position on each
+# MOUSEMOVE; it returns {'PASS_THROUGH'} so it never consumes events or blocks normal interaction.
+# The timer pump reads _cursor and maps it into the region (see _cursor_region_pixel). Lifecycle
+# friction (documented): modal operators can't be invoked from the restricted register() context
+# (deferred via a timer) and are CANCELLED on file load (restarted via load_post). It does NOT fight
+# the timer pump -- both run on Blender's main thread, never concurrently, sharing only the _cursor
+# dict (modal writes, timer reads).
+# ======================================================================================
+class TRACKBALL_NAV_OT_mouse_tracker(bpy.types.Operator):
+    """Internal: passively cache the cursor's window-space position for the under-mouse orbit pivot.
+    Always PASS_THROUGH -- never consumes events."""
+    bl_idname = "trackball_nav.mouse_tracker"
+    bl_label = "Trackball: Mouse Tracker (internal)"
+    bl_options = {'INTERNAL'}
+
+    def invoke(self, context, event):
+        if context.window is None:                  # --background / no window -> nothing to track
+            return {'CANCELLED'}
+        _tracker["gen"] += 1                         # supersede any straggler from before a reload
+        self._gen = _tracker["gen"]
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def modal(self, context, event):
+        if self._gen != _tracker["gen"]:            # superseded (reload) or shutting down -> stop
+            return {'CANCELLED'}
+        if event.type == 'MOUSEMOVE':
+            win = context.window
+            if win is not None:
+                _cursor["win"] = win.as_pointer()
+                _cursor["x"] = float(event.mouse_x)
+                _cursor["y"] = float(event.mouse_y)
+                _cursor["t"] = time.time()
+                _cursor["ok"] = True
+        return {'PASS_THROUGH'}                      # let the event continue to normal handlers
+
+
+def _start_tracker():
+    """(Re)start the passive mouse tracker in an available window. Deferred out of register()/load
+    (a modal operator needs a window + an unrestricted context). One-shot (returns None)."""
+    try:
+        if bpy.app.background:                       # headless: no interactive window / event loop
+            return None
+        wm = getattr(bpy.context, "window_manager", None)
+        if wm is None or not wm.windows:
+            return None                             # no window yet
+        win = bpy.context.window or wm.windows[0]
+        with bpy.context.temp_override(window=win):
+            bpy.ops.trackball_nav.mouse_tracker('INVOKE_DEFAULT')
+        _log("mouse tracker started (window-wide MOUSEMOVE cache for under-cursor pivot)")
+    except Exception:
+        _log("mouse tracker start FAILED: " + traceback.format_exc().strip().replace("\n", " | "))
+    return None
+
+
+@bpy.app.handlers.persistent
+def _on_load_post(*_args):
+    """Blender cancels running modal operators on file load -> restart the mouse tracker (deferred,
+    since load_post runs in a restricted context). Invalidate the stale cached cursor first."""
+    _cursor["ok"] = False
+    try:
+        bpy.app.timers.register(_start_tracker, first_interval=0.1)
+    except Exception:
+        pass
+
+
+# ======================================================================================
 # Add-on registration
 # ======================================================================================
 def register():
@@ -663,26 +801,42 @@ def register():
     _gesture.update({"t": 0.0, "pivot": None, "invalid": True})
     _mode_override["v"] = None
     _daemon_nav["v"] = None
-    try:
-        bpy.utils.register_class(TRACKBALL_NAV_OT_cycle_mode)
-    except Exception:                        # already registered (e.g. reload) -> ignore
-        pass
+    _cursor.update({"win": None, "x": 0.0, "y": 0.0, "t": 0.0, "ok": False})
+    for cls in (TRACKBALL_NAV_OT_cycle_mode, TRACKBALL_NAV_OT_mouse_tracker):
+        try:
+            bpy.utils.register_class(cls)
+        except Exception:                    # already registered (e.g. reload) -> ignore
+            pass
     try:
         bpy.types.VIEW3D_MT_view.append(_menu_func)
     except Exception:
         pass
     _register_keymap()
+    if _on_load_post not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_on_load_post)   # restart the tracker after a file load
     _reader_thread = threading.Thread(target=_reader, name="trackball-nav-reader", daemon=True)
     _reader_thread.start()
     if not bpy.app.timers.is_registered(_on_timer):
         bpy.app.timers.register(_on_timer, persistent=True)
+    # Start the passive mouse tracker deferred (register()'s context is too restricted to invoke a
+    # modal operator; a timer runs it once a window/context is available -- no-op in --background).
+    try:
+        bpy.app.timers.register(_start_tracker, first_interval=0.2)
+    except Exception:
+        pass
 
 
 def unregister():
     _stop.set()
+    _tracker["gen"] += 1                     # supersede the running mouse tracker (self-cancels next event)
     try:
         if bpy.app.timers.is_registered(_on_timer):
             bpy.app.timers.unregister(_on_timer)
+    except Exception:
+        pass
+    try:
+        if _on_load_post in bpy.app.handlers.load_post:
+            bpy.app.handlers.load_post.remove(_on_load_post)
     except Exception:
         pass
     _unregister_keymap()
@@ -690,10 +844,11 @@ def unregister():
         bpy.types.VIEW3D_MT_view.remove(_menu_func)
     except Exception:
         pass
-    try:
-        bpy.utils.unregister_class(TRACKBALL_NAV_OT_cycle_mode)
-    except Exception:
-        pass
+    for cls in (TRACKBALL_NAV_OT_mouse_tracker, TRACKBALL_NAV_OT_cycle_mode):
+        try:
+            bpy.utils.unregister_class(cls)
+        except Exception:
+            pass
     _log("unregister: Trackball Nav v%s" % ADDIN_VERSION)
 
 
