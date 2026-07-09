@@ -119,9 +119,9 @@ self:update motion         false
 - **Write:** `view.affine`, `view.extents`, `hit.lookfrom` / `hit.direction` / `hit.aperture`
   (write-only inputs — reading them returns "unknown property", which is **expected**),
   `hit.selectionOnly`, `motion`, `transaction`, `pivot.position`, `pivot.visible`.
-- **Not exposed:** `pointer` — navlib gives us no cursor position, so the daemon reads the **OS**
-  cursor itself (`GetCursorPos`) and maps it into the canvas to aim the hit-test (§8.14). navlib's
-  hit-test happily accepts an arbitrary ray, so the missing `pointer` accessor is *not* a blocker.
+- **Not exposed:** `pointer` — navlib gives us no cursor position. The daemon takes a **page-
+  reported** `#canvas` NDC from a userscript (`/trackball/pointer`, §8.14) and aims the hit-test
+  through that ray. The missing `pointer` accessor is *not* a blocker.
 - Best-effort props (`motion`/`transaction`/`pivot.*`) are sent via `write_best_effort`: a
   CALLERROR is swallowed (logged once) and never disconnects. **Only `view.affine` must land.**
 
@@ -170,7 +170,7 @@ Algorithm:
    back along forward (started outside the model). This is the **orthographic** ray (Onshape is ortho
    by default, §8.8); NDC = (0,0) reproduces the old screen-center ray exactly.
    - `view` / `selection` → NDC (0,0) (screen center).
-   - `cursor` → the OS cursor mapped to canvas NDC (§8.14); off-canvas ⇒ **fall back to the center**.
+   - `cursor` → page-reported `#canvas` NDC (§8.14); off-canvas / no userscript ⇒ **fall back to the center**.
 2. Try apertures smallest-first (`HIT_APERTURES = (0.03, 0.1, 0.3)` × view half-extent), widening
    until something is hit ("expand the radius until it hits").
 3. Validate the hit is a finite 3-point **inside `model.extents` expanded ~10% of its diagonal**
@@ -265,9 +265,8 @@ These are the non-obvious things, each as *symptom → cause → fix*. Most cost
 - `hit.lookfrom`/`hit.direction`/`hit.aperture` are **write-only**; reading them returns "unknown
   property" — that is expected, **not** a failure.
 - `pointer` is **not exposed**, but the hit-test accepts an **arbitrary ray**, so a cursor-position
-  pivot IS possible: the daemon reads the OS cursor and aims the ray through it (`cursor` pivot,
-  §8.14). The mouse→canvas mapping (especially Firefox chrome) was the hard part; the hit-test itself
-  is fine.
+  pivot IS possible: the page reports exact `#canvas` NDC via userscript (`cursor` pivot, §8.14).
+  Win32 window geometry alone cannot size the canvas on Firefox; screen capture is not used.
 - A **no-hit** result is not clearly signalled, so always validate `hit.lookat` against the model
   bbox (`_valid_hit`).
 - **Cache-poisoning trap:** do **not** read `hit.lookat` through the caching `conn.read()` — a no-hit
@@ -306,25 +305,42 @@ These are the non-obvious things, each as *symptom → cause → fix*. Most cost
 - If the client doesn't answer a read/write within `_RPC_TIMEOUT` (2s), we treat the connection as
   dead and drop it. A wedged/backgrounded tab will disconnect rather than hang the worker.
 
-### 8.14 Under-cursor orbit: mapping the OS cursor into the canvas (⚠ NEEDS LIVE-GUI VERIFY)
+### 8.14 Under-cursor orbit: exact #canvas pointer from the page (✓ LIVE-VERIFIED)
 The `cursor` pivot orbits about the surface **under the mouse**. Two halves:
 - **Half B (the ray) — solid.** `_hit_cursor` → `_pixel_ray` → `_hit_ray` (same aperture/bbox/hold as `view`).
-- **Half A (mouse → canvas).** `GetCursorPos` on a per-monitor-v2 worker thread → web-content rect →
-  canvas NDC:
-  1. **Content rect** (`_browser_content_rect`): Chromium = largest `Chrome_RenderWidgetHostHWND`;
-     Firefox = top-level client minus `_firefox_content_top` (screen-DC capture of the top band;
-     first left-half Onshape-dark row). **Do not use `GetDC(hwnd)` BitBlt on Firefox** — it returns
-     solid black under DWM, which made content-top stick at 0 and auto-left overestimate canvas
-     width (pivot **down and to the right**, offset **gains with cursor-x** — the classic symptom).
-  2. **Canvas inset** (`_measure_canvas_inset`, preferred): screen-capture the content, scan
-     right-side columns for viewport top/bottom (neutral grey **or** non-UI model pixels), then
-     derive width from `view.extents` aspect flush-right. Cached per content size + aspect.
-     Falls back to config `canvas_inset` + aspect `canvas_auto_left` if measurement fails.
-  3. Remap fraction → NDC (`_client_fraction_to_ndc`); off-canvas → centre-hit fallback.
+- **Half A (mouse → canvas NDC) — page-reported, exact.** navlib exposes no pointer. Win32
+  `GetCursorPos` + window geometry cannot recover the WebGL canvas on Firefox (client includes
+  chrome; no content HWND). Screen-DC / BitBlt measurement was tried and rejected (inaccurate /
+  user-forbidden). **`view.extents` aspect is not the canvas aspect** (live: `#canvas` ≈ 1.72 vs
+  extents halves ≈ 0.98), so auto-left from extents was wrong and removed.
 
-- **Verified offline** (`tests/test_onshape_cursor_pivot.py`): ray/NDC/auto-left, black-capture
-  rejection, measured-inset path, model-fills-view case. **Live:** screen-DC measure smoke-checked
-  on Firefox @ 125% DPI. **Still needs GUI confirm** that the orbit pivot sits under the cursor.
+  **Why a userscript:** the only exact size is `document.getElementById("canvas").getBoundingClientRect()`
+  inside the page. A Violentmonkey/Tampermonkey script (served at
+  `https://127.51.68.120:8181/trackball/pointer.js`, also copyable from the daemon UI) posts canvas
+  NDC to `/trackball/pointer`. The bridge caches samples (~0.75 s TTL). Off-canvas / stale /
+  missing → fall back to the screen-centre hit.
+
+- **Install (daemon UI):** 3D Apps → Onshape → Enable/Re-check shows cert + SpaceMouse steps plus
+  **Copy userscript** and the install list. Per-App Bindings → Onshape has a dedicated
+  **Copy userscript…** button (copies immediately, then shows “Copied!” + steps). Choosing Orbit
+  pivot = **cursor (under mouse)** opens a one-time warning with the same copy/steps and an
+  optional **Do not show again** checkbox (`onshape.cursor_userscript_warn_dismissed`).
+- **Manual steps:** install Tampermonkey/Violentmonkey → new script → paste → save → reload Onshape.
+  Optional check: `GET /trackball/pointer` should show updating `ndc_x`/`ndc_y`.
+- **Verified live** (daemon 0.1.56+): under-cursor orbit works; residual error is small / mostly
+  imperceptible. Offline tests cover ray/parse/TTL/`_hit_cursor`/fallbacks and the extents≠canvas
+  aspect lock (`tests/test_onshape_cursor_pivot.py`).
+
+#### Simpler install alternatives (not shipped yet)
+Listed for future UX work — current path is copy-from-daemon + userscript manager:
+
+| Approach | User effort | Notes |
+|---|---|---|
+| Fold deeper into Set up (already partially done) | One dialog | Copy button + steps on Enable/Re-check |
+| Greasy Fork / GitHub raw + `@updateURL` | One “Install” click | Needs hosted script + version sync |
+| Bookmarklet | Drag bookmark; click per tab | No extension; easy to forget |
+| Tiny Firefox/Chrome extension | “Add to browser” once | Best long-term UX; review/signing cost |
+| Warn when `cursor` selected but no samples | Zero install change | Makes failure obvious (complementary) |
 
 ### 8.15 "Connects in Firefox but not Chrome/Edge" — Private Network Access
 - **Symptom:** the bridge links from Firefox but a Chromium browser (Chrome/Edge) never connects, even
@@ -356,14 +372,14 @@ Current values (expect a sign/feel pass on real hardware — flip signs if a cha
 | `ZOOM_SIGN` / `ZOOM_SCALE` | `1.0` / `0.25` | zoom direction / magnitude |
 | `AFFINE_TRANSLATION_IN_COLUMN` | `False` | §8.1 — row-vector for Onshape |
 | `HIT_APERTURES` | `(0.03,0.1,0.3)` | hit-test ray thicknesses (× view half-extent), widened in order |
-| `CANVAS_INSET` | `(0,0,0,0)` | §8.14 — env DEFAULT for the `cursor`-pivot canvas insets (L,T,R,B) of the **web-content** area; config/UI `onshape.canvas_inset` supersedes. Top toolbar ≈ the only one to set (~0.05–0.09) — a wrong top *gains* the horizontal |
-| `CANVAS_AUTO_LEFT` | `True` | §8.14 — env DEFAULT; config/UI `onshape.canvas_auto_left` supersedes. Auto-track the resizable left panel from the view aspect (needs a correct Top + chrome-free content rect) |
+| `_POINTER_TTL` | `0.75` | §8.14 — max age of a page-reported `#canvas` NDC sample |
 | `_MOTION_IDLE` | `0.35` | seconds idle before the gesture ends / pivot re-picks |
 | `_RPC_TIMEOUT` | `2.0` | §8.13 |
 
 Per-app sensitivity/invert/scheme and the viewport rate come from config (Per-App Bindings), same as
 the other apps. `config.data["onshape"]` holds `{address, port, cert_path, key_path}` (additive
-block; blank cert paths → the generated defaults).
+block; blank cert paths → the generated defaults). Under-cursor orbit needs the userscript from
+`/trackball/pointer.js` (no canvas-inset calibration).
 
 ---
 
@@ -394,15 +410,16 @@ block; blank cert paths → the generated defaults).
 ## 11. Status & known limitations (at handoff)
 
 - **Working:** TLS + handshake + connection status; orbit with the hit-test "view" pivot; under-mouse
-  **`cursor` pivot** (daemon 0.1.55 — screen-DC canvas measure + aspect width; offline-tested,
-  **needs live-GUI verify** of the hit under the mouse); ortho zoom (rubberband fixed); pan;
-  control scheme (view/object/origin/cursor, free/turntable, zoom modes).
+  **`cursor` pivot** (daemon 0.1.57 — page userscript posts exact `#canvas` NDC; **live-verified**,
+  small residual inaccuracy; install via Copy userscript in Enable/Re-check, Per-App Bindings, or
+  the cursor-pivot warning); ortho zoom (rubberband fixed); pan; control scheme
+  (view/object/origin/cursor, free/turntable, zoom modes).
 - **Needs a feel/sign pass on hardware:** orbit/pan/zoom directions and magnitudes (`*_SIGN`,
   `*_SCALE`), and the turntable `WORLD_UP` axis (Y vs Z) — verify and flip as needed.
 - **Limitations:** zoom-to-object/cursor for ortho is approximate (falls back toward center); Firefox
-  needs its own cert trust; perspective path is lightly tested (Onshape defaults to ortho). Measured
-  canvas assumes flush-right (set Right inset if a right panel is open). There is **no add-in** to
-  install or update for Onshape — it's all the in-process bridge.
+  needs its own cert trust; perspective path is lightly tested (Onshape defaults to ortho).
+  Under-cursor orbit requires the `/trackball/pointer.js` userscript (daemon UI copies it). There is
+  **no add-in** to install or update for Onshape — it's all the in-process bridge.
 
 ---
 

@@ -209,13 +209,11 @@ DEFAULTS = {
     # Onshape's page connects to, at this fixed loopback endpoint (it MUST be 127.51.68.120:8181 --
     # that's the address Onshape's 3Dconnexion client probes). Blank cert/key paths => the driver
     # uses generated certs in the config dir (onshape_cert.pem / onshape_key.pem).
-    # canvas_inset (L,T,R,B fractions) positions the under-cursor orbit pivot inside the browser: the
-    # 3D canvas sits below Onshape's top toolbar (Top) and beside its panels. The resizable left
-    # feature-tree panel is auto-tracked from the view aspect when canvas_auto_left is on, so usually
-    # only Top needs setting (~0.05-0.09, the toolbar's fraction of the window height). Supersedes the
-    # TB_ONSHAPE_CANVAS_* env vars. See docs/apps/onshape.md §8.14.
+    # Under-cursor orbit uses a page userscript that POSTs exact #canvas NDC to /trackball/pointer
+    # (see docs/apps/onshape.md §8.14). cursor_userscript_warn_dismissed suppresses the one-time
+    # UI warning when the user picks Orbit pivot = cursor.
     "onshape": {"address": "127.51.68.120", "port": 8181, "cert_path": "", "key_path": "",
-                "canvas_inset": [0.0, 0.0, 0.0, 0.0], "canvas_auto_left": True},
+                "cursor_userscript_warn_dismissed": False},
 }
 
 

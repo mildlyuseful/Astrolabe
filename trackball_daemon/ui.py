@@ -194,10 +194,10 @@ class SettingsWindow:
             anchor="w", padx=12, pady=2)
         return var
 
-    def _mapped_combo_row(self, parent, label, keys, options, hint=""):
+    def _mapped_combo_row(self, parent, label, keys, options, hint="", on_change=None):
         """Readonly combo whose display labels differ from the stored values. `options` is a list of
         (display, value) pairs -- used for the Blender Advanced combos that relabel the generic
-        scheme with Blender terms."""
+        scheme with Blender terms. Optional `on_change(new_value)` runs after save."""
         frame = ttk.Frame(parent)
         frame.pack(fill="x", **_PAD)
         ttk.Label(frame, text=label, width=24, anchor="w").pack(side="left")
@@ -210,9 +210,93 @@ class SettingsWindow:
         combo.pack(side="left")
         if hint:
             ttk.Label(frame, text=hint, foreground="#777").pack(side="left", padx=6)
-        combo.bind("<<ComboboxSelected>>", lambda _e: self._set_and_save(keys, val_by_disp[var.get()]))
+
+        def _on_select(_e=None):
+            val = val_by_disp[var.get()]
+            self._set_and_save(keys, val)
+            if on_change is not None:
+                on_change(val)
+
+        combo.bind("<<ComboboxSelected>>", _on_select)
         return var
 
+    def _copy_onshape_userscript(self):
+        """Copy the Violentmonkey/Tampermonkey userscript to the clipboard. Returns True on success."""
+        from .onshape_bridge import pointer_userscript_source
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(pointer_userscript_source())
+            self.root.update_idletasks()
+            return True
+        except tk.TclError:
+            return False
+
+    def _show_onshape_userscript_dialog(self, *, title, lead="", show_dont_show_again=False,
+                                        copy_on_open=False):
+        """Modal with Copy userscript + install steps. Optional 'do not show again' for the cursor warn.
+        When `copy_on_open` is True, the script is copied immediately and the lead becomes 'Copied!'."""
+        from .onshape_bridge import pointer_install_instructions, POINTER_SCRIPT_URL
+
+        parent = self.win if self.win is not None else self.root
+        dlg = tk.Toplevel(parent)
+        dlg.title(title)
+        dlg.transient(parent)
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        body = ttk.Frame(dlg, padding=12)
+        body.pack(fill="both", expand=True)
+
+        status = tk.StringVar(value="")
+        if copy_on_open:
+            if self._copy_onshape_userscript():
+                status.set("Copied!")
+                if not lead:
+                    lead = "The userscript is on your clipboard. Install steps:"
+            else:
+                status.set("Copy failed — open %s and paste manually." % POINTER_SCRIPT_URL)
+
+        if lead:
+            ttk.Label(body, text=lead, wraplength=520, justify="left").pack(anchor="w", pady=(0, 8))
+
+        ttk.Label(body, textvariable=status, foreground="#1a7f37").pack(anchor="w")
+
+        def _copy():
+            if self._copy_onshape_userscript():
+                status.set("Copied!")
+            else:
+                status.set("Copy failed — open %s and paste manually." % POINTER_SCRIPT_URL)
+
+        ttk.Button(body, text="Copy userscript", command=_copy).pack(anchor="w", pady=(4, 10))
+
+        ttk.Label(body, text=pointer_install_instructions(), wraplength=520,
+                  justify="left").pack(anchor="w")
+
+        dont = tk.BooleanVar(value=False)
+        if show_dont_show_again:
+            ttk.Checkbutton(body, text="Do not show again", variable=dont).pack(
+                anchor="w", pady=(12, 0))
+
+        def _close():
+            if show_dont_show_again and dont.get():
+                self._set_and_save(("onshape", "cursor_userscript_warn_dismissed"), True)
+            dlg.destroy()
+
+        ttk.Button(body, text="OK", command=_close).pack(anchor="e", pady=(14, 0))
+        dlg.protocol("WM_DELETE_WINDOW", _close)
+        dlg.wait_window()
+
+    def _warn_onshape_cursor_userscript_if_needed(self, new_value):
+        if new_value != "cursor":
+            return
+        if self.cfg.data.get("onshape", {}).get("cursor_userscript_warn_dismissed"):
+            return
+        self._show_onshape_userscript_dialog(
+            title="Onshape — under-cursor orbit",
+            lead="Orbit pivot \"cursor (under mouse)\" needs the Astrolabe userscript in your "
+                 "Onshape browser. Without it, orbit falls back to the screen centre.",
+            show_dont_show_again=True,
+        )
     @staticmethod
     def _fmt(v):
         if isinstance(v, float):
@@ -288,7 +372,13 @@ class SettingsWindow:
                 holder["btn"].config(text=self._app_button_text(appdef))
             except tk.TclError:
                 pass
-            messagebox.showinfo("Integration", msg, parent=self.win)
+            if appdef.key == "onshape":
+                self._show_onshape_userscript_dialog(
+                    title="Onshape — Set up",
+                    lead=msg,
+                )
+            else:
+                messagebox.showinfo("Integration", msg, parent=self.win)
         else:
             messagebox.showwarning("Integration", msg, parent=self.win)
 
@@ -411,7 +501,9 @@ class SettingsWindow:
         self._mapped_combo_row(parent, "Orbit pivot", base + ("scheme", "orbit_pivot"),
                                [("default", "default"), ("view", "view"),
                                 ("cursor (under mouse)", "cursor"), ("object", "object"),
-                                ("origin", "origin"), ("selection", "selection")])
+                                ("origin", "origin"), ("selection", "selection")],
+                               on_change=(self._warn_onshape_cursor_userscript_if_needed
+                                          if app_key == "onshape" else None))
         self._combo_row(parent, "Orbit style", base + ("scheme", "orbit_style"),
                         values=["default", "free", "turntable"])
         self._mapped_combo_row(parent, "Zoom mode", base + ("scheme", "zoom_mode"),
@@ -422,34 +514,22 @@ class SettingsWindow:
                              "surface under the centre")
 
         if app_key == "onshape":
-            self._onshape_canvas_fields(parent)
+            box = ttk.LabelFrame(parent, text="Under-cursor orbit — userscript")
+            box.pack(fill="x", padx=10, pady=(12, 4))
+            ttk.Label(box, text="Required only when Orbit pivot = cursor (under mouse). Copies the "
+                                "Violentmonkey/Tampermonkey script that reports the exact #canvas "
+                                "pointer to the local bridge.",
+                      foreground="#555", wraplength=600).pack(anchor="w", padx=10, pady=(4, 2))
+            ttk.Button(box, text="Copy userscript…",
+                       command=lambda: self._show_onshape_userscript_dialog(
+                           title="Onshape — copy userscript",
+                           copy_on_open=True,
+                       )).pack(anchor="w", padx=10, pady=(2, 8))
 
         ttk.Label(parent,
                   text="Which received axis feeds orbit/pan/zoom lives in the config file; "
                        "edits here apply live.",
                   foreground="#888", wraplength=600).pack(anchor="w", padx=10, pady=(10, 2))
-
-    def _onshape_canvas_fields(self, parent):
-        """Under-cursor pivot calibration for Onshape (the 'cursor' orbit pivot). The daemon can't
-        read the browser DOM, so it positions the 3D canvas inside the browser window from these
-        insets; the resizable left feature-tree panel is auto-tracked from the view aspect (so usually
-        only Top needs setting). All apply live -- watch the pivot while you adjust."""
-        box = ttk.LabelFrame(parent, text="Under-Cursor pivot — canvas calibration")
-        box.pack(fill="x", padx=10, pady=(12, 4))
-        ttk.Label(box, text="Only for Orbit pivot = 'cursor (under mouse)'. Top = Onshape toolbar as a "
-                            "fraction of the *page* height (~0.05–0.09), not the whole browser window "
-                            "(Firefox chrome is subtracted automatically). The left feature-tree panel "
-                            "is tracked from the view aspect. Tip: TB_ONSHAPE_DEBUG=1 logs the mapping.",
-                  foreground="#555", wraplength=600).pack(anchor="w", padx=10, pady=(4, 2))
-        self._bool_row(box, "Auto-track left panel (feature tree) from the view aspect",
-                       ("onshape", "canvas_auto_left"))
-        self._entry_row(box, "Top inset (toolbar)", ("onshape", "canvas_inset", 1),
-                        hint="fraction of window height; the key value to calibrate")
-        self._entry_row(box, "Left inset", ("onshape", "canvas_inset", 0),
-                        hint="only used when Auto-track is OFF")
-        self._entry_row(box, "Right inset", ("onshape", "canvas_inset", 2),
-                        hint="set only if a right panel (Appearance/…) is open")
-        self._entry_row(box, "Bottom inset", ("onshape", "canvas_inset", 3), hint="usually 0")
 
     def _invert_row(self, parent, label, base_keys, items):
         """A labelled row of inline invert checkboxes. `items` = [(text, key), ...] under base_keys."""

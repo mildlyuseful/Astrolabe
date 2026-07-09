@@ -146,8 +146,6 @@ class App:
             self.sw_driver.set_pivot_hold(swcfg.get("view_pivot_hold_sec", 0.5))
         if self.onshape_bridge is not None:
             self.onshape_bridge.set_scheme(**self._effective_scheme("onshape"))
-            ocfg = self.config.data.get("onshape", {})
-            self.onshape_bridge.set_canvas(ocfg.get("canvas_inset"), ocfg.get("canvas_auto_left"))
 
     def _app_rate(self, key):
         """Effective viewport/flush rate (Hz) for app `key`: its per-app override, or the global

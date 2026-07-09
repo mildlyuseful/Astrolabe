@@ -1,29 +1,28 @@
-# Onshape cursor mapping — Firefox chrome / content-rect fix
+# Onshape cursor mapping — status (daemon 0.1.57)
 
-Status: **APPLIED in daemon 0.1.54** (see `trackball_daemon/onshape_bridge.py` +
-`docs/apps/onshape.md` §8.14). This note keeps the diagnosis that earlier attempts hit.
+**Live-verified.** Under-cursor orbit works via a page userscript; residual error is small / mostly
+imperceptible.
 
-## The sizing bug
+## Why this approach
 
-`_cursor_client_fraction()` must report the cursor as a fraction of the browser **web-content**
-area (the page), not the top-level window client.
+Previous approaches (Win32 content-rect + BitBlt / screen-DC canvas measure / `view.extents`
+auto-left) could not recover an exact canvas size without screen capture, and `view.extents`
+aspect does **not** match `#canvas` (~0.98 vs ~1.72 live). Screen capture was ruled out.
 
-1. **Firefox:** `WindowFromPoint` / `MozillaWindowClass` `GetClientRect` **includes** browser chrome
-   (tabs + address bar + bookmarks, ~45 px @ 125% DPI with bookmarks visible on the test machine).
-   That inflates `win_h` for `_effective_canvas_inset` (horizontal scale error that tracks the left
-   feature-tree width) and shifts `fy` downward (consistent vertical pivot offset).
-2. **Chrome:** multiple `Chrome_RenderWidgetHostHWND` children exist; the **first** match can be a
-   tiny UI widget. Use the **largest** by client area (area > 50k px²).
+The only exact source is DOM: `document.getElementById("canvas").getBoundingClientRect()`.
 
-## Fix (current code)
+## Current approach
 
-`_browser_content_rect(root)`:
+A Violentmonkey/Tampermonkey userscript on `cad.onshape.com` posts canvas NDC to
+`https://127.51.68.120:8181/trackball/pointer`.
 
-- Tier 1: largest `Chrome_RenderWidgetHostHWND` under the root.
-- Tier 2: Firefox — top-level client minus `_firefox_content_top` (BitBlt top band; first row that
-  is Onshape near-black across the **left half**; cached per hwnd/size).
-- Tier 3: raw client rect.
+- Source: `trackball_daemon/onshape_bridge.py` (`_POINTER_USERSCRIPT` / `pointer_userscript_source()`),
+  also served at `/trackball/pointer.js`.
+- Install from the daemon UI: Enable/Re-check dialog, Per-App Bindings → **Copy userscript…**, or
+  the warning when selecting Orbit pivot = cursor (optional “Do not show again”).
+- Steps: install Tampermonkey/Violentmonkey → new script → paste → save → reload Onshape.
 
-Combined with aspect-derived `canvas_auto_left` and a calibrated Top toolbar inset (~0.05–0.09 of
-content height). Offline: `tests/test_onshape_cursor_pivot.py`. Live hit-under-cursor still flagged
-needs-GUI-verify.
+## Simpler install alternatives (future)
+
+See `docs/apps/onshape.md` §8.14 table: Greasy Fork one-click, bookmarklet, browser extension,
+missing-sample warning. Not shipped yet — copy-from-daemon is the supported path.

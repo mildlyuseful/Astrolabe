@@ -106,24 +106,11 @@ AFFINE_TRANSLATION_IN_COLUMN = False
 # centre (i.e. model orbit). Onshape does the actual raycast; we just set the ray + read the result.
 HIT_APERTURES = (0.03, 0.1, 0.3)
 
-# Under-cursor orbit: fractions of the *web-content* area eaten by Onshape's in-page chrome
-# (header/toolbar/panels). Env defaults only -- config.onshape.canvas_inset / canvas_auto_left
-# (via set_canvas) supersede these at runtime. The resizable left feature-tree is auto-tracked
-# from view.extents' aspect when CANVAS_AUTO_LEFT is on, so usually only Top needs a value
-# (~0.05-0.09 of the content height). A wrong Top *gains* the horizontal (see docs §8.14).
-def _env_frac(name, default=0.0):
-    try:
-        return max(0.0, min(0.9, float(os.environ.get(name, default))))
-    except (TypeError, ValueError):
-        return float(default)
-
-
-CANVAS_INSET = (_env_frac("TB_ONSHAPE_CANVAS_LEFT", 0.0),
-                _env_frac("TB_ONSHAPE_CANVAS_TOP", 0.0),
-                _env_frac("TB_ONSHAPE_CANVAS_RIGHT", 0.0),
-                _env_frac("TB_ONSHAPE_CANVAS_BOTTOM", 0.0))
-CANVAS_AUTO_LEFT = os.environ.get("TB_ONSHAPE_CANVAS_AUTO_LEFT", "1").strip().lower() not in (
-    "0", "false", "no", "off")
+# Under-cursor orbit: the page reports the pointer as a fraction of #canvas (exact DOM
+# getBoundingClientRect). A tiny userscript POSTs that to /trackball/pointer on this bridge.
+# view.extents' aspect does NOT match the canvas pixel aspect (verified live: ~0.98 vs ~1.72),
+# so we never derive canvas size from extents. See docs/apps/onshape.md §8.14.
+_POINTER_TTL = 0.75          # seconds; stale page reports are ignored (fall back to centre)
 
 # Verbose diagnostics: set TB_ONSHAPE_DEBUG=1 to log focus changes, each gesture's camera
 # read/write, and any CALLERROR -- off by default so normal runs don't spam the log.
@@ -143,14 +130,6 @@ _PERSP_TTL = 1.0             # cache view.perspective this long (it changes rare
 _OBJ_TTL = 0.5              # cache model.extents (orbit/zoom pivot) this long
 _EXT_TTL = 0.2              # cache view.extents (pan/zoom scale) this long
 _TGT_TTL = 0.3              # cache view.target ("view" pivot) this long
-# Firefox's top-level client rect INCLUDES the browser chrome (tabs/URL/bookmarks). Cache the
-# measured content-top inset so we only BitBlt when the window size changes.
-_FF_CONTENT_CACHE = {"key": None, "top": 0}
-# Measured (L,T,R,B) canvas inset inside the web-content rect. Keyed by content size + view
-# aspect so a panel drag / resize remeasures; avoids depending on a hand-tuned Top.
-_CANVAS_INSET_CACHE = {"key": None, "inset": None}
-
-
 # --- WAMP v1 message-type tags (JSON arrays [TYPE, ...]) ---------------------------------------
 class _WAMP:
     WELCOME = 0
@@ -467,7 +446,8 @@ class _OnshapeConn:
             head += chunk
             if len(head) > 16384:
                 return False
-        lines = head.split(b"\r\n")
+        header_blob, _, leftover = head.partition(b"\r\n\r\n")
+        lines = header_blob.split(b"\r\n")
         try:
             method, path, _ = lines[0].decode("latin-1").split(" ", 2)
         except ValueError:
@@ -478,13 +458,50 @@ class _OnshapeConn:
                 k, v = ln.split(b":", 1)
                 headers[k.decode("latin-1").strip().lower()] = v.decode("latin-1").strip()
         origin = headers.get("origin", "*")
+        path_only = path.split("?", 1)[0]
+
+        # Read any request body (pointer POSTs are tiny JSON).
+        try:
+            content_len = int(headers.get("content-length", "0") or 0)
+        except ValueError:
+            content_len = 0
+        body_in = leftover
+        while len(body_in) < content_len:
+            try:
+                chunk = self.sock.recv(min(4096, content_len - len(body_in)))
+            except OSError:
+                break
+            if not chunk:
+                break
+            body_in += chunk
+        body_in = body_in[:content_len]
 
         if method == "OPTIONS":
             self._http(204, "", origin, ctype=None)
             return False
-        if path.startswith("/3dconnexion/nlproxy"):
+        if path_only.startswith("/3dconnexion/nlproxy"):
             self._http(200, json.dumps({"port": BRIDGE_PORT, "version": NLPROXY_VERSION}),
                        origin, ctype="application/json")
+            return False
+        # Exact canvas pointer from the Onshape page (userscript). No screen capture.
+        if path_only.startswith("/trackball/pointer.js") and method == "GET":
+            self._http(200, _POINTER_USERSCRIPT, origin, ctype="application/javascript")
+            return False
+        if path_only.startswith("/trackball/pointer") and method in ("POST", "PUT"):
+            parsed = _parse_pointer_body(body_in)
+            if parsed is not None:
+                _set_page_pointer(parsed[0], parsed[1], parsed[2])
+                self._http(204, "", origin, ctype=None)
+            else:
+                self._http(400, "bad pointer json", origin, ctype="text/plain")
+            return False
+        if path_only.startswith("/trackball/pointer") and method == "GET":
+            # Status for the cert-trust / install page.
+            with _PAGE_POINTER_LOCK:
+                age = (time.monotonic() - _PAGE_POINTER["t"]) if _PAGE_POINTER["t"] else None
+                snap = {"age_s": age, "on_canvas": _PAGE_POINTER["on"],
+                        "ndc_x": _PAGE_POINTER["ndc_x"], "ndc_y": _PAGE_POINTER["ndc_y"]}
+            self._http(200, json.dumps(snap), origin, ctype="application/json")
             return False
         if "websocket" in headers.get("upgrade", "").lower():
             key = headers.get("sec-websocket-key", "")
@@ -495,22 +512,27 @@ class _OnshapeConn:
             self._raw_send(resp.encode("latin-1"))
             self.sock.settimeout(1.0)               # short timeout so the reader can poll stop()
             return True
-        # Plain GET / -> a tiny status page (handy for the one-time cert-trust visit).
+        # Plain GET / -> status + userscript install hint (also the one-time cert-trust visit).
         body = ("<html><body><h1>Trackball Daemon &mdash; Onshape bridge</h1>"
                 "<p>This local NL-Proxy emulator is running. Onshape connects to it automatically; "
                 "if you can read this with no certificate warning, the cert is trusted.</p>"
+                "<h2>Under-cursor orbit</h2>"
+                "<p>Install the userscript from "
+                "<a href='/trackball/pointer.js'>/trackball/pointer.js</a> "
+                "(Violentmonkey / Tampermonkey on <code>cad.onshape.com</code>). It posts the exact "
+                "#canvas pointer to this bridge &mdash; no screen capture, no calibration.</p>"
                 "</body></html>")
         self._http(200, body, origin, ctype="text/html")
         return False
 
     def _http(self, status, body, origin, ctype="text/plain"):
-        reason = {200: "OK", 204: "No Content", 404: "Not Found"}.get(status, "OK")
-        data = body.encode("utf-8")
+        reason = {200: "OK", 204: "No Content", 400: "Bad Request", 404: "Not Found"}.get(status, "OK")
+        data = body.encode("utf-8") if isinstance(body, str) else (body or b"")
         # Access-Control-Allow-Private-Network: Chromium's Private Network Access preflight for a
         # public page (cad.onshape.com) talking to loopback. Harmless to Firefox.
         out = ["HTTP/1.1 %d %s" % (status, reason),
                "Access-Control-Allow-Origin: %s" % origin,
-               "Access-Control-Allow-Methods: GET, OPTIONS",
+               "Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS",
                "Access-Control-Allow-Headers: *",
                "Access-Control-Allow-Private-Network: true",
                "Connection: close"]
@@ -680,334 +702,149 @@ class _OnshapeConn:
         return NLPROXY_VERSION
 
 
-# --- under-cursor orbit: OS cursor -> web-content fraction -> canvas NDC -> world ray ------------
-# navlib exposes no pointer accessor, so the daemon reads GetCursorPos and aims the existing
-# hit-test through that pixel. The hard part is the browser: Firefox's top-level client rect
-# INCLUDES tabs/URL/bookmarks, while Chromium's Chrome_RenderWidgetHostHWND does not. Getting
-# the wrong content rect makes auto-left (aspect-derived panel width) scale-wrong horizontally
-# and shifts the pivot down. See docs/apps/onshape.md §8.14.
+# --- under-cursor orbit: page-reported canvas NDC (exact DOM size, no screen capture) ----------
+# navlib exposes no pointer accessor. Win32 GetCursorPos + window geometry cannot recover the
+# WebGL canvas rect on Firefox (client includes chrome; no content HWND). Screen-DC measurement
+# is forbidden. Instead a userscript on cad.onshape.com posts the pointer as a fraction of
+# document.getElementById("canvas").getBoundingClientRect() to POST /trackball/pointer.
 
 
-def _make_thread_dpi_aware():
-    """Per-monitor-v2 DPI awareness for THIS thread so GetCursorPos / client rects are physical px.
-    Thread-local (SetThreadDpiAwarenessContext) -- does not touch the Tk UI thread."""
+_PAGE_POINTER = {"t": 0.0, "ndc_x": 0.0, "ndc_y": 0.0, "on": False}
+_PAGE_POINTER_LOCK = threading.Lock()
+
+# Bookmarklet / Violentmonkey userscript body (also served as text/javascript from the bridge).
+_POINTER_USERSCRIPT = r"""// ==UserScript==
+// @name         Astrolabe Onshape cursor pivot
+// @namespace    https://github.com/mildlyuseful/Astrolabe
+// @version      0.1
+// @description  Report the mouse position on Onshape's #canvas to the local trackball NL-Proxy.
+// @match        https://cad.onshape.com/*
+// @match        https://*.onshape.com/*
+// @grant        none
+// @run-at       document-idle
+// ==/UserScript==
+(function () {
+  "use strict";
+  var ENDPOINT = "https://127.51.68.120:8181/trackball/pointer";
+  var last = { t: 0, x: 0, y: 0, on: false };
+  function canvasEl() {
+    return document.getElementById("canvas") || document.querySelector("canvas");
+  }
+  function report(ev) {
+    var c = canvasEl();
+    if (!c) return;
+    var r = c.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) return;
+    var on = ev.clientX >= r.left && ev.clientX <= r.right &&
+             ev.clientY >= r.top && ev.clientY <= r.bottom;
+    var fx = (ev.clientX - r.left) / r.width;
+    var fy = (ev.clientY - r.top) / r.height;
+    // NDC: x right, y up, both in [-1,1] (matches the bridge's _pixel_ray).
+    var ndcX = fx * 2 - 1;
+    var ndcY = 1 - fy * 2;
+    last = { t: Date.now(), x: ndcX, y: ndcY, on: on, cw: r.width, ch: r.height };
+    // fire-and-forget; Private Network Access preflight is answered by the bridge OPTIONS handler
+    try {
+      fetch(ENDPOINT, {
+        method: "POST",
+        mode: "cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ndc_x: ndcX, ndc_y: ndcY, on_canvas: on,
+                               canvas_w: r.width, canvas_h: r.height })
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  window.addEventListener("mousemove", report, { passive: true, capture: true });
+  // Keep the last sample fresh while the cursor is still (gesture start without a move).
+  setInterval(function () {
+    if (!last.t) return;
+    if (Date.now() - last.t > 400) return;
+    try {
+      fetch(ENDPOINT, {
+        method: "POST",
+        mode: "cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ndc_x: last.x, ndc_y: last.y, on_canvas: last.on,
+                               canvas_w: last.cw, canvas_h: last.ch })
+      }).catch(function () {});
+    } catch (e) {}
+  }, 200);
+})();
+"""
+
+POINTER_SCRIPT_URL = "https://127.51.68.120:8181/trackball/pointer.js"
+POINTER_STATUS_URL = "https://127.51.68.120:8181/trackball/pointer"
+
+
+def pointer_userscript_source():
+    """Full Violentmonkey/Tampermonkey userscript text (copy-paste install)."""
+    return _POINTER_USERSCRIPT
+
+
+def pointer_install_instructions():
+    """User-facing steps to install the under-cursor userscript (shared by setup UI + docs)."""
+    return (
+        "Under-cursor orbit needs a tiny page script (exact #canvas size from the DOM):\n\n"
+        "1) Install the Tampermonkey or Violentmonkey extension in the browser you use for Onshape.\n"
+        "2) Open the extension → Create a new script (or \"+\" / Add new script).\n"
+        "3) Delete the template, paste the Astrolabe userscript (use Copy userscript), then Save.\n"
+        "4) Reload your Onshape tab and move the mouse over the 3D view.\n"
+        "5) Optional check: open %s — ndc_x/ndc_y should update as you move.\n\n"
+        "Script URL (daemon must be running): %s"
+        % (POINTER_STATUS_URL, POINTER_SCRIPT_URL)
+    )
+
+
+def _set_page_pointer(ndc_x, ndc_y, on_canvas):
+    """Record a page-reported canvas NDC sample (called from the HTTP accept thread)."""
     try:
-        import ctypes
-        ctypes.windll.user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-4))
-    except Exception:
-        pass
+        x = float(ndc_x); y = float(ndc_y)
+    except (TypeError, ValueError):
+        return
+    if not (math.isfinite(x) and math.isfinite(y)):
+        return
+    with _PAGE_POINTER_LOCK:
+        _PAGE_POINTER["t"] = time.monotonic()
+        _PAGE_POINTER["ndc_x"] = max(-1.5, min(1.5, x))
+        _PAGE_POINTER["ndc_y"] = max(-1.5, min(1.5, y))
+        _PAGE_POINTER["on"] = bool(on_canvas)
 
 
-def _find_largest_descendant(hwnd, class_name):
-    """Largest (by client area) descendant of `hwnd` whose class equals `class_name`, or None."""
-    try:
-        import ctypes
-        from ctypes import wintypes
-        u32 = ctypes.windll.user32
-        best = [None, 0]
-        EnumChildProc = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-
-        def _cb(ch, _lp):
-            buf = ctypes.create_unicode_buffer(256)
-            u32.GetClassNameW(ch, buf, 256)
-            if buf.value == class_name:
-                rc = wintypes.RECT()
-                if u32.GetClientRect(ch, ctypes.byref(rc)):
-                    area = int(rc.right) * int(rc.bottom)
-                    if area > best[1]:
-                        best[0], best[1] = ch, area
-            return True
-
-        u32.EnumChildWindows(hwnd, EnumChildProc(_cb), 0)
-        return best[0] if best[1] > 50000 else None
-    except Exception:
-        return None
-
-
-def _capture_screen_bgra(left, top, width, height):
-    """BitBlt a screen rectangle into a top-down BGRA bytearray, or None on failure.
-
-    Uses the SCREEN DC (GetDC(0)), not a window DC: Firefox's MozillaWindowClass window DC
-    returns solid black under DWM (verified live), which made the old content-top detector
-    always report 0 and poisoned auto-left."""
-    try:
-        import ctypes
-        u32 = ctypes.windll.user32
-        gdi = ctypes.windll.gdi32
-        w, h = int(width), int(height)
-        if w < 8 or h < 8:
+def _get_page_pointer(ttl=_POINTER_TTL):
+    """Return (ndc_x, ndc_y) from a fresh on-canvas page report, or None."""
+    with _PAGE_POINTER_LOCK:
+        t = _PAGE_POINTER["t"]
+        if t <= 0.0 or (time.monotonic() - t) > float(ttl):
             return None
-
-        class BITMAPINFOHEADER(ctypes.Structure):
-            _fields_ = [("biSize", ctypes.c_uint32), ("biWidth", ctypes.c_int32),
-                        ("biHeight", ctypes.c_int32), ("biPlanes", ctypes.c_uint16),
-                        ("biBitCount", ctypes.c_uint16), ("biCompression", ctypes.c_uint32),
-                        ("biSizeImage", ctypes.c_uint32), ("biXPelsPerMeter", ctypes.c_int32),
-                        ("biYPelsPerMeter", ctypes.c_int32), ("biClrUsed", ctypes.c_uint32),
-                        ("biClrImportant", ctypes.c_uint32)]
-
-        class BITMAPINFO(ctypes.Structure):
-            _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", ctypes.c_uint32 * 3)]
-
-        hdc = u32.GetDC(0)
-        mem = gdi.CreateCompatibleDC(hdc)
-        bmp = gdi.CreateCompatibleBitmap(hdc, w, h)
-        old = gdi.SelectObject(mem, bmp)
-        gdi.BitBlt(mem, 0, 0, w, h, hdc, int(left), int(top), 0x00CC0020)  # SRCCOPY
-        bmi = BITMAPINFO()
-        bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
-        bmi.bmiHeader.biWidth = w
-        bmi.bmiHeader.biHeight = -h
-        bmi.bmiHeader.biPlanes = 1
-        bmi.bmiHeader.biBitCount = 32
-        buf = (ctypes.c_uint8 * (w * h * 4))()
-        gdi.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(bmi), 0)
-        gdi.SelectObject(mem, old)
-        gdi.DeleteObject(bmp)
-        gdi.DeleteDC(mem)
-        u32.ReleaseDC(0, hdc)
-        return buf, w, h
-    except Exception:
-        return None
-
-
-def _firefox_content_top(hwnd, client_w, client_h):
-    """Physical-px Y where the web page begins inside a Firefox top-level client rect.
-
-    Firefox's MozillaWindowClass client area includes the tab strip / URL bar / bookmarks bar.
-    We capture the top of the client via the SCREEN DC and find the first row that is Onshape's
-    dark page chrome across the left half. Cached per (hwnd, w, h). Returns 0 on failure."""
-    global _FF_CONTENT_CACHE
-    key = (int(hwnd), int(client_w), int(client_h))
-    if _FF_CONTENT_CACHE.get("key") == key:
-        return int(_FF_CONTENT_CACHE["top"])
-    top = 0
-    try:
-        import ctypes
-        from ctypes import wintypes
-        u32 = ctypes.windll.user32
-        band = min(int(client_h), max(80, int(client_h * 0.35)))
-        w = int(client_w)
-        if w < 64 or band < 16:
-            _FF_CONTENT_CACHE = {"key": key, "top": 0}
-            return 0
-        pt = wintypes.POINT(0, 0)
-        if not u32.ClientToScreen(hwnd, ctypes.byref(pt)):
-            _FF_CONTENT_CACHE = {"key": key, "top": 0}
-            return 0
-        captured = _capture_screen_bgra(pt.x, pt.y, w, band)
-        if captured is None:
-            _FF_CONTENT_CACHE = {"key": key, "top": 0}
-            return 0
-        buf, _, _ = captured
-
-        # Onshape's page chrome is near-black (~28,27,34). Firefox chrome is light/blue/grey on
-        # the LEFT (tabs/URL/bookmarks). The right edge can look dark early, so key off LEFT half.
-        xs = [max(0, min(w - 1, int(w * f))) for f in (0.04, 0.10, 0.18, 0.28, 0.40)]
-        # Sanity: if the top rows are already all-dark AND there are no light pixels above, we
-        # may have captured a black buffer -- require at least one light sample in the band
-        # before accepting a dark-page match.
-        light_seen = False
-        for y in range(min(band, 40)):
-            for x in xs:
-                i = (y * w + x) * 4
-                b, g, r = buf[i], buf[i + 1], buf[i + 2]
-                if r >= 50 or g >= 50 or b >= 55:
-                    light_seen = True
-                    break
-            if light_seen:
-                break
-        if not light_seen:
-            # Entire top band is dark -- either a black BitBlt failure or the page fills the
-            # client (no browser chrome). Treat as no chrome rather than inventing an offset.
-            _FF_CONTENT_CACHE = {"key": key, "top": 0}
-            return 0
-
-        for y in range(band):
-            dark = 0
-            for x in xs:
-                i = (y * w + x) * 4
-                b, g, r = buf[i], buf[i + 1], buf[i + 2]
-                if r < 50 and g < 50 and b < 55:
-                    dark += 1
-            if dark >= 4:                       # >=4 of 5 left-half samples -> Onshape page
-                top = y
-                break
-    except Exception:
-        top = 0
-    _FF_CONTENT_CACHE = {"key": key, "top": int(top)}
-    return int(top)
-
-
-def _measure_canvas_inset(content_left, content_top, content_w, content_h, half_x, half_y):
-    """Measure Onshape's 3D canvas as (L,T,R,B) fractions of the web-content rect.
-
-    Strategy (robust when the model fills the view -- empty-canvas grey then fragments):
-      1. Scan a column on the RIGHT of the content (canvas is almost always there) to find
-         the first/last rows that look like the viewport (neutral grey OR non-UI colour).
-      2. Derive canvas width from that height × view.extents aspect (half_x/half_y), flush
-         to the right (minus a small right inset if configured later).
-    Returns None when capture/detection fails."""
-    if half_x < 1e-9 or half_y < 1e-9 or content_w < 64 or content_h < 64:
-        return None
-    captured = _capture_screen_bgra(content_left, content_top, content_w, content_h)
-    if captured is None:
-        return None
-    buf, w, h = captured
-
-    def _rgb(x, y):
-        i = (int(y) * w + int(x)) * 4
-        return buf[i + 2], buf[i + 1], buf[i]
-
-    def _is_ui_dark(r, g, b):
-        # Onshape header / feature-tree / icon strip: near-black with a slight blue cast.
-        return r < 45 and g < 45 and b < 55 and (b >= r + 3 or (r < 35 and g < 35 and b < 40))
-
-    def _is_viewport_pixel(r, g, b):
-        # Neutral canvas grey, OR anything that isn't UI-dark (model colours, view-cube, etc.).
-        if _is_ui_dark(r, g, b):
-            return False
-        # Explicit neutral grey (empty canvas).
-        if abs(r - g) <= 6 and abs(g - b) <= 6 and abs(r - b) <= 6 and 18 <= r <= 80:
-            return True
-        # Saturated / brighter = model or gizmo sitting on the canvas.
-        if max(r, g, b) >= 60 and not (r < 50 and g < 50 and b < 55):
-            return True
-        return False
-
-    # Right-side columns: prefer ~85% across; also try 70% and 95% and majority-vote.
-    cols = [max(0, min(w - 1, int(w * f))) for f in (0.70, 0.85, 0.95)]
-    tops, bots = [], []
-    for cx in cols:
-        top_y = None
-        for y in range(h):
-            if _is_viewport_pixel(*_rgb(cx, y)):
-                top_y = y
-                break
-        bot_y = None
-        for y in range(h - 1, -1, -1):
-            if _is_viewport_pixel(*_rgb(cx, y)):
-                bot_y = y
-                break
-        if top_y is not None and bot_y is not None and bot_y - top_y >= 64:
-            tops.append(top_y)
-            bots.append(bot_y)
-    if not tops:
-        return None
-    tops.sort()
-    bots.sort()
-    t = tops[len(tops) // 2]            # median
-    bot = bots[len(bots) // 2]
-    canvas_h = bot - t + 1
-    if canvas_h < 64:
-        return None
-
-    # Width from view aspect; assume flush to the right edge of the content.
-    canvas_w = canvas_h * (float(half_x) / float(half_y))
-    if canvas_w < 64 or canvas_w > w * 0.98:
-        return None
-    a = max(0, int(round(w - canvas_w)))
-    b = w - 1
-
-    left = a / float(w)
-    top = t / float(h)
-    right = 0.0
-    bottom = (h - 1 - bot) / float(h)
-    left = max(0.0, min(0.85, left))
-    top = max(0.0, min(0.5, top))
-    bottom = max(0.0, min(0.5, bottom))
-    if left + right >= 0.95 or top + bottom >= 0.95:
-        return None
-    return (left, top, right, bottom)
-
-
-def _cached_canvas_inset(content_left, content_top, content_w, content_h, half_x, half_y):
-    """Cached wrapper around _measure_canvas_inset. Remeasures when the content size or view
-    aspect changes (panel drag / resize / zoom)."""
-    global _CANVAS_INSET_CACHE
-    aspect_q = round(float(half_x) / float(half_y), 3) if half_y > 1e-9 else 0.0
-    key = (int(content_w), int(content_h), aspect_q)
-    if _CANVAS_INSET_CACHE.get("key") == key and _CANVAS_INSET_CACHE.get("inset") is not None:
-        return _CANVAS_INSET_CACHE["inset"]
-    inset = _measure_canvas_inset(content_left, content_top, content_w, content_h, half_x, half_y)
-    _CANVAS_INSET_CACHE = {"key": key, "inset": inset}
-    return inset
-
-
-def _browser_content_rect(root_hwnd):
-    """Screen-space (left, top, width, height) of the browser's *web content* area.
-
-    Tier 1: largest Chrome_RenderWidgetHostHWND under the root (Chromium -- excludes browser chrome).
-    Tier 2: Firefox -- top-level client rect with the measured chrome height subtracted.
-    Tier 3: raw top-level client rect.
-    Returns None on failure."""
-    try:
-        import ctypes
-        from ctypes import wintypes
-        u32 = ctypes.windll.user32
-        # Chromium: the render widget is the page; pick the LARGEST (not the first -- tiny UI
-        # widgets also use this class).
-        render = _find_largest_descendant(root_hwnd, "Chrome_RenderWidgetHostHWND")
-        if render is not None:
-            rc = wintypes.RECT()
-            if u32.GetClientRect(render, ctypes.byref(rc)) and rc.right > 64 and rc.bottom > 64:
-                pt = wintypes.POINT(0, 0)
-                if u32.ClientToScreen(render, ctypes.byref(pt)):
-                    return (int(pt.x), int(pt.y), int(rc.right), int(rc.bottom))
-
-        rc = wintypes.RECT()
-        if not u32.GetClientRect(root_hwnd, ctypes.byref(rc)) or rc.right <= 0 or rc.bottom <= 0:
+        if not _PAGE_POINTER["on"]:
             return None
-        pt = wintypes.POINT(0, 0)
-        if not u32.ClientToScreen(root_hwnd, ctypes.byref(pt)):
-            return None
-        left, top, width, height = int(pt.x), int(pt.y), int(rc.right), int(rc.bottom)
+        return (_PAGE_POINTER["ndc_x"], _PAGE_POINTER["ndc_y"])
 
-        cbuf = ctypes.create_unicode_buffer(256)
-        u32.GetClassNameW(root_hwnd, cbuf, 256)
-        if cbuf.value == "MozillaWindowClass":
-            chrome = _firefox_content_top(root_hwnd, width, height)
-            if 0 < chrome < height - 64:
-                top += chrome
-                height -= chrome
-        return (left, top, width, height)
+
+def _parse_pointer_body(raw):
+    """Parse a /trackball/pointer JSON body. Returns (ndc_x, ndc_y, on_canvas) or None."""
+    try:
+        data = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
     except Exception:
         return None
-
-
-def _cursor_client_fraction():
-    """OS cursor as (fx, fy, win_w, win_h, content_left, content_top) across the focused browser's
-    *web-content* area, or None when the cursor isn't over that area. fx/fy are top-left origin
-    in [0,1]; win_w/win_h are content size in physical px; content_left/top are screen origin of
-    the content rect (for canvas measurement). DPI-aware: caller must be per-monitor-v2."""
-    if sys.platform != "win32":
+    if not isinstance(data, dict):
         return None
-    try:
-        import ctypes
-        from ctypes import wintypes
-        u32 = ctypes.windll.user32
-        pt = wintypes.POINT()
-        if not u32.GetCursorPos(ctypes.byref(pt)):
+    if "ndc_x" in data and "ndc_y" in data:
+        on = data.get("on_canvas", True)
+        return (data.get("ndc_x"), data.get("ndc_y"), bool(on))
+    # Alternate: CSS-pixel offset inside the canvas + size (also exact).
+    if all(k in data for k in ("x", "y", "w", "h")):
+        try:
+            w = float(data["w"]); h = float(data["h"])
+            if w < 1e-6 or h < 1e-6:
+                return None
+            fx = float(data["x"]) / w
+            fy = float(data["y"]) / h
+            on = (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0)
+            return (fx * 2.0 - 1.0, 1.0 - fy * 2.0, on)
+        except (TypeError, ValueError):
             return None
-        hwnd = u32.WindowFromPoint(pt)
-        if not hwnd:
-            return None
-        root = u32.GetAncestor(hwnd, 2)             # GA_ROOT
-        if not root or root != u32.GetForegroundWindow():
-            return None
-        rect = _browser_content_rect(root)
-        if rect is None:
-            return None
-        left, top, width, height = rect
-        if width <= 0 or height <= 0:
-            return None
-        fx = (pt.x - left) / float(width)
-        fy = (pt.y - top) / float(height)
-        if not (-0.05 <= fx <= 1.05 and -0.05 <= fy <= 1.05):
-            return None                             # cursor outside the content (other monitor / etc.)
-        return (fx, fy, float(width), float(height), float(left), float(top))
-    except Exception:
-        return None
+    return None
 
 
 class OnshapeBridge:
@@ -1043,9 +880,6 @@ class OnshapeBridge:
         # Control scheme (orbit pivot / orbit style / zoom mode); a dict ref-swap is atomic, so the
         # worker reads it lock-free each flush (same pattern as the broker / SW driver).
         self._scheme = {"op": "view", "os": "free", "zm": "to_center"}
-        # Under-cursor canvas calibration (live via set_canvas / config.onshape.*).
-        self._canvas_inset = tuple(CANVAS_INSET)
-        self._canvas_auto_left = bool(CANVAS_AUTO_LEFT)
 
     @staticmethod
     def _clamp_rate(hz):
@@ -1061,20 +895,6 @@ class OnshapeBridge:
 
     def set_scheme(self, orbit_pivot, orbit_style, zoom_mode):
         self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode}
-
-    def set_canvas(self, inset=None, auto_left=None):
-        """Live-update the under-cursor canvas calibration (no restart). `inset` is an iterable of
-        4 fractions (L,T,R,B) or None to leave unchanged; `auto_left` is bool/None."""
-        if inset is not None:
-            try:
-                vals = [max(0.0, min(0.9, float(v))) for v in list(inset)[:4]]
-                while len(vals) < 4:
-                    vals.append(0.0)
-                self._canvas_inset = tuple(vals)
-            except (TypeError, ValueError):
-                pass
-        if auto_left is not None:
-            self._canvas_auto_left = bool(auto_left)
 
     def submit(self, ox, oy, oz, px, py, zoom):
         with self._lock:
@@ -1188,9 +1008,6 @@ class OnshapeBridge:
 
     # --- worker thread (the navigation model) -------------------------------------------------
     def _run_worker(self):
-        # Physical-px GetCursorPos / client rects for the under-cursor pivot (thread-local; Tk
-        # stays unaware). Harmless when the cursor pivot isn't in use.
-        _make_thread_dpi_aware()
         last_motion = 0.0
         while not self._stop.is_set():
             cycle = time.monotonic()
@@ -1388,9 +1205,9 @@ class OnshapeBridge:
         if op == "origin":
             return (0.0, 0.0, 0.0)
         if op == "cursor":
-            # Under-mouse: aim the hit-test through the OS cursor. Off-canvas / miss -> screen
-            # centre (same as "view"), then model centre. ⚠ mouse->canvas mapping needs live-GUI
-            # verify (docs §8.14); the ray/hold/fallback path is offline-tested.
+            # Under-mouse: aim the hit-test through the page-reported #canvas NDC. No sample /
+            # off-canvas / miss -> screen centre (same as "view"), then model centre. Needs the
+            # userscript installed (docs §8.14); the ray/hold/fallback path is offline-tested.
             hit = self._hit_cursor(conn, eye, right, up, back)
             if hit is not None:
                 return hit
@@ -1416,31 +1233,14 @@ class OnshapeBridge:
         return self._hit_ray(conn, lookfrom, direction, vh)
 
     def _hit_cursor(self, conn, eye, right, up, back):
-        """navlib hit-test through the OS cursor's canvas point, or None when the cursor can't be
-        mapped into the canvas (off-panel / no window / mapping failed)."""
-        frac = _cursor_client_fraction()
-        if frac is None:
-            return None
-        fx, fy, win_w, win_h, content_left, content_top = frac
-        half_x, half_y = self._view_halves(conn)
-        # Prefer a measured canvas rect (screen capture + view-aspect match). That removes the
-        # Top-calibration dependency that caused the gain-with-x / down-right offset when Top
-        # defaulted to 0. Fall back to config + auto-left when measurement fails.
-        measured = _cached_canvas_inset(content_left, content_top, win_w, win_h, half_x, half_y)
-        if measured is not None:
-            inset = measured
-            source = "measured"
-        else:
-            inset = self._effective_canvas_inset(half_x, half_y, win_w, win_h,
-                                                 self._canvas_inset, self._canvas_auto_left)
-            source = "auto-left"
-        ndc = self._client_fraction_to_ndc(fx, fy, inset)
+        """navlib hit-test through the page-reported canvas NDC, or None when no fresh sample."""
+        ndc = _get_page_pointer()
         if ndc is None:
             return None
+        half_x, half_y = self._view_halves(conn)
         if _DEBUG:
-            self._log.info("onshape cursor: frac=(%.3f,%.3f) win=%.0fx%.0f inset=(%.3f,%.3f,%.3f,%.3f) "
-                           "ndc=(%.3f,%.3f) via=%s", fx, fy, win_w, win_h, inset[0], inset[1],
-                           inset[2], inset[3], ndc[0], ndc[1], source)
+            self._log.info("onshape cursor: page-ndc=(%.3f,%.3f) half=(%.3f,%.3f)",
+                           ndc[0], ndc[1], half_x, half_y)
         vh = max(half_x, half_y)
         lookfrom, direction = self._pixel_ray(ndc[0], ndc[1], eye, right, up, back,
                                               half_x, half_y, vh * 8.0)
@@ -1478,42 +1278,6 @@ class OnshapeBridge:
         offset = _v_add(_v_scale(right, ndc_x * half_x), _v_scale(up, ndc_y * half_y))
         lookfrom = _v_sub(_v_add(eye, offset), _v_scale(fwd, backoff))
         return lookfrom, fwd
-
-    @staticmethod
-    def _client_fraction_to_ndc(fx, fy, inset):
-        """Map a top-left client-area fraction through canvas insets to NDC (x right, y up).
-        Returns None when the point falls outside the canvas (with a small edge tolerance)."""
-        left, top, right, bottom = inset
-        cw = 1.0 - left - right
-        ch = 1.0 - top - bottom
-        if cw < 1e-6 or ch < 1e-6:
-            return None
-        ux = (fx - left) / cw
-        uy = (fy - top) / ch
-        if not (-0.02 <= ux <= 1.02 and -0.02 <= uy <= 1.02):
-            return None
-        ux = max(0.0, min(1.0, ux))
-        uy = max(0.0, min(1.0, uy))
-        return (ux * 2.0 - 1.0, 1.0 - uy * 2.0)          # y-flip: top-left -> NDC y=+1
-
-    @staticmethod
-    def _effective_canvas_inset(half_x, half_y, win_w, win_h, inset, auto_left):
-        """Resolve (L,T,R,B). With auto_left, derive L from the view aspect so the resizable
-        feature-tree panel is tracked live: Onshape keeps view.extents' aspect equal to the
-        visible canvas pixel aspect. Assumes the canvas is flush to the content's right & bottom
-        (set Right/Bottom manually when a right/bottom panel is open). Top MUST be correct -- a
-        wrong top gains the horizontal (canvas_w_frac includes (1-top-bottom))."""
-        left, top, right, bottom = (float(inset[0]), float(inset[1]),
-                                    float(inset[2]), float(inset[3]))
-        if not auto_left:
-            return (left, top, right, bottom)
-        if half_y < 1e-9 or win_w < 1.0 or win_h < 1.0:
-            return (left, top, right, bottom)
-        usable_h = max(1e-6, 1.0 - top - bottom)
-        # canvas_w / canvas_h = half_x / half_y, canvas_h = usable_h * win_h
-        canvas_w_frac = (half_x / half_y) * (win_h / win_w) * usable_h
-        left = max(0.0, min(0.9, 1.0 - right - canvas_w_frac))
-        return (left, top, right, bottom)
 
     @staticmethod
     def _valid_hit(pt, bbox):
