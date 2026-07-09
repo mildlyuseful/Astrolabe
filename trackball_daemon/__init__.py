@@ -21,4 +21,4 @@ or installs from GitHub without source changes):
   app          - orchestrator that wires the above together
 """
 
-__version__ = "0.1.54"
+__version__ = "0.1.55"

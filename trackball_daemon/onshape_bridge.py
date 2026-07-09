@@ -146,6 +146,9 @@ _TGT_TTL = 0.3              # cache view.target ("view" pivot) this long
 # Firefox's top-level client rect INCLUDES the browser chrome (tabs/URL/bookmarks). Cache the
 # measured content-top inset so we only BitBlt when the window size changes.
 _FF_CONTENT_CACHE = {"key": None, "top": 0}
+# Measured (L,T,R,B) canvas inset inside the web-content rect. Keyed by content size + view
+# aspect so a panel drag / resize remeasures; avoids depending on a hand-tuned Top.
+_CANVAS_INSET_CACHE = {"key": None, "inset": None}
 
 
 # --- WAMP v1 message-type tags (JSON arrays [TYPE, ...]) ---------------------------------------
@@ -721,29 +724,19 @@ def _find_largest_descendant(hwnd, class_name):
         return None
 
 
-def _firefox_content_top(hwnd, client_w, client_h):
-    """Physical-px Y where the web page begins inside a Firefox top-level client rect.
+def _capture_screen_bgra(left, top, width, height):
+    """BitBlt a screen rectangle into a top-down BGRA bytearray, or None on failure.
 
-    Firefox's MozillaWindowClass client area includes the tab strip / URL bar / bookmarks bar.
-    We BitBlt the top of the client and find the first row that is Onshape's dark page chrome
-    across most of the width. Cached per (hwnd, w, h) so a resize remeasures and a steady
-    window does not. Returns 0 on failure (caller then treats the whole client as content)."""
-    global _FF_CONTENT_CACHE
-    key = (int(hwnd), int(client_w), int(client_h))
-    if _FF_CONTENT_CACHE.get("key") == key:
-        return int(_FF_CONTENT_CACHE["top"])
-    top = 0
+    Uses the SCREEN DC (GetDC(0)), not a window DC: Firefox's MozillaWindowClass window DC
+    returns solid black under DWM (verified live), which made the old content-top detector
+    always report 0 and poisoned auto-left."""
     try:
         import ctypes
-        from ctypes import wintypes
         u32 = ctypes.windll.user32
         gdi = ctypes.windll.gdi32
-        # Only need the top band -- browser chrome is well under ~300 px even with bookmarks.
-        band = min(int(client_h), max(80, int(client_h * 0.35)))
-        w = int(client_w)
-        if w < 64 or band < 16:
-            _FF_CONTENT_CACHE = {"key": key, "top": 0}
-            return 0
+        w, h = int(width), int(height)
+        if w < 8 or h < 8:
+            return None
 
         class BITMAPINFOHEADER(ctypes.Structure):
             _fields_ = [("biSize", ctypes.c_uint32), ("biWidth", ctypes.c_int32),
@@ -756,28 +749,80 @@ def _firefox_content_top(hwnd, client_w, client_h):
         class BITMAPINFO(ctypes.Structure):
             _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", ctypes.c_uint32 * 3)]
 
-        hdc = u32.GetDC(hwnd)
+        hdc = u32.GetDC(0)
         mem = gdi.CreateCompatibleDC(hdc)
-        bmp = gdi.CreateCompatibleBitmap(hdc, w, band)
+        bmp = gdi.CreateCompatibleBitmap(hdc, w, h)
         old = gdi.SelectObject(mem, bmp)
-        gdi.BitBlt(mem, 0, 0, w, band, hdc, 0, 0, 0x00CC0020)  # SRCCOPY
+        gdi.BitBlt(mem, 0, 0, w, h, hdc, int(left), int(top), 0x00CC0020)  # SRCCOPY
         bmi = BITMAPINFO()
         bmi.bmiHeader.biSize = ctypes.sizeof(BITMAPINFOHEADER)
         bmi.bmiHeader.biWidth = w
-        bmi.bmiHeader.biHeight = -band
+        bmi.bmiHeader.biHeight = -h
         bmi.bmiHeader.biPlanes = 1
         bmi.bmiHeader.biBitCount = 32
-        buf = (ctypes.c_uint8 * (w * band * 4))()
-        gdi.GetDIBits(mem, bmp, 0, band, buf, ctypes.byref(bmi), 0)
+        buf = (ctypes.c_uint8 * (w * h * 4))()
+        gdi.GetDIBits(mem, bmp, 0, h, buf, ctypes.byref(bmi), 0)
         gdi.SelectObject(mem, old)
         gdi.DeleteObject(bmp)
         gdi.DeleteDC(mem)
-        u32.ReleaseDC(hwnd, hdc)
+        u32.ReleaseDC(0, hdc)
+        return buf, w, h
+    except Exception:
+        return None
+
+
+def _firefox_content_top(hwnd, client_w, client_h):
+    """Physical-px Y where the web page begins inside a Firefox top-level client rect.
+
+    Firefox's MozillaWindowClass client area includes the tab strip / URL bar / bookmarks bar.
+    We capture the top of the client via the SCREEN DC and find the first row that is Onshape's
+    dark page chrome across the left half. Cached per (hwnd, w, h). Returns 0 on failure."""
+    global _FF_CONTENT_CACHE
+    key = (int(hwnd), int(client_w), int(client_h))
+    if _FF_CONTENT_CACHE.get("key") == key:
+        return int(_FF_CONTENT_CACHE["top"])
+    top = 0
+    try:
+        import ctypes
+        from ctypes import wintypes
+        u32 = ctypes.windll.user32
+        band = min(int(client_h), max(80, int(client_h * 0.35)))
+        w = int(client_w)
+        if w < 64 or band < 16:
+            _FF_CONTENT_CACHE = {"key": key, "top": 0}
+            return 0
+        pt = wintypes.POINT(0, 0)
+        if not u32.ClientToScreen(hwnd, ctypes.byref(pt)):
+            _FF_CONTENT_CACHE = {"key": key, "top": 0}
+            return 0
+        captured = _capture_screen_bgra(pt.x, pt.y, w, band)
+        if captured is None:
+            _FF_CONTENT_CACHE = {"key": key, "top": 0}
+            return 0
+        buf, _, _ = captured
 
         # Onshape's page chrome is near-black (~28,27,34). Firefox chrome is light/blue/grey on
-        # the LEFT (tabs/URL/bookmarks). The right edge can look dark early (window controls /
-        # overlapping paint), so we key off the LEFT half only -- that's the reliable tell.
+        # the LEFT (tabs/URL/bookmarks). The right edge can look dark early, so key off LEFT half.
         xs = [max(0, min(w - 1, int(w * f))) for f in (0.04, 0.10, 0.18, 0.28, 0.40)]
+        # Sanity: if the top rows are already all-dark AND there are no light pixels above, we
+        # may have captured a black buffer -- require at least one light sample in the band
+        # before accepting a dark-page match.
+        light_seen = False
+        for y in range(min(band, 40)):
+            for x in xs:
+                i = (y * w + x) * 4
+                b, g, r = buf[i], buf[i + 1], buf[i + 2]
+                if r >= 50 or g >= 50 or b >= 55:
+                    light_seen = True
+                    break
+            if light_seen:
+                break
+        if not light_seen:
+            # Entire top band is dark -- either a black BitBlt failure or the page fills the
+            # client (no browser chrome). Treat as no chrome rather than inventing an offset.
+            _FF_CONTENT_CACHE = {"key": key, "top": 0}
+            return 0
+
         for y in range(band):
             dark = 0
             for x in xs:
@@ -792,6 +837,101 @@ def _firefox_content_top(hwnd, client_w, client_h):
         top = 0
     _FF_CONTENT_CACHE = {"key": key, "top": int(top)}
     return int(top)
+
+
+def _measure_canvas_inset(content_left, content_top, content_w, content_h, half_x, half_y):
+    """Measure Onshape's 3D canvas as (L,T,R,B) fractions of the web-content rect.
+
+    Strategy (robust when the model fills the view -- empty-canvas grey then fragments):
+      1. Scan a column on the RIGHT of the content (canvas is almost always there) to find
+         the first/last rows that look like the viewport (neutral grey OR non-UI colour).
+      2. Derive canvas width from that height × view.extents aspect (half_x/half_y), flush
+         to the right (minus a small right inset if configured later).
+    Returns None when capture/detection fails."""
+    if half_x < 1e-9 or half_y < 1e-9 or content_w < 64 or content_h < 64:
+        return None
+    captured = _capture_screen_bgra(content_left, content_top, content_w, content_h)
+    if captured is None:
+        return None
+    buf, w, h = captured
+
+    def _rgb(x, y):
+        i = (int(y) * w + int(x)) * 4
+        return buf[i + 2], buf[i + 1], buf[i]
+
+    def _is_ui_dark(r, g, b):
+        # Onshape header / feature-tree / icon strip: near-black with a slight blue cast.
+        return r < 45 and g < 45 and b < 55 and (b >= r + 3 or (r < 35 and g < 35 and b < 40))
+
+    def _is_viewport_pixel(r, g, b):
+        # Neutral canvas grey, OR anything that isn't UI-dark (model colours, view-cube, etc.).
+        if _is_ui_dark(r, g, b):
+            return False
+        # Explicit neutral grey (empty canvas).
+        if abs(r - g) <= 6 and abs(g - b) <= 6 and abs(r - b) <= 6 and 18 <= r <= 80:
+            return True
+        # Saturated / brighter = model or gizmo sitting on the canvas.
+        if max(r, g, b) >= 60 and not (r < 50 and g < 50 and b < 55):
+            return True
+        return False
+
+    # Right-side columns: prefer ~85% across; also try 70% and 95% and majority-vote.
+    cols = [max(0, min(w - 1, int(w * f))) for f in (0.70, 0.85, 0.95)]
+    tops, bots = [], []
+    for cx in cols:
+        top_y = None
+        for y in range(h):
+            if _is_viewport_pixel(*_rgb(cx, y)):
+                top_y = y
+                break
+        bot_y = None
+        for y in range(h - 1, -1, -1):
+            if _is_viewport_pixel(*_rgb(cx, y)):
+                bot_y = y
+                break
+        if top_y is not None and bot_y is not None and bot_y - top_y >= 64:
+            tops.append(top_y)
+            bots.append(bot_y)
+    if not tops:
+        return None
+    tops.sort()
+    bots.sort()
+    t = tops[len(tops) // 2]            # median
+    bot = bots[len(bots) // 2]
+    canvas_h = bot - t + 1
+    if canvas_h < 64:
+        return None
+
+    # Width from view aspect; assume flush to the right edge of the content.
+    canvas_w = canvas_h * (float(half_x) / float(half_y))
+    if canvas_w < 64 or canvas_w > w * 0.98:
+        return None
+    a = max(0, int(round(w - canvas_w)))
+    b = w - 1
+
+    left = a / float(w)
+    top = t / float(h)
+    right = 0.0
+    bottom = (h - 1 - bot) / float(h)
+    left = max(0.0, min(0.85, left))
+    top = max(0.0, min(0.5, top))
+    bottom = max(0.0, min(0.5, bottom))
+    if left + right >= 0.95 or top + bottom >= 0.95:
+        return None
+    return (left, top, right, bottom)
+
+
+def _cached_canvas_inset(content_left, content_top, content_w, content_h, half_x, half_y):
+    """Cached wrapper around _measure_canvas_inset. Remeasures when the content size or view
+    aspect changes (panel drag / resize / zoom)."""
+    global _CANVAS_INSET_CACHE
+    aspect_q = round(float(half_x) / float(half_y), 3) if half_y > 1e-9 else 0.0
+    key = (int(content_w), int(content_h), aspect_q)
+    if _CANVAS_INSET_CACHE.get("key") == key and _CANVAS_INSET_CACHE.get("inset") is not None:
+        return _CANVAS_INSET_CACHE["inset"]
+    inset = _measure_canvas_inset(content_left, content_top, content_w, content_h, half_x, half_y)
+    _CANVAS_INSET_CACHE = {"key": key, "inset": inset}
+    return inset
 
 
 def _browser_content_rect(root_hwnd):
@@ -836,10 +976,10 @@ def _browser_content_rect(root_hwnd):
 
 
 def _cursor_client_fraction():
-    """OS cursor as a fraction (fx, fy, win_w, win_h) across the focused browser's *web-content*
-    area, or None when the cursor isn't over that area / the focused window isn't a browser.
-    fx/fy are top-left origin in [0,1]; win_w/win_h are the content size in physical px (fed to
-    auto-left). DPI-aware: caller must run on a per-monitor-v2 thread (the Onshape worker)."""
+    """OS cursor as (fx, fy, win_w, win_h, content_left, content_top) across the focused browser's
+    *web-content* area, or None when the cursor isn't over that area. fx/fy are top-left origin
+    in [0,1]; win_w/win_h are content size in physical px; content_left/top are screen origin of
+    the content rect (for canvas measurement). DPI-aware: caller must be per-monitor-v2."""
     if sys.platform != "win32":
         return None
     try:
@@ -865,7 +1005,7 @@ def _cursor_client_fraction():
         fy = (pt.y - top) / float(height)
         if not (-0.05 <= fx <= 1.05 and -0.05 <= fy <= 1.05):
             return None                             # cursor outside the content (other monitor / etc.)
-        return (fx, fy, float(width), float(height))
+        return (fx, fy, float(width), float(height), float(left), float(top))
     except Exception:
         return None
 
@@ -1281,17 +1421,26 @@ class OnshapeBridge:
         frac = _cursor_client_fraction()
         if frac is None:
             return None
-        fx, fy, win_w, win_h = frac
+        fx, fy, win_w, win_h, content_left, content_top = frac
         half_x, half_y = self._view_halves(conn)
-        inset = self._effective_canvas_inset(half_x, half_y, win_w, win_h,
-                                             self._canvas_inset, self._canvas_auto_left)
+        # Prefer a measured canvas rect (screen capture + view-aspect match). That removes the
+        # Top-calibration dependency that caused the gain-with-x / down-right offset when Top
+        # defaulted to 0. Fall back to config + auto-left when measurement fails.
+        measured = _cached_canvas_inset(content_left, content_top, win_w, win_h, half_x, half_y)
+        if measured is not None:
+            inset = measured
+            source = "measured"
+        else:
+            inset = self._effective_canvas_inset(half_x, half_y, win_w, win_h,
+                                                 self._canvas_inset, self._canvas_auto_left)
+            source = "auto-left"
         ndc = self._client_fraction_to_ndc(fx, fy, inset)
         if ndc is None:
             return None
         if _DEBUG:
             self._log.info("onshape cursor: frac=(%.3f,%.3f) win=%.0fx%.0f inset=(%.3f,%.3f,%.3f,%.3f) "
-                           "ndc=(%.3f,%.3f)", fx, fy, win_w, win_h, inset[0], inset[1], inset[2],
-                           inset[3], ndc[0], ndc[1])
+                           "ndc=(%.3f,%.3f) via=%s", fx, fy, win_w, win_h, inset[0], inset[1],
+                           inset[2], inset[3], ndc[0], ndc[1], source)
         vh = max(half_x, half_y)
         lookfrom, direction = self._pixel_ray(ndc[0], ndc[1], eye, right, up, back,
                                               half_x, half_y, vh * 8.0)

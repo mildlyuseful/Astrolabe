@@ -307,51 +307,24 @@ These are the non-obvious things, each as *symptom → cause → fix*. Most cost
   dead and drop it. A wedged/backgrounded tab will disconnect rather than hang the worker.
 
 ### 8.14 Under-cursor orbit: mapping the OS cursor into the canvas (⚠ NEEDS LIVE-GUI VERIFY)
-The `cursor` pivot orbits about the surface **under the mouse** (like a SpaceMouse's "rotation center
-= cursor"). Two halves, mirroring the other apps:
-- **Half B (the ray) — solid.** navlib's hit-test takes an arbitrary ray, so we just aim it through
-  the cursor's canvas point instead of the center (`_hit_cursor` → `_pixel_ray` → `_hit_ray`). Same
-  code path, aperture loop, bbox validation, and per-gesture hold as `view`.
-- **Half A (the mouse → canvas mapping).** navlib exposes no cursor, and the daemon can't read the
-  browser DOM, so we read the **OS** cursor with `GetCursorPos` and map it ourselves:
-  1. cursor's **fraction across the browser's web-content area** (`_cursor_client_fraction` →
-     `_browser_content_rect`): `GetCursorPos` + `WindowFromPoint` → `GetAncestor(..., GA_ROOT)`,
-     gated to the foreground window. The content rect is **not** always the top-level client:
-     - **Chromium:** largest `Chrome_RenderWidgetHostHWND` descendant (excludes tab/URL chrome;
-       pick largest — tiny UI widgets share the class).
-     - **Firefox:** `MozillaWindowClass`'s client rect **includes** tabs/URL/bookmarks (verified
-       live: compositor child is the same size). We BitBlt the top band and find the first row that
-       is Onshape's near-black page chrome across the **left half** (right-edge paint can look dark
-       early), then subtract that height. Cached per `(hwnd, w, h)` so a resize remeasures.
-     Prior attempts that used the raw Firefox client as "content" produced a **consistent downward
-     pivot offset** and a **horizontal scale error** that tracked the left feature-tree width —
-     chrome-inflated `win_h` poisoned auto-left, and `fy` included the tab strip.
-  2. remap that fraction by the **canvas insets** (left/top/right/bottom fractions of the
-     *web-content* area that Onshape's in-page toolbar + panels eat) → canvas NDC
-     (`_client_fraction_to_ndc`, top-left→y-up flip). Cursor over a panel → `None` → fall back to
-     screen-centre hit.
-- **DPI.** Worker thread is per-monitor-v2 aware (`_make_thread_dpi_aware`) so cursor and rects are
-  both physical px (same Fusion/SW fix).
-- **Left feature-tree AUTO-TRACKED.** Onshape keeps `view.extents`' aspect equal to the visible
-  canvas pixel aspect, so panel width falls out of aspect + content size (`_effective_canvas_inset`,
-  `canvas_auto_left` on by default):
-  `canvas_w_frac = (half_x/half_y)·(win_h/win_w)·(1−top−bottom)`, `left = 1 − right − canvas_w_frac`.
-  Assumes canvas flush to content right & bottom; set Right/Bottom when those panels are open.
-- **⚠ `top` toolbar inset MUST be correct — it feeds the left.** A too-small top makes the computed
-  canvas too wide → left too small → pivot offset **scales with cursor-x** (can cross zero). Set Top
-  to the toolbar's fraction of the **content** height (**~0.05–0.09**).
-- **Calibrate live** (no restart): *3D Apps → Onshape → Under-Cursor pivot — canvas calibration*
-  (`config.onshape.canvas_inset` / `canvas_auto_left` → `set_canvas`; supersedes
-  `TB_ONSHAPE_CANVAS_*`). `TB_ONSHAPE_DEBUG=1` logs `onshape cursor: frac=… win=WxH inset=… ndc=…`.
+The `cursor` pivot orbits about the surface **under the mouse**. Two halves:
+- **Half B (the ray) — solid.** `_hit_cursor` → `_pixel_ray` → `_hit_ray` (same aperture/bbox/hold as `view`).
+- **Half A (mouse → canvas).** `GetCursorPos` on a per-monitor-v2 worker thread → web-content rect →
+  canvas NDC:
+  1. **Content rect** (`_browser_content_rect`): Chromium = largest `Chrome_RenderWidgetHostHWND`;
+     Firefox = top-level client minus `_firefox_content_top` (screen-DC capture of the top band;
+     first left-half Onshape-dark row). **Do not use `GetDC(hwnd)` BitBlt on Firefox** — it returns
+     solid black under DWM, which made content-top stick at 0 and auto-left overestimate canvas
+     width (pivot **down and to the right**, offset **gains with cursor-x** — the classic symptom).
+  2. **Canvas inset** (`_measure_canvas_inset`, preferred): screen-capture the content, scan
+     right-side columns for viewport top/bottom (neutral grey **or** non-UI model pixels), then
+     derive width from `view.extents` aspect flush-right. Cached per content size + aspect.
+     Falls back to config `canvas_inset` + aspect `canvas_auto_left` if measurement fails.
+  3. Remap fraction → NDC (`_client_fraction_to_ndc`); off-canvas → centre-hit fallback.
 
-- **Verified offline** (`tests/test_onshape_cursor_pivot.py`, 22 cases): `_pixel_ray`,
-  `_client_fraction_to_ndc`, `_effective_canvas_inset` (incl. chrome-included-client regression),
-  Firefox content-top BitBlt detector, Chromium render-widget preference, `_hit_cursor` e2e,
-  `_pivot("cursor")` fallback chain. **Firefox content-top detector also smoke-checked** against a
-  live maximized Onshape tab (page top ≈ 45 px @ 125% DPI with bookmarks bar). **Un-verified (needs
-  live-GUI):** end-to-end that the hit lands on the surface under the mouse while orbiting with
-  panels open/closed. To verify: Orbit pivot = *cursor (under mouse)*, orbit on different faces,
-  watch the pivot marker / debug log at any panel width.
+- **Verified offline** (`tests/test_onshape_cursor_pivot.py`): ray/NDC/auto-left, black-capture
+  rejection, measured-inset path, model-fills-view case. **Live:** screen-DC measure smoke-checked
+  on Firefox @ 125% DPI. **Still needs GUI confirm** that the orbit pivot sits under the cursor.
 
 ### 8.15 "Connects in Firefox but not Chrome/Edge" — Private Network Access
 - **Symptom:** the bridge links from Firefox but a Chromium browser (Chrome/Edge) never connects, even
@@ -421,15 +394,15 @@ block; blank cert paths → the generated defaults).
 ## 11. Status & known limitations (at handoff)
 
 - **Working:** TLS + handshake + connection status; orbit with the hit-test "view" pivot; under-mouse
-  **`cursor` pivot** (daemon 0.1.54 — OS cursor → web-content rect → canvas NDC → navlib ray; offline-
-  tested, **needs live-GUI verify** of the hit under the mouse); ortho zoom (rubberband fixed); pan;
+  **`cursor` pivot** (daemon 0.1.55 — screen-DC canvas measure + aspect width; offline-tested,
+  **needs live-GUI verify** of the hit under the mouse); ortho zoom (rubberband fixed); pan;
   control scheme (view/object/origin/cursor, free/turntable, zoom modes).
 - **Needs a feel/sign pass on hardware:** orbit/pan/zoom directions and magnitudes (`*_SIGN`,
   `*_SCALE`), and the turntable `WORLD_UP` axis (Y vs Z) — verify and flip as needed.
 - **Limitations:** zoom-to-object/cursor for ortho is approximate (falls back toward center); Firefox
-  needs its own cert trust; perspective path is lightly tested (Onshape defaults to ortho). Top
-  toolbar inset still wants a one-time calibration (~0.05–0.09). There is **no add-in** to install or
-  update for Onshape — it's all the in-process bridge.
+  needs its own cert trust; perspective path is lightly tested (Onshape defaults to ortho). Measured
+  canvas assumes flush-right (set Right inset if a right panel is open). There is **no add-in** to
+  install or update for Onshape — it's all the in-process bridge.
 
 ---
 

@@ -6,7 +6,7 @@ cannot see by reading the code**, and the **full list of future plans / requeste
 options**. Per-component deep dives live in their own docs (linked in §15); this file is the map that
 ties them together and covers the things that span more than one component.
 
-> Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.54**, Fusion
+> Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.55**, Fusion
 > add-in **0.1.14**, Blender add-on **0.1.11**, FreeCAD add-on **0.1.4**, SketchUp extension
 > **0.2.2**, Unreal add-on **0.2.2**, AutoCAD plugin **0.3.1**,
 > `pyproject` version is dynamic (single-sourced from `__version__`; packaging not yet cut). Dev machine: Windows 11, Blender 5.1.1, SolidWorks
@@ -343,15 +343,13 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
 - **Onshape** — *in-process TLS-WebSocket bridge* (`onshape_bridge.py`) that **impersonates the
   3Dconnexion NL-Proxy** at `127.51.68.120:8181`, speaking WAMP. Onshape's page connects, hands us its
   camera (`view.affine`), and we run the nav model. No add-in/extension; needs a one-time **cert
-  trust**. The under-mouse **`cursor` orbit pivot** (daemon **0.1.54**) aims navlib's hit-test through
+  trust**. The under-mouse **`cursor` orbit pivot** (daemon **0.1.55**) aims navlib's hit-test through
   the OS cursor (mapped into the canvas daemon-side). Half B (arbitrary-ray hit-test) is solid; Half A
-  maps `GetCursorPos` → **web-content** rect → canvas NDC → ray. The resize/panel sizing bug was
-  Firefox-specific: `MozillaWindowClass`'s client rect **includes** tabs/URL/bookmarks, which inflated
-  `win_h` for auto-left and shifted `fy` down — fixed by BitBlt-detecting the Onshape page top (cached
-  per hwnd/size) and, on Chromium, using the largest `Chrome_RenderWidgetHostHWND`. Left feature-tree
-  width is still **auto-tracked** from `view.extents` aspect (`canvas_auto_left`); Top toolbar inset
-  remains the one calibration (~0.05–0.09). DPI: worker thread is per-monitor-v2 aware. PNA header for
-  Chromium CORS. **Offline-tested; live hit under cursor still needs GUI verify.** →
+  maps `GetCursorPos` → **web-content** rect → **measured canvas** (screen-DC capture: right-column
+  top/bottom + view-aspect width) → NDC → ray. Firefox `GetDC(hwnd)` BitBlt returns black (DWM) — that
+  made content-top stick at 0 and auto-left overestimate width (**gain-with-x / down-right**); fixed by
+  capturing via the screen DC and measuring the canvas instead of relying on a hand-tuned Top.
+  Offline-tested; live hit still wants a GUI confirm. →
   [`docs/apps/onshape.md`](docs/apps/onshape.md) §8.14–8.15.
 
 - **Blender** — *socket add-on* (`plugins/blender/trackball_nav`), the **richest** target: orbit
@@ -775,17 +773,15 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
   `TrackballNav::CursorTracker.selftest` in the Ruby Console to confirm (SketchUp notes §5.5). This
   is the one app in the series verified only offline; both halves rest on proven primitives
   (`pickray`/`raytest` live-verified; the `GetCursorPos`+`WindowFromPoint`+client-rect mapping proven
-  in the SolidWorks driver). **Onshape — DONE IN CODE (daemon 0.1.54), offline-tested, NEEDS a
+  in the SolidWorks driver). **Onshape — DONE IN CODE (daemon 0.1.55), offline-tested, NEEDS a
   live-GUI verify:** navlib exposes no cursor, but its hit-test takes an arbitrary ray, so Half B just
   aims the existing hit-test through the mouse (`_hit_cursor`→`_pixel_ray`→shared `_hit_ray`; `cursor`
   falls back to the screen-center hit off-canvas). Half A reads `GetCursorPos` against the browser
-  **web-content** rect (Chromium: largest `Chrome_RenderWidgetHostHWND`; Firefox: top-level client
-  minus BitBlt-detected page top — Mozilla's client includes tabs/URL/bookmarks, which was the
-  vertical-offset + horizontal-scale bug), then remaps by `canvas_inset` / aspect-derived auto-left →
-  canvas NDC. Top toolbar inset (~0.05–0.09) is the remaining calibration; left panel tracks live.
-  Offline tests (`test_onshape_cursor_pivot.py`, 22 cases) cover the ray build, fraction→NDC,
-  auto-left, Firefox chrome detection, chrome-included-client regression, `_hit_cursor` e2e, and
-  cursor→center→model fallback; the live canvas landing + hit are un-verified (Onshape notes §8.14).
+  **web-content** rect, then **measures the canvas** (screen-DC capture: right-column top/bottom +
+  view-aspect width flush-right). Firefox `GetDC(hwnd)` BitBlt returns black under DWM — that made
+  content-top stick at 0 and auto-left overestimate width (down-right / gain-with-x); fixed in 0.1.55.
+  Offline tests cover ray/NDC/auto-left, black-capture rejection, measured inset, model-fills-view;
+  live orbit-under-pointer still un-verified (Onshape notes §8.14).
   **Blender — DONE IN CODE (add-on
   0.1.11), headless-tested, NEEDS a live-GUI verify:** the "no on-demand mouse getter" claim was
   RE-CONFIRMED empirically (headless `bl_rna` probe — no mouse/cursor/pointer property anywhere;

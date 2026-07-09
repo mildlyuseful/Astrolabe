@@ -167,7 +167,10 @@ def _no_auto(bridge, inset=(0.0, 0.0, 0.0, 0.0)):
 
 def test_hit_cursor_aims_ray_through_the_cursor(bridge, monkeypatch):
     _no_auto(bridge)
-    monkeypatch.setattr(ob, "_cursor_client_fraction", lambda: (0.75, 0.25, 800, 600))  # ndc (0.5,0.5)
+    monkeypatch.setattr(ob, "_cached_canvas_inset", lambda *a, **k: None)   # force config path
+    # 6-tuple: fx,fy,win_w,win_h,content_left,content_top
+    monkeypatch.setattr(ob, "_cursor_client_fraction",
+                        lambda: (0.75, 0.25, 800, 600, 0.0, 0.0))  # ndc (0.5,0.5)
     conn = FakeConn(hit=[1.0, 2.0, 5.0])                  # inside the default model bbox
     eye, right, up, back = (0.0, 0.0, 50.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)
     hit = bridge._hit_cursor(conn, eye, right, up, back)
@@ -183,7 +186,9 @@ def test_hit_cursor_auto_left_shifts_the_ray(bridge, monkeypatch):
     # the panel. Window 800x600, view aspect 3:3 -> auto-left = 0.25.
     bridge._canvas_auto_left = True
     bridge._canvas_inset = (0.0, 0.0, 0.0, 0.0)
-    monkeypatch.setattr(ob, "_cursor_client_fraction", lambda: (0.625, 0.5, 800, 600))
+    monkeypatch.setattr(ob, "_cached_canvas_inset", lambda *a, **k: None)
+    monkeypatch.setattr(ob, "_cursor_client_fraction",
+                        lambda: (0.625, 0.5, 800, 600, 0.0, 0.0))
     conn = FakeConn(hit=[0.0, 0.0, 5.0], view_ext=[-3.0, -3.0, -1.0, 3.0, 3.0, 1.0])
     eye, right, up, back = (0.0, 0.0, 50.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)
     bridge._hit_cursor(conn, eye, right, up, back)
@@ -191,9 +196,27 @@ def test_hit_cursor_auto_left_shifts_the_ray(bridge, monkeypatch):
     assert abs(lf[0]) < 1e-9 and abs(lf[1]) < 1e-9         # centred: no right/up offset
 
 
+def test_hit_cursor_uses_measured_inset(bridge, monkeypatch):
+    """Measured canvas rect wins over config/auto-left -- the path that fixes Top=0 gain-with-x."""
+    bridge._canvas_auto_left = True
+    bridge._canvas_inset = (0.0, 0.0, 0.0, 0.0)            # would wrongly put left=0
+    monkeypatch.setattr(ob, "_cached_canvas_inset",
+                        lambda *a, **k: (0.25, 0.1, 0.0, 0.0))  # measured 25% left + 10% top
+    # cursor at canvas centre of the measured rect: fx=0.25+0.75/2=0.625, fy=0.1+0.9/2=0.55
+    monkeypatch.setattr(ob, "_cursor_client_fraction",
+                        lambda: (0.625, 0.55, 800, 600, 0.0, 0.0))
+    conn = FakeConn(hit=[0.0, 0.0, 5.0], view_ext=[-3.0, -3.0, -1.0, 3.0, 3.0, 1.0])
+    eye, right, up, back = (0.0, 0.0, 50.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)
+    bridge._hit_cursor(conn, eye, right, up, back)
+    lf = conn.write_of("hit.lookfrom")
+    assert abs(lf[0]) < 1e-9 and abs(lf[1]) < 1e-9
+
+
 def test_hit_cursor_none_when_cursor_off_canvas(bridge, monkeypatch):
     _no_auto(bridge)
-    monkeypatch.setattr(ob, "_cursor_client_fraction", lambda: (1.4, 0.5, 800, 600))  # right of canvas
+    monkeypatch.setattr(ob, "_cached_canvas_inset", lambda *a, **k: None)
+    monkeypatch.setattr(ob, "_cursor_client_fraction",
+                        lambda: (1.4, 0.5, 800, 600, 0.0, 0.0))  # right of canvas
     conn = FakeConn(hit=[1.0, 2.0, 5.0])
     assert bridge._hit_cursor(conn, (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1)) is None
     assert conn.writes == []                              # never touched the hit-test
@@ -208,7 +231,9 @@ def test_hit_cursor_none_when_no_cursor(bridge, monkeypatch):
 
 def test_hit_cursor_bbox_rejects_stray_hit(bridge, monkeypatch):
     _no_auto(bridge)
-    monkeypatch.setattr(ob, "_cursor_client_fraction", lambda: (0.5, 0.5, 800, 600))
+    monkeypatch.setattr(ob, "_cached_canvas_inset", lambda *a, **k: None)
+    monkeypatch.setattr(ob, "_cursor_client_fraction",
+                        lambda: (0.5, 0.5, 800, 600, 0.0, 0.0))
     conn = FakeConn(hit=[500.0, 0.0, 0.0])               # far outside model.extents
     assert bridge._hit_cursor(conn, (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1)) is None
     # every aperture tried a read (all rejected by the bbox guard)
@@ -258,11 +283,12 @@ def test_pivot_view_never_touches_cursor(bridge, monkeypatch):
 
 # --- Firefox content-top: chrome-included client rect is the sizing bug -----------------------
 def test_firefox_content_top_finds_dark_page_row(monkeypatch):
-    """Synthetic BitBlt band: light Firefox chrome, then a full-width Onshape-dark row.
-    The detector must return that row (not an earlier sparse dark speck on the right)."""
+    """Synthetic screen-DC band: light Firefox chrome, then a full-width Onshape-dark row.
+    The detector must return that row (not an earlier sparse dark speck on the right).
+    Also rejects an all-black capture (the old GetDC(hwnd) BitBlt failure mode)."""
     import ctypes
+    from ctypes import wintypes
     w, band, page_y = 200, 80, 40
-    # BGRA buffer, top-down
     buf = bytearray(w * band * 4)
     for y in range(band):
         for x in range(w):
@@ -272,35 +298,92 @@ def test_firefox_content_top_finds_dark_page_row(monkeypatch):
             else:
                 buf[i:i + 3] = bytes((209, 180, 153))    # light Firefox tab blue
             buf[i + 3] = 255
-    # a dark speck in the chrome on the far right must NOT trigger an early match
     for y in range(5, 15):
         i = (y * w + (w - 2)) * 4
         buf[i:i + 3] = bytes((34, 27, 28))
 
-    class FakeU32:
-        def GetDC(self, _hwnd): return 1
-        def ReleaseDC(self, _hwnd, _hdc): return 1
+    monkeypatch.setattr(ob, "_capture_screen_bgra",
+                        lambda *_a, **_k: (buf, w, band))
 
-    class FakeGdi:
-        def CreateCompatibleDC(self, _hdc): return 2
-        def CreateCompatibleBitmap(self, _hdc, _w, _h): return 3
-        def SelectObject(self, _dc, obj): return 0
-        def BitBlt(self, *_a): return 1
-        def GetDIBits(self, _mem, _bmp, _start, _lines, out, _bmi, _usage):
-            ctypes.memmove(out, bytes(buf), len(buf))
-            return _lines
-        def DeleteObject(self, _o): return 1
-        def DeleteDC(self, _dc): return 1
+    class FakeU32:
+        def ClientToScreen(self, _hwnd, pt_ref):
+            pt = ctypes.cast(pt_ref, ctypes.POINTER(wintypes.POINT)).contents
+            pt.x, pt.y = 0, 0
+            return 1
 
     class FakeWindll:
         user32 = FakeU32()
-        gdi32 = FakeGdi()
 
     monkeypatch.setattr(ctypes, "windll", FakeWindll(), raising=False)
     ob._FF_CONTENT_CACHE = {"key": None, "top": 0}
     assert ob._firefox_content_top(hwnd=42, client_w=w, client_h=band + 400) == page_y
-    # cache hit
-    assert ob._firefox_content_top(hwnd=42, client_w=w, client_h=band + 400) == page_y
+    assert ob._firefox_content_top(hwnd=42, client_w=w, client_h=band + 400) == page_y  # cache
+
+
+def test_firefox_content_top_rejects_black_capture(monkeypatch):
+    """GetDC(hwnd) BitBlt on Firefox returns solid black -- must NOT report content_top>0."""
+    import ctypes
+    from ctypes import wintypes
+    w, band = 200, 80
+    buf = bytearray(w * band * 4)          # all zeros = black
+    monkeypatch.setattr(ob, "_capture_screen_bgra", lambda *_a, **_k: (buf, w, band))
+
+    class FakeU32:
+        def ClientToScreen(self, _hwnd, pt_ref):
+            pt = ctypes.cast(pt_ref, ctypes.POINTER(wintypes.POINT)).contents
+            pt.x, pt.y = 0, 0
+            return 1
+
+    class FakeWindll:
+        user32 = FakeU32()
+
+    monkeypatch.setattr(ctypes, "windll", FakeWindll(), raising=False)
+    ob._FF_CONTENT_CACHE = {"key": None, "top": 0}
+    assert ob._firefox_content_top(hwnd=42, client_w=w, client_h=band + 400) == 0
+
+
+def test_measure_canvas_inset_finds_panel_and_toolbar(monkeypatch):
+    """Synthetic content bitmap: left panel + top toolbar + canvas; width from view aspect."""
+    w, h = 400, 300
+    # toolbar 30px, canvas 270px tall flush right; with aspect 300/270 left = 100px panel
+    buf = bytearray(w * h * 4)
+    for y in range(h):
+        for x in range(w):
+            i = (y * w + x) * 4
+            if y < 30:
+                buf[i:i + 3] = bytes((34, 27, 28))       # toolbar UI-dark
+            elif x < 100:
+                buf[i:i + 3] = bytes((34, 27, 28))       # left panel UI-dark
+            else:
+                buf[i:i + 3] = bytes((51, 51, 51))       # canvas grey
+            buf[i + 3] = 255
+    monkeypatch.setattr(ob, "_capture_screen_bgra", lambda *_a, **_k: (buf, w, h))
+    inset = ob._measure_canvas_inset(0, 0, w, h, half_x=300.0, half_y=270.0)
+    assert inset is not None
+    l, t, r, b = inset
+    assert abs(l - 0.25) < 0.05                          # ~100/400 from aspect
+    assert abs(t - 0.10) < 0.05                          # ~30/300 from column scan
+    assert r < 0.02 and b < 0.05
+
+
+def test_measure_canvas_inset_works_when_model_fills_view(monkeypatch):
+    """Model colours on the canvas must not break the right-column top/bottom scan."""
+    w, h = 400, 300
+    buf = bytearray(w * h * 4)
+    for y in range(h):
+        for x in range(w):
+            i = (y * w + x) * 4
+            if y < 30 or x < 100:
+                buf[i:i + 3] = bytes((34, 27, 28))
+            elif 150 <= x <= 250 and 100 <= y <= 200:
+                buf[i:i + 3] = bytes((140, 185, 212))    # blue cube
+            else:
+                buf[i:i + 3] = bytes((51, 51, 51))
+            buf[i + 3] = 255
+    monkeypatch.setattr(ob, "_capture_screen_bgra", lambda *_a, **_k: (buf, w, h))
+    inset = ob._measure_canvas_inset(0, 0, w, h, half_x=300.0, half_y=270.0)
+    assert inset is not None
+    assert abs(inset[0] - 0.25) < 0.05 and abs(inset[1] - 0.10) < 0.05
 
 
 def test_browser_content_rect_prefers_chromium_render_widget(monkeypatch):
