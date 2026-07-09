@@ -254,3 +254,110 @@ def test_pivot_view_never_touches_cursor(bridge, monkeypatch):
                          (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1)) == (3.0, 3.0, 3.0)
     assert bridge._pivot(FakeConn(), {"op": "selection"},
                          (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1)) == (3.0, 3.0, 3.0)
+
+
+# --- Firefox content-top: chrome-included client rect is the sizing bug -----------------------
+def test_firefox_content_top_finds_dark_page_row(monkeypatch):
+    """Synthetic BitBlt band: light Firefox chrome, then a full-width Onshape-dark row.
+    The detector must return that row (not an earlier sparse dark speck on the right)."""
+    import ctypes
+    w, band, page_y = 200, 80, 40
+    # BGRA buffer, top-down
+    buf = bytearray(w * band * 4)
+    for y in range(band):
+        for x in range(w):
+            i = (y * w + x) * 4
+            if y >= page_y:
+                buf[i:i + 3] = bytes((34, 27, 28))       # B,G,R ~ Onshape (28,27,34)
+            else:
+                buf[i:i + 3] = bytes((209, 180, 153))    # light Firefox tab blue
+            buf[i + 3] = 255
+    # a dark speck in the chrome on the far right must NOT trigger an early match
+    for y in range(5, 15):
+        i = (y * w + (w - 2)) * 4
+        buf[i:i + 3] = bytes((34, 27, 28))
+
+    class FakeU32:
+        def GetDC(self, _hwnd): return 1
+        def ReleaseDC(self, _hwnd, _hdc): return 1
+
+    class FakeGdi:
+        def CreateCompatibleDC(self, _hdc): return 2
+        def CreateCompatibleBitmap(self, _hdc, _w, _h): return 3
+        def SelectObject(self, _dc, obj): return 0
+        def BitBlt(self, *_a): return 1
+        def GetDIBits(self, _mem, _bmp, _start, _lines, out, _bmi, _usage):
+            ctypes.memmove(out, bytes(buf), len(buf))
+            return _lines
+        def DeleteObject(self, _o): return 1
+        def DeleteDC(self, _dc): return 1
+
+    class FakeWindll:
+        user32 = FakeU32()
+        gdi32 = FakeGdi()
+
+    monkeypatch.setattr(ctypes, "windll", FakeWindll(), raising=False)
+    ob._FF_CONTENT_CACHE = {"key": None, "top": 0}
+    assert ob._firefox_content_top(hwnd=42, client_w=w, client_h=band + 400) == page_y
+    # cache hit
+    assert ob._firefox_content_top(hwnd=42, client_w=w, client_h=band + 400) == page_y
+
+
+def test_browser_content_rect_prefers_chromium_render_widget(monkeypatch):
+    """Chromium: largest Chrome_RenderWidgetHostHWND wins (already excludes browser chrome)."""
+    monkeypatch.setattr(ob, "_find_largest_descendant", lambda *_a, **_k: 99)
+    monkeypatch.setattr(ob, "_firefox_content_top",
+                        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("ff path")))
+
+    import ctypes
+    from ctypes import wintypes
+
+    calls = {"client": 0, "screen": 0}
+
+    def fake_client(hwnd, rc_ref):
+        calls["client"] += 1
+        # byref(RECT) -> write into the pointed-to RECT
+        rc = ctypes.cast(rc_ref, ctypes.POINTER(wintypes.RECT)).contents
+        rc.left, rc.top, rc.right, rc.bottom = 0, 0, 1600, 900
+        return 1
+
+    def fake_screen(hwnd, pt_ref):
+        calls["screen"] += 1
+        pt = ctypes.cast(pt_ref, ctypes.POINTER(wintypes.POINT)).contents
+        pt.x, pt.y = 10, 80
+        return 1
+
+    class FakeU32:
+        GetClientRect = staticmethod(fake_client)
+        ClientToScreen = staticmethod(fake_screen)
+
+        def GetClassNameW(self, *_a):
+            raise AssertionError("Chromium path should not need the class name")
+
+    class FakeWindll:
+        user32 = FakeU32()
+
+    monkeypatch.setattr(ctypes, "windll", FakeWindll(), raising=False)
+    assert ob._browser_content_rect(1) == (10, 80, 1600, 900)
+    assert calls["client"] == 1 and calls["screen"] == 1
+
+
+def test_chrome_included_client_gains_auto_left():
+    """The Firefox sizing bug: MozillaWindowClass's client rect includes browser chrome, but
+    canvas_inset.top is an Onshape-toolbar fraction of the *page*. Feeding auto-left the
+    chrome-inflated height with a content-calibrated top makes left drift (horizontal scale
+    error); the unsubtracted chrome also shifts fy downward (vertical offset)."""
+    # True (content-relative): 800x600 page, 25% left panel, 10% top toolbar, canvas 600x540.
+    l_ok, _, _, _ = OnshapeBridge._effective_canvas_inset(
+        600.0, 540.0, 800, 600, (0.0, 0.1, 0.0, 0.0), True)
+    assert abs(l_ok - 0.25) < 1e-9
+    # Bug: same top=0.1 (toolbar/page) but win_h still includes 100 px of browser chrome.
+    l_bad, _, _, _ = OnshapeBridge._effective_canvas_inset(
+        600.0, 540.0, 800, 700, (0.0, 0.1, 0.0, 0.0), True)
+    assert abs(l_bad - 0.25) > 0.03
+    # Vertical: a cursor on the canvas top edge is at content fy=0.1, but relative to the
+    # chrome-included client it's (100+60)/700 -- maps below the toolbar NDC.
+    ndc_ok = OnshapeBridge._client_fraction_to_ndc(0.625, 0.1, (0.25, 0.1, 0.0, 0.0))
+    ndc_bad = OnshapeBridge._client_fraction_to_ndc(0.625, 160 / 700, (0.25, 0.1, 0.0, 0.0))
+    assert ndc_ok is not None and abs(ndc_ok[1] - 1.0) < 1e-9          # canvas top -> NDC y=+1
+    assert ndc_bad is not None and ndc_bad[1] < 0.95                    # shifted down

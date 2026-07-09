@@ -436,10 +436,10 @@ class SettingsWindow:
         only Top needs setting). All apply live -- watch the pivot while you adjust."""
         box = ttk.LabelFrame(parent, text="Under-Cursor pivot — canvas calibration")
         box.pack(fill="x", padx=10, pady=(12, 4))
-        ttk.Label(box, text="Only for Orbit pivot = 'cursor (under mouse)'. The 3D canvas sits below "
-                            "Onshape's top toolbar and beside its panels. Set Top to the toolbar's "
-                            "fraction of the window height (~0.05–0.09); the left feature-tree panel "
-                            "is tracked automatically. Tip: set TB_ONSHAPE_DEBUG=1 to log the mapping.",
+        ttk.Label(box, text="Only for Orbit pivot = 'cursor (under mouse)'. Top = Onshape toolbar as a "
+                            "fraction of the *page* height (~0.05–0.09), not the whole browser window "
+                            "(Firefox chrome is subtracted automatically). The left feature-tree panel "
+                            "is tracked from the view aspect. Tip: TB_ONSHAPE_DEBUG=1 logs the mapping.",
                   foreground="#555", wraplength=600).pack(anchor="w", padx=10, pady=(4, 2))
         self._bool_row(box, "Auto-track left panel (feature tree) from the view aspect",
                        ("onshape", "canvas_auto_left"))

@@ -6,7 +6,7 @@ cannot see by reading the code**, and the **full list of future plans / requeste
 options**. Per-component deep dives live in their own docs (linked in §15); this file is the map that
 ties them together and covers the things that span more than one component.
 
-> Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.53**, Fusion
+> Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.54**, Fusion
 > add-in **0.1.14**, Blender add-on **0.1.11**, FreeCAD add-on **0.1.4**, SketchUp extension
 > **0.2.2**, Unreal add-on **0.2.2**, AutoCAD plugin **0.3.1**,
 > `pyproject` version is dynamic (single-sourced from `__version__`; packaging not yet cut). Dev machine: Windows 11, Blender 5.1.1, SolidWorks
@@ -343,17 +343,16 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
 - **Onshape** — *in-process TLS-WebSocket bridge* (`onshape_bridge.py`) that **impersonates the
   3Dconnexion NL-Proxy** at `127.51.68.120:8181`, speaking WAMP. Onshape's page connects, hands us its
   camera (`view.affine`), and we run the nav model. No add-in/extension; needs a one-time **cert
-  trust**. The under-mouse **`cursor` orbit pivot** (daemon 0.1.48) aims navlib's hit-test through the
-  OS cursor (mapped into the canvas daemon-side) — done in code; the DPI "down-and-right" offset (same
-  as Fusion/SW) was fixed by making the worker thread per-monitor-v2 aware + reading the web-content
-  window (`WindowFromPoint`, so browser chrome drops out); the **resizable left feature-tree panel is
-  auto-tracked** from the `view.extents` aspect (`canvas_auto_left`, no calibration) — but the **`top`
-  toolbar inset feeds that formula**, so a wrong top *gains* the horizontal (offset scales with cursor-x
-  / crosses zero, the user's symptom); the canvas insets are now **live-configurable** (`config.onshape.
-  canvas_inset`/`canvas_auto_left` → `set_canvas`, UI fields), so Top is dialed in once. Chrome/Edge
-  **wouldn't link** (Firefox did) → Chromium **Private Network Access** needs
-  `Access-Control-Allow-Private-Network: true` on the CORS preflight (added; cert trust is a separate
-  per-browser axis). → [`docs/apps/onshape.md`](docs/apps/onshape.md) §8.14–8.15.
+  trust**. The under-mouse **`cursor` orbit pivot** (daemon **0.1.54**) aims navlib's hit-test through
+  the OS cursor (mapped into the canvas daemon-side). Half B (arbitrary-ray hit-test) is solid; Half A
+  maps `GetCursorPos` → **web-content** rect → canvas NDC → ray. The resize/panel sizing bug was
+  Firefox-specific: `MozillaWindowClass`'s client rect **includes** tabs/URL/bookmarks, which inflated
+  `win_h` for auto-left and shifted `fy` down — fixed by BitBlt-detecting the Onshape page top (cached
+  per hwnd/size) and, on Chromium, using the largest `Chrome_RenderWidgetHostHWND`. Left feature-tree
+  width is still **auto-tracked** from `view.extents` aspect (`canvas_auto_left`); Top toolbar inset
+  remains the one calibration (~0.05–0.09). DPI: worker thread is per-monitor-v2 aware. PNA header for
+  Chromium CORS. **Offline-tested; live hit under cursor still needs GUI verify.** →
+  [`docs/apps/onshape.md`](docs/apps/onshape.md) §8.14–8.15.
 
 - **Blender** — *socket add-on* (`plugins/blender/trackball_nav`), the **richest** target: orbit
   (free/turntable, 6 pivots), pan/zoom/dolly/roll, **fly/walk** first-person modes, camera-view
@@ -776,17 +775,18 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
   `TrackballNav::CursorTracker.selftest` in the Ruby Console to confirm (SketchUp notes §5.5). This
   is the one app in the series verified only offline; both halves rest on proven primitives
   (`pickray`/`raytest` live-verified; the `GetCursorPos`+`WindowFromPoint`+client-rect mapping proven
-  in the SolidWorks driver). **Onshape — DONE IN CODE (daemon 0.1.48), offline-tested, NEEDS a
+  in the SolidWorks driver). **Onshape — DONE IN CODE (daemon 0.1.54), offline-tested, NEEDS a
   live-GUI verify:** navlib exposes no cursor, but its hit-test takes an arbitrary ray, so Half B just
   aims the existing hit-test through the mouse (`_hit_cursor`→`_pixel_ray`→shared `_hit_ray`; `cursor`
-  falls back to the screen-center hit off-canvas). Half A reads the OS cursor (`GetCursorPos`) and maps
-  it by the cursor's **fraction across the foreground window's client area** (`ClientToScreen` — again
-  DPI-scale-free), then remaps by `CANVAS_INSET` (the toolbar/panel insets Onshape eats out of the
-  browser) → canvas NDC. **The mouse→canvas mapping is the fuzzy part** — `CANVAS_INSET` defaults to 0
-  and needs live calibration (env `TB_ONSHAPE_CANVAS_{LEFT,TOP,RIGHT,BOTTOM}`); the daemon can't read
-  the browser DOM. Offline tests (`test_onshape_cursor_pivot.py`) cover the ray build, the
-  fraction→NDC remap/rejection, `_hit_cursor` end-to-end, and the cursor→center→model fallback; the
-  live canvas landing + hit are un-verified (Onshape notes §8.14). **Blender — DONE IN CODE (add-on
+  falls back to the screen-center hit off-canvas). Half A reads `GetCursorPos` against the browser
+  **web-content** rect (Chromium: largest `Chrome_RenderWidgetHostHWND`; Firefox: top-level client
+  minus BitBlt-detected page top — Mozilla's client includes tabs/URL/bookmarks, which was the
+  vertical-offset + horizontal-scale bug), then remaps by `canvas_inset` / aspect-derived auto-left →
+  canvas NDC. Top toolbar inset (~0.05–0.09) is the remaining calibration; left panel tracks live.
+  Offline tests (`test_onshape_cursor_pivot.py`, 22 cases) cover the ray build, fraction→NDC,
+  auto-left, Firefox chrome detection, chrome-included-client regression, `_hit_cursor` e2e, and
+  cursor→center→model fallback; the live canvas landing + hit are un-verified (Onshape notes §8.14).
+  **Blender — DONE IN CODE (add-on
   0.1.11), headless-tested, NEEDS a live-GUI verify:** the "no on-demand mouse getter" claim was
   RE-CONFIRMED empirically (headless `bl_rna` probe — no mouse/cursor/pointer property anywhere;
   `Event.mouse_*` only inside a modal op; Window has cursor setters only). So a **passive window-wide
