@@ -142,6 +142,11 @@ def _app(enabled=False):
         # screen-centre pivot is recomputed. Holds the pivot steady during a gesture; re-settles to
         # the current centre after a pause. (SolidWorks driver; other apps recompute per frame.)
         "view_pivot_hold_sec": 0.5,
+        # When True and something is selected, orbit (and to_cursor zoom) use the selection centre
+        # instead of the designated pivot (cursor / view / origin / …). Unreal implements this;
+        # other apps expose the toggle as a placeholder until their add-ons read it. Deep-merged
+        # onto existing configs (no CONFIG_VERSION bump).
+        "selection_overrides_pivot": True,
         "bindings": copy.deepcopy(_DEFAULT_3D_BINDINGS),
     }
 
@@ -209,7 +214,11 @@ DEFAULTS = {
     # Onshape's page connects to, at this fixed loopback endpoint (it MUST be 127.51.68.120:8181 --
     # that's the address Onshape's 3Dconnexion client probes). Blank cert/key paths => the driver
     # uses generated certs in the config dir (onshape_cert.pem / onshape_key.pem).
-    "onshape": {"address": "127.51.68.120", "port": 8181, "cert_path": "", "key_path": ""},
+    # Under-cursor orbit uses a page userscript that POSTs exact #canvas NDC to /trackball/pointer
+    # (see docs/apps/onshape.md §8.14). cursor_userscript_warn_dismissed suppresses the one-time
+    # UI warning when the user picks Orbit pivot = cursor.
+    "onshape": {"address": "127.51.68.120", "port": 8181, "cert_path": "", "key_path": "",
+                "cursor_userscript_warn_dismissed": False},
 }
 
 

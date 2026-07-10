@@ -7,8 +7,10 @@ add-on** integration (like Fusion/Blender/FreeCAD), not an in-process driver. Re
 touching the add-on.
 
 Verified live on the dev machine: **Unreal Engine 5.8** (`5.8.0-55116800+++UE5+Release-5.8`), the
-built-in **Python Editor Script Plugin**. Add-on `0.2.0` (Blender-parity scheme: orbit/fly/walk,
-viewpoint pivot, twist action, lock-horizon, per-mode inverts), daemon `__version__` `0.1.22`.
+built-in **Python Editor Script Plugin**. Add-on `0.2.4` (Blender-parity scheme: orbit/fly/walk,
+viewpoint pivot, twist action, lock-horizon, per-mode inverts; under-mouse `cursor` orbit /
+`to_cursor` zoom via Epic's stock **GeoReferencing** editor BPLibrary — gotcha #13;
+`selection_overrides_pivot` — gotcha #14).
 
 ---
 
@@ -17,6 +19,8 @@ viewpoint pivot, twist action, lock-horizon, per-mode inverts), daemon `__versio
 ```sh
 # Pure camera math — runs under plain pytest (tbnav_unreal_camera.py has NO unreal import):
 python -m pytest tests/test_unreal_nav_math.py -q
+# Cursor / to_cursor pivot pipeline (stub unreal + GeoReferencing BPLibrary):
+python -m pytest tests/test_unreal_cursor_pivot.py -q
 # Daemon wiring (install copies the plugin, auto_update, detection, plugin-dir resolution, routing):
 python -m pytest tests/test_integrations_unreal.py -q
 # Everything:
@@ -60,14 +64,14 @@ free-fly editor camera and its plugin/`init_unreal.py` startup model.
 
 | Path | Role |
 |---|---|
-| `…/unreal/TrackballNav/TrackballNav.uplugin` | **Plugin descriptor.** Content-only (no C++ Modules), `CanContainContent:true`, depends on `PythonScriptPlugin` (so enabling Trackball Nav enables Python too). `EnabledByDefault:false` → the user enables it once. |
+| `…/unreal/TrackballNav/TrackballNav.uplugin` | **Plugin descriptor.** Content-only (no C++ Modules), `CanContainContent:true`, depends on `PythonScriptPlugin` **and** `GeoReferencing` (enabling Trackball Nav enables Python + the stock editor viewport-cursor helpers). `EnabledByDefault:false` → the user enables it once. |
 | `…/TrackballNav/version.json` | Version the daemon reads for `auto_update` (like Fusion's `.manifest`). Keep in sync with `ADDIN_VERSION` + the `.uplugin` `VersionName`. |
 | `…/TrackballNav/Content/Python/init_unreal.py` | **Startup shim.** Unreal auto-runs this for every enabled plugin's `Content/Python` at editor startup. It only `import trackball_nav; trackball_nav.start()`. |
 | `…/Content/Python/trackball_nav.py` | **The add-on.** Reader thread, Slate-post-tick main-thread pump, live camera read/write, pivot resolution, scheme, logging. Runs *inside the editor's Python*. |
 | `…/Content/Python/tbnav_unreal_camera.py` | **Pure camera math** (vector + Rodrigues rotation, the duck-typed `Camera`, rotator↔basis, orbit/pan/zoom). **No `unreal` import** → unit-testable headless under plain `python`. |
 | `trackball_daemon/integrations.py` | `detect_unreal`, `install_unreal` (copy the plugin into each engine's `Engine/Plugins`), `unreal_plugin_dir`, the `_ADDINS["unreal"]` entry, `auto_update`. |
 | `navbroker.py` / `app.py` / `config.py` / `ui.py` | Generic broker-app plumbing — **no Unreal-specific code** beyond a one-line `_APP_PROC_HINTS` entry and `config.apps.unreal` default. |
-| `tests/test_unreal_nav_math.py` / `tests/test_integrations_unreal.py` | Pure-math + wiring tests. |
+| `tests/test_unreal_nav_math.py` / `tests/test_unreal_cursor_pivot.py` / `tests/test_integrations_unreal.py` | Pure-math + cursor-pivot (stubbed `unreal`) + wiring tests. |
 
 The daemon process and the add-on are **two different Python interpreters** (daemon Python vs
 Unreal's bundled Python). They only talk over the broker socket.
@@ -163,18 +167,22 @@ broker frame — see §5.1), interpreted for the editor's free-fly camera. `conf
   `origin` → (0,0,0); `object` → median of the **selected actors'** bounding-box centres
   (`EditorActorSubsystem.get_selected_level_actors()` → `actor.get_actor_bounds(False)`), cached
   ~0.5 s; `selection` → **falls back to `object`** — **Unreal has NO 3D cursor** (verified: no such Python
-  API; all `*cursor*` names are mouse/UI/gizmo, and no 3D-cursor option is shown for Unreal);
-  the under-mouse `cursor` pivot is unsupported too (C++-only) and falls through; `view` → the
-  surface under the **screen centre** via `SystemLibrary.line_trace_single` down the camera forward
-  axis into the **editor world** (`sub.get_editor_world()`), validated against the selection bbox and
-  **held for the gesture** (re-raycast on pan/zoom or after a ~0.35 s idle). Everything falls back
-  through the selection centre to a **point a focus-distance ahead of the camera**, then `None`
-  (= free-fly). So orbit always has a sane behaviour, and **free-fly emerges naturally** when nothing
-  is under the cursor / selected.
+  API; all Blender-style `*cursor*` names are mouse/UI/gizmo, and no 3D-cursor option is shown for Unreal);
+  the under-mouse `cursor` pivot (add-on **0.2.3**) raycasts the surface under the **level-viewport
+  mouse** — Half A from stock `GeoReferencingEditorBPLibrary.get_viewport_cursor_information()`
+  (gotcha #13), Half B `line_trace_single` along that world ray, bbox-validated and **held for the
+  gesture** like `view`; on miss / unfocused viewport it falls back to the selection centre;
+  `view` → the surface under the **screen centre** via `SystemLibrary.line_trace_single` down the
+  camera forward axis into the **editor world** (`sub.get_editor_world()`), validated against the
+  selection bbox and **held for the gesture** (re-raycast on pan/zoom or after a ~0.35 s idle).
+  Everything falls back through the selection centre to a **point a focus-distance ahead of the
+  camera**, then `None` (= free-fly). So orbit always has a sane behaviour, and **free-fly emerges
+  naturally** when nothing is under the cursor / selected.
 - **Orbit style** (`scheme.orbit_style`): `free` (about the camera's own right/up/fwd, twist allowed)
   or `turntable` (yaw about WORLD Z + pitch about camera-right, **roll dropped**).
-- **Zoom mode** (`scheme.zoom_mode`): `to_center` (and unresolvable `to_cursor`) → dolly along forward; `to_object` →
-  dolly toward the selection centre.
+- **Zoom mode** (`scheme.zoom_mode`): `to_center` → dolly along forward; `to_object` → dolly toward the
+  selection centre; `to_cursor` → dolly toward the under-mouse surface hit (same Geo ray + trace as
+  cursor orbit, own `_zoom_gesture` hold; miss → forward dolly).
 - **Per-mode inverts** (`advanced.invert.<orbit|viewpoint|fly|walk>.<axis>`): applied **in the add-on**
   (like Blender, §12.9) — the same physical channel means different things per mode, so independent
   inverts are only possible once the mode is known. Signs default **off** (best-guess, live-tune) —
@@ -198,12 +206,13 @@ adv" special-case (which couldn't coexist with a second advanced-carrying app). 
 ## 6. The add-on internals
 
 ### 6.1 Bootstrap (simpler than FreeCAD's)
-The `.uplugin` lists `PythonScriptPlugin` as a dependency, so enabling **Trackball Nav** in
-*Edit → Plugins* also enables Python. At editor startup Unreal runs every enabled plugin's
-`Content/Python/init_unreal.py` (**verified** in the UE log) → our shim does
-`import trackball_nav; trackball_nav.start()`. `start()` is **synchronous** (no `GuiUp`/`QTimer`
-deferral like FreeCAD needs) — registering a Slate post-tick callback and a daemon reader thread is
-safe at startup, and the pump simply no-ops until a perspective viewport exists.
+The `.uplugin` lists `PythonScriptPlugin` and `GeoReferencing` as dependencies, so enabling
+**Trackball Nav** in *Edit → Plugins* also enables Python and Epic's geo editor helpers (under-cursor
+mouse pixel / ray). At editor startup Unreal runs every enabled plugin's `Content/Python/init_unreal.py`
+(**verified** in the UE log) → our shim does `import trackball_nav; trackball_nav.start()`. `start()`
+is **synchronous** (no `GuiUp`/`QTimer` deferral like FreeCAD needs) — registering a Slate post-tick
+callback and a daemon reader thread is safe at startup, and the pump simply no-ops until a
+perspective viewport exists.
 
 ### 6.2 Threading
 `unreal` API is **main(game)-thread-only**. The socket **reader thread** does I/O + `queue.put`
@@ -239,8 +248,10 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
   on "Set up". (`tests/test_integrations_unreal.py::test_install_reports_manual_steps_when_unwritable`.)
 - **Enable once:** even after the files are in place, the plugin is inert until the user **enables it
   in *Edit → Plugins → "Trackball" → restart*** — the analogue of Fusion's one-time "Run on Startup".
-- **What actually auto-loads (verified):** a *content-only* plugin (no C++ module) **does** run its
-  `init_unreal.py` once enabled — confirmed by the UE startup log. So no native build is needed.
+- **What actually auto-loads (verified):** a *content-only* plugin (no C++ module of ours) **does**
+  run its `init_unreal.py` once enabled — confirmed by the UE startup log. GeoReferencing is a
+  stock engine plugin (ships with UE); enabling Trackball Nav pulls it in via the `.uplugin`
+  dependency. No Trackball native build is needed.
 - **Versioning:** bump **three** places that must match — `ADDIN_VERSION` in `trackball_nav.py`,
   `version.json`, and `VersionName` in `TrackballNav.uplugin`. `_ADDINS["unreal"]` reads `version.json`
   like Fusion's `.manifest`. On a bump, `auto_update` re-copies on the daemon's next launch (needs
@@ -302,6 +313,33 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
 12. **Two interpreters → two reload rules.** A change to the add-on (`Content/Python/*.py`) needs the
     **editor restarted** (no Python-add-on reload); a change to the daemon needs the **daemon
     restarted**. A change to both needs both.
+13. **Under-cursor (`cursor`) orbit / `to_cursor` zoom — DONE in code (add-on 0.2.3) via stock
+    GeoReferencing.** Earlier probes correctly found that PIE-only mouse APIs and
+    `get_mouse_position_on_platform` can't localise into the level viewport, and that
+    `EditorViewportClient` is absent from Python. The missing Half A was **already shipped by Epic**
+    inside the **GeoReferencing** plugin (not under an obvious "Editor Scripting" name):
+    - **Half A — mouse + optional world ray:** `unreal.GeoReferencingEditorBPLibrary.
+      get_viewport_cursor_information()` → `(focused, screen_location, world_location, world_direction)`
+      for `GCurrentLevelEditingViewportClient` (C++: `GetCursorWorldLocationFromMousePos`). Fallback:
+      `get_viewport_cursor_location()` + `UnrealEditorSubsystem.screen_to_world`. Our `.uplugin` lists
+      `GeoReferencing` as a dependency so enabling Trackball Nav enables it (and its SQLiteCore dep).
+    - **Half B — surface hit:** `line_trace_single` along that world ray (same bbox + hold machinery as
+      `view`). `to_cursor` zoom uses the same `_cursor_pivot` with a separate `_zoom_gesture` hold.
+    - **Focus gate (live UX):** Epic's getter sets `focused=false` when the **viewport widget** lacks
+      Slate focus (Details / Content Browser / …). Daemon focus on `UnrealEditor.exe` is not enough —
+      click the level viewport once. Unfocused / miss → selection centre → forward-point fallbacks
+      (same chain as `view`). Logged as `cursor-pivot:` in `unreal_addin.log`.
+    - **Rejected alternatives:** a custom Trackball C++ module; an EUW click-capturing overlay;
+      `get_mouse_position_on_platform` + a calibrated viewport rect (no reliable screen origin).
+    - **Live-GUI verify still TODO:** headless stubs cover the pipeline; confirm hover+orbit feel and
+      the focus gate on a real editor + trackball.
+14. **`selection_overrides_pivot` (add-on 0.2.4).** Config key `apps.unreal.selection_overrides_pivot`
+    (default **True**; deep-merged, no config-version bump). The daemon folds it into the frame's
+    `adv` object. When **True** and level actors are selected, orbit (`view` / `cursor` / `origin`)
+    and `to_cursor` zoom use the **selection centre** instead of the designated pivot. When
+    **False**, the designated pivot is used even with a selection (raycast bbox gate disabled).
+    `object` / `selection` pivots still mean selection centre. Placeholder toggles exist for every
+    other 3D app in the UI; only Unreal applies it today.
 
 ---
 
@@ -332,17 +370,19 @@ deferral FreeCAD made for its sign calibration).
 - **Headless (fast, no Unreal):** `tests/test_unreal_nav_math.py` covers the pure math — the verified
   conventions (identity / yaw90 / pitch90 / rotator↔basis round-trip), orbit free + turntable (incl.
   horizon-lock + twist-drop), orbit-about-pivot rigidity + free-fly in-place, pan (distance-scaled),
-  and dolly (forward + toward-point). `tests/test_integrations_unreal.py` covers the daemon wiring
-  (Unreal is an `_ADDINS` app; install copies the plugin + marks enabled; the admin-needed copy
-  failure returns manual steps without marking installed; `auto_update` re-copies on a bump; plugin-
-  dir resolution; detection). `python -m pytest tests -q` is green.
+  and dolly (forward + toward-point). `tests/test_unreal_cursor_pivot.py` covers the GeoReferencing →
+  ray → hold / fallback cursor and `to_cursor` pipeline with a stub `unreal`. `tests/test_integrations_unreal.py`
+  covers the daemon wiring (Unreal is an `_ADDINS` app; install copies the plugin + marks enabled; the
+  admin-needed copy failure returns manual steps without marking installed; `auto_update` re-copies on
+  a bump; plugin-dir resolution; detection; `.uplugin` lists GeoReferencing). `python -m pytest tests -q`
+  is green.
 - **Live (the only thing tests can't cover):** install via the daemon's **Set up** (or drop the
   plugin into a project's `Plugins/`), enable it in *Edit → Plugins* + restart, run the daemon, open a
-  level, switch to 3D mode, focus the editor, and use the trackball. Lean on
-  `%APPDATA%\TrackballDaemon\unreal_addin.log` (`start:` / `scheme:` / `rx orbit|pan|zoom` /
-  `view-pivot` / `applied`). **Sign/scale calibration** (`ORBIT_SIGN`/`PAN_*`/`ZOOM_*` in
-  `tbnav_unreal_camera.py`) is the one item that wants a real trackball — flip with the per-app Invert
-  checkboxes or the constants.
+  level, switch to 3D mode, focus the editor, **click the level viewport**, set Orbit around =
+  Under Cursor, and use the trackball. Lean on `%APPDATA%\TrackballDaemon\unreal_addin.log`
+  (`start:` / `scheme:` / `rx orbit|pan|zoom` / `view-pivot` / `cursor-pivot:` / `applied`).
+  **Sign/scale calibration** (`ORBIT_SIGN`/`PAN_*`/`ZOOM_*` in `tbnav_unreal_camera.py`) still wants
+  a real trackball — flip with the per-app Invert checkboxes or the constants.
 
 ---
 
@@ -350,12 +390,14 @@ deferral FreeCAD made for its sign calibration).
 
 - **Log:** `%APPDATA%\TrackballDaemon\unreal_addin.log` (rate-limited). Key lines: `start:` (loaded +
   engine version), `scheme:` (op/os/zm received), `rx orbit|pan|zoom` (which channel arrived —
-  distinguishes a daemon/Shift issue from an add-on issue), `view-pivot: surface hit|… fallback`,
-  `applied` (the camera actually changed), `Play-In-Editor active` (PIE guard), `no perspective
-  viewport` (no level/viewport open). The tray's `Apps: unreal v…` confirms the hello handshake.
-- **Deferred / not done:** the **live GUI sign/scale calibration** (best-guess defaults); true
-  **cursor-pixel pivot / zoom-to-cursor** (relative pipeline — falls back, like every app); **discrete
-  view ops** (Frame Selected, axis snaps) need a button-event channel the broker doesn't have yet.
+  distinguishes a daemon/Shift issue from an add-on issue), `view-pivot:` / `cursor-pivot:` (surface
+  hit or fallback — cursor needs viewport Slate focus), `applied` (the camera actually changed),
+  `Play-In-Editor active` (PIE guard), `no perspective viewport` (no level/viewport open),
+  `GeoReferencingEditorBPLibrary missing` (dependency not enabled). The tray's `Apps: unreal v…`
+  confirms the hello handshake.
+- **Deferred / not done:** the **live GUI sign/scale calibration** (best-guess defaults); **live
+  verify** of under-cursor orbit / `to_cursor` zoom feel + focus-gate; **discrete view ops** (Frame
+  Selected, axis snaps) need a button-event channel the broker doesn't have yet.
 - **Install caveat:** writing the plugin into an engine `Plugins` dir needs **admin**; without it the
   daemon prints manual steps (engine dir as admin, or the project `Plugins` dir no-admin). The plugin
   must be **enabled once** per project before it loads.

@@ -56,7 +56,7 @@ Stored values now match the UI labels. If your context says `pointer`/`to_pointe
 - Saved configs migrate automatically (`config.py::_migrate`, v2→v3; tests in
   `tests/test_config_migration.py`). Broker frames (`op`/`zm`) carry the new values.
 - All six add-ons were bumped so auto-update ships the rename: **Fusion 0.1.14, Blender 0.1.10,
-  FreeCAD 0.1.4, SketchUp 0.2.1, Unreal 0.2.1, AutoCAD plugin 0.3.1** (DLL rebuilt + rebundled).
+  FreeCAD 0.1.4, SketchUp 0.2.1, Unreal 0.2.1, AutoCAD plugin 0.3.4** (DLL rebuilt + rebundled).
   Daemon `__version__` is **0.1.44**. If you bump any of these, bump FROM these numbers.
 - Internal renames ride along: Fusion/FreeCAD `_pointer_*` helpers are now `_cursor_*`,
   log labels are `cursor map:` / `cursor-pivot:`, FreeCAD's constants are `CURSOR_Y_FLIP` /

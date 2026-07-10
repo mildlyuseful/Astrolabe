@@ -131,7 +131,14 @@ class App:
             # the extra key. `key` is the focused broker app (it persists across a focus loss, so a
             # mode change made while the settings window is up still targets the right app), so
             # nav_mode delivery is robust -- switching to fly/walk reaches the add-on on focus.
-            adv = (self.config.data["apps"].get(key) or {}).get("advanced")
+            # selection_overrides_pivot lives on the app root (all apps) and is folded into adv so
+            # every socket add-on can read one place — Fusion/etc. still ignore unknown keys.
+            appcfg = self.config.data["apps"].get(key) or {}
+            adv = appcfg.get("advanced")
+            if adv is not None or "selection_overrides_pivot" in appcfg:
+                adv = dict(adv or {})
+                adv["selection_overrides_pivot"] = bool(
+                    appcfg.get("selection_overrides_pivot", True))
             self.broker.set_scheme(**scheme, advanced=adv)
             nav = (adv or {}).get("nav_mode")
             sig = (key, scheme["orbit_pivot"], scheme["orbit_style"], scheme["zoom_mode"], nav)

@@ -138,6 +138,17 @@ right, _u, _f, _b = tn._view_axes(rv)
 check("roll.location_unchanged", vclose(rv.view_location, loc0))
 check("roll.rotates_about_forward", abs(right.z) < 1e-6 and not vclose(right, (1, 0, 0)))
 
+# --- under-cursor pivot: WINDOW-space mouse -> REGION pixel (pure mapping) -------------
+# region at window offset (300, 120), size 1000 x 700.
+check("cursorpx.centre", tn._region_pixel_from_window(300, 120, 1000, 700, 800, 470) == (500, 350))
+check("cursorpx.origin", tn._region_pixel_from_window(300, 120, 1000, 700, 300, 120) == (0, 0))
+check("cursorpx.inside_margin",                         # 1px outside -> absorbed by the 2px margin
+      tn._region_pixel_from_window(300, 120, 1000, 700, 299, 120) == (-1, 0))
+check("cursorpx.left_of_region",                        # well left of the region -> None (fallback)
+      tn._region_pixel_from_window(300, 120, 1000, 700, 100, 470) is None)
+check("cursorpx.above_region",                          # above the region -> None
+      tn._region_pixel_from_window(300, 120, 1000, 700, 800, 900) is None)
+
 # --- selection median / horizontal ----------------------------------------------------
 check("median.mean", vclose(tn._selection_median_from([Vector((0, 0, 0)), Vector((2, 2, 2))]), (1, 1, 1)))
 check("median.empty_is_none", tn._selection_median_from([]) is None)

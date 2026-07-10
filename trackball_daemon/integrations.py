@@ -245,17 +245,19 @@ def setup_onshape(appdef: "AppDef", cfg) -> tuple[bool, str]:
     return True, (
         "Onshape integration enabled — it's driven through the browser's built-in 3Dconnexion "
         "support, so there's no add-in to install.\n\n"
-        "Two one-time steps:\n"
-        "1) Trust the local certificate so Chrome/Edge will connect. Recommended (no admin) — run "
-        "in a terminal:\n"
+        "One-time steps:\n"
+        "1) Trust the local certificate so Chrome/Edge/Firefox will connect. Recommended (no admin) "
+        "— run in a terminal:\n"
         "      certutil -user -addstore Root \"%s\"\n"
         "   Click 'Yes' on the Windows prompt. (To undo later: certutil -user -delstore Root "
         "127.51.68.120.) Alternatively, just browse to https://127.51.68.120:8181 once and accept "
         "the warning.\n"
         "2) In Onshape, enable the SpaceMouse / 3Dconnexion option (Account → Preferences, or the "
-        "view settings).\n\n"
-        "Then open an Onshape document in Chrome, switch the daemon to 3D mode, and focus the "
-        "Onshape tab — the row flips to \"connected\" once Onshape's 3D mouse client connects."
+        "view settings).\n"
+        "3) For under-cursor orbit (Orbit pivot = cursor), install the userscript with "
+        "\"Copy userscript\" below (also available under Per-App Bindings → Onshape).\n\n"
+        "Then open an Onshape document, switch the daemon to 3D mode, and focus the Onshape tab — "
+        "the row flips to \"connected\" once Onshape's 3D mouse client connects."
         % cert_path)
 
 
@@ -587,10 +589,11 @@ def install_unreal(appdef: "AppDef", cfg) -> tuple[bool, str]:
     return True, (
         f"Trackball plugin {verb} (v{a['addin_version']}) for {', '.join(copied)}.\n\n"
         "Enable it ONCE per project: Edit -> Plugins -> search \"Trackball\" -> tick \"Trackball "
-        "Nav\" -> restart the editor (this also enables the Python Editor Script Plugin it depends "
-        "on).\n\n"
+        "Nav\" -> restart the editor (this also enables the Python Editor Script Plugin and "
+        "GeoReferencing it depends on — GeoReferencing supplies the under-cursor mouse pixel).\n\n"
         "Then open a level, switch the daemon to 3D mode, and focus the Unreal Editor — the row "
-        "flips to \"connected\" once the editor loads the plugin." + tail)
+        "flips to \"connected\" once the editor loads the plugin. For Under Cursor orbit, click "
+        "the level viewport so it has focus." + tail)
 
 
 # --- add-in version tracking + one-click / auto update --------------------------------

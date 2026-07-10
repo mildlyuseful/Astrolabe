@@ -129,9 +129,10 @@ Each non-empty frame, on the worker thread:
 
 Pan (`_apply_pan`): add `PAN_SIGN * delta * PAN_SCALE` to the tracked `Translation3` and SET it.
 Zoom (`_apply_zoom`): `to_center` is a bare `ZoomByFactor`; `to_object` zooms then pans the
-bounding-box centre back by `(Scale2_before − Scale2_after)·(col·C)`; `to_cursor` (under the mouse; no SW hit-test) falls back to
-`to_center` (no hit-test for zoom). After a bare `ZoomByFactor` we force a resync (`_view_ts = 0`)
-because it changes both `Scale2` and `Translation3` itself.
+bounding-box centre back by `(Scale2_before − Scale2_after)·(col·C)`; `to_cursor` does the same but
+holds the **surface point under the mouse cursor** (§7.5, captured once per gesture into
+`_zoom_pivot`), falling back to `to_center` on a miss. After a bare `ZoomByFactor` we force a resync
+(`_view_ts = 0`) because it changes both `Scale2` and `Translation3` itself.
 
 ---
 
@@ -139,16 +140,19 @@ because it changes both `Scale2` and `Translation3` itself.
 
 `set_scheme(orbit_pivot, orbit_style, zoom_mode)` is pushed from `app._apply_schemes()` (general
 default merged with the per-app SolidWorks override; per-app value `"default"` inherits the general
-one — see `config.effective_scheme`). **Four pivot modes**, all built on §4's rotate-then-pan:
+one — see `config.effective_scheme`). **Five pivot modes**, all built on §4's rotate-then-pan:
 
 - **`origin`** — rotate **only**, no pan: the model spins about the world origin with **zero view
   translation**. The original behaviour, and the lightest path. (Re-added as a distinct mode after it
   was conflated with `object` — see §8.6.)
-- **`object`** (and **`selection`** / under-mouse **`cursor`**, which fall back to it) — hold the **bounding-box centre**, a fixed
-  point, so it's exact every frame and needs no per-gesture capture.
+- **`object`** (and **`selection`**, which falls back to it) — hold the **bounding-box centre**, a
+  fixed point, so it's exact every frame and needs no per-gesture capture.
 - **`view`** — hold the **screen-centre point at the true surface depth** under the crosshair, found
   by a raycast (§7). Captured once and **held** through a gesture; recomputed only after the view is
   idle ≥ `view_pivot_hold_sec` (default 0.5 s, per-app `set_pivot_hold`) or when a pan/zoom moves it.
+- **`cursor`** — hold the surface point under the **mouse cursor** — the same raycast as `view`,
+  aimed through the cursor pixel instead of the screen centre (§7.5). Same capture-once-and-hold; a
+  miss / off-view cursor falls back to the object centre for the rest of the gesture.
 
 Orbit **style**: `free` rotates about the composed camera-space axis (`vx·col0 + vy·col1 + vz·col2`);
 `turntable` yaws about `WORLD_UP` + pitches about camera-right, **roll dropped**, composed into one
@@ -194,6 +198,72 @@ debugging time on this feature went.**
 
 The whole feature can be disabled with the module constant `VIEW_PIVOT_RAYCAST = False` (then `view`
 reverts to screen-centre-at-object-depth), mirroring the `FORCE_REDRAW` escape hatch.
+
+---
+
+## 7.5 The `cursor` pivot — orbit/zoom about the point under the mouse (`_cursor_pivot`, `_cursor_screen_ab`, `_cursor_client_point`)
+
+`cursor` / `to_cursor` reuse the §7 raycast, only aimed through the **mouse cursor pixel** instead of
+the screen centre. The whole trick is turning the OS cursor into the in-plane `(a, b)` offsets the
+raycast already speaks. The mapping was **verified live in the GUI**, screenshot-confirmed against a
+box's corners (driving the OS cursor to each corner's true on-screen position and confirming
+`_cursor_pivot` returns that corner to **< 0.1 mm** — §10).
+
+> **Lesson — a self-consistent test can still be wrong.** The first cut "verified to < 0.1 mm" by
+> `SetCursorPos(Transform(corner))` then inverting `Transform` at that same pixel. That round-trips
+> **by construction** — it proves the algebra inverts, not that `Transform`'s pixels are where the
+> cursor actually is. A real hover landed the pivot up-and-left of the cursor. The honest test drives
+> the cursor to the corner's **true screen position** and lets the driver map it back independently;
+> the two facts below came out of that + a screenshot.
+
+**Half A — the live cursor, on demand (not `IMouse`).** `IModelView.GetMouse` **exists** (a property
+returning an `IMouse` dispatch — COM-introspected live), and `IMouse` is a connection-point event
+source. But sinking its move notification from this **out-of-process** driver would mean makepy'ing
+the whole SolidWorks typelib (SW dispatches carry **no typeinfo**) **and** a cross-process COM
+callback marshaled into SolidWorks' UI thread for **every** mouse move (~100+ Hz). We need the cursor
+**once per gesture**, so we read it **on demand** with Win32 `GetCursorPos` (the daemon is a Windows
+process) — the same call the AutoCAD/Fusion cursor pivots use, and the pixel is always **fresh** (no
+cache to stale). `_cursor_client_point` maps it with `ScreenToClient(GetViewHWnd)` and gates on the
+result falling inside the client rect while the SW frame is foreground. **NOT** a `WindowFromPoint ==
+GetViewHWnd` identity check — SolidWorks composites the 3D view with an inner render child, so
+`WindowFromPoint` returns a window that is *neither* `GetViewHWnd` nor a resolvable descendant of it
+(verified live); the client-rect test sidesteps that child, and rejects the surrounding
+toolbars/panels and other apps.
+
+**Half B — cursor pixel → model ray, via `IModelView.Transform`.** `Transform` is the model →
+**pixel** transform. Its column-convention 3×3 rows are the camera **right** / camera **up** axes, so
+a point on the cursor ray satisfies `row0·P = (px_x − t0)/s` and `row1·P = (px_y − t1)/s`.
+`_cursor_screen_ab` inverts that: it confirms `row0`/`row1` align with the camera `col0`/`col1`
+(rejecting a changed transform model rather than producing a wrong pivot), resolves each **sign** per
+capture (SW's pixel-y runs the opposite direction to camera-up, so no baked-in flip constant), and
+returns `(a, b)`. Then `_cursor_pivot` runs the **exact §7 raycast** from `(a, b)`.
+
+The two facts about `Transform`'s pixel space that a naive reading gets wrong — both **screenshot-
+verified** at 125 % display scaling:
+
+- **`Transform`'s pixels are CLIENT-relative (to `GetViewHWnd`'s client top-left), not desktop.**
+  There is a ~toolbar-height **y** offset (and an **x** offset when the window isn't full-width), so
+  we map the cursor with `ScreenToClient(GetViewHWnd)` first; the inversion is then a bare
+  `(client_px − t)/s`. (Placing the cursor at `Transform(peak)` interpreted as desktop landed it on
+  the *Extruded Boss/Base* ribbon button directly above the peak — the giveaway.)
+- **`Transform`'s pixels are PHYSICAL (device) pixels, while `GetCursorPos` returns pixels in the
+  calling thread's DPI space.** At 125 % a DPI-unaware reader sees logical px and the pivot lands
+  up-and-left of the cursor (the exact user-reported symptom). Fix: `_make_thread_dpi_aware()` sets
+  the **worker thread** (only) to per-monitor-v2 DPI awareness at `_run` start
+  (`SetThreadDpiAwarenessContext`, thread-local so the Tk UI is untouched), so
+  `GetCursorPos`/`ScreenToClient`/`GetClientRect` all return physical px matching `Transform`.
+
+Because both the transform and the client rect are re-read each capture, moving/resizing/maximizing
+the SW window needs no extra bookkeeping — the mapping is **resize-resistant** by construction.
+
+`to_cursor` **zoom** uses the same `_cursor_pivot` into a separate per-gesture slot (`_zoom_pivot`,
+reset on orbit/pan), then rides the existing "hold a point fixed while zooming" recenter that
+`to_object` already implemented (§5). A miss falls back to `to_center`.
+
+The remaining un-verified item is purely the **feel** while a human orbits (the geometry is proven
+exact); the row-alignment guard is a defensive check for a transform convention we haven't seen
+SolidWorks break; and hovering the FeatureManager tree (which overlays the client's left edge) maps
+to the model geometry behind it — benign, bbox-validated.
 
 ---
 
@@ -337,11 +407,27 @@ that blocks everything else).
   practice (a small radius still hits the face right there). Retune via `_RAY_APERTURE_FRACS` /
   `_RAY_PUSH` / `_RAY_BBOX_MARGIN` if needed.
 
-### 8.13 `cursor` (under-mouse) has no SW resolver yet -- and `selection` is the bbox centre
-- There is no SW cursor hit-test wired yet (`IMouse` is the candidate route) — so `cursor` falls
-  back to `object` (bbox centre). A true cursor-position pivot would need the screen cursor piped into
-  the driver and unprojected onto the optical axis (then the same raycast as `view`, offset to the
-  cursor). Not implemented.
+### 8.13 The `cursor` pivot mapping — `IModelView.Transform` is CLIENT-relative PHYSICAL px, `IMouse` was a trap
+- `cursor` / `to_cursor` are **implemented** (§7.5). What could only be settled by observing:
+  - The obvious route — sink `IModelView.GetMouse` → `IMouse`'s move event — is a **trap** for an
+    out-of-process driver: SW dispatches have **no typeinfo** (makepy the whole typelib) and it fires
+    a cross-process COM callback ~100+ Hz. `GetCursorPos` on demand at gesture start is right.
+  - The cursor-pixel → model-ray map inverts `IModelView.Transform`. Its pixel space had **two**
+    traps, both of which produced the user-reported "pivot up-and-left of the cursor" and both only
+    caught by a **live screenshot** (the first-cut "verified < 0.1 mm" was **tautological** — it
+    inverted `Transform` at the very pixel it had just `SetCursorPos`'d to, so it round-tripped by
+    construction and proved nothing about on-screen placement):
+    - **`Transform` is CLIENT-relative** (to `GetViewHWnd`'s client top-left), not desktop — map the
+      cursor through `ScreenToClient(GetViewHWnd)` first. (`Transform(peak)` as desktop landed on the
+      ribbon button *above* the peak.)
+    - **`Transform` is PHYSICAL px; `GetCursorPos` follows the calling thread's DPI awareness** — at
+      125 % a DPI-unaware reader is off by the scale. Fix: make the **worker thread** per-monitor DPI
+      aware (`_make_thread_dpi_aware`, thread-local — the Tk UI thread stays as-is).
+  - The over-the-view **gate is the client rect, not `WindowFromPoint` identity** — SW's inner render
+    child makes `WindowFromPoint` return a window that isn't `GetViewHWnd` or a resolvable descendant.
+  - **Lesson**: a self-consistent round-trip is not a verification. Drive the cursor to the feature's
+    *true* screen position and let the code map back independently; confirm with eyes/screenshot.
+- `selection` remains the **bbox centre** (no per-entity selection pivot over COM yet).
 
 ### 8.14 No add-in, by design
 - SolidWorks add-ins need **admin COM registration**; we deliberately avoid that. Everything is the
@@ -368,7 +454,8 @@ channel goes the wrong way.**
 | `_RAY_APERTURE_FRACS` | `(.005,.015,.045,.135)` | aperture sweep (× bbox diagonal), smallest-first (§7, §8.12) |
 | `_RAY_PUSH` | `4.0` | ray origin pushback (× bbox diagonal) — starts outside the model |
 | `_RAY_BBOX_MARGIN` | `0.10` | accept a hit only within bbox + N× diagonal |
-| `DEFAULT_PIVOT_HOLD` | `0.5` | `view` pivot re-capture idle threshold (per-app `view_pivot_hold_sec`) |
+| `_CURSOR_XF_ALIGN_TOL` | `0.05` | `cursor` pivot: how far `Transform`'s in-plane rows may drift from the camera axes before the mapping is distrusted (§7.5) |
+| `DEFAULT_PIVOT_HOLD` | `0.5` | `view`/`cursor` pivot re-capture idle threshold (per-app `view_pivot_hold_sec`) |
 | `DEFAULT_FLUSH_HZ` | `30` | flush/refresh rate (per-app `rate_hz`; `0` ⇒ global `bridge.rate_hz`) |
 | `_VIEW_TTL` | `1.0` | view-handle revalidation period (also the liveness probe) |
 | `_OBJ_CACHE_TTL` | `0.5` | bbox cache lifetime |
@@ -412,25 +499,32 @@ and is usually running with a part open. The driver can be exercised end-to-end:
 
 The unit tests (`tests/test_solidworks_driver.py`) mock the COM boundary
 (`FakeApp/FakeModel/FakeView/FakeSelMgr/FakeExtension/FakeEntity`) so **no SolidWorks is required** to
-run them — they cover orbit/pan/zoom, all four pivots, the raycast (surface depth, miss-fallback,
+run them — they cover orbit/pan/zoom, all five pivots, the raycast (surface depth, miss-fallback,
 out-of-bbox rejection, aperture expansion, nearest-of-multiple, the integer-`Tol` regression,
-selection save/restore), the freeze, attach/drop, and the worker loop. What they **cannot** cover is
-the real COM behaviour — that's what §10's live testing is for.
+selection save/restore), the **`cursor` pivot** (Transform inversion, per-capture sign resolution,
+row-alignment rejection, hold + object-centre fallback, `to_cursor` zoom hold), the freeze,
+attach/drop, and the worker loop. What they **cannot** cover is the real COM behaviour — that's what
+§10's live testing is for. The `cursor` mapping specifically **was** verified live in the GUI by
+driving the OS cursor to each box corner's **true on-screen position** (`Transform(corner) +
+client-origin`, screenshot-confirmed) and confirming the driver's own `_cursor_pivot` — which maps
+back independently via `ScreenToClient` + the `Transform` inverse — returned each corner to
+**< 0.1 mm** (throwaway scratchpad probes; not in the repo).
 
 ---
 
 ## 11. Status & known limitations (at handoff)
 
-- **Working & live-verified:** attach/connection status; orbit with all four pivots; the `view`
-  surface-depth raycast (pivot at true surface depth, held-pivot screen drift ~0); pan; zoom
-  (`to_center`/`to_object`); orbit styles (`free`/`turntable`); the viewport freeze (~2× smoother);
-  exact pivot hold (~1e-16).
+- **Working & live-verified:** attach/connection status; orbit with all five pivots; the `view`
+  surface-depth raycast (pivot at true surface depth, held-pivot screen drift ~0); the **`cursor`
+  pivot** (OS cursor → `Transform` inverse → raycast, verified to < 0.1 mm against known corners,
+  §7.5/§10) and **`to_cursor` zoom**; pan; zoom (`to_center`/`to_object`); orbit styles
+  (`free`/`turntable`); the viewport freeze (~2× smoother); exact pivot hold (~1e-16).
 - **Needs a feel/sign pass on hardware** if anything feels off: `*_SIGN` / `*_SCALE` magnitudes and
-  the turntable `WORLD_UP` axis.
-- **Limitations:** no true cursor-position pivot yet (`cursor` == `object`; §8.13); `to_cursor` zoom falls
-  back to `to_center`; the raycast aperture is bbox-scaled, not viewport-scaled (§8.12); drawings have
-  no box (pivots degrade gracefully). The out-of-process COM rate is below an in-process add-in's, by
-  design (§8.14).
+  the turntable `WORLD_UP` axis. The `cursor` pivot's **geometry is exact**; only its feel during a
+  live human orbit is un-exercised.
+- **Limitations:** `selection` == `object` (no per-entity selection pivot over COM; §8.13); the
+  raycast aperture is bbox-scaled, not viewport-scaled (§8.12); drawings have no box (pivots degrade
+  gracefully). The out-of-process COM rate is below an in-process add-in's, by design (§8.14).
 
 ---
 
@@ -439,7 +533,9 @@ the real COM behaviour — that's what §10's live testing is for.
 - **`solidworks_driver.py`** — the whole driver: worker loop (`_run`/`_flush`), attach
   (`_attach`/`_find_running_sw`), the verified camera ops (`_apply_orbit`/`_apply_pan`/`_apply_zoom`),
   the `view`-pivot raycast (`_view_pivot`/`_raycast_depth`/`_get_pick_handles`/`_save`/`_restore`),
-  caching (`_live_view`/`_object_box`), and the math helpers (`_rodrigues`, quaternion, `_variant`).
+  the `cursor`-pivot mapping (`_cursor_pivot`/`_cursor_screen_ab`/`_cursor_client_point`, reusing
+  `_raycast_depth`), caching (`_live_view`/`_object_box`), and the math helpers (`_rodrigues`,
+  quaternion, `_variant`).
 - **`app.py`** — constructs `self.sw_driver = SolidWorksDriver(self._on_sw_connection_changed, ...)`;
   routes `solidworks` frames in `_nav_sink`; pushes rate (`_apply_rates`) and scheme + pivot-hold
   (`_apply_schemes` → `set_scheme` + `set_pivot_hold`); merges status in
@@ -450,9 +546,10 @@ the real COM behaviour — that's what §10's live testing is for.
   The general default scheme is `pivot=view, style=free, zoom=to_center`.
 - **`integrations.py`** — `detect_solidworks` (globs `SLDWORKS.exe`) and `setup_solidworks` (verify SW
   + pywin32, mark enabled; **no add-in to copy**). SolidWorks is **not** in the add-in copy/update set.
-- **`ui.py`** — the Per-App Bindings "Orbit pivot" dropdown (`default/view/object/origin/cursor`), the
-  General "Orbit pivot" dropdown (`view/object/origin/cursor`), and the "View-pivot hold (s)" entry
-  (SolidWorks-only). Only SolidWorks currently honours all four pivots.
+- **`ui.py`** — the "Orbit pivot" dropdowns (labels map to the stored values
+  `view / cursor / object / origin / selection`; the under-mouse pivot shows as "cursor (under
+  mouse)") and the "View-pivot hold (s)" entry. SolidWorks honours all five pivots (`origin` and
+  `selection`-vs-`object` are SolidWorks-distinct).
 - **`winfocus.py`** — `foreground_process_name` (used to route to SolidWorks when `sldworks` is
   frontmost).
 - **`requirements.txt`** — `pywin32` (Windows). Missing ⇒ the driver disables itself and logs once.

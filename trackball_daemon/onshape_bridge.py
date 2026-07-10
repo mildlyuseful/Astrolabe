@@ -99,13 +99,18 @@ ZOOM_SIGN = 1.0                   # twist -> zoom direction
 # pan ever come out transposed or coupled against a different app, flip this.
 AFFINE_TRANSLATION_IN_COLUMN = False
 
-# "view"/"selection"/"cursor" orbit pivot uses Onshape's navlib hit-test: raycast down the screen
-# centre and
-# pivot about the first surface hit (like Onshape's own right-click orbit). These are the ray
+# "view"/"selection"/"cursor" orbit pivot uses Onshape's navlib hit-test: raycast a screen point
+# and pivot about the first surface hit (like Onshape's own right-click orbit). These are the ray
 # aperture (cone diameter) as fractions of the view half-extent, tried smallest-first -- a narrow
-# centre ray, widening until something is hit. If none hit at the widest, we fall back to the model
+# ray, widening until something is hit. If none hit at the widest, we fall back to the model
 # centre (i.e. model orbit). Onshape does the actual raycast; we just set the ray + read the result.
 HIT_APERTURES = (0.03, 0.1, 0.3)
+
+# Under-cursor orbit: the page reports the pointer as a fraction of #canvas (exact DOM
+# getBoundingClientRect). A tiny userscript POSTs that to /trackball/pointer on this bridge.
+# view.extents' aspect does NOT match the canvas pixel aspect (verified live: ~0.98 vs ~1.72),
+# so we never derive canvas size from extents. See docs/apps/onshape.md §8.14.
+_POINTER_TTL = 0.75          # seconds; stale page reports are ignored (fall back to centre)
 
 # Verbose diagnostics: set TB_ONSHAPE_DEBUG=1 to log focus changes, each gesture's camera
 # read/write, and any CALLERROR -- off by default so normal runs don't spam the log.
@@ -125,8 +130,6 @@ _PERSP_TTL = 1.0             # cache view.perspective this long (it changes rare
 _OBJ_TTL = 0.5              # cache model.extents (orbit/zoom pivot) this long
 _EXT_TTL = 0.2              # cache view.extents (pan/zoom scale) this long
 _TGT_TTL = 0.3              # cache view.target ("view" pivot) this long
-
-
 # --- WAMP v1 message-type tags (JSON arrays [TYPE, ...]) ---------------------------------------
 class _WAMP:
     WELCOME = 0
@@ -443,7 +446,8 @@ class _OnshapeConn:
             head += chunk
             if len(head) > 16384:
                 return False
-        lines = head.split(b"\r\n")
+        header_blob, _, leftover = head.partition(b"\r\n\r\n")
+        lines = header_blob.split(b"\r\n")
         try:
             method, path, _ = lines[0].decode("latin-1").split(" ", 2)
         except ValueError:
@@ -454,13 +458,50 @@ class _OnshapeConn:
                 k, v = ln.split(b":", 1)
                 headers[k.decode("latin-1").strip().lower()] = v.decode("latin-1").strip()
         origin = headers.get("origin", "*")
+        path_only = path.split("?", 1)[0]
+
+        # Read any request body (pointer POSTs are tiny JSON).
+        try:
+            content_len = int(headers.get("content-length", "0") or 0)
+        except ValueError:
+            content_len = 0
+        body_in = leftover
+        while len(body_in) < content_len:
+            try:
+                chunk = self.sock.recv(min(4096, content_len - len(body_in)))
+            except OSError:
+                break
+            if not chunk:
+                break
+            body_in += chunk
+        body_in = body_in[:content_len]
 
         if method == "OPTIONS":
             self._http(204, "", origin, ctype=None)
             return False
-        if path.startswith("/3dconnexion/nlproxy"):
+        if path_only.startswith("/3dconnexion/nlproxy"):
             self._http(200, json.dumps({"port": BRIDGE_PORT, "version": NLPROXY_VERSION}),
                        origin, ctype="application/json")
+            return False
+        # Exact canvas pointer from the Onshape page (userscript). No screen capture.
+        if path_only.startswith("/trackball/pointer.js") and method == "GET":
+            self._http(200, _POINTER_USERSCRIPT, origin, ctype="application/javascript")
+            return False
+        if path_only.startswith("/trackball/pointer") and method in ("POST", "PUT"):
+            parsed = _parse_pointer_body(body_in)
+            if parsed is not None:
+                _set_page_pointer(parsed[0], parsed[1], parsed[2])
+                self._http(204, "", origin, ctype=None)
+            else:
+                self._http(400, "bad pointer json", origin, ctype="text/plain")
+            return False
+        if path_only.startswith("/trackball/pointer") and method == "GET":
+            # Status for the cert-trust / install page.
+            with _PAGE_POINTER_LOCK:
+                age = (time.monotonic() - _PAGE_POINTER["t"]) if _PAGE_POINTER["t"] else None
+                snap = {"age_s": age, "on_canvas": _PAGE_POINTER["on"],
+                        "ndc_x": _PAGE_POINTER["ndc_x"], "ndc_y": _PAGE_POINTER["ndc_y"]}
+            self._http(200, json.dumps(snap), origin, ctype="application/json")
             return False
         if "websocket" in headers.get("upgrade", "").lower():
             key = headers.get("sec-websocket-key", "")
@@ -471,21 +512,29 @@ class _OnshapeConn:
             self._raw_send(resp.encode("latin-1"))
             self.sock.settimeout(1.0)               # short timeout so the reader can poll stop()
             return True
-        # Plain GET / -> a tiny status page (handy for the one-time cert-trust visit).
+        # Plain GET / -> status + userscript install hint (also the one-time cert-trust visit).
         body = ("<html><body><h1>Trackball Daemon &mdash; Onshape bridge</h1>"
                 "<p>This local NL-Proxy emulator is running. Onshape connects to it automatically; "
                 "if you can read this with no certificate warning, the cert is trusted.</p>"
+                "<h2>Under-cursor orbit</h2>"
+                "<p>Install the userscript from "
+                "<a href='/trackball/pointer.js'>/trackball/pointer.js</a> "
+                "(Violentmonkey / Tampermonkey on <code>cad.onshape.com</code>). It posts the exact "
+                "#canvas pointer to this bridge &mdash; no screen capture, no calibration.</p>"
                 "</body></html>")
         self._http(200, body, origin, ctype="text/html")
         return False
 
     def _http(self, status, body, origin, ctype="text/plain"):
-        reason = {200: "OK", 204: "No Content", 404: "Not Found"}.get(status, "OK")
-        data = body.encode("utf-8")
+        reason = {200: "OK", 204: "No Content", 400: "Bad Request", 404: "Not Found"}.get(status, "OK")
+        data = body.encode("utf-8") if isinstance(body, str) else (body or b"")
+        # Access-Control-Allow-Private-Network: Chromium's Private Network Access preflight for a
+        # public page (cad.onshape.com) talking to loopback. Harmless to Firefox.
         out = ["HTTP/1.1 %d %s" % (status, reason),
                "Access-Control-Allow-Origin: %s" % origin,
-               "Access-Control-Allow-Methods: GET, OPTIONS",
+               "Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS",
                "Access-Control-Allow-Headers: *",
+               "Access-Control-Allow-Private-Network: true",
                "Connection: close"]
         if ctype is not None:
             out.append("Content-Type: %s" % ctype)
@@ -651,6 +700,151 @@ class _OnshapeConn:
 
     def version_str(self):
         return NLPROXY_VERSION
+
+
+# --- under-cursor orbit: page-reported canvas NDC (exact DOM size, no screen capture) ----------
+# navlib exposes no pointer accessor. Win32 GetCursorPos + window geometry cannot recover the
+# WebGL canvas rect on Firefox (client includes chrome; no content HWND). Screen-DC measurement
+# is forbidden. Instead a userscript on cad.onshape.com posts the pointer as a fraction of
+# document.getElementById("canvas").getBoundingClientRect() to POST /trackball/pointer.
+
+
+_PAGE_POINTER = {"t": 0.0, "ndc_x": 0.0, "ndc_y": 0.0, "on": False}
+_PAGE_POINTER_LOCK = threading.Lock()
+
+# Bookmarklet / Violentmonkey userscript body (also served as text/javascript from the bridge).
+_POINTER_USERSCRIPT = r"""// ==UserScript==
+// @name         Astrolabe Onshape cursor pivot
+// @namespace    https://github.com/mildlyuseful/Astrolabe
+// @version      0.1
+// @description  Report the mouse position on Onshape's #canvas to the local trackball NL-Proxy.
+// @match        https://cad.onshape.com/*
+// @match        https://*.onshape.com/*
+// @grant        none
+// @run-at       document-idle
+// ==/UserScript==
+(function () {
+  "use strict";
+  var ENDPOINT = "https://127.51.68.120:8181/trackball/pointer";
+  var last = { t: 0, x: 0, y: 0, on: false };
+  function canvasEl() {
+    return document.getElementById("canvas") || document.querySelector("canvas");
+  }
+  function report(ev) {
+    var c = canvasEl();
+    if (!c) return;
+    var r = c.getBoundingClientRect();
+    if (r.width < 8 || r.height < 8) return;
+    var on = ev.clientX >= r.left && ev.clientX <= r.right &&
+             ev.clientY >= r.top && ev.clientY <= r.bottom;
+    var fx = (ev.clientX - r.left) / r.width;
+    var fy = (ev.clientY - r.top) / r.height;
+    // NDC: x right, y up, both in [-1,1] (matches the bridge's _pixel_ray).
+    var ndcX = fx * 2 - 1;
+    var ndcY = 1 - fy * 2;
+    last = { t: Date.now(), x: ndcX, y: ndcY, on: on, cw: r.width, ch: r.height };
+    // fire-and-forget; Private Network Access preflight is answered by the bridge OPTIONS handler
+    try {
+      fetch(ENDPOINT, {
+        method: "POST",
+        mode: "cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ndc_x: ndcX, ndc_y: ndcY, on_canvas: on,
+                               canvas_w: r.width, canvas_h: r.height })
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  window.addEventListener("mousemove", report, { passive: true, capture: true });
+  // Keep the last sample fresh while the cursor is still (gesture start without a move).
+  setInterval(function () {
+    if (!last.t) return;
+    if (Date.now() - last.t > 400) return;
+    try {
+      fetch(ENDPOINT, {
+        method: "POST",
+        mode: "cors",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ndc_x: last.x, ndc_y: last.y, on_canvas: last.on,
+                               canvas_w: last.cw, canvas_h: last.ch })
+      }).catch(function () {});
+    } catch (e) {}
+  }, 200);
+})();
+"""
+
+POINTER_SCRIPT_URL = "https://127.51.68.120:8181/trackball/pointer.js"
+POINTER_STATUS_URL = "https://127.51.68.120:8181/trackball/pointer"
+
+
+def pointer_userscript_source():
+    """Full Violentmonkey/Tampermonkey userscript text (copy-paste install)."""
+    return _POINTER_USERSCRIPT
+
+
+def pointer_install_instructions():
+    """User-facing steps to install the under-cursor userscript (shared by setup UI + docs)."""
+    return (
+        "Under-cursor orbit needs a tiny page script (exact #canvas size from the DOM):\n\n"
+        "1) Install the Tampermonkey or Violentmonkey extension in the browser you use for Onshape.\n"
+        "2) Open the extension → Create a new script (or \"+\" / Add new script).\n"
+        "3) Delete the template, paste the Astrolabe userscript (use Copy userscript), then Save.\n"
+        "4) Reload your Onshape tab and move the mouse over the 3D view.\n"
+        "5) Optional check: open %s — ndc_x/ndc_y should update as you move.\n\n"
+        "Script URL (daemon must be running): %s"
+        % (POINTER_STATUS_URL, POINTER_SCRIPT_URL)
+    )
+
+
+def _set_page_pointer(ndc_x, ndc_y, on_canvas):
+    """Record a page-reported canvas NDC sample (called from the HTTP accept thread)."""
+    try:
+        x = float(ndc_x); y = float(ndc_y)
+    except (TypeError, ValueError):
+        return
+    if not (math.isfinite(x) and math.isfinite(y)):
+        return
+    with _PAGE_POINTER_LOCK:
+        _PAGE_POINTER["t"] = time.monotonic()
+        _PAGE_POINTER["ndc_x"] = max(-1.5, min(1.5, x))
+        _PAGE_POINTER["ndc_y"] = max(-1.5, min(1.5, y))
+        _PAGE_POINTER["on"] = bool(on_canvas)
+
+
+def _get_page_pointer(ttl=_POINTER_TTL):
+    """Return (ndc_x, ndc_y) from a fresh on-canvas page report, or None."""
+    with _PAGE_POINTER_LOCK:
+        t = _PAGE_POINTER["t"]
+        if t <= 0.0 or (time.monotonic() - t) > float(ttl):
+            return None
+        if not _PAGE_POINTER["on"]:
+            return None
+        return (_PAGE_POINTER["ndc_x"], _PAGE_POINTER["ndc_y"])
+
+
+def _parse_pointer_body(raw):
+    """Parse a /trackball/pointer JSON body. Returns (ndc_x, ndc_y, on_canvas) or None."""
+    try:
+        data = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    if "ndc_x" in data and "ndc_y" in data:
+        on = data.get("on_canvas", True)
+        return (data.get("ndc_x"), data.get("ndc_y"), bool(on))
+    # Alternate: CSS-pixel offset inside the canvas + size (also exact).
+    if all(k in data for k in ("x", "y", "w", "h")):
+        try:
+            w = float(data["w"]); h = float(data["h"])
+            if w < 1e-6 or h < 1e-6:
+                return None
+            fx = float(data["x"]) / w
+            fy = float(data["y"]) / h
+            on = (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0)
+            return (fx * 2.0 - 1.0, 1.0 - fy * 2.0, on)
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 class OnshapeBridge:
@@ -1010,11 +1204,18 @@ class OnshapeBridge:
         op = scheme.get("op", "view")
         if op == "origin":
             return (0.0, 0.0, 0.0)
-        if op in ("view", "selection", "cursor"):
-            # Orbit about what's under the screen centre (like Onshape's own right-click orbit):
-            # raycast there via the navlib hit-test. navlib has no mouse-position accessor, so
-            # "cursor" (under the mouse) uses the screen centre too until a cursor->canvas mapping
-            # exists; "selection" likewise. Nothing hit -> fall through to model-centre orbit.
+        if op == "cursor":
+            # Under-mouse: aim the hit-test through the page-reported #canvas NDC. No sample /
+            # off-canvas / miss -> screen centre (same as "view"), then model centre. Needs the
+            # userscript installed (docs §8.14); the ray/hold/fallback path is offline-tested.
+            hit = self._hit_cursor(conn, eye, right, up, back)
+            if hit is not None:
+                return hit
+            hit = self._hit_center(conn, eye, right, up, back)
+            if hit is not None:
+                return hit
+        elif op in ("view", "selection"):
+            # Orbit about what's under the screen centre (like Onshape's own right-click orbit).
             hit = self._hit_center(conn, eye, right, up, back)
             if hit is not None:
                 return hit
@@ -1025,32 +1226,58 @@ class OnshapeBridge:
         return _v_add(eye, _v_scale(_v_neg(back), self._view_half(conn) * 4.0))
 
     def _hit_center(self, conn, eye, right, up, back):
-        """Pivot via Onshape's navlib hit-test: raycast down the screen centre, widening the ray
-        aperture until a surface is hit; return that point (or None if nothing is hit / the build
-        lacks hit-testing). Onshape runs the raycast -- we only set the ray and read the result, a
-        few localhost round-trips, and the caller holds the result for the whole gesture."""
+        """navlib hit-test through the screen centre (NDC 0,0)."""
+        half_x, half_y = self._view_halves(conn)
+        vh = max(half_x, half_y)
+        lookfrom, direction = self._pixel_ray(0.0, 0.0, eye, right, up, back, half_x, half_y, vh * 8.0)
+        return self._hit_ray(conn, lookfrom, direction, vh)
+
+    def _hit_cursor(self, conn, eye, right, up, back):
+        """navlib hit-test through the page-reported canvas NDC, or None when no fresh sample."""
+        ndc = _get_page_pointer()
+        if ndc is None:
+            return None
+        half_x, half_y = self._view_halves(conn)
+        if _DEBUG:
+            self._log.info("onshape cursor: page-ndc=(%.3f,%.3f) half=(%.3f,%.3f)",
+                           ndc[0], ndc[1], half_x, half_y)
+        vh = max(half_x, half_y)
+        lookfrom, direction = self._pixel_ray(ndc[0], ndc[1], eye, right, up, back,
+                                              half_x, half_y, vh * 8.0)
+        return self._hit_ray(conn, lookfrom, direction, vh)
+
+    def _hit_ray(self, conn, lookfrom, direction, vh):
+        """Write an arbitrary pick ray, widen the aperture until a bbox-valid hit.lookat lands.
+        Shared by centre and cursor. Returns the hit point or None."""
         if conn._hit_unsupported:
             return None
-        fwd = _v_normalize(_v_neg(back))
-        vh = self._view_half(conn)
-        lookfrom = _v_sub(eye, _v_scale(fwd, vh * 8.0))   # start on the viewer side, outside the model
-        bbox = conn.read("model.extents", ttl=_OBJ_TTL)   # to sanity-check the hit (cached)
+        bbox = conn.read("model.extents", ttl=_OBJ_TTL)
         try:
             conn.write("hit.selectionOnly", False)
             conn.write("hit.lookfrom", list(lookfrom))
-            conn.write("hit.direction", list(fwd))
+            conn.write("hit.direction", list(direction))
         except _PropUnsupported:
-            conn._hit_unsupported = True                  # this build lacks hit-testing -> stop trying
+            conn._hit_unsupported = True
             return None
         for f in HIT_APERTURES:
             try:
                 conn.write("hit.aperture", max(1e-5, vh * f))
                 pt = conn._rpc("self:read", ["hit.lookat"])
             except _PropUnsupported:
-                continue                                  # no hit at this aperture -> widen the cone
+                continue
             if self._valid_hit(pt, bbox):
                 return (float(pt[0]), float(pt[1]), float(pt[2]))
         return None
+
+    @staticmethod
+    def _pixel_ray(ndc_x, ndc_y, eye, right, up, back, half_x, half_y, backoff):
+        """Orthographic pick ray through a canvas NDC point (x right, y up, both in [-1,1]).
+        NDC (0,0) is the screen-centre ray the old _hit_center used. lookfrom is pulled `backoff`
+        along forward so the ray starts outside the model."""
+        fwd = _v_normalize(_v_neg(back))
+        offset = _v_add(_v_scale(right, ndc_x * half_x), _v_scale(up, ndc_y * half_y))
+        lookfrom = _v_sub(_v_add(eye, offset), _v_scale(fwd, backoff))
+        return lookfrom, fwd
 
     @staticmethod
     def _valid_hit(pt, bbox):
@@ -1078,11 +1305,19 @@ class OnshapeBridge:
             return ((ext[0] + ext[3]) * 0.5, (ext[1] + ext[4]) * 0.5, (ext[2] + ext[5]) * 0.5)
         return None
 
-    def _view_half(self, conn):
+    def _view_halves(self, conn):
+        """(half_x, half_y) of view.extents -- the orthographic half-width/height in world units.
+        Falls back to a unit square when extents are unavailable."""
         ext = conn.read("view.extents", ttl=_EXT_TTL)
         if isinstance(ext, list) and len(ext) >= 6:
-            return max(1e-4, 0.5 * max(ext[3] - ext[0], ext[4] - ext[1]))
-        return 1.0
+            hx = max(1e-4, 0.5 * abs(ext[3] - ext[0]))
+            hy = max(1e-4, 0.5 * abs(ext[4] - ext[1]))
+            return (hx, hy)
+        return (1.0, 1.0)
+
+    def _view_half(self, conn):
+        hx, hy = self._view_halves(conn)
+        return max(hx, hy)
 
     def _perspective(self, conn):
         val = conn.read("view.perspective", ttl=_PERSP_TTL)

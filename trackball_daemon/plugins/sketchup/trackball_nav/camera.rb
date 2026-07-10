@@ -27,8 +27,16 @@ module TrackballNav
     @gesture_pivot = nil
     @object_cache = { model_id: nil, time: 0.0, point: nil }
     @last_scheme = nil
+    # Under-mouse 'cursor' pivot: the last viewport pixel [x, y] (logical, view-relative), and an
+    # optional refresh callable the live cursor tracker (cursor.rb) installs. camera.rb stays pure
+    # (no Win32) so it is testable via tools/sketchup_nav_selftest.rb -- the tracker pushes the
+    # pixel in; the self-test injects a synthetic one and leaves @cursor_refresh nil.
+    @cursor_pixel = nil
+    @cursor_refresh = nil
 
     class << self
+      attr_accessor :cursor_pixel, :cursor_refresh
+
       def apply(frame, model = Sketchup.active_model, now = Time.now.to_f)
         return false unless model
 
@@ -105,16 +113,31 @@ module TrackballNav
       end
 
       def screen_center_pivot(model, view)
-        ray = view.pickray(view.vpwidth * 0.5, view.vpheight * 0.5)
+        raytest_pixel(model, view, view.vpwidth * 0.5, view.vpheight * 0.5, 'view-pivot')
+      end
+
+      # Raycast the surface under the LIVE MOUSE CURSOR (the same pick as screen_center_pivot,
+      # aimed through @cursor_pixel instead of the centre). Returns a world Point3d or nil (no
+      # cursor pixel / off-model) -> the caller falls back to the object centre. Half B of the
+      # 'cursor' pivot; half A (getting @cursor_pixel) is the live tracker in cursor.rb.
+      def cursor_pivot(model, view)
+        px = @cursor_pixel
+        return nil unless px.is_a?(Array) && px.length == 2
+
+        raytest_pixel(model, view, px[0], px[1], 'cursor-pivot')
+      end
+
+      def raytest_pixel(model, view, x, y, label)
+        ray = view.pickray(x, y)
         hit = ray && model.raytest(ray)
         point = hit && hit[0]
         return nil unless point && point_in_model_bounds?(point, model.bounds)
 
-        TrackballNav.log_rate_limited('view-pivot', "view-pivot: surface hit #{point.to_a.inspect}") if
+        TrackballNav.log_rate_limited(label, "#{label}: surface hit #{point.to_a.inspect}") if
           TrackballNav.respond_to?(:log_rate_limited)
         point.clone
       rescue StandardError => error
-        TrackballNav.log_rate_limited('raytest', "view-pivot raytest failed: #{error.message}") if
+        TrackballNav.log_rate_limited("#{label}-err", "#{label} raytest failed: #{error.message}") if
           TrackballNav.respond_to?(:log_rate_limited)
         nil
       end
@@ -275,20 +298,32 @@ module TrackballNav
           ORIGIN.clone
         when 'object', 'selection'
           object_center(model, target)
-        # under-mouse 'cursor' has no SketchUp resolver yet (GetCursorPos via Fiddle is the
-        # planned route) -> falls to the object-centre else-branch below
         when 'view'
-          if @gesture_pivot.nil? || idle > PIVOT_HOLD_IDLE
-            hit = screen_center_pivot(model, view)
-            @gesture_pivot = hit || object_center(model, target)
-            if hit.nil? && TrackballNav.respond_to?(:log_rate_limited)
-              TrackballNav.log_rate_limited('view-pivot-fallback', 'view-pivot: object-centre fallback')
-            end
+          held_raycast_pivot(model, target, idle) { screen_center_pivot(model, view) }
+        when 'cursor'
+          # under-mouse pivot: refresh the live cursor pixel (the tracker's callable; no-op in the
+          # self-test), then raycast it -- same per-gesture hold + object-centre fallback as 'view'
+          held_raycast_pivot(model, target, idle) do
+            @cursor_refresh&.call(view)
+            cursor_pivot(model, view)
           end
-          @gesture_pivot.clone
         else
           object_center(model, target)
         end
+      end
+
+      # Capture a raycast pivot ONCE per gesture and HOLD it (recompute only after idle or a
+      # pan/zoom invalidation); fall back to the object centre on a miss. Shared by 'view' and
+      # 'cursor'. The block returns the surface hit (or nil).
+      def held_raycast_pivot(model, target, idle)
+        if @gesture_pivot.nil? || idle > PIVOT_HOLD_IDLE
+          hit = yield
+          @gesture_pivot = hit || object_center(model, target)
+          if hit.nil? && TrackballNav.respond_to?(:log_rate_limited)
+            TrackballNav.log_rate_limited('pivot-fallback', 'raycast pivot: object-centre fallback')
+          end
+        end
+        @gesture_pivot.clone
       end
 
       def invalidate_view_pivot!

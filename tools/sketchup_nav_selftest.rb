@@ -234,6 +234,37 @@ module TrackballNavSelfTest
       (distance(camera.eye, surface_pivot) - before_pivot_distance).abs < EPSILON
     end
 
+    # Under-mouse 'cursor' pivot: a SYNTHETIC off-centre pixel must raycast a DIFFERENT surface
+    # point than the screen centre (half B; half A -- the live cursor -- is cursor.rb, GUI-only).
+    driver = TrackballNav::CameraDriver
+    driver.cursor_refresh = nil                # no live tracker: our injected pixel must survive
+    camera.set(box_center.offset(Geom::Vector3d.new(25, -35, 25)), box_center, Geom::Vector3d.new(0, 0, 1))
+    view.invalidate
+    driver.cursor_pixel = nil
+    assert('nil cursor pixel yields no pivot') { driver.cursor_pivot(model, view).nil? }
+    centre_pivot = driver.screen_center_pivot(model, view)
+    assert('cursor test: centre pickray hits box') { centre_pivot.is_a?(Geom::Point3d) }
+    off_pixel = [view.vpwidth * 0.40, view.vpheight * 0.62]   # off-centre, still over the box
+    driver.cursor_pixel = off_pixel
+    cursor_hit = driver.cursor_pivot(model, view)
+    assert('cursor pixel raycasts a surface point') { cursor_hit.is_a?(Geom::Point3d) }
+    assert('cursor pivot differs from screen centre') { distance(cursor_hit, centre_pivot) > EPSILON }
+
+    # 'cursor' pivot through the public apply() path holds the cursor hit rigid vs the eye.
+    camera.set(box_center.offset(Geom::Vector3d.new(25, -35, 25)), box_center, Geom::Vector3d.new(0, 0, 1))
+    view.invalidate
+    driver.cursor_pixel = off_pixel
+    driver.reset_gesture!
+    held_cursor = driver.cursor_pivot(model, view)
+    before_cursor_distance = distance(camera.eye, held_cursor)
+    changed = TrackballNav.apply('o' => [0.06, 0.05, 0], 'p' => [0, 0], 'z' => 0,
+                                 'op' => 'cursor', 'os' => 'free', 'zm' => 'to_center')
+    assert('cursor-pivot orbit applies') { changed }
+    assert('held cursor pivot stays fixed vs eye') do
+      (distance(camera.eye, held_cursor) - before_cursor_distance).abs < EPSILON
+    end
+    driver.cursor_pixel = nil
+
     report('PASS Trackball Nav SketchUp self-test complete')
   ensure
     model.abort_operation if operation_open

@@ -109,18 +109,21 @@ and moves the active view's camera.
    Bindings, same as the other apps — set per app or leave on **Default** to inherit General →
    3D control scheme). All three are applied, verified live with zero drift of the held point:
    - **Orbit pivot** — `origin` rotates about the model origin (the lightest path); `object`
-     (and `selection` / `cursor`, which fall back to it — no SW hit-test for either yet)
-     rotates about the model's bounding-box centre;
+     (and `selection`, which falls back to it) rotates about the model's bounding-box centre;
      `view` rotates about the surface **under the centre of the screen** — found by a raycast,
      exactly like SolidWorks' own middle-drag orbit — and **holds it for the whole gesture**,
-     falling back to the object centre when the crosshair is off-model.
-   - **View-pivot hold (s)** (Per-App Bindings, `view` pivot only) — seconds the view must be
-     still before the `view` pivot re-raycasts. Default **0.5**; `0` recomputes at the start of
+     falling back to the object centre when the crosshair is off-model;
+     **`cursor` rotates about the surface under the MOUSE CURSOR** — the same raycast aimed
+     through the cursor instead of the screen centre (hover the feature you care about and spin
+     the ball), held per gesture, object-centre fallback on a miss.
+   - **View-pivot hold (s)** (Per-App Bindings, `view`/`cursor` pivots) — seconds the view must be
+     still before the pivot re-raycasts. Default **0.5**; `0` recomputes at the start of
      every orbit; a pan/zoom always recomputes it immediately.
    - **Orbit style** — `free` (all three axes, with roll) or `turntable` (yaw about world-up +
      pitch about camera-right, roll dropped so the model never tilts).
    - **Zoom mode** — `to_center` (default) zooms about the view centre; `to_object` keeps the
-     bounding-box centre fixed; `to_cursor` falls back to to_center (no SW hit-test).
+     bounding-box centre fixed; **`to_cursor` keeps the point under the mouse cursor fixed** while
+     zooming (a miss falls back to `to_center`).
    - Switching the orbit pivot takes effect immediately (any held pivot is dropped).
 
    There is **no add-in** to update, so the daemon never auto-copies anything for SolidWorks.
@@ -227,8 +230,10 @@ cert/trust details: [`docs/apps/onshape.md`](docs/apps/onshape.md).)
    + **Control scheme**) and **Viewport refresh rate** apply as for the other apps. Camera math is a
    reuse of the Fusion add-in's orbit/pan/zoom-about-a-pivot (the bridge decodes Onshape's
    `view.affine` to eye + a camera basis, applies the change, re-encodes), so **orbit pivot / orbit
-   style / zoom mode** are all honored (`view` pivot uses `view.target` when Onshape exposes it, else
-   the model centre; `to_cursor` falls back to `to_center`).
+   style / zoom mode** are all honored (`view` pivot raycasts the surface under the screen centre via
+   Onshape's navlib hit-test, falling back to the model centre; **`cursor` (Under Cursor)** aims that
+   same hit-test through the OS mouse — done in code, needs a live calibration of the canvas insets,
+   see [`docs/apps/onshape.md`](docs/apps/onshape.md) §8.14; `to_cursor` falls back to `to_center`).
    - Intrinsic per-axis orientation lives at the top of `onshape_bridge.py`
      (`ORBIT_SIGN`/`PAN_SIGN`/`PAN_SCALE`/`ZOOM_SIGN`/`ZOOM_SCALE`, and `WORLD_UP` for the turntable
      azimuth — Onshape's scene up may be Y or Z, so verify turntable and flip `WORLD_UP` if verticals
@@ -298,7 +303,9 @@ SketchUp for Web is not supported (it has no local scripting hook).
    **active • connected** and the tray shows `Apps: sketchup v…`.
 4. In **Per-App Bindings → sketchup**, choose:
    - **Orbit** — normal object/view-centred navigation. **Viewpoint** turns the camera in place;
-     Auto Depth raycasts the surface under the viewport centre and holds it for the gesture.
+     **Auto Depth** raycasts the surface under the viewport centre and holds it for the gesture;
+     **Under Cursor** raycasts the surface under the **mouse** instead (add-on 0.2.2 — needs a
+     one-time live check, see the maintainer notes).
    - **Fly** — unconstrained 6DOF look; hold **Shift** to strafe/advance and rise/fall.
    - **Walk** — horizon-locked look; hold **Shift** to move on the ground plane, with twist for
      rise/fall (useful for stairs/floors).
@@ -329,20 +336,24 @@ SpaceMouse orbiting your model.
      **or** — no admin needed — drop it into **your project's** `Plugins\TrackballNav` folder instead.
 2. **Enable it once:** in the editor, **Edit → Plugins → search "Trackball" → tick "Trackball Nav"**,
    then **restart the editor**. (This is the analogue of Fusion's one-time *Run on Startup*. Enabling
-   Trackball Nav also enables the **Python Editor Script Plugin** it depends on — no separate step.)
+   Trackball Nav also enables the **Python Editor Script Plugin** and **GeoReferencing** it depends
+   on — GeoReferencing supplies the under-cursor mouse pixel; no separate step.)
 3. Open a level, switch the daemon to **3D mode** (tray → Mode), and **focus** the Unreal Editor. The
    row flips to **active • connected** and the tray shows `Apps: unreal v…`. Spin the ball to orbit;
    hold **Shift** to pan/zoom. (During **Play-In-Editor** the add-on no-ops so it doesn't fight the
-   game; it also no-ops cleanly with no perspective viewport open.)
+   game; it also no-ops cleanly with no perspective viewport open.) For **Under Cursor** orbit, click
+   the **level viewport** so it has focus (clicking Details / Content Browser leaves the viewport
+   unfocused and that pivot falls back to Selection).
 4. Tuning — Unreal gets the **full Blender-style Per-App Bindings panel**:
    - **Navigation mode** — toggle **Orbit / Fly / Walk** (with Fly speed / Walk speed). *Fly* = free
      6DOF (banks on twist; forward follows pitch). *Walk* = horizon-locked look, movement stays on the
      ground plane. In **orbit** mode, un-shifted twist does **Twist action** (roll / zoom / dolly /
      none), and **Lock horizon** keeps the view level.
    - **Orbit around** — **Viewpoint** (turn the camera in place), **Auto Depth** (raycast the surface
-     under screen-centre; falls back to selection → free-fly on a miss), **Selection** (selected
-     actors' bounding box), **World Origin**, and **3D Cursor** (Unreal has no 3D cursor, so this
-     orbits the selection too). **Orbit method** free/turntable.
+     under screen-centre; falls back to selection → free-fly on a miss), **Under Cursor** (add-on
+     0.2.3 — raycasts under the mouse via Epic's GeoReferencing helpers; needs the viewport focused),
+     **Selection** (selected actors' bounding box), **World Origin**. (No **3D Cursor** option —
+     Unreal has none.) **Orbit method** free/turntable. **Zoom mode** includes **to_cursor**.
    - **Invert directions** — independent per mode (Orbit / Viewpoint / Fly / Walk), plus orbit/pan/zoom
      **gains** and **Viewport refresh rate**.
    Unreal is **left-handed, Z-up, centimetres**, so expect to flip a few **Invert** checkboxes the
@@ -362,8 +373,10 @@ the editor's **next launch**. So after updating the daemon: relaunch it, then re
 > **Read it before changing the add-on.**
 
 Blender is also **implemented** (a rich socket add-on — orbit/pan/zoom plus fly/walk, camera-view
-driving, and more); see [`HANDOFF.md`](HANDOFF.md) §8 and
-[`docs/apps/blender.md`](docs/apps/blender.md) for its setup and tuning.
+driving, and more). Its **Under Cursor** orbit pivot (add-on 0.1.11) orbits the surface under the
+mouse via a passive modal-operator mouse tracker (Blender has no on-demand mouse getter) — done in
+code, needs a live-GUI verify. See [`HANDOFF.md`](HANDOFF.md) §8 and
+[`docs/apps/blender.md`](docs/apps/blender.md) §4.5 for its setup and tuning.
 
 ## Project layout (packaging-ready)
 

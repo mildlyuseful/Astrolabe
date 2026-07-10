@@ -104,6 +104,42 @@ feed({"o": [0.3, 0.0, 0.0], "p": [0, 0], "z": 0.0, "op": "view", "os": "free", "
       "adv": ADV})
 check("autodepth.orbit_moves_location", (rv.view_location - loc_ad).length > 1e-6)
 
+# ===== under-mouse "cursor" pivot (Half B + the mapping; the live modal tracker is GUI-only) =====
+# Half B: raycast an ARBITRARY region pixel (not just the centre). The centre pixel passes through
+# the cube -> a hit; a far-corner pixel (0,0) looks past it into empty space -> a miss.
+rv.view_location = Vector((0.0, 0.0, 0.0)); rv.view_distance = 10.0
+rv.view_rotation = Quaternion((1.0, 0.0, 0.0, 0.0)); rv.view_perspective = 'PERSP'
+hit_c = tn._raycast_pixel(rv, region, region.width * 0.5, region.height * 0.5)
+check("cursor.raycast_pixel_centre_hits", hit_c is not None)
+check("cursor.raycast_pixel_corner_misses", tn._raycast_pixel(rv, region, 0.0, 0.0) is None)
+
+# Feed a SYNTHETIC cached cursor at the region centre (what the modal tracker would cache live) and
+# resolve the cursor pivot through the real _cursor_region_pixel -> _raycast_cursor path.
+tn._cursor.update({"win": _win.as_pointer(), "ok": True,
+                   "x": region.x + region.width * 0.5, "y": region.y + region.height * 0.5})
+cur_hit = tn._raycast_cursor(rv, region, _win)
+check("cursor.raycast_cursor_hits_cube", cur_hit is not None
+      and (cur_hit - (hit_c or Vector((9, 9, 9)))).length < 1e-4)
+
+# cursor OUTSIDE this region (window-space far to the left) -> None -> selection-median fallback
+tn._cursor.update({"x": region.x - 500.0, "y": region.y + region.height * 0.5})
+check("cursor.offscreen_is_none", tn._raycast_cursor(rv, region, _win) is None)
+
+# end to end: op="cursor" with the cursor over the cube orbits about that hit (moves view_location);
+# with the cursor off-viewport it falls back to the selection median (cube at origin still moves it).
+for ob in bpy.context.scene.objects:
+    try:
+        ob.select_set(ob.type == 'MESH')
+    except Exception:
+        pass
+tn._cursor.update({"win": _win.as_pointer(), "ok": True,
+                   "x": region.x + region.width * 0.5, "y": region.y + region.height * 0.5})
+tn._gesture.update({"pivot": None, "invalid": True, "t": 0.0})
+loc_cur = rv.view_location.copy()
+feed({"o": [0.3, 0.0, 0.0], "p": [0, 0], "z": 0.0, "op": "cursor", "os": "free", "zm": "to_center",
+      "adv": ADV})
+check("cursor.orbit_moves_location", (rv.view_location - loc_cur).length > 1e-6)
+
 # selection median: select the mesh objects -> median at the origin (default cube)
 for ob in bpy.context.scene.objects:
     try:
