@@ -350,7 +350,8 @@ def test_flush_one_failing_op_does_not_blank_the_rest():
 def test_set_scheme_updates():
     drv = SolidWorksDriver()
     drv.set_scheme("object", "turntable", "to_object")
-    assert drv._scheme == {"op": "object", "os": "turntable", "zm": "to_object"}
+    assert drv._scheme == {"op": "object", "os": "turntable", "zm": "to_object",
+                           "sel_override": True}
 
 
 def test_compute_object_center_part_vs_assembly_vs_none():
@@ -513,7 +514,8 @@ def test_view_pivot_raycast_passes_integer_tol():
 
 def test_raycast_saves_and_restores_user_selection():
     # SelectByRay clobbers the selection set; the user's selection must come back afterwards.
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme(
+        "view", "free", "to_center", selection_overrides_pivot=False)
     model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0),
                                  ray_hits=[(0.0, (1.0, 1.0, 1.5))])
     drv._flush((0.0, 0.0, 0.0, 0.0, 0.0, 0.0))            # prime _live_view (sets the pick handles)
@@ -524,6 +526,30 @@ def test_raycast_saves_and_restores_user_selection():
     assert model._selmgr._sel == [user_ent]               # user's selection restored
     assert user_ent.select_appends == [True]              # re-selected via append (set, not marks)
     assert len(model._ext.ray_calls) >= 1                 # the raycast did run
+
+
+def test_selection_override_wins_without_mutating_selection():
+    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0),
+                                 ray_hits=[(0.0, (1.0, 1.0, 1.5))])
+    drv._flush((0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+    selected = FakeEntity((0.25, 0.5, 0.75), model._selmgr)
+    model._selmgr._sel = [selected]
+    drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
+    assert model._selmgr._sel == [selected]
+    assert model._ext.ray_calls == []                     # selection wins before view raycast
+    assert len(_view.translation_sets) == 1               # off-origin selection point held
+
+
+def test_selection_override_can_be_disabled():
+    drv = SolidWorksDriver(); drv.set_scheme(
+        "view", "free", "to_center", selection_overrides_pivot=False)
+    model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0),
+                                 ray_hits=[(0.0, (1.0, 1.0, 1.5))])
+    drv._flush((0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+    model._selmgr._sel = [FakeEntity((0.25, 0.5, 0.75), model._selmgr)]
+    drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
+    assert len(model._ext.ray_calls) >= 1                 # designated view pivot restored
 
 
 def test_object_orbit_does_not_raycast():

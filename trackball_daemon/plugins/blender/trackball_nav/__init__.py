@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 11),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 12),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,8 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.11"                   # reported in the handshake (shown in the daemon's tray)
+ADDIN_VERSION = "0.1.12"                   # reported in the handshake (shown in the daemon's tray)
+                                           # 0.1.12: selection_overrides_pivot is functional.
                                            # 0.1.10: 3D-cursor pivot value renamed cursor->cursor_3d
                                            # (daemon config v3; "cursor" now means under-the-mouse).
                                            # 0.1.11: under-mouse "cursor" pivot implemented via a
@@ -355,7 +356,7 @@ def _cursor_location():
         return None
 
 
-def _orbit_pivot(op, rv, region, idle, win=None):
+def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True):
     """Resolve the orbit pivot Vector for pivot id `op`, or None (== orbit about view_location).
       viewpoint -> the EYE: turns the camera in place (look around), independent of how far the orbit
                    point/view_location happens to be. (Earlier this orbited view_location, which sits
@@ -366,9 +367,15 @@ def _orbit_pivot(op, rv, region, idle, win=None):
                    tracker's cached position -> selection-median fallback when the cursor is off the
                    viewport / over empty space / not cached yet)
       object    -> selection median      cursor_3d -> 3D cursor        origin -> world origin
-    Anything unavailable falls back to None (orbit about view_location, Blender's default)."""
+    When ``sel_override`` is enabled, a non-empty selection wins over every external pivot. The
+    viewpoint mode remains a true turn-in-place operation, matching Unity/Godot/Rhino. Anything
+    unavailable falls back to None (orbit about view_location, Blender's default)."""
     if op == "viewpoint":
         return _eye(rv)
+    if sel_override:
+        selected = _selection_median()
+        if selected is not None:
+            return selected
     if op == "view":
         if _gesture["pivot"] is None or _gesture["invalid"] or idle > PIVOT_HOLD_IDLE:
             _gesture["pivot"] = _raycast_center(rv, region)
@@ -425,7 +432,10 @@ def _apply_orbit(win, rv, region, o, frame, adv, idle):
     if pitch or yaw or roll:
         turntable = (style == "turntable") or lock
         R = _orbit_R(rv, pitch, yaw, roll, turntable)
-        _apply_world_rotation(rv, R, _orbit_pivot(op, rv, region, idle, win))
+        _apply_world_rotation(
+            rv, R, _orbit_pivot(
+                op, rv, region, idle, win,
+                sel_override=bool(adv.get("selection_overrides_pivot", True))))
 
 
 def _move_scale(base, speed, rv):

@@ -25,7 +25,8 @@ import traceback
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.4"          # 0.1.4: scheme values renamed (pointer->cursor,
+ADDIN_VERSION = "0.1.5"          # 0.1.5: selection_overrides_pivot is functional.
+                                 # 0.1.4: scheme values renamed (pointer->cursor,
                                  # cursor->selection, to_pointer->to_cursor; daemon config v3).
                                  # reported in the hello handshake (shown in the daemon's tray); keep
                                  # in sync with version.json. 0.1.1: pan scale fix (was ~100x too
@@ -351,10 +352,13 @@ def _selection_center(doc):
     return (sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n, sum(p[2] for p in pts) / n)
 
 
-def _orbit_pivot(op, view, doc, camera, idle):
+def _orbit_pivot(op, view, doc, camera, idle, sel_override=True):
     """Resolve the orbit pivot for the scheme `op`. Everything falls back to the model centre,
     then the camera look-at, so orbit always has a sane pivot."""
     center, bbox = _object_center(doc)
+    selected = _selection_center(doc) if sel_override or op == "selection" else None
+    if selected is not None:
+        return selected
     if op == "origin":
         return (0.0, 0.0, 0.0)
     if op == "view":
@@ -370,16 +374,20 @@ def _orbit_pivot(op, view, doc, camera, idle):
                 _gesture["pivot"] = center
         return _gesture["pivot"] if _gesture["pivot"] is not None else cammath.look_at(camera)
     if op == "selection":
-        return _selection_center(doc) or center or cammath.look_at(camera)
+        return center or cammath.look_at(camera)
     # "object" and unknowns -> model centre
     return center if center is not None else cammath.look_at(camera)
 
 
-def _zoom_pivot(zm, view, doc, idle):
+def _zoom_pivot(zm, view, doc, idle, sel_override=True):
     if zm == "to_object":
         center, _bb = _object_center(doc)
         return center                      # may be None -> zoom about the look-at
     if zm == "to_cursor":
+        if sel_override:
+            selected = _selection_center(doc)
+            if selected is not None:
+                return selected
         # Keep the surface point under the MOUSE POINTER fixed on screen while zooming
         # (cammath.zoom already holds an off-centre pivot). Same per-gesture hold as the orbit
         # pivot, in its own slot so orbit/zoom gestures don't clobber each other's pivot.
@@ -402,6 +410,8 @@ def _apply(view, frame, idle):
     op = frame.get("op", "view")
     style = frame.get("os", "free")
     zm = frame.get("zm", "to_center")
+    adv = frame.get("adv") or {}
+    sel_override = bool(adv.get("selection_overrides_pivot", True))
 
     sig = (op, style, zm)
     if sig != _last_scheme["v"]:
@@ -416,7 +426,7 @@ def _apply(view, frame, idle):
     if o[0] or o[1] or o[2]:
         _log_rl("rx_orbit", "rx orbit o=(%.4f,%.4f,%.4f) op=%s os=%s" % (o[0], o[1], o[2], op, style))
         _zoom_gesture["pivot"] = None            # view rotates -> next zoom re-raycasts its pivot
-        pivot = _orbit_pivot(op, view, doc, camera, idle)
+        pivot = _orbit_pivot(op, view, doc, camera, idle, sel_override=sel_override)
         cammath.orbit(camera, o, style == "turntable", pivot)
         changed = True
     elif p[0] or p[1]:
@@ -428,7 +438,7 @@ def _apply(view, frame, idle):
     elif z:
         _log_rl("rx_zoom", "rx zoom z=%.4f zm=%s" % (z, zm))
         _gesture["pivot"] = None
-        cammath.zoom(camera, z, _zoom_pivot(zm, view, doc, idle))
+        cammath.zoom(camera, z, _zoom_pivot(zm, view, doc, idle, sel_override=sel_override))
         changed = True
 
     if changed:

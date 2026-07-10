@@ -269,6 +269,22 @@ def test_orbit_pivot_cursor_last_resort_is_look_at():
     assert fc._orbit_pivot("cursor", view, empty_doc, c, idle=10.0) == cam.look_at(c)
 
 
+def test_selection_override_wins_and_can_be_disabled(monkeypatch):
+    monkeypatch.setattr(fc, "_selection_center", lambda _doc: (2.0, 3.0, 4.0))
+    c = _ortho_cam()
+    view = _view_both_hits()
+    assert fc._orbit_pivot("origin", view, DOC, c, idle=10.0,
+                           sel_override=True) == (2.0, 3.0, 4.0)
+    assert fc._orbit_pivot("origin", view, DOC, c, idle=10.0,
+                           sel_override=False) == (0.0, 0.0, 0.0)
+
+
+def test_designated_selection_works_when_override_is_off(monkeypatch):
+    monkeypatch.setattr(fc, "_selection_center", lambda _doc: (6.0, 7.0, 8.0))
+    assert fc._orbit_pivot("selection", _view_both_hits(), DOC, _ortho_cam(), idle=10.0,
+                           sel_override=False) == (6.0, 7.0, 8.0)
+
+
 # --- _zoom_pivot zm=="to_cursor" ----------------------------------------------------------
 def test_zoom_pivot_to_cursor_uses_cursor_hit():
     view = _view_both_hits()

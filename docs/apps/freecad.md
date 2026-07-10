@@ -5,8 +5,8 @@ Daemon: the architecture, the verified Coin camera model, and the FreeCAD-specif
 real live debugging. FreeCAD is a **socket add-on** integration (like Fusion/Blender), not an
 in-process driver (SolidWorks/Onshape). Read this before touching the add-on.
 
-Verified live on the dev machine: **FreeCAD 1.1.1**, PySide6, Coin3D/pivy. Add-on `0.1.4`, daemon
-`__version__` `0.1.44`.
+Verified live on the dev machine: **FreeCAD 1.1.1**, PySide6, Coin3D/pivy. Current add-on `0.1.5`,
+daemon `__version__` `0.1.58`; the selection-override addition is offline-tested pending a feel pass.
 
 ---
 
@@ -137,7 +137,8 @@ view.redraw()                               # force a repaint (needed when drive
   bbox validation, and per-gesture hold as `view`. Everything ultimately falls back to the model
   centre, then the camera look-at, so orbit always has a sane pivot. (`view`/`cursor` is FreeCAD's
   *easiest* raycast of the apps — `getObjectInfo` does the pick and hands back world coords; no ray
-  construction needed.)
+  construction needed.) Add-on 0.1.5 applies `selection_overrides_pivot`: a non-empty selection
+  wins over the designated orbit/to-cursor pivot; disabling it restores the requested pivot.
 - **Orbit style** (`scheme.orbit_style`): `free` (rotate about the camera's own right/up/fwd, twist
   allowed) or `turntable` (yaw about WORLD Z + pitch about camera-right, **roll dropped** so the
   horizon stays level).

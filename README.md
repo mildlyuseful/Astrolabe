@@ -76,8 +76,10 @@ and only flows in **3D mode** (tray → Mode), so the mouse cursor is untouched 
      **"cursor (under mouse)" (add-in 0.1.13+) raycasts the surface under the MOUSE CURSOR
      instead** — hover the feature you care about and spin the ball — and **"to_cursor (under
      mouse)"** zooms about it (the cursor is read fresh at each gesture start; if it isn't over
-     the viewport, it falls back to the model centre). "selection" falls back to the model
-     centre. (Stored scheme values: `cursor`/`to_cursor`. Display-scaling is handled: Fusion's
+     the viewport, it falls back to the model centre). `origin` is the world origin and
+     `selection` uses the aggregate bounds of Fusion's active selection. **Selection overrides
+     orbit center** makes that selection win over the designated pivot. (Stored scheme values:
+     `cursor`/`to_cursor`. Display-scaling is handled: Fusion's
      screenToView takes logical screen px but returns physical viewport px, so both the input
      and the bounds check are scale-aware.)
 
@@ -110,7 +112,8 @@ and moves the active view's camera.
    Bindings, same as the other apps — set per app or leave on **Default** to inherit General →
    3D control scheme). All three are applied, verified live with zero drift of the held point:
    - **Orbit pivot** — `origin` rotates about the model origin (the lightest path); `object`
-     (and `selection`, which falls back to it) rotates about the model's bounding-box centre;
+     rotates about the model's bounding-box centre; `selection` uses the mean of SolidWorks'
+     selected-entity points;
      `view` rotates about the surface **under the centre of the screen** — found by a raycast,
      exactly like SolidWorks' own middle-drag orbit — and **holds it for the whole gesture**,
      falling back to the object centre when the crosshair is off-model;
@@ -125,7 +128,8 @@ and moves the active view's camera.
    - **Zoom mode** — `to_center` (default) zooms about the view centre; `to_object` keeps the
      bounding-box centre fixed; **`to_cursor` keeps the point under the mouse cursor fixed** while
      zooming (a miss falls back to `to_center`).
-   - Switching the orbit pivot takes effect immediately (any held pivot is dropped).
+   - **Selection overrides orbit center** makes a non-empty selection replace the designated
+     orbit pivot (and `to_cursor` zoom pivot). Switching the orbit pivot takes effect immediately.
 
    There is **no add-in** to update, so the daemon never auto-copies anything for SolidWorks.
 
@@ -175,12 +179,14 @@ Architecture, Mechanical) are all `acad.exe` and expose the same automation obje
 4. **Control scheme** (the **Orbit pivot / Orbit style / Zoom mode** dropdowns in Per-App Bindings,
    same as the other apps — per app or **Default** to inherit General):
    - **Orbit pivot** — `origin` (WCS origin), `object` (drawing-extents centre), `view` (the current
-     view **target** — AutoCAD's native target orbit), `selection` (falls back to object), and
+     view **target** — AutoCAD's native target orbit), `selection` (selected entities' aggregate
+     geometric-extents centre, falling back to object), and
      **`cursor` — orbit about the point under the MOUSE CURSOR** (the plugin
      watches the cursor via `PointMonitor`, holds the point under it when a gesture starts, and
      orbits the view rigidly around it; `to_cursor` zoom keeps that point fixed while zooming. In a
      shaded visual style the depth comes from the entity under the cursor; in 2D wireframe faces
      don't pick, so mid-face hovers use the construction-plane point — still under the cursor).
+     **Selection overrides orbit center** makes a non-empty selection win over the chosen pivot.
    - **Orbit style** — `free` or `turntable` (yaw about world-up + pitch about camera-right; AutoCAD
      is **Z-up**). Unlike the old COM path, the plugin sets `VIEWTWIST` directly, so free-roll works.
    - **Zoom mode** — `to_center` (default), `to_object` (zoom about the drawing-extents centre), or

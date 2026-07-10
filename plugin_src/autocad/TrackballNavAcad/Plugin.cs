@@ -57,7 +57,9 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.4";   // keep in sync with the csproj <Version>
+        public const string PluginVersion = "0.3.5";   // keep in sync with the csproj <Version>
+                                                       // 0.3.5: real origin/object/selection pivots
+                                                       // + selection_overrides_pivot.
                                                        // 0.3.4: AabbNearHit always uses the near
                                                        // face (tEnter) — UCS-plane samples inside
                                                        // a solid no longer return interior points.
@@ -88,6 +90,7 @@ namespace TrackballNav
         readonly object _lock = new object();
         readonly double[] _acc = new double[6];
         string _opPivot = "view", _oStyle = "free", _zMode = "to_center";
+        bool _selectionOverrides = true;
         volatile bool _stop;
         volatile bool _connected;
         Thread _sockThread;
@@ -391,6 +394,11 @@ namespace TrackballNav
                         if (root.TryGetProperty("op", out var op)) _opPivot = op.GetString();
                         if (root.TryGetProperty("os", out var os)) _oStyle = os.GetString();
                         if (root.TryGetProperty("zm", out var zm)) _zMode = zm.GetString();
+                        if (root.TryGetProperty("adv", out var adv) &&
+                            adv.ValueKind == JsonValueKind.Object &&
+                            adv.TryGetProperty("selection_overrides_pivot", out var sel) &&
+                            (sel.ValueKind == JsonValueKind.True || sel.ValueKind == JsonValueKind.False))
+                            _selectionOverrides = sel.GetBoolean();
                     }
                 }
             }
@@ -425,6 +433,7 @@ namespace TrackballNav
             }
             double[] delta = null;
             string style, opv, zmv;
+            bool selectionOverrides;
             lock (_lock)
             {
                 if (_acc[0] != 0 || _acc[1] != 0 || _acc[2] != 0 ||
@@ -436,6 +445,7 @@ namespace TrackballNav
                 style = _oStyle;
                 opv = _opPivot;
                 zmv = _zMode;
+                selectionOverrides = _selectionOverrides;
             }
             // watchdog: if the REGEN's CommandEnded never arrives, un-wedge navigation
             if (_regenInFlight && (DateTime.UtcNow - _regenFiredAt).TotalSeconds > 2.0)
@@ -493,7 +503,7 @@ namespace TrackballNav
 
             try
             {
-                if (s_gsBroken || !TryApplyGs(doc, delta, style, opv, zmv))
+                if (s_gsBroken || !TryApplyGs(doc, delta, style, opv, zmv, selectionOverrides))
                     Apply(doc, delta, style);          // legacy fallback (regens per frame;
                                                        // no pointer pivot -- view-centre orbit)
                 _lastFrameAt = DateTime.UtcNow;
@@ -803,7 +813,8 @@ namespace TrackballNav
         }
 
         // --- the GS transport: live kernel view, regen-free (docs 8.15) -------------------------
-        bool TryApplyGs(Document doc, double[] d, string style, string opv, string zmv)
+        bool TryApplyGs(Document doc, double[] d, string style, string opv, string zmv,
+                        bool selectionOverrides)
         {
             try
             {
@@ -851,16 +862,22 @@ namespace TrackballNav
                 bool hasPan = d[3] != 0 || d[4] != 0;
                 bool hasZoom = d[5] != 0;
                 Point3d? orbitPivot = null, zoomPivot = null;
-                if (hasOrbit && opv == "cursor")
+                if (hasOrbit && !_heldOrbitSet)
                 {
-                    if (!_heldOrbitSet) { _heldOrbitPivot = CapturePointerPivot(); _heldOrbitSet = true; }
+                    _heldOrbitPivot = ResolveOrbitPivot(doc, opv, selectionOverrides);
+                    _heldOrbitSet = true;
+                }
+                if (hasOrbit)
                     orbitPivot = _heldOrbitPivot;
+                if (hasZoom && zmv == "to_cursor" && !_cam.Persp && !_heldZoomSet)
+                {
+                    _heldZoomPivot = selectionOverrides ? CaptureSelectionCenter(doc) : null;
+                    if (!_heldZoomPivot.HasValue)
+                        _heldZoomPivot = CapturePointerPivot();
+                    _heldZoomSet = true;
                 }
                 if (hasZoom && zmv == "to_cursor" && !_cam.Persp)
-                {
-                    if (!_heldZoomSet) { _heldZoomPivot = CapturePointerPivot(); _heldZoomSet = true; }
                     zoomPivot = _heldZoomPivot;
-                }
                 _cam = NavMath.Apply(_cam, d, style, OrbitSign, PanSignX, PanSignY,
                                      PanScale, ZoomSign, ZoomScale, orbitPivot, zoomPivot);
                 NavMath.Write(_gsView, _cam);
@@ -876,6 +893,84 @@ namespace TrackballNav
                 EndGesture(commit: false);
                 return false;
             }
+        }
+
+        static Point3d? CaptureSelectionCenter(Document doc)
+        {
+            try
+            {
+                var selected = doc.Editor.SelectImplied();
+                if (selected.Status != PromptStatus.OK || selected.Value == null)
+                    return null;
+                bool found = false;
+                double minX = 0, minY = 0, minZ = 0, maxX = 0, maxY = 0, maxZ = 0;
+                using (var tr = doc.TransactionManager.StartOpenCloseTransaction())
+                {
+                    foreach (var id in selected.Value.GetObjectIds())
+                    {
+                        try
+                        {
+                            var ent = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+                            if (ent == null) continue;
+                            var ext = ent.GeometricExtents;
+                            if (!found)
+                            {
+                                minX = ext.MinPoint.X; minY = ext.MinPoint.Y; minZ = ext.MinPoint.Z;
+                                maxX = ext.MaxPoint.X; maxY = ext.MaxPoint.Y; maxZ = ext.MaxPoint.Z;
+                                found = true;
+                            }
+                            else
+                            {
+                                minX = Math.Min(minX, ext.MinPoint.X);
+                                minY = Math.Min(minY, ext.MinPoint.Y);
+                                minZ = Math.Min(minZ, ext.MinPoint.Z);
+                                maxX = Math.Max(maxX, ext.MaxPoint.X);
+                                maxY = Math.Max(maxY, ext.MaxPoint.Y);
+                                maxZ = Math.Max(maxZ, ext.MaxPoint.Z);
+                            }
+                        }
+                        catch { /* erased/non-geometric entity: skip it */ }
+                    }
+                    tr.Commit();
+                }
+                return found
+                    ? new Point3d((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5)
+                    : (Point3d?)null;
+            }
+            catch { return null; }
+        }
+
+        Point3d? ResolveOrbitPivot(Document doc, string opv, bool selectionOverrides)
+        {
+            var selected = (selectionOverrides || opv == "selection")
+                ? CaptureSelectionCenter(doc) : null;
+            if (selected.HasValue)
+                return selected;
+            switch (opv)
+            {
+                case "origin": return Point3d.Origin;
+                case "object":
+                case "selection": return CaptureDrawingCenter();
+                case "cursor": return CapturePointerPivot();
+                default: return null;               // view/unknown: the GS camera target
+            }
+        }
+
+        static Point3d? CaptureDrawingCenter()
+        {
+            try
+            {
+                var mn = SysPt("EXTMIN");
+                var mx = SysPt("EXTMAX");
+                var diagonal = mx - mn;
+                if (mx.X < mn.X || mx.Y < mn.Y || mx.Z < mn.Z ||
+                    diagonal.Length < 1e-12 || diagonal.Length > 1e18)
+                    return null;
+                return new Point3d((mn.X + mx.X) * 0.5,
+                                   (mn.Y + mx.Y) * 0.5,
+                                   (mn.Z + mx.Z) * 0.5);
+            }
+            catch { return null; }
         }
 
         // Is the viewport in the "2D Wireframe" visual style? There the 2D pipeline PRESENTS and

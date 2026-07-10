@@ -76,7 +76,8 @@ module TrackballNav
                   else
                     if has_orbit
                       orbit_camera(model, view, camera, orbit, pivot_id, style, idle,
-                                   advanced['lock_horizon'] == true)
+                                   advanced['lock_horizon'] == true,
+                                   advanced.fetch('selection_overrides_pivot', true) == true)
                     elsif has_pan
                       invalidate_view_pivot!
                       pan_camera(view, camera, pan)
@@ -112,6 +113,23 @@ module TrackballNav
         fallback
       end
 
+      def selection_center(model)
+        bounds = Geom::BoundingBox.new
+        found = false
+        model.selection.each do |entity|
+          next unless entity.respond_to?(:bounds)
+
+          box = entity.bounds
+          next if box.nil? || box.empty?
+
+          bounds.add(box)
+          found = true
+        end
+        found && !bounds.empty? ? bounds.center.clone : nil
+      rescue StandardError
+        nil
+      end
+
       def screen_center_pivot(model, view)
         raytest_pixel(model, view, view.vpwidth * 0.5, view.vpheight * 0.5, 'view-pivot')
       end
@@ -144,14 +162,15 @@ module TrackballNav
 
       private
 
-      def orbit_camera(model, view, camera, orbit, pivot_id, style, idle, lock_horizon = false)
+      def orbit_camera(model, view, camera, orbit, pivot_id, style, idle, lock_horizon = false,
+                       selection_overrides = true)
         eye = camera.eye
         target = camera.target
         up = camera.up
         axes = camera_axes(eye, target, up)
         return false unless axes
 
-        pivot = orbit_pivot(model, view, eye, target, pivot_id, idle)
+        pivot = orbit_pivot(model, view, eye, target, pivot_id, idle, selection_overrides)
         return false unless pivot
 
         if style == 'turntable' || lock_horizon
@@ -290,13 +309,18 @@ module TrackballNav
         true
       end
 
-      def orbit_pivot(model, view, eye, target, pivot_id, idle)
+      def orbit_pivot(model, view, eye, target, pivot_id, idle, selection_overrides = true)
+        selected = selection_center(model) if selection_overrides && pivot_id != 'viewpoint'
+        return selected if selected
+
         case pivot_id
         when 'viewpoint'
           eye.clone
         when 'origin'
           ORIGIN.clone
-        when 'object', 'selection'
+        when 'selection'
+          selection_center(model) || object_center(model, target)
+        when 'object'
           object_center(model, target)
         when 'view'
           held_raycast_pivot(model, target, idle) { screen_center_pivot(model, view) }

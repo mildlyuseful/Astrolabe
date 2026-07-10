@@ -27,12 +27,15 @@ from trackball_daemon.onshape_bridge import OnshapeBridge, _PropUnsupported  # n
 
 
 class FakeConn:
-    def __init__(self, hit=None, view_ext=None, model_ext=None, misses=0):
+    def __init__(self, hit=None, view_ext=None, model_ext=None, misses=0,
+                 selection_ext=None, selection_empty=None):
         self._hit_unsupported = False
         self._hit = hit
         self._view_ext = view_ext if view_ext is not None else [-4.0, -3.0, -1.0, 4.0, 3.0, 1.0]
         self._model_ext = model_ext if model_ext is not None else [-10.0] * 3 + [10.0] * 3
         self.misses = misses
+        self._selection_ext = selection_ext
+        self._selection_empty = selection_empty
         self.writes = []
 
     def read(self, prop, ttl=0.0):
@@ -40,6 +43,10 @@ class FakeConn:
             return self._view_ext
         if prop == "model.extents":
             return self._model_ext
+        if prop == "selection.extents":
+            return self._selection_ext
+        if prop == "selection.empty":
+            return self._selection_empty
         return None
 
     def write(self, prop, value):
@@ -211,8 +218,20 @@ def test_pivot_view_never_touches_cursor(bridge, monkeypatch):
                         lambda *a: (_ for _ in ()).throw(AssertionError("wrong path")))
     assert bridge._pivot(FakeConn(), {"op": "view"},
                          (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1)) == (3.0, 3.0, 3.0)
-    assert bridge._pivot(FakeConn(), {"op": "selection"},
-                         (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1)) == (3.0, 3.0, 3.0)
+
+
+def test_selection_override_wins_and_can_be_disabled(bridge, monkeypatch):
+    conn = FakeConn(selection_ext=[2.0, 4.0, 6.0, 6.0, 8.0, 10.0], selection_empty=False)
+    monkeypatch.setattr(bridge, "_hit_center", lambda *a: (1.0, 1.0, 1.0))
+    camera = ((0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    assert bridge._pivot(conn, {"op": "view", "sel_override": True}, *camera) == (4.0, 6.0, 8.0)
+    assert bridge._pivot(conn, {"op": "view", "sel_override": False}, *camera) == (1.0, 1.0, 1.0)
+
+
+def test_designated_selection_works_when_override_is_off(bridge):
+    conn = FakeConn(selection_ext=[0.0, 2.0, 4.0, 2.0, 6.0, 8.0], selection_empty=False)
+    camera = ((0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    assert bridge._pivot(conn, {"op": "selection", "sel_override": False}, *camera) == (1.0, 4.0, 6.0)
 
 
 def test_userscript_mentions_endpoint_and_canvas():

@@ -579,10 +579,7 @@ class SettingsWindow:
                        ("apps", app_key, "selection_overrides_pivot"))
         sel_note = ("When on and something is selected, orbit uses the selection centre "
                     "instead of the designated pivot (Under Cursor / Auto Depth / …).")
-        if app_key == "rhino":
-            sel_note += " Applied by the Rhino add-on."
-        else:
-            sel_note += " Not yet applied in this app's add-on — toggle is saved for when it is."
+        sel_note += " Applied live by this app's integration."
         ttk.Label(parent, text=sel_note,
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
@@ -657,9 +654,8 @@ class SettingsWindow:
         self._bool_row(s2, "Lock horizon (keep level even in trackball)", adv + ("lock_horizon",))
         self._bool_row(s2, "Selection overrides orbit center",
                        ("apps", "blender", "selection_overrides_pivot"))
-        ttk.Label(s2, text="When on and something is selected, orbit would use the selection "
-                           "centre instead of the designated pivot. Not yet applied in the Blender "
-                           "add-on — toggle is saved for when it is.",
+        ttk.Label(s2, text="When on and something is selected, orbit uses the selection centre "
+                           "instead of the designated pivot (Viewpoint remains turn-in-place).",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s3 = ttk.LabelFrame(parent, text="Pan / Zoom")
@@ -737,9 +733,8 @@ class SettingsWindow:
         self._bool_row(s2, "Lock horizon (keep level in free orbit)", adv + ("lock_horizon",))
         self._bool_row(s2, "Selection overrides orbit center",
                        ("apps", "sketchup", "selection_overrides_pivot"))
-        ttk.Label(s2, text="When on and something is selected, orbit would use the selection "
-                           "centre instead of the designated pivot. Not yet applied in the SketchUp "
-                           "extension — toggle is saved for when it is.",
+        ttk.Label(s2, text="When on and something is selected, orbit uses the selection bounds "
+                           "centre instead of the designated pivot (Viewpoint remains turn-in-place).",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s3 = ttk.LabelFrame(parent, text="Pan / Zoom")

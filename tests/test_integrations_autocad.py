@@ -2,6 +2,7 @@
 update copies DLL + version.json into the runtime dir; the COM driver NETLOADs it on attach and
 stays the fallback). Locked-DLL updates are STAGED, not failed."""
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -85,6 +86,15 @@ def test_autocad_in_default_config(isolated_config):
     ac = cfg.data["apps"]["autocad"]
     assert ac["enabled"] is False and ac["installed"] is False
     assert ac["bindings"]["scheme"]["orbit_pivot"] == "default"   # shared _app() shape
+
+
+def test_autocad_plugin_consumes_selection_override_and_all_generic_pivots():
+    source = (Path(__file__).parents[1] / "plugin_src" / "autocad" /
+              "TrackballNavAcad" / "Plugin.cs").read_text(encoding="utf-8")
+    assert 'TryGetProperty("selection_overrides_pivot"' in source
+    assert "CaptureSelectionCenter(doc)" in source
+    assert 'case "origin": return Point3d.Origin;' in source
+    assert 'case "object":' in source and "CaptureDrawingCenter()" in source
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")

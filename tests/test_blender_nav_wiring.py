@@ -5,6 +5,7 @@ The invariant under test: extending the broker must NOT change what existing add
 they read only o/p/z/op/os/zm, so "adv" is present only when the focused app sets it.
 """
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from trackball_daemon.app import App
@@ -153,3 +154,11 @@ def test_sketchup_focus_sends_its_advanced(isolated_config):
     assert adv["nav_mode"] == "orbit"
     assert adv["selection_overrides_pivot"] is True
     assert sent["advanced"] is not cfg.data["apps"]["blender"]["advanced"]
+
+
+def test_blender_addon_consumes_selection_override():
+    source = (Path(__file__).parents[1] / "trackball_daemon" / "plugins" / "blender" /
+              "trackball_nav" / "__init__.py").read_text(encoding="utf-8")
+    assert 'adv.get("selection_overrides_pivot", True)' in source
+    assert "if sel_override:" in source
+    assert "selected = _selection_median()" in source

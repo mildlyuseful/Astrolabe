@@ -179,7 +179,8 @@ def test_focus_applies_solidworks_scheme():
     app._nav_sink(1, 1, 1, 1, 1, 1)              # focusing SolidWorks pushes its scheme to the driver
     # solidworks per-app scheme: pivot=object (override), style=default->general free, zoom=to_object
     assert app.sw_driver.schemes[-1] == {
-        "orbit_pivot": "object", "orbit_style": "free", "zoom_mode": "to_object"}
+        "orbit_pivot": "object", "orbit_style": "free", "zoom_mode": "to_object",
+        "selection_overrides_pivot": True}
     assert app.sw_driver.holds[-1] == 0.75       # per-app view-pivot hold pushed to the driver
 
 

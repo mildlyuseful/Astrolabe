@@ -10,7 +10,7 @@ Primary code: [`trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py`
 (+ `TrackballNav.manifest`). Tests: [`tests/test_fusion_cursor_pivot.py`](../../tests/test_fusion_cursor_pivot.py)
 (pixel→ray→pivot math against a stubbed `adsk`). Wiring: `app.py`, `config.py`, `integrations.py`
 (`install_fusion` / auto-update), `ui.py`. User-facing setup: the Fusion section of
-[`README.md`](../../README.md). (Current at add-in `0.1.14`, daemon `0.1.44`.)
+[`README.md`](../../README.md). (Current at add-in `0.1.15`, daemon `0.1.58`.)
 
 ---
 
@@ -86,6 +86,9 @@ pan/zoom or after the idle hold time). Fusion specifics:
   object centre.
 - The cursor is read fresh at each gesture start — there is deliberately **no cache to go
   stale**.
+- Add-in 0.1.15 resolves `origin` explicitly and computes `selection` from the aggregate world-space
+  bounds of `app.activeSelections`. `selection_overrides_pivot` makes that centre replace the
+  designated orbit/to-cursor pivot; disabling it restores the requested pivot.
 
 ## 5. Testing
 

@@ -12,7 +12,7 @@ Tests: [`tests/test_autocad_loader.py`](../../tests/test_autocad_loader.py),
 [`tests/test_integrations_autocad.py`](../../tests/test_integrations_autocad.py),
 [`tests/test_app_routing.py`](../../tests/test_app_routing.py). Wiring: `app.py`, `config.py`,
 `integrations.py`, `ui.py`, `winfocus.py`. User-facing summary: the AutoCAD section of
-[`README.md`](../../README.md). (Current at daemon `__version__` 0.1.44, plugin 0.3.4.)
+[`README.md`](../../README.md). (Current at daemon `__version__` 0.1.58, plugin 0.3.5.)
 
 ---
 
@@ -206,9 +206,8 @@ and tracks `_dir/_size/_center` across its own writes**, re-reading direction+si
 3D point we `ZoomCenter` on each orbit frame):
 
 - **`origin`** — the WCS origin `(0,0,0)`.
-- **`object`** (and **`selection`**, which falls back to it) — the **drawing-extents centre**
-  (`EXTMIN`/`EXTMAX` midpoint, cached ~0.5 s), falling back to the tracked `_center` if extents are
-  unavailable.
+- **`object`** — the **drawing-extents centre** (`EXTMIN`/`EXTMAX` midpoint). **`selection`** uses
+  the aggregate `Entity.GeometricExtents` centre of the implied selection and falls back to object.
 - **`view`** (the general default) — the tracked **`_center`** (the point currently screen-centred).
   AutoCAD has **no COM screen-centre raycast**, so unlike SolidWorks/Fusion/Onshape there is no true
   "surface under the crosshair" pivot; `view` orbits about whatever is centred. (See §8.6.)
@@ -309,13 +308,14 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   (§8.4) — the driver never calls `SetVariable` on the view, and even if it recurred the guard logs it
   once and the next frame recovers.
 
-### 8.6 No COM screen-centre raycast → `view`/`selection` pivots are not true surface pivots
+### 8.6 No COM screen-centre raycast → `view` is not a true surface pivot
 - Unlike SolidWorks (`SelectByRay`), Fusion (`findBRepUsingRay`), Onshape (navlib `hit.lookat`),
   Blender (`scene.ray_cast`) and FreeCAD (`getObjectInfo`), **AutoCAD exposes no cheap COM screen-centre
   pick** for the model-space viewport. So `view` orbits about the current **Target** (AutoCAD's native
-  target orbit), and `selection` falls back to **object** (extents centre). The trackball pipeline is
-  relative anyway (no cursor pixel to unproject), so this matches the cross-app `selection` limitation
-  (HANDOFF §14).
+  target orbit). Plugin 0.3.5 resolves `selection` independently from the selected entities'
+  aggregate geometric extents and `selection_overrides_pivot` can make it replace any designated
+  pivot. The archived COM transport still lacks this path; the in-process plugin is the sole live
+  navigation transport.
 
 ### 8.7 A freshly `Documents.Add()`ed doc mis-resolves properties → re-fetch `ActiveDocument`
 - **Symptom (probe/testing only):** the object returned by `acad.Documents.Add()` raises

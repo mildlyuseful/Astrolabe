@@ -169,7 +169,7 @@ Algorithm:
    `ndc_x·half_x` right + `ndc_y·half_y` up from the view center, with `lookfrom` pulled `view_half*8`
    back along forward (started outside the model). This is the **orthographic** ray (Onshape is ortho
    by default, §8.8); NDC = (0,0) reproduces the old screen-center ray exactly.
-   - `view` / `selection` → NDC (0,0) (screen center).
+   - `view` → NDC (0,0) (screen center).
    - `cursor` → page-reported `#canvas` NDC (§8.14); off-canvas / no userscript ⇒ **fall back to the center**.
 2. Try apertures smallest-first (`HIT_APERTURES = (0.03, 0.1, 0.3)` × view half-extent), widening
    until something is hit ("expand the radius until it hits").
@@ -180,8 +180,11 @@ Algorithm:
    reused every frame, re-picked only after a pan/zoom or idle > 0.35s. The hit-test therefore runs
    **once per gesture (~5 round-trips), not per frame.**
 
-Other pivots: `origin` = world origin; `object` falls back to model center when no hit. The scheme
-comes from `set_scheme` (General → 3D control scheme, or per-app Onshape override).
+Other pivots: `origin` = world origin; `object` = model centre; `selection` reads navlib's
+`selection.extents` and falls back to object. Daemon 0.1.58 wires `selection_overrides_pivot` into
+the in-process bridge, so a non-empty selection replaces the designated orbit pivot. Onshape builds
+that omit the optional selection properties safely continue through the designated-pivot path. The
+scheme comes from `set_scheme` (General → 3D control scheme, or per-app Onshape override).
 
 ---
 

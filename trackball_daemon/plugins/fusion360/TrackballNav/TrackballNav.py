@@ -37,7 +37,8 @@ PAN_SCALE = 0.14                 # broker pan delta -> fraction of view extents 
 ZOOM_SCALE = 0.25                # broker zoom delta -> fraction of view extents (baseline zoom feel)
 ZOOM_SIGN = 1.0                  # twist->zoom direction
 
-ADDIN_VERSION = "0.1.14"         # reported in the handshake so the daemon shows the LOADED version.
+ADDIN_VERSION = "0.1.15"         # reported in the handshake so the daemon shows the LOADED version.
+                                 # 0.1.15: real selection/origin pivots + selection override.
                                  # 0.1.14: scheme values renamed (pointer->cursor, cursor->selection,
                                  # to_pointer->to_cursor) to match the daemon v3 config migration.
                                  # 0.1.11: "pointer" orbit pivot + "to_pointer" zoom (orbit/zoom about
@@ -165,6 +166,37 @@ def _object_center(fallback):
     except Exception:
         _log_rl("objc", "object-center FAILED: " + traceback.format_exc().strip().replace("\n", " | "))
         return fallback
+
+
+def _selection_center():
+    """Aggregate world-space bounding-box centre of Fusion's active selection, or None.
+
+    ``activeSelections`` can contain bodies, occurrences, components, faces, sketches, and proxy
+    objects. Most expose ``boundingBox`` directly; selection wrappers expose the selected object as
+    ``entity``. Unsupported/non-geometric selections are skipped instead of stealing the pivot.
+    """
+    try:
+        selections = app.activeSelections
+        mn = [None, None, None]
+        mx = [None, None, None]
+        found = False
+        for i in range(selections.count):
+            item = selections.item(i)
+            entity = getattr(item, "entity", item)
+            bb = getattr(entity, "boundingBox", None)
+            if bb is None:
+                continue
+            lo, hi = bb.minPoint, bb.maxPoint
+            for axis, (a, b) in enumerate(((lo.x, hi.x), (lo.y, hi.y), (lo.z, hi.z))):
+                mn[axis] = a if mn[axis] is None else min(mn[axis], a)
+                mx[axis] = b if mx[axis] is None else max(mx[axis], b)
+            found = True
+        if found:
+            xyz = [(mn[i] + mx[i]) * 0.5 for i in range(3)]
+            return adsk.core.Point3D.create(xyz[0], xyz[1], xyz[2])
+    except Exception:
+        _log_rl("selc", "selection-center FAILED: " + traceback.format_exc().strip().replace("\n", " | "))
+    return None
 
 
 def _in_bbox(p, bb):
@@ -393,7 +425,7 @@ def _cursor_pivot(cam):
     return _raycast_pivot(design, origin, d, half_h, "cursor-pivot")
 
 
-def _orbit_pivot(op, cam, tgt, idle):
+def _orbit_pivot(op, cam, tgt, idle, sel_override=True):
     """Pivot point for an orbit gesture:
       view            -> raycast down the screen centre to the real surface depth, computed ONCE per
                          gesture and HELD (so the point under the crosshair stays put) -- like native
@@ -402,6 +434,11 @@ def _orbit_pivot(op, cam, tgt, idle):
                          start), same per-gesture hold + fallbacks as `view`.
       object / selection -> model bounding-box centre.
     Everything falls back to the model centre, then the view target, when nothing is available."""
+    selected = _selection_center() if sel_override or op == "selection" else None
+    if selected is not None:
+        return selected
+    if op == "origin":
+        return adsk.core.Point3D.create(0.0, 0.0, 0.0)
     if op == "view":
         if _gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
             _gesture["pivot"] = _screen_center_pivot(cam) or _object_center(tgt)
@@ -415,7 +452,7 @@ def _orbit_pivot(op, cam, tgt, idle):
     return tgt
 
 
-def _zoom_pivot(zm, cam, tgt, idle):
+def _zoom_pivot(zm, cam, tgt, idle, sel_override=True):
     # "to_object" zooms toward the model center; "to_cursor" toward the surface under the mouse
     # cursor (the zoom branch already keeps an arbitrary P fixed on screen; per-gesture hold in its
     # own slot so orbit/zoom gestures don't clobber each other's pivot, miss -> view centre);
@@ -423,6 +460,10 @@ def _zoom_pivot(zm, cam, tgt, idle):
     if zm == "to_object":
         return _object_center(tgt)
     if zm == "to_cursor":
+        if sel_override:
+            selected = _selection_center()
+            if selected is not None:
+                return selected
         if _zoom_gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
             _zoom_gesture["pivot"] = _cursor_pivot(cam)
         return _zoom_gesture["pivot"] or tgt
@@ -439,10 +480,12 @@ def _apply(frame):
         op = frame.get("op", "view")          # orbit pivot: view | object | cursor
         style = frame.get("os", "free")       # orbit style: free | turntable
         zm = frame.get("zm", "to_center")     # zoom mode:  to_center | to_object | to_cursor
-        sig = (op, style, zm)
+        adv = frame.get("adv") or {}
+        sel_override = bool(adv.get("selection_overrides_pivot", True))
+        sig = (op, style, zm, sel_override)
         if sig != _last_scheme["v"]:           # confirm live scheme changes are received
             _last_scheme["v"] = sig
-            _log("scheme received: pivot=%s style=%s zoom=%s" % sig)
+            _log("scheme received: pivot=%s style=%s zoom=%s sel_override=%s" % sig)
 
         vp = app.activeViewport
         if not vp:
@@ -468,7 +511,7 @@ def _apply(frame):
         if o[0] or o[1] or o[2]:
             # ---- ORBIT: rotate eye + target + up about the chosen pivot ----
             _zoom_gesture["pivot"] = None     # view rotates -> the next zoom re-raycasts its pivot
-            pivot = _orbit_pivot(op, cam, tgt, idle)
+            pivot = _orbit_pivot(op, cam, tgt, idle, sel_override=sel_override)
             dpt = ((pivot.x - tgt.x) ** 2 + (pivot.y - tgt.y) ** 2 + (pivot.z - tgt.z) ** 2) ** 0.5
             _log_rl("pivot", "orbit pivot=%s |P-T|=%.3f P=(%.2f,%.2f,%.2f) target=(%.2f,%.2f,%.2f)"
                     % (op, dpt, pivot.x, pivot.y, pivot.z, tgt.x, tgt.y, tgt.z))
@@ -517,7 +560,7 @@ def _apply(frame):
             s = 1.0 - ZOOM_SIGN * z * ZOOM_SCALE
             if s < 0.01:
                 s = 0.01
-            P = _zoom_pivot(zm, cam, tgt, idle)
+            P = _zoom_pivot(zm, cam, tgt, idle, sel_override=sel_override)
             ntgt = adsk.core.Point3D.create(P.x + (tgt.x - P.x) * s,
                                             P.y + (tgt.y - P.y) * s,
                                             P.z + (tgt.z - P.z) * s)

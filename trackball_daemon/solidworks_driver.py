@@ -132,6 +132,7 @@ FORCE_REDRAW = True
 DEFAULT_FLUSH_HZ = 30.0
 _RETRY_PERIOD = 2.0           # seconds between attach attempts while SolidWorks isn't running
 _OBJ_CACHE_TTL = 0.5         # seconds to cache the model bounding-box centre (recomputed lazily)
+_SELECTION_CACHE_TTL = 0.15  # avoid a selection-manager COM round-trip on every orbit frame
 # Out-of-process COM reads are expensive (~17-20 ms each for ActiveDoc/ActiveView/Translation3,
 # measured live), so the worker caches the model/view handles + the view's Translation3/Scale2 and
 # re-validates them only every _VIEW_TTL. That re-fetch doubles as the liveness probe (a closed app
@@ -256,11 +257,12 @@ class SolidWorksDriver:
         self._warned = set()                                  # one-time logs for failing ops
         # Control scheme (orbit pivot / orbit style / zoom mode), set live via set_scheme. Mirrors
         # NavBroker; a dict ref-swap is atomic, so the worker reads it lock-free each flush.
-        self._scheme = {"op": "view", "os": "free", "zm": "to_center"}
+        self._scheme = {"op": "view", "os": "free", "zm": "to_center", "sel_override": True}
         # COM handles -- created and used ONLY on the worker thread.
         self._swApp = None
         self._mathUtil = None
         self._box_cache = (0.0, None)                         # (monotonic_ts, bbox 6-tuple or None)
+        self._selection_cache = (None, 0.0, None)             # (selmgr, monotonic_ts, centre)
         # Cached view state (worker thread only) -- see _VIEW_TTL. _model/_view are re-validated
         # periodically; _trans/_scale are tracked across our own sets so we avoid re-reading them.
         self._model = None
@@ -297,14 +299,14 @@ class SolidWorksDriver:
         """Live-update the flush/viewport-refresh rate (Hz). Applied on the next flush."""
         self._period = 1.0 / self._clamp_rate(hz)
 
-    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode):
+    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True):
         """Set the control scheme applied on the next flush. Parallels NavBroker.set_scheme so
         app._apply_schemes() drives SolidWorks the same way it drives the socket add-ons.
           orbit_pivot: origin | object | view | selection | cursor
               origin    -> rotate about the model origin, no view translation (the original behaviour);
               object    -> rotate about the model bounding-box centre;
               view      -> rotate about the screen-centre point at the true surface depth (raycast; held);
-              selection -> falls back to object (bounding-box centre);
+              selection -> mean of selected-entity points, falling back to object;
               cursor    -> rotate about the surface point under the MOUSE CURSOR (the same
                            SelectByRay machinery aimed through the cursor pixel -- _cursor_pivot;
                            held per gesture); misses / unmappable cursor fall back to object.
@@ -312,7 +314,9 @@ class SolidWorksDriver:
           zoom_mode:   to_center | to_object | to_cursor   (to_cursor = zoom about the surface
                        point under the mouse cursor, held per gesture; a miss falls back to
                        to_center)"""
-        self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode}
+        self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode,
+                        "sel_override": bool(selection_overrides_pivot)}
+        self._selection_cache = (None, 0.0, None)
         self._orbit_pivot = None             # drop any held pivot so a pivot switch takes effect now
         self._zoom_pivot = None
 
@@ -407,6 +411,7 @@ class SolidWorksDriver:
         self._swApp = swApp
         self._mathUtil = self._get_mathutil(swApp)  # pan disabled (only) if this fails
         self._box_cache = (0.0, None)               # fresh attach -> recompute the bounding box
+        self._selection_cache = (None, 0.0, None)
         self._invalidate_view()                     # fresh attach -> re-fetch view + tracked state
         self._warned.clear()                        # let the first failure of each op log again
         try:
@@ -473,6 +478,7 @@ class SolidWorksDriver:
         self._swApp = None
         self._mathUtil = None
         self._box_cache = (0.0, None)
+        self._selection_cache = (None, 0.0, None)
         self._invalidate_view()
         self._set_connected(False)
 
@@ -653,7 +659,10 @@ class SolidWorksDriver:
             return
 
         op = scheme["op"]
-        if op == "origin":
+        selected = self._selection_center(self._selmgr) if scheme.get("sel_override", True) else None
+        if selected is not None:
+            pivot = selected
+        elif op == "origin":
             pivot = None                            # rotate only, no pan
         elif op == "view":
             if self._orbit_pivot is None or idle >= self._pivot_hold_sec:
@@ -666,6 +675,8 @@ class SolidWorksDriver:
                 self._orbit_pivot = (self._cursor_pivot(view, c0, c1, c2, model)
                                      or self._object_center(model))
             pivot = self._orbit_pivot
+        elif op == "selection":
+            pivot = self._selection_center(self._selmgr) or self._object_center(model)
         else:                          # object / selection -> bounding-box centre (fixed point)
             pivot = self._object_center(model)
 
@@ -938,15 +949,18 @@ class SolidWorksDriver:
         zm = scheme["zm"]
         center = None
         can_hold = self._mathUtil is not None and self._trans is not None and self._scale
-        if zm == "to_object":
-            center = self._object_center(model)
-        elif zm == "to_cursor" and can_hold:
-            if self._zoom_pivot is None or idle >= self._pivot_hold_sec:
-                ad = view.Orientation3.ArrayData
-                self._zoom_pivot = self._cursor_pivot(
-                    view, (ad[0], ad[3], ad[6]), (ad[1], ad[4], ad[7]),
-                    (ad[2], ad[5], ad[8]), model)
-            center = self._zoom_pivot               # None (miss) -> plain to_center zoom
+        if zm == "to_cursor" and scheme.get("sel_override", True):
+            center = self._selection_center(self._selmgr)
+        if center is None:
+            if zm == "to_object":
+                center = self._object_center(model)
+            elif zm == "to_cursor" and can_hold:
+                if self._zoom_pivot is None or idle >= self._pivot_hold_sec:
+                    ad = view.Orientation3.ArrayData
+                    self._zoom_pivot = self._cursor_pivot(
+                        view, (ad[0], ad[3], ad[6]), (ad[1], ad[4], ad[7]),
+                        (ad[2], ad[5], ad[8]), model)
+                center = self._zoom_pivot           # None (miss) -> plain to_center zoom
         if center is not None and can_hold:
             ad = view.Orientation3.ArrayData
             c0 = (ad[0], ad[3], ad[6]); c1 = (ad[1], ad[4], ad[7])
@@ -964,6 +978,41 @@ class SolidWorksDriver:
             self._view_ts = 0.0                      # -> resync tracked state on the next flush
 
     # --- selection save/restore around the raycast (so we don't disturb the user's work) --
+    def _selection_center(self, selmgr):
+        """Mean of the current selection points in model space, or None.
+
+        SolidWorks' late-bound COM surface does not expose one uniform bounding-box API across
+        faces, edges, features, bodies, and components. ``GetSelectionPoint2`` is available for all
+        of them and is already the live-verified point source used by the raycast path, so averaging
+        those points gives a stable selection pivot without mutating the user's selection.
+        """
+        if selmgr is None:
+            return None
+        now = time.monotonic()
+        cached_mgr, cached_at, cached_center = self._selection_cache
+        if selmgr is cached_mgr and now - cached_at < _SELECTION_CACHE_TTL:
+            return cached_center
+        try:
+            n = int(selmgr.GetSelectedObjectCount2(-1))
+        except Exception:
+            self._selection_cache = (selmgr, now, None)
+            return None
+        points = []
+        for i in range(1, n + 1):
+            try:
+                p = selmgr.GetSelectionPoint2(i, -1)
+                if p is not None and len(p) >= 3:
+                    points.append((float(p[0]), float(p[1]), float(p[2])))
+            except Exception:
+                pass
+        if not points:
+            self._selection_cache = (selmgr, now, None)
+            return None
+        count = float(len(points))
+        center = tuple(sum(p[axis] for p in points) / count for axis in range(3))
+        self._selection_cache = (selmgr, now, center)
+        return center
+
     @staticmethod
     def _save_selection(selmgr):
         """Snapshot the current selection (entity dispatches) so the raycast can restore it. Returns

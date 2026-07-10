@@ -145,8 +145,8 @@ one — see `config.effective_scheme`). **Five pivot modes**, all built on §4's
 - **`origin`** — rotate **only**, no pan: the model spins about the world origin with **zero view
   translation**. The original behaviour, and the lightest path. (Re-added as a distinct mode after it
   was conflated with `object` — see §8.6.)
-- **`object`** (and **`selection`**, which falls back to it) — hold the **bounding-box centre**, a
-  fixed point, so it's exact every frame and needs no per-gesture capture.
+- **`object`** — hold the model **bounding-box centre**. **`selection`** uses the mean of the current
+  selection points reported by `ISelectionMgr.GetSelectionPoint2`, falling back to object.
 - **`view`** — hold the **screen-centre point at the true surface depth** under the crosshair, found
   by a raycast (§7). Captured once and **held** through a gesture; recomputed only after the view is
   idle ≥ `view_pivot_hold_sec` (default 0.5 s, per-app `set_pivot_hold`) or when a pan/zoom moves it.
@@ -427,7 +427,8 @@ that blocks everything else).
     child makes `WindowFromPoint` return a window that isn't `GetViewHWnd` or a resolvable descendant.
   - **Lesson**: a self-consistent round-trip is not a verification. Drive the cursor to the feature's
     *true* screen position and let the code map back independently; confirm with eyes/screenshot.
-- `selection` remains the **bbox centre** (no per-entity selection pivot over COM yet).
+- `selection` uses the mean of the current selected-entity points (daemon 0.1.58). The app-root
+  `selection_overrides_pivot` toggle makes this replace the designated orbit/to-cursor pivot.
 
 ### 8.14 No add-in, by design
 - SolidWorks add-ins need **admin COM registration**; we deliberately avoid that. Everything is the

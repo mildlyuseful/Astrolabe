@@ -893,8 +893,10 @@ class OnshapeBridge:
     def set_rate(self, hz):
         self._period = 1.0 / self._clamp_rate(hz)
 
-    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode):
-        self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode}
+    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True):
+        self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode,
+                        "sel_override": bool(selection_overrides_pivot)}
+        self._held_pivot = None
 
     def submit(self, ox, oy, oz, px, py, zoom):
         with self._lock:
@@ -1202,6 +1204,10 @@ class OnshapeBridge:
     # --- scheme geometry ----------------------------------------------------------------------
     def _pivot(self, conn, scheme, eye, right, up, back):
         op = scheme.get("op", "view")
+        if scheme.get("sel_override", True):
+            selected = self._selection_center(conn)
+            if selected is not None:
+                return selected
         if op == "origin":
             return (0.0, 0.0, 0.0)
         if op == "cursor":
@@ -1214,7 +1220,14 @@ class OnshapeBridge:
             hit = self._hit_center(conn, eye, right, up, back)
             if hit is not None:
                 return hit
-        elif op in ("view", "selection"):
+        elif op == "selection":
+            selected = self._selection_center(conn)
+            if selected is not None:
+                return selected
+            center = self._object_center(conn)
+            if center is not None:
+                return center
+        elif op == "view":
             # Orbit about what's under the screen centre (like Onshape's own right-click orbit).
             hit = self._hit_center(conn, eye, right, up, back)
             if hit is not None:
@@ -1303,6 +1316,26 @@ class OnshapeBridge:
         ext = conn.read("model.extents", ttl=_OBJ_TTL)
         if isinstance(ext, list) and len(ext) >= 6:
             return ((ext[0] + ext[3]) * 0.5, (ext[1] + ext[4]) * 0.5, (ext[2] + ext[5]) * 0.5)
+        return None
+
+    def _selection_center(self, conn):
+        """Selection-extents centre exposed by the navlib client, or None.
+
+        Navlib models selection state separately from model extents. Some clients omit these
+        optional properties; ``conn.read`` already turns an unsupported read into None, preserving
+        the designated-pivot path when an Onshape build does not expose them.
+        """
+        empty = conn.read("selection.empty", ttl=_OBJ_TTL)
+        if empty is True:
+            return None
+        ext = conn.read("selection.extents", ttl=_OBJ_TTL)
+        if isinstance(ext, list) and len(ext) >= 6:
+            try:
+                values = [float(v) for v in ext[:6]]
+            except (TypeError, ValueError):
+                return None
+            if all(math.isfinite(v) for v in values):
+                return tuple((values[i] + values[i + 3]) * 0.5 for i in range(3))
         return None
 
     def _view_halves(self, conn):

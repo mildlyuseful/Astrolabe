@@ -6,9 +6,9 @@ cannot see by reading the code**, and the **full list of future plans / requeste
 options**. Per-component deep dives live in their own docs (linked in §15); this file is the map that
 ties them together and covers the things that span more than one component.
 
-> Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.57**, Fusion
-> add-in **0.1.14**, Blender add-on **0.1.11**, FreeCAD add-on **0.1.4**, SketchUp extension
-> **0.2.2**, Unreal add-on **0.2.4**, AutoCAD plugin **0.3.4**,
+> Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.58**, Fusion
+> add-in **0.1.15**, Blender add-on **0.1.12**, FreeCAD add-on **0.1.5**, SketchUp extension
+> **0.2.3**, Unreal add-on **0.2.4**, AutoCAD plugin **0.3.5**,
 > `pyproject` version is dynamic (single-sourced from `__version__`; packaging not yet cut). Dev machine: Windows 11, Blender 5.1.1, SolidWorks
 > 2025, Fusion 360, FreeCAD 1.1.1, SketchUp 2026.2, Unreal Engine 5.8, AutoCAD 2026 installed. The firmware has no
 > version field.
@@ -266,8 +266,8 @@ selection, plus `viewpoint` in Blender/SketchUp/Unreal and `cursor_3d` in Blende
 (free/turntable), `zoom_mode` (to_center/to_object/**to_cursor**). `cursor`/`to_cursor` =
 orbit/zoom about the surface under the **MOUSE CURSOR**; the daemon wires the value through every
 dropdown + broker frame once, and each app only needs a plugin-side pivot resolver — implemented
-so far in **FreeCAD**, **AutoCAD (PointMonitor)**, and **Fusion (GetCursorPos + screenToView)**;
-apps without one fall back to their view/object pivot. `selection` is the selection/bbox pivot
+in every integration (with app-specific APIs such as AutoCAD PointMonitor and Fusion
+GetCursorPos+screenToView). `selection` is the selection/bbox pivot
 and `cursor_3d` is Blender's 3D cursor. **Stored values match the UI labels since daemon 0.1.44
 (config v3):** the under-mouse pivot was born as `pointer`/`to_pointer` (daemon 0.1.39, when the
 UI was relabelled but the values kept the old names) and the old `cursor` value meant
@@ -276,6 +276,11 @@ legacy `to_cursor` alias of to_center (old configs migrate automatically). Set i
 General (default) or per app (per-app `"default"` inherits General). `app._apply_schemes` pushes the
 focused app's effective scheme to its driver; the **focused broker app's** `advanced` block (Blender's
 or Unreal's) is attached to the broker scheme (§12.9).
+
+**Selection override parity (daemon 0.1.58 / issue #3).** `selection_overrides_pivot` is consumed by
+all integrations. A non-empty selection replaces every external orbit pivot; `viewpoint` stays a
+true turn-in-place operation. Fusion and AutoCAD also gained real origin/object/selection resolution
+in their primary add-in paths instead of silently collapsing those values to the view target.
 
 **The shared "view-pivot raycast" idea.** For the `view` orbit pivot, camera apps cast a ray
 down the **screen centre** to the **real surface depth** under the crosshair (like native middle/right-

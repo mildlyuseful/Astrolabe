@@ -4,8 +4,8 @@ The SketchUp side of Trackball Daemon is a **Ruby socket extension**. It runs in
 Desktop (Pro/Studio), connects to the daemon's localhost nav broker, and drives the active view's
 explicit eye/target/up camera. SketchUp for Web is not supported because it has no local Ruby hook.
 
-Verified live on this machine against **SketchUp 2026.2.243**, bundled **Ruby 3.2.2**, add-on
-`0.2.0`, daemon `0.1.38`. The API probe and production self-test were run from *Extensions →
+Verified live on this machine against **SketchUp 2026.2.243**, bundled **Ruby 3.2.2**. Current add-on
+`0.2.3`, daemon `0.1.58`; the earlier API probe and production self-test were run from *Extensions →
 Developer → Ruby Console*. The production add-on also completed its broker hello; `daemon.log`
 reported the loaded SketchUp build through its versioned hello. Add-on **0.2.2** adds the under-mouse
 `cursor` pivot (§5.5); its offline pixel→pivot math is self-tested, but the live Win32 cursor→
@@ -161,7 +161,7 @@ where the active mode is known.
 - `origin` → `ORIGIN`
 - `viewpoint` → camera eye (turn in place)
 - `object` → `model.bounds.center`
-- `selection` → object centre
+- `selection` → aggregate bounds centre of the current `model.selection` (object centre fallback)
 - `view` → surface under the viewport **centre**, else object centre
 - `cursor` → surface under the **mouse cursor** (add-on 0.2.2) — the same `pickray`/`raytest` as
   `view`, aimed through the live cursor pixel instead of the centre. See §5.5.

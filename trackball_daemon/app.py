@@ -148,11 +148,16 @@ class App:
                               % (key, scheme["orbit_pivot"], scheme["orbit_style"],
                                  scheme["zoom_mode"], nav))
         if self.sw_driver is not None:
-            self.sw_driver.set_scheme(**self._effective_scheme("solidworks"))
             swcfg = self.config.data["apps"].get("solidworks") or {}
+            self.sw_driver.set_scheme(
+                **self._effective_scheme("solidworks"),
+                selection_overrides_pivot=bool(swcfg.get("selection_overrides_pivot", True)))
             self.sw_driver.set_pivot_hold(swcfg.get("view_pivot_hold_sec", 0.5))
         if self.onshape_bridge is not None:
-            self.onshape_bridge.set_scheme(**self._effective_scheme("onshape"))
+            oncfg = self.config.data["apps"].get("onshape") or {}
+            self.onshape_bridge.set_scheme(
+                **self._effective_scheme("onshape"),
+                selection_overrides_pivot=bool(oncfg.get("selection_overrides_pivot", True)))
 
     def _app_rate(self, key):
         """Effective viewport/flush rate (Hz) for app `key`: its per-app override, or the global

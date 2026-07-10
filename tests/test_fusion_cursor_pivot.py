@@ -365,3 +365,39 @@ def test_zoom_pivot_to_cursor_holds_and_falls_back(monkeypatch):
 def test_zoom_pivot_to_center_unchanged():
     tgt = _pt(0, 0, 0)
     assert tn._zoom_pivot("to_center", object(), tgt, idle=0.0) is tgt
+
+
+def test_selection_override_uses_aggregate_selection_bounds(monkeypatch):
+    class Selection:
+        def __init__(self, bounds):
+            self.entity = types.SimpleNamespace(boundingBox=FakeBB(*bounds))
+
+    class Selections:
+        def __init__(self, items):
+            self._items = items
+            self.count = len(items)
+
+        def item(self, index):
+            return self._items[index]
+
+    selected = Selections([
+        Selection(((-2.0, 0.0, 4.0), (2.0, 2.0, 6.0))),
+        Selection(((8.0, -4.0, 0.0), (10.0, 4.0, 8.0))),
+    ])
+    monkeypatch.setattr(tn, "app", types.SimpleNamespace(activeSelections=selected))
+    target = _pt(50.0, 50.0, 50.0)
+    p = tn._orbit_pivot("origin", object(), target, idle=10.0, sel_override=True)
+    assert (p.x, p.y, p.z) == pytest.approx((4.0, 0.0, 4.0))
+    p = tn._orbit_pivot("origin", object(), target, idle=10.0, sel_override=False)
+    assert (p.x, p.y, p.z) == pytest.approx((0.0, 0.0, 0.0))
+
+
+def test_designated_selection_works_when_override_is_off(monkeypatch):
+    selected = types.SimpleNamespace(
+        count=1,
+        item=lambda _i: types.SimpleNamespace(
+            entity=types.SimpleNamespace(boundingBox=FakeBB((2, 4, 6), (6, 8, 10)))))
+    monkeypatch.setattr(tn, "app", types.SimpleNamespace(activeSelections=selected))
+    p = tn._orbit_pivot("selection", object(), _pt(50, 50, 50), idle=10.0,
+                        sel_override=False)
+    assert (p.x, p.y, p.z) == pytest.approx((4.0, 6.0, 8.0))

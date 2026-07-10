@@ -6,7 +6,7 @@ and how/why we solved them. If you just want the design catalog (every nav mode,
 generic-scheme↔Blender reconciliation, the verified Blender-API facts), read its companion
 [`blender_design.md`](blender_design.md). This file is the one to read **first** when taking over.
 
-Current versions at handoff: **add-on `0.1.9`**, daemon `__version__` `0.1.19`, Blender on the dev
+Current versions at handoff: **add-on `0.1.12`**, daemon `__version__` `0.1.58`, Blender on the dev
 machine **5.1.1**.
 
 ---
@@ -186,7 +186,8 @@ under the screen centre (held per gesture); `cursor` → **under-mouse** raycast
 selection-median fallback); `object` → selection median; `cursor_3d` → 3D cursor; `origin` → world
 origin; unknown → `view_location` (Blender default). `viewpoint` is a Blender-only value added to the
 generic `orbit_pivot` enum. `view` and `cursor` **share the one per-gesture hold slot** (`_gesture`),
-which is fine because only one pivot is active at a time.
+which is fine because only one pivot is active at a time. Add-on 0.1.12 applies
+`selection_overrides_pivot` to every external pivot; `viewpoint` remains true turn-in-place.
 
 ### 5.3 Baseline constants (top of the add-on — tune here, not in the daemon)
 | Const | Meaning / why |
