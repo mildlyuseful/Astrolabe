@@ -706,10 +706,18 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
   driver-free desktop path is to **ship our own clean-room `TDxNavLib.dll`** (export the navlib C ABI;
   the app loads ours and we drive its camera via the registered accessors, reusing the Onshape
   `_navigate` math). That's a **native DLL** (needs a C toolchain — none installed) + a **per-app DLL
-  drop**, and is **redundant for the five existing integrations** (all already driver-free, FreeCAD
-  included); its only unique value is **closed-source apps with no scripting hook** (Solid Edge/NX/
-  Inventor/Rhino). Deferred for that reason. *Web* navlib generalization (other browser CAD that uses
+  drop**, and is **redundant for the existing socket/COM integrations** (all already driver-free);
+  its only unique value is **closed-source apps with no scripting hook** (Solid Edge/NX/
+  Inventor — **Rhino is no longer in this list**: it has a Python socket add-on as of the
+  unity-godot-rhino branch). Deferred for that reason. *Web* navlib generalization (other browser CAD that uses
   the same WAMP NL-Proxy) is still in-scope for the existing Onshape bridge.
+
+- **Unity / Godot / Rhino** — **IMPLEMENTED (branch feature/unity-godot-rhino-integrations).**
+  Unity (UPM Scene-view package, add-in 0.1.6) and Godot (EditorPlugin) ship the full
+  Unreal/Blender-parity suite; Rhino 8 ships the lean default suite with under-cursor +
+  `selection_overrides_pivot`. Unity live-verified (cursor pivot, zoom/`cameraDistance`,
+  Dynamic Clipping override, pivot-extent cap). Godot is turntable-only (no roll). See
+  `docs/apps/{unity,godot,rhino}.md`.
 
 **Control features (need a new channel/signal)**
 - **Discrete view ops** — Frame/View Selected, ortho axis snaps (Front/Top/Right), 15° orbit steps,

@@ -119,6 +119,19 @@ _DEFAULT_UNREAL_ADVANCED = {
     "invert": _DEFAULT_UNREAL_INVERT,   # per-mode direction flips (applied in the add-on)
 }
 
+# Unity reuses the Unreal advanced block, plus a Scene-view-only override for Dynamic Clipping
+# (Camera overlay: near/far auto-fit from size — feels like zoom-to-fit while looking around).
+# Godot: turntable-only, no roll (editor cursor is yaw/pitch only — free orbit / twist→roll
+# cannot persist).
+_DEFAULT_UNITY_ADVANCED = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
+_DEFAULT_UNITY_ADVANCED["override_dynamic_clip"] = True  # force SceneView.cameraSettings.dynamicClip off
+# Soft max for under-cursor / auto-depth pivots: scene AABB radius × this multiplier.
+# Stops horizon-line hits from rocketing the camera to infinity.
+_DEFAULT_UNITY_ADVANCED["pivot_extent_mult"] = 8.0
+_DEFAULT_GODOT_ADVANCED = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
+_DEFAULT_GODOT_ADVANCED["twist_action"] = "zoom"
+_DEFAULT_GODOT_ADVANCED["lock_horizon"] = True
+
 
 def effective_scheme(general_scheme, app_scheme):
     """Resolve a per-app scheme against the general default (per-app 'default' => inherit)."""
@@ -169,6 +182,21 @@ def _unreal_app():
     return a
 
 
+def _unity_app():
+    """Unity Scene view: Unreal-shaped advanced block (orbit/fly/walk + under-cursor + selection)."""
+    a = _app()
+    a["advanced"] = copy.deepcopy(_DEFAULT_UNITY_ADVANCED)
+    return a
+
+
+def _godot_app():
+    """Godot editor 3D viewport: turntable-only (no free orbit / roll — editor limitation)."""
+    a = _app()
+    a["advanced"] = copy.deepcopy(_DEFAULT_GODOT_ADVANCED)
+    a["bindings"]["scheme"]["orbit_style"] = "turntable"
+    return a
+
+
 def _sketchup_app():
     """SketchUp's shared app shape plus viewpoint/fly/walk and per-mode direction controls."""
     a = _app()
@@ -201,6 +229,9 @@ DEFAULTS = {
         "freecad":    _app(),
         "sketchup":   _sketchup_app(),
         "unreal":     _unreal_app(),
+        "unity":      _unity_app(),
+        "godot":      _godot_app(),
+        "rhino":      _app(),
         "fusion360":  _app(),
         "solidworks": _app(),
         "onshape":    _app(),

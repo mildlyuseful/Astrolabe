@@ -185,6 +185,9 @@ class App:
         "freecad": ("freecad",),
         "sketchup": ("sketchup",),
         "unreal": ("unrealeditor", "ue4editor"),
+        "unity": ("unity",),
+        "godot": ("godot",),
+        "rhino": ("rhino",),
         "solidworks": ("sldworks",),
         "autocad": ("acad",),
     }

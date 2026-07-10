@@ -9,7 +9,8 @@ A DIY **dual-sensor optical trackball** that acts as both a Bluetooth mouse and 
 - **Trackball Daemon** (`trackball_daemon/`, Python, Windows): a background **system-tray app**
   that consumes the rotation stream and either injects mouse movement (cursor mode) or drives a
   3D app's camera like a SpaceMouse (3D mode) — **Fusion 360, SolidWorks, AutoCAD, Onshape,
-  Blender, FreeCAD, SketchUp Desktop, and Unreal Engine**, routed to whichever app is focused.
+  Blender, FreeCAD, SketchUp Desktop, Unreal Engine, Unity, Godot, and Rhino**, routed to
+  whichever app is focused.
 
 This README is the user-facing run/setup guide for the daemon.
 
@@ -372,6 +373,60 @@ the editor's **next launch**. So after updating the daemon: relaunch it, then re
 > live-probe the editor Python API **headless**): [`docs/apps/unreal.md`](docs/apps/unreal.md).
 > **Read it before changing the add-on.**
 
+### Unity (implemented — UPM Editor package)
+Unity's **Scene view** is driven by a bundled UPM package (`com.astrolabe.trackball-nav`) that
+auto-starts via `[InitializeOnLoad]`. Full Blender/Unreal-parity suite (orbit/fly/walk, under-cursor,
+selection override). Play mode is ignored.
+
+1. Open a Unity project (or leave one open), then Settings → **3D Apps** → Unity → **Set up**
+   (copies into `Packages/com.astrolabe.trackball-nav/`).
+2. Let Unity reimport / domain-reload (or restart the Editor).
+3. Daemon **3D mode**, focus Unity — row shows **connected**.
+
+Set up finds projects from running `Unity.exe` `-projectpath` args (hidden PowerShell CIM; no
+console flash) and Unity Hub `%APPDATA%\UnityHub\projects-v1.json` (including the Hub v1
+`data` wrapper). If none are found, the dialog stages the package and gives a **Copy** path for
+manual install into `<YourProject>\Packages\com.astrolabe.trackball-nav\`.
+
+**Per-App Bindings (Unity)** also expose:
+- **Override Unity Dynamic Clipping** (default on) — Scene View Camera → Dynamic Clipping can
+  feel like auto zoom-to-fit; the add-on forces fixed near/far while navigating, and restores
+  Dynamic Clipping when you turn the override off (nudge the trackball once after toggling).
+- **Pivot extent limit ×** (default `8`) — caps under-cursor / auto-depth pivots at
+  `scene size × multiplier` so near-horizon hits do not fling the camera away.
+
+> Maintainer guide: [`docs/apps/unity.md`](docs/apps/unity.md) (cameraDistance vs size, picking
+> without PlaceObject, dyn-clip / pivot-extent notes).
+
+### Godot (implemented — EditorPlugin)
+Godot 4's editor 3D viewport uses the same full control suite as Unity/Unreal.
+
+1. Open your project in Godot, then Settings → **3D Apps** → Godot → **Set up** (copies into
+   `addons/trackball_nav/` and enables the plugin in `project.godot`).
+2. Reload the project or restart Godot.
+3. Daemon **3D mode**, focus Godot — row shows **connected**.
+
+Set up does **not** scan a fixed projects folder — it only sees running Godot `--path` /
+`project.godot` args and recent entries under `%APPDATA%\Godot\` (Godot 4 `projects.cfg`
+uses `[C:/path/to/project]` section headers). If it can't find your
+project, the dialog stages the add-on and gives **Copy** buttons for a manual install:
+copy into `<YourProject>\addons\trackball_nav\`, then enable **Trackball Nav** under
+Project → Project Settings → Plugins.
+
+> Maintainer guide: [`docs/apps/godot.md`](docs/apps/godot.md).
+
+### Rhino 8 (implemented — Python scripts, default suite)
+Rhino uses the lean default scheme (orbit/pan/zoom + under-cursor + selection override; no fly/walk).
+
+1. Settings → **3D Apps** → Rhino → **Set up** (copies to
+   `%APPDATA%\McNeel\Rhinoceros\8.0\scripts\TrackballNav\` and registers a startup command when possible).
+2. **Restart Rhino** (or run the printed `_-RunPythonScript` once). If Set up asks you to add a
+   startup command manually, type **Options** in Rhino's command line (there is no top-level
+   Options menu), then General → startup commands — use **Copy** in the daemon dialog.
+3. Daemon **3D mode**, focus Rhino — row shows **connected**.
+
+> Maintainer guide: [`docs/apps/rhino.md`](docs/apps/rhino.md) (under-cursor raycast notes / pitfalls).
+
 Blender is also **implemented** (a rich socket add-on — orbit/pan/zoom plus fly/walk, camera-view
 driving, and more). Its **Under Cursor** orbit pivot (add-on 0.1.11) orbits the surface under the
 mouse via a passive modal-operator mouse tracker (Blender has no on-demand mouse getter) — done in
@@ -400,7 +455,7 @@ trackball_daemon/
   onshape_bridge.py     in-process Onshape bridge (TLS WebSocket NL-Proxy emulator for the browser)
   autocad_driver.py     AutoCAD plugin loader (COM NETLOAD delivery only; the compiled plugin is the transport)
   winfocus.py     foreground-window detection (route nav to the focused app)
-  integrations.py 3D-app detect / set up (Fusion/Blender/FreeCAD/SketchUp/Unreal add-on installers; SolidWorks/Onshape/AutoCAD enable)
+  integrations.py 3D-app detect / set up (Fusion/Blender/FreeCAD/SketchUp/Unreal/Unity/Godot/Rhino add-on installers; SolidWorks/Onshape/AutoCAD enable)
   tray.py         pystray tray icon + lifecycle
   ui.py           Tkinter settings window
   debugview.py    optional pygame cube (--debug)
@@ -411,6 +466,9 @@ trackball_daemon/
   plugins/freecad/TrackballNav/     bundled FreeCAD add-on (Init.py + InitGui.py + tbnav_*.py + version.json)
   plugins/sketchup/                 bundled SketchUp Ruby extension (loader + trackball_nav/{main,camera,version})
   plugins/unreal/TrackballNav/      bundled Unreal Editor plugin (.uplugin + version.json + Content/Python/{init_unreal.py, trackball_nav.py, tbnav_unreal_camera.py})
+  plugins/unity/com.astrolabe.trackball-nav/  bundled Unity UPM package (package.json + Editor/*.cs + version.json)
+  plugins/godot/trackball_nav/      bundled Godot EditorPlugin (plugin.cfg + *.gd + version.json)
+  plugins/rhino/TrackballNav/       bundled Rhino 8 Python scripts (start.py + tbnav_*.py + version.json)
   plugins/autocad/                  bundled AutoCAD NETLOAD plugin (TrackballNavAcad.dll + version.json)
 archive/
   autocad_com_transport/            RETIRED AutoCAD COM nav transport + overlay + tests (see its README)

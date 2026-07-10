@@ -88,10 +88,12 @@ def test_install_reports_manual_steps_when_unwritable(isolated_config, tmp_path,
 
     monkeypatch.setattr(integrations.shutil, "copytree", _denied)
     cfg = Config().load()
-    ok, msg = integrations.install(integrations.APPS_BY_KEY["unreal"], cfg)
+    ok, msg, copies = integrations.normalize_install_result(
+        integrations.install(integrations.APPS_BY_KEY["unreal"], cfg))
     assert ok is False
     assert "admin" in msg.lower()
     assert cfg.data["apps"]["unreal"]["installed"] is False
+    assert copies and "bundled" in copies[0][0].lower()
 
 
 def test_update_not_offered_before_install(isolated_config, tmp_path, monkeypatch):

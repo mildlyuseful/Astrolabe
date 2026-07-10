@@ -116,6 +116,36 @@ def test_unreal_routes_to_broker():
     assert app.engine.bound == ["unreal"]
 
 
+def test_unity_routes_to_broker():
+    app = _bare_app()
+    app._active_app_key = lambda: "unity"
+    app._nav_sink(1, 2, 3, 4, 5, 6)
+    assert app.broker.calls == [(1, 2, 3, 4, 5, 6)]
+    assert app.engine.bound == ["unity"]
+
+
+def test_godot_routes_to_broker():
+    app = _bare_app()
+    app._active_app_key = lambda: "godot"
+    app._nav_sink(1, 2, 3, 4, 5, 6)
+    assert app.broker.calls == [(1, 2, 3, 4, 5, 6)]
+    assert app.engine.bound == ["godot"]
+
+
+def test_rhino_routes_to_broker():
+    app = _bare_app()
+    app._active_app_key = lambda: "rhino"
+    app._nav_sink(1, 2, 3, 4, 5, 6)
+    assert app.broker.calls == [(1, 2, 3, 4, 5, 6)]
+    assert app.engine.bound == ["rhino"]
+
+
+def test_unity_godot_rhino_process_hints_registered():
+    assert "unity" in App._APP_PROC_HINTS["unity"]
+    assert "godot" in App._APP_PROC_HINTS["godot"]
+    assert "rhino" in App._APP_PROC_HINTS["rhino"]
+
+
 def test_no_focused_app_drops_frame():
     app = _bare_app()
     app._active_app_key = lambda: None
