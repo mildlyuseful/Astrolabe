@@ -142,6 +142,11 @@ def _app(enabled=False):
         # screen-centre pivot is recomputed. Holds the pivot steady during a gesture; re-settles to
         # the current centre after a pause. (SolidWorks driver; other apps recompute per frame.)
         "view_pivot_hold_sec": 0.5,
+        # When True and something is selected, orbit (and to_cursor zoom) use the selection centre
+        # instead of the designated pivot (cursor / view / origin / …). Unreal implements this;
+        # other apps expose the toggle as a placeholder until their add-ons read it. Deep-merged
+        # onto existing configs (no CONFIG_VERSION bump).
+        "selection_overrides_pivot": True,
         "bindings": copy.deepcopy(_DEFAULT_3D_BINDINGS),
     }
 

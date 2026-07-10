@@ -512,6 +512,12 @@ class SettingsWindow:
         self._entry_row(parent, "View-pivot hold (s)", ("apps", app_key, "view_pivot_hold_sec"),
                         hint="'view' pivot only (SolidWorks): seconds still before it re-raycasts the "
                              "surface under the centre")
+        self._bool_row(parent, "Selection overrides orbit center",
+                       ("apps", app_key, "selection_overrides_pivot"))
+        ttk.Label(parent, text="When on and something is selected, orbit uses the selection centre "
+                               "instead of the designated pivot (Under Cursor / Auto Depth / …). "
+                               "Not yet applied in this app's add-on — toggle is saved for when it is.",
+                  foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         if app_key == "onshape":
             box = ttk.LabelFrame(parent, text="Under-cursor orbit — userscript")
@@ -582,6 +588,12 @@ class SettingsWindow:
         self._combo_row(s2, "Twist action", adv + ("twist_action",),
                         values=["roll", "zoom", "dolly", "none"])
         self._bool_row(s2, "Lock horizon (keep level even in trackball)", adv + ("lock_horizon",))
+        self._bool_row(s2, "Selection overrides orbit center",
+                       ("apps", "blender", "selection_overrides_pivot"))
+        ttk.Label(s2, text="When on and something is selected, orbit would use the selection "
+                           "centre instead of the designated pivot. Not yet applied in the Blender "
+                           "add-on — toggle is saved for when it is.",
+                  foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s3 = ttk.LabelFrame(parent, text="Pan / Zoom")
         s3.pack(fill="x", padx=10, pady=6)
@@ -656,6 +668,12 @@ class SettingsWindow:
                                 ("Model Centre", "object"),
                                 ("World Origin", "origin")])
         self._bool_row(s2, "Lock horizon (keep level in free orbit)", adv + ("lock_horizon",))
+        self._bool_row(s2, "Selection overrides orbit center",
+                       ("apps", "sketchup", "selection_overrides_pivot"))
+        ttk.Label(s2, text="When on and something is selected, orbit would use the selection "
+                           "centre instead of the designated pivot. Not yet applied in the SketchUp "
+                           "extension — toggle is saved for when it is.",
+                  foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s3 = ttk.LabelFrame(parent, text="Pan / Zoom")
         s3.pack(fill="x", padx=10, pady=6)
@@ -729,17 +747,23 @@ class SettingsWindow:
         self._combo_row(s2, "Twist action", adv + ("twist_action",),
                         values=["roll", "zoom", "dolly", "none"])
         self._bool_row(s2, "Lock horizon (keep level even in free orbit)", adv + ("lock_horizon",))
+        self._bool_row(s2, "Selection overrides orbit center",
+                       ("apps", "unreal", "selection_overrides_pivot"))
         ttk.Label(s2, text="Unreal has no 3D cursor, so no 3D-cursor option is shown. "
-                           "\"Auto Depth\" raycasts the surface under screen-centre. \"Under Cursor\" "
-                           "is not yet supported in Unreal (no editor-viewport mouse in the Python "
-                           "API) — it falls back to Selection.",
+                           "\"Auto Depth\" raycasts under screen-centre; \"Under Cursor\" under the "
+                           "mouse (viewport must be focused). When \"Selection overrides…\" is on "
+                           "and actors are selected, orbit/to_cursor use the selection centre "
+                           "instead of those pivots.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s3 = ttk.LabelFrame(parent, text="Pan / Zoom")
         s3.pack(fill="x", padx=10, pady=6)
+        self._mapped_combo_row(s3, "Zoom mode", base + ("scheme", "zoom_mode"),
+                               [("Default (General)", "default"), ("to_center", "to_center"),
+                                ("to_object", "to_object"), ("to_cursor (under mouse)", "to_cursor")])
         self._bool_row(s3, "Pan scales with focus distance", adv + ("pan_scales_with_distance",))
         self._entry_row(s3, "Auto-depth hold (s)", ("apps", "unreal", "view_pivot_hold_sec"),
-                        hint="'Auto Depth' pivot: seconds still before it re-raycasts")
+                        hint="'Auto Depth' / 'Under Cursor' pivot: seconds still before it re-raycasts")
 
         s5 = ttk.LabelFrame(parent, text="Invert directions — independent per mode")
         s5.pack(fill="x", padx=10, pady=6)

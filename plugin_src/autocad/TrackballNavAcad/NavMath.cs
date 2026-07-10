@@ -159,5 +159,93 @@ namespace TrackballNav
                 Persp = c.Persp,
             };
         }
+
+        // --- cursor-pivot depth helpers (shared with the offline NavMathTests twin) -------------
+        // PointMonitor's ComputedPoint lies on the UCS construction plane: right under the cursor
+        // in screen XY, but arbitrarily far in depth when the view is oblique. Sliding along the
+        // view axis to the plane through `depthPoint` keeps the screen position and puts the
+        // pivot at a scene-sensible depth (the view target / VIEWCTR).
+        public static Point3d AtViewDepth(Point3d onRay, Vector3d viewDirUnit, Point3d depthPoint)
+        {
+            return onRay + viewDirUnit * (depthPoint - onRay).DotProduct(viewDirUnit);
+        }
+
+        // True when `p` lies inside the drawing extents grown by `marginFrac` of their diagonal.
+        // Degenerate / unset extents (EXTMAX < EXTMIN, zero, or astronomical) → accept.
+        public static bool InsideGrownExtents(Point3d p, Point3d mn, Point3d mx,
+                                              double marginFrac = 0.10)
+        {
+            var d = mx - mn;
+            if (!(mx.X >= mn.X && d.Length > 1e-9 && d.Length < 1e18))
+                return true;
+            double m = marginFrac * d.Length;
+            return p.X >= mn.X - m && p.Y >= mn.Y - m && p.Z >= mn.Z - m &&
+                   p.X <= mx.X + m && p.Y <= mx.Y + m && p.Z <= mx.Z + m;
+        }
+
+        // Near-face hit of the axis-aligned box [mn, mx] along the view ray through `onPlane`.
+        // `viewDirUnit` is AutoCAD's VIEWDIR (target → camera). Returns null on a miss. Prefer
+        // this over the bbox centre: the centre can land behind a solid from the camera, which
+        // feels like orbiting about the back face.
+        //
+        // IMPORTANT: PointMonitor's ComputedPoint lies on the UCS construction plane, which often
+        // CUTS THROUGH a solid (e.g. z=0 through a [0,10]^3 cube). Then onPlane is INSIDE the
+        // AABB (tEnter < 0 < tExit). Always use tEnter — the camera-facing face — never t=0
+        // (that returned an interior point with no coordinate on a face, which is wrong).
+        public static Point3d? AabbNearHit(Point3d onPlane, Vector3d viewDirUnit,
+                                          Point3d mn, Point3d mx)
+        {
+            // Travel into the scene (camera → target): p(t) = onPlane - t * viewDirUnit, t real.
+            // Slab test; the near hit is tEnter (closest-to-camera intersection). When onPlane
+            // is inside, tEnter is negative and still lands on the near face toward the camera.
+            double tEnter = double.NegativeInfinity, tExit = double.PositiveInfinity;
+            if (!Slab1D(onPlane.X, -viewDirUnit.X, mn.X, mx.X, ref tEnter, ref tExit) ||
+                !Slab1D(onPlane.Y, -viewDirUnit.Y, mn.Y, mx.Y, ref tEnter, ref tExit) ||
+                !Slab1D(onPlane.Z, -viewDirUnit.Z, mn.Z, mx.Z, ref tEnter, ref tExit) ||
+                tExit < tEnter)
+                return null;
+            return onPlane - viewDirUnit * tEnter;
+        }
+
+        static bool Slab1D(double origin, double dir, double min, double max,
+                           ref double tEnter, ref double tExit)
+        {
+            if (Math.Abs(dir) < 1e-15)
+                return origin >= min && origin <= max;
+            double inv = 1.0 / dir;
+            double t0 = (min - origin) * inv, t1 = (max - origin) * inv;
+            if (t0 > t1) { double tmp = t0; t0 = t1; t1 = tmp; }
+            if (t0 > tEnter) tEnter = t0;
+            if (t1 < tExit) tExit = t1;
+            return tEnter <= tExit;
+        }
+
+        // Larger = closer to the camera (VIEWDIR points target → camera). Used to pick the
+        // FRONT solid when GetPickedEntities returns several (order is not front-to-back).
+        public static double CameraDepthScore(Point3d p, Vector3d viewDirUnit) =>
+            p.X * viewDirUnit.X + p.Y * viewDirUnit.Y + p.Z * viewDirUnit.Z;
+
+        // Thick-ray AABB probe: expand the box by `radius` on every axis, then near-hit. When
+        // the exact ray misses but the cursor is within `radius` of the silhouette (2D Wireframe
+        // edge picks, thin features), the expanded box still hits; depth is then taken from the
+        // real box's near face under the cursor (screen position preserved). Mirrors Fusion's
+        // aperture-expanding findBRepUsingRay.
+        public static Point3d? AabbNearHitThick(Point3d onPlane, Vector3d viewDirUnit,
+                                               Point3d mn, Point3d mx, double radius)
+        {
+            if (radius < 0.0) radius = 0.0;
+            var pad = new Vector3d(radius, radius, radius);
+            if (!AabbNearHit(onPlane, viewDirUnit, mn - pad, mx + pad).HasValue)
+                return null;
+            var exact = AabbNearHit(onPlane, viewDirUnit, mn, mx);
+            if (exact.HasValue)
+                return exact;
+            // Grazing hit: stay under the cursor, use the real box's camera-facing corner depth.
+            var nearCorner = new Point3d(
+                viewDirUnit.X >= 0.0 ? mx.X : mn.X,
+                viewDirUnit.Y >= 0.0 ? mx.Y : mn.Y,
+                viewDirUnit.Z >= 0.0 ? mx.Z : mn.Z);
+            return AtViewDepth(onPlane, viewDirUnit, nearCorner);
+        }
     }
 }

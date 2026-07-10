@@ -57,7 +57,18 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.1";   // keep in sync with the csproj <Version>
+        public const string PluginVersion = "0.3.4";   // keep in sync with the csproj <Version>
+                                                       // 0.3.4: AabbNearHit always uses the near
+                                                       // face (tEnter) — UCS-plane samples inside
+                                                       // a solid no longer return interior points.
+                                                       // 0.3.3: cursor pivot — nearest of all
+                                                       // GetPickedEntities (front solid, not
+                                                       // paths[0]); Fusion-style expanding
+                                                       // ray-AABB on plane miss (2D Wireframe).
+                                                       // 0.3.2: cursor pivot — 2D-wireframe OOB
+                                                       // fallback (reproject plane hits to view
+                                                       // depth; freeze PointMonitor mid-gesture;
+                                                       // AABB near-face for solids).
                                                        // 0.3.1: scheme values renamed (pointer->cursor,
                                                        // to_pointer->to_cursor; daemon config v3).
                                                        // 0.3.0: "pointer" orbit pivot + "to_pointer"
@@ -120,8 +131,12 @@ namespace TrackballNav
         // _ptrPoint = the WCS point under the mouse cursor, with the best depth available:
         // an active object snap > the picked entity's depth along the view ray > the raw
         // ComputedPoint (which lies on the UCS construction plane, NOT the 3D surface).
+        // _ptrOnEntity = true when the cache used an osnap / picked-entity depth (false = plane
+        // point — CapturePointerPivot reprojects it to the view-target depth so 2D Wireframe
+        // mid-face hovers don't go OOB on oblique views).
         Document _pmDoc;                   // doc whose Editor.PointMonitor we're subscribed to
         bool _ptrValid;
+        bool _ptrOnEntity;
         Point3d _ptrPoint;
         DateTime _ptrAt;
 
@@ -199,6 +214,7 @@ namespace TrackballNav
                 return;
             Log(inst._ptrValid
                 ? $"TBNAVPTR: cached ({inst._ptrPoint.X:0.###},{inst._ptrPoint.Y:0.###},{inst._ptrPoint.Z:0.###}) " +
+                  $"{(inst._ptrOnEntity ? "entity" : "plane")} " +
                   $"{(DateTime.UtcNow - inst._ptrAt).TotalSeconds:0.0}s ago"
                 : "TBNAVPTR: no cursor point cached");
             AcadApp.DocumentManager.MdiActiveDocument?.Editor.WriteMessage(
@@ -232,6 +248,7 @@ namespace TrackballNav
                     new Vector3d(0.25, 0.10, 0.0) * Convert.ToDouble(AcadApp.GetSystemVariable("VIEWSIZE"));
             inst._ptrPoint = P;
             inst._ptrValid = true;
+            inst._ptrOnEntity = true;              // synthetic point is already at scene depth
             inst._ptrAt = DateTime.UtcNow;
             inst._ptrTestPivot = P;
             inst._ptrTestSeeded = false;
@@ -518,11 +535,15 @@ namespace TrackballNav
                 try { _pmDoc.Editor.PointMonitor -= OnPointMonitor; } catch { }
                 _pmDoc = null;
                 _ptrValid = false;                 // the old doc's point is meaningless here
+                _ptrOnEntity = false;
             }
             if (doc == null)
                 return;
             try
             {
+                // Without forced pick, GetPickedEntities is empty outside an active command --
+                // mid-face / edge rollover never depth-corrects. Harmless for normal drafting.
+                try { doc.Editor.TurnForcedPickOn(); } catch { }
                 doc.Editor.PointMonitor += OnPointMonitor;
                 _pmDoc = doc;
                 Log("pointer: PointMonitor subscribed on the active document");
@@ -534,72 +555,191 @@ namespace TrackballNav
         {
             try
             {
+                // During a GS gesture the DB camera is stale (we drive the kernel view only), so
+                // ComputedPoint's WCS mapping is wrong. Freezing the last idle sample keeps the
+                // held pivot coherent and stops a mid-gesture mouse move from poisoning the cache
+                // for the next gesture (the "quick move then re-orbit" 2D-wireframe miss).
+                if (_gsActive)
+                    return;
                 var ctx = e.Context;
                 if (ctx == null || !ctx.PointComputed)
                     return;
                 // ComputedPoint is WCS but sits on the UCS construction plane (or an osnap) --
                 // the XY under the cursor is right, the DEPTH usually is not. Best available:
                 Point3d pt = ctx.ComputedPoint;
+                bool onEntity = false;
                 if ((ctx.History & PointHistoryBits.ObjectSnapped) != 0)
                 {
                     pt = ctx.ObjectSnappedPoint;   // an osnap point lies ON the entity: true depth
+                    onEntity = true;
                 }
                 else
                 {
                     var picked = ctx.GetPickedEntities();
                     if (picked != null && picked.Length > 0)
                     {
-                        var deep = SurfaceDepthPoint(picked, ctx.ComputedPoint);
+                        var deep = NearestPickedDepth(picked, ctx.ComputedPoint);
                         if (deep.HasValue)
+                        {
                             pt = deep.Value;
+                            onEntity = true;
+                        }
                     }
                 }
                 if (!_ptrValid)
-                    Log($"pointer: first cursor point cached ({pt.X:0.###},{pt.Y:0.###},{pt.Z:0.###})");
+                    Log($"pointer: first cursor point cached ({pt.X:0.###},{pt.Y:0.###},{pt.Z:0.###})"
+                        + (onEntity ? " (entity)" : " (plane)"));
                 _ptrPoint = pt;
+                _ptrOnEntity = onEntity;
                 _ptrValid = true;
                 _ptrAt = DateTime.UtcNow;
             }
             catch (System.Exception ex) { LogOnce("pm-handler", ex); }
         }
 
-        // Depth-correct the on-plane cursor point using the entity under the cursor: slide along
-        // the view ray (which passes through ComputedPoint) to the entity's depth. Exact for
-        // top-level curves (projected closest point); bbox-centre depth for everything else --
-        // still exactly under the cursor (on the ray), at a plausible depth. Uses ids[0] (the
-        // TOP-LEVEL entity): deeper path entries of a block are in block space, not WCS.
-        Point3d? SurfaceDepthPoint(FullSubentityPath[] picked, Point3d onPlane)
+        // Among every top-level entity in the PointMonitor aperture, take the hit CLOSEST to the
+        // camera. GetPickedEntities is NOT ordered front-to-back (Kean / live: Conceptual often
+        // returns the back solid as paths[0] -- the old code orbited about that).
+        Point3d? NearestPickedDepth(FullSubentityPath[] picked, Point3d onPlane)
         {
             try
             {
                 var doc = _pmDoc;
                 if (doc == null)
                     return null;
-                var vd = SysPt("VIEWDIR").GetAsVector();      // target -> camera (view axis;
-                if (vd.Length < 1e-12)                        // exact ray for parallel projection,
-                    return null;                              // the axis approximation for persp)
-                vd = vd.GetNormal();
-                var ids = picked[0].GetObjectIds();
-                if (ids == null || ids.Length == 0)
+                var vd = SysPt("VIEWDIR").GetAsVector();
+                if (vd.Length < 1e-12)
                     return null;
+                vd = vd.GetNormal();
+                Point3d? best = null;
+                double bestScore = double.NegativeInfinity;
                 using (var tr = doc.Database.TransactionManager.StartOpenCloseTransaction())
                 {
-                    var ent = tr.GetObject(ids[0], OpenMode.ForRead) as Entity;
-                    if (ent == null)
-                        return null;
-                    if (ent is Curve cv)
-                        return cv.GetClosestPointTo(onPlane, vd, false);
-                    var ext = ent.GeometricExtents;
-                    var ctr = ext.MinPoint + (ext.MaxPoint - ext.MinPoint) * 0.5;
-                    return onPlane + vd * (ctr - onPlane).DotProduct(vd);
+                    var seen = new System.Collections.Generic.HashSet<ObjectId>();
+                    foreach (var path in picked)
+                    {
+                        var ids = path.GetObjectIds();
+                        if (ids == null || ids.Length == 0 || !seen.Add(ids[0]))
+                            continue;
+                        var hit = EntityRayDepth(tr, ids[0], onPlane, vd, radius: 0.0);
+                        if (!hit.HasValue)
+                            continue;
+                        double score = NavMath.CameraDepthScore(hit.Value, vd);
+                        if (score > bestScore)
+                        {
+                            bestScore = score;
+                            best = hit;
+                        }
+                    }
+                }
+                return best;
+            }
+            catch { return null; }
+        }
+
+        // Depth of one entity along the view ray through onPlane. Curves: projected closest
+        // point (accepted when within `radius` of the ray). Everything else: AABB near-face
+        // (thickened by `radius` for the expanding aperture search). id must be top-level.
+        static Point3d? EntityRayDepth(Transaction tr, ObjectId id, Point3d onPlane,
+                                       Vector3d viewDirUnit, double radius)
+        {
+            try
+            {
+                var ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                if (ent == null || !ent.Visible)
+                    return null;
+                if (ent is Curve cv)
+                {
+                    var cp = cv.GetClosestPointTo(onPlane, viewDirUnit, false);
+                    var offset = cp - onPlane;
+                    double along = offset.DotProduct(viewDirUnit);
+                    double lateral = (offset - viewDirUnit * along).Length;
+                    return lateral <= radius + 1e-9 ? cp : (Point3d?)null;
+                }
+                Extents3d ext;
+                try { ext = ent.GeometricExtents; }
+                catch { return null; }                 // no extents (lights, cameras, …)
+                if (radius <= 0.0)
+                    return NavMath.AabbNearHit(onPlane, viewDirUnit, ext.MinPoint, ext.MaxPoint)
+                        ?? NavMath.AtViewDepth(onPlane, viewDirUnit,
+                               ext.MinPoint + (ext.MaxPoint - ext.MinPoint) * 0.5);
+                return NavMath.AabbNearHitThick(onPlane, viewDirUnit,
+                                                ext.MinPoint, ext.MaxPoint, radius);
+            }
+            catch { return null; }
+        }
+
+        // Fusion-style expanding aperture: when PointMonitor has no entity (typical 2D Wireframe
+        // mid-face), walk model space with a thickening ray and take the nearest hit. Runs once
+        // at gesture capture -- not per mouse move. Fracs of VIEWSIZE / field height.
+        static readonly double[] s_apertureFracs = { 0.0, 0.02, 0.05, 0.10, 0.20 };
+
+        Point3d? ExpandRayDepth(Point3d onPlane, Vector3d viewDirUnit)
+        {
+            try
+            {
+                var doc = AcadApp.DocumentManager.MdiActiveDocument;
+                if (doc == null)
+                    return null;
+                double vs = _gsActive
+                    ? _cam.Fh
+                    : Convert.ToDouble(AcadApp.GetSystemVariable("VIEWSIZE"));
+                if (vs < 1e-12)
+                    return null;
+                var db = doc.Database;
+                using (var tr = db.TransactionManager.StartOpenCloseTransaction())
+                {
+                    var bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+                    var ms = (BlockTableRecord)tr.GetObject(
+                        bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+                    foreach (double frac in s_apertureFracs)
+                    {
+                        double radius = frac * vs;
+                        Point3d? best = null;
+                        double bestScore = double.NegativeInfinity;
+                        foreach (ObjectId id in ms)
+                        {
+                            var hit = EntityRayDepth(tr, id, onPlane, viewDirUnit, radius);
+                            if (!hit.HasValue)
+                                continue;
+                            double score = NavMath.CameraDepthScore(hit.Value, viewDirUnit);
+                            if (score > bestScore)
+                            {
+                                bestScore = score;
+                                best = hit;
+                            }
+                        }
+                        if (best.HasValue)
+                            return best;
+                    }
                 }
             }
-            catch { return null; }             // odd pick (erased id, zero extents) -> plane point
+            catch (System.Exception ex) { LogOnce("ptr-expand", ex); }
+            return null;
+        }
+
+        // Live view axis + look-at for pivot capture: prefer the GS shadow (exact during a
+        // gesture) over the DB sysvars (stale until EndGesture commits).
+        void PivotViewBasis(out Vector3d viewDirUnit, out Point3d depthPoint)
+        {
+            if (_gsActive)
+            {
+                var dir = _cam.Pos - _cam.Tgt;
+                viewDirUnit = dir.Length < 1e-12 ? Vector3d.ZAxis : dir.GetNormal();
+                depthPoint = _cam.Tgt;
+                return;
+            }
+            var vd = SysPt("VIEWDIR").GetAsVector();
+            viewDirUnit = vd.Length < 1e-12 ? Vector3d.ZAxis : vd.GetNormal();
+            try { depthPoint = SysPt("VIEWCTR"); }
+            catch { depthPoint = SysPt("TARGET"); }
         }
 
         // The held "cursor" pivot: the cached cursor point, validated against the drawing
-        // extents grown by 10% of their diagonal (a cursor over empty space intersects the UCS
-        // plane arbitrarily far away when the view is oblique). null -> plain target orbit.
+        // extents grown by 10% of their diagonal. Plane misses first try an expanding
+        // model-space ray (2D Wireframe mid-face / near-edge); failing that, reproject to
+        // view-target depth. null only when there is no cache, or the point is still
+        // off-model after salvage.
         Point3d? CapturePointerPivot()
         {
             if (!_ptrValid)
@@ -610,19 +750,50 @@ namespace TrackballNav
             var p = _ptrPoint;
             try
             {
+                PivotViewBasis(out var vd, out var depth);
                 var mn = SysPt("EXTMIN");
                 var mx = SysPt("EXTMAX");
-                var d = mx - mn;
-                if (mx.X >= mn.X && d.Length > 1e-9 && d.Length < 1e18)   // extents are real
+                bool oob = !NavMath.InsideGrownExtents(p, mn, mx);
+
+                if (!_ptrOnEntity)
                 {
-                    double m = 0.10 * d.Length;
-                    if (p.X < mn.X - m || p.Y < mn.Y - m || p.Z < mn.Z - m ||
-                        p.X > mx.X + m || p.Y > mx.Y + m || p.Z > mx.Z + m)
+                    // Expanding aperture (Fusion-style): recover a real surface when the
+                    // PointMonitor aperture was empty -- the common 2D Wireframe mid-face case.
+                    var expanded = ExpandRayDepth(p, vd);
+                    if (expanded.HasValue && NavMath.InsideGrownExtents(expanded.Value, mn, mx))
                     {
-                        LogRL("ptr-oob",
-                              "pointer pivot: cursor point outside the drawing extents -> target orbit");
-                        return null;
+                        LogRL("ptr-expand",
+                              $"pointer pivot: expanding ray hit -> "
+                              + $"({expanded.Value.X:0.###},{expanded.Value.Y:0.###},{expanded.Value.Z:0.###})");
+                        p = expanded.Value;
+                        oob = false;
                     }
+                    else
+                    {
+                        var fixedPt = NavMath.AtViewDepth(p, vd, depth);
+                        LogRL("ptr-plane",
+                              "pointer pivot: plane/empty hit -> view-depth under cursor");
+                        p = fixedPt;
+                        oob = !NavMath.InsideGrownExtents(p, mn, mx);
+                    }
+                }
+                else if (oob)
+                {
+                    var fixedPt = NavMath.AtViewDepth(p, vd, depth);
+                    if (NavMath.InsideGrownExtents(fixedPt, mn, mx))
+                    {
+                        LogRL("ptr-reproj",
+                              "pointer pivot: entity sample OOB -> reprojected to view depth");
+                        p = fixedPt;
+                        oob = false;
+                    }
+                }
+
+                if (oob)
+                {
+                    LogRL("ptr-oob",
+                          "pointer pivot: cursor point outside the drawing extents -> target orbit");
+                    return null;
                 }
             }
             catch { }

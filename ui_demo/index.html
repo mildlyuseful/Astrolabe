@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Astrolabe Daemon Settings (UI Demo)</title>
+  <!-- Google Fonts for premium typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <div class="app-container">
+    
+    <!-- Left Navigation Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-wrapper">
+          <svg class="astrolabe-logo" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="10" stroke="url(#logo-grad)" stroke-width="2"/>
+            <circle cx="12" cy="12" r="6" stroke="url(#logo-grad)" stroke-width="1.5" stroke-dasharray="3 3"/>
+            <path d="M12 2V22" stroke="url(#logo-grad)" stroke-width="1.5"/>
+            <path d="M2 12H22" stroke="url(#logo-grad)" stroke-width="1.5"/>
+            <circle cx="12" cy="12" r="2.5" fill="var(--accent-color)"/>
+            <defs>
+              <linearGradient id="logo-grad" x1="2" y1="2" x2="22" y2="22" gradientUnits="userSpaceOnUse">
+                <stop stop-color="var(--accent-color)"/>
+                <stop offset="1" stop-color="var(--accent-indigo)"/>
+              </linearGradient>
+            </defs>
+          </svg>
+          <span class="logo-text">Astrolabe</span>
+        </div>
+        <span class="app-version">v0.1.44</span>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="nav-menu">
+        <button class="nav-item active" data-tab="tab-apps">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="7" height="7"></rect>
+            <rect x="14" y="3" width="7" height="7"></rect>
+            <rect x="14" y="14" width="7" height="7"></rect>
+            <rect x="3" y="14" width="7" height="7"></rect>
+          </svg>
+          3D Apps
+        </button>
+        <button class="nav-item" data-tab="tab-bindings">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="4" y1="21" x2="4" y2="14"></line>
+            <line x1="4" y1="10" x2="4" y2="3"></line>
+            <line x1="12" y1="21" x2="12" y2="12"></line>
+            <line x1="12" y1="8" x2="12" y2="3"></line>
+            <line x1="20" y1="21" x2="20" y2="16"></line>
+            <line x1="20" y1="12" x2="20" y2="3"></line>
+            <line x1="1" y1="14" x2="7" y2="14"></line>
+            <line x1="9" y1="8" x2="15" y2="8"></line>
+            <line x1="17" y1="16" x2="23" y2="16"></line>
+          </svg>
+          Per-App Bindings
+        </button>
+        <button class="nav-item" data-tab="tab-general">
+          <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+          General Settings
+        </button>
+      </nav>
+
+      <!-- Sidebar Footer: Device Status & Mode Toggle -->
+      <div class="sidebar-footer">
+        <div class="device-status-card">
+          <div class="device-info">
+            <span class="status-indicator connected animate-pulse"></span>
+            <div class="device-name-wrapper">
+              <span class="device-label">Astrolabe (XIAO3389)</span>
+              <span class="device-details">BLE • Battery 88%</span>
+            </div>
+          </div>
+          <div class="mode-selector-wrapper">
+            <span class="mode-label">Operation Mode</span>
+            <div class="toggle-group">
+              <button class="toggle-btn active" id="btn-mode-3d">3D Mode</button>
+              <button class="toggle-btn" id="btn-mode-cursor">Cursor</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="main-content">
+      
+      <!-- Top Header -->
+      <header class="top-header">
+        <h1 class="page-title" id="page-title">3D App Integrations</h1>
+        <div class="header-actions">
+          <button class="theme-toggle-btn" id="theme-toggle" title="Toggle Light/Dark Theme">
+            <svg class="theme-icon sun-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="5"></circle>
+              <line x1="12" y1="1" x2="12" y2="3"></line>
+              <line x1="12" y1="21" x2="12" y2="23"></line>
+              <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+              <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+              <line x1="1" y1="12" x2="3" y2="12"></line>
+              <line x1="21" y1="12" x2="23" y2="12"></line>
+              <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+              <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+            </svg>
+            <svg class="theme-icon moon-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+              <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+            </svg>
+          </button>
+          <div class="status-badge" id="global-status-badge">
+            <span class="badge-dot green animate-pulse"></span>
+            <span class="badge-text">Daemon Running</span>
+          </div>
+        </div>
+      </header>
+
+      <!-- Content Scrollable Body -->
+      <div class="content-body">
+
+        <!-- TAB 1: 3D Apps -->
+        <section id="tab-apps" class="tab-panel active">
+          <p class="panel-subtitle">Supported 3D apps — enable, set up the integration, and choose what starts automatically.</p>
+          
+          <div class="apps-grid">
+            
+            <!-- Blender Card -->
+            <div class="app-card" data-app="blender">
+              <div class="app-card-header">
+                <div class="app-icon-wrapper blender-bg">
+                  <!-- Custom Blender SVG -->
+                  <svg viewBox="0 0 24 24" class="app-svg-icon" fill="currentColor">
+                    <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 14.5c0 .83-.67 1.5-1.5 1.5s-1.5-.67-1.5-1.5.67-1.5 1.5-1.5 1.5.67 1.5 1.5zm.36-4.9l-.36 3.4c0 .28-.22.5-.5.5h-1a.5.5 0 0 1-.5-.5l-.36-3.4a.5.5 0 0 1 .18-.46c.55-.41 1.25-.64 2-.64.75 0 1.45.23 2 .64a.5.5 0 0 1 .18.46zm3.32-2.12c-.22.22-.58.22-.8 0l-1.42-1.42c-.22-.22-.22-.58 0-.8.64-.64 1.48-.96 2.32-.96s1.68.32 2.32.96a.56.56 0 0 1 0 .8l-2.42 2.42z"/>
+                  </svg>
+                </div>
+                <div class="app-meta">
+                  <h3>Blender</h3>
+                  <span class="app-status text-success">active • connected (v0.1.10)</span>
+                </div>
+              </div>
+              <div class="app-card-body">
+                <label class="checkbox-wrapper">
+                  <input type="checkbox" checked>
+                  <span class="checkmark"></span>
+                  Enabled
+                </label>
+                <label class="checkbox-wrapper">
+                  <input type="checkbox" checked>
+                  <span class="checkmark"></span>
+                  Start automatically
+                </label>
+              </div>
+              <div class="app-card-actions">
+                <button class="btn btn-outline" onclick="openBlenderDialog()">Reinstall</button>
+              </div>
+            </div>
+
+            <!-- FreeCAD Card -->
+            <div class="app-card" data-app="freecad">
+              <div class="app-card-header">
+                <div class="app-icon-wrapper freecad-bg">
+                  <!-- Custom FreeCAD SVG -->
+                  <svg viewBox="0 0 24 24" class="app-svg-icon" fill="currentColor">
+                    <path d="M12 2L2 22h20L12 2zm0 4l6.5 13h-13L12 6zm-2 6v4h4v-4h-4z"/>
+                  </svg>
+                </div>
+                <div class="app-meta">
+                  <h3>FreeCAD</h3>
+                  <span class="app-status">detected: 1.0.0</span>
+                </div>
+              </div>
+              <div class="app-card-body">
+                <label class="checkbox-wrapper">
+                  <input type="checkbox" checked>
+                  <span class="checkmark"></span>
+                  Enabled
+                </label>
+                <label class="checkbox-wrapper">
+                  <input type="checkbox">
+                  <span class="checkmark"></span>
+                  Start automatically
+                </label>
+              </div>
+              <div class="app-card-actions">
+                <button class="btn btn-outline">Reinstall</button>
+              </div>
+            </div>
+
+            <!-- SketchUp Card -->
+            <div class="app-card" data-app="sketchup">
+              <div class="app-card-header">
+                <div class="app-icon-wrapper sketchup-bg">
+                  <!-- SketchUp SVG -->
+                  <svg viewBox="0 0 24 24" class="app-svg-icon" fill="currentColor">
+                    <path d="M4 4h16v16H4V4zm2 2v12h12V6H6zm2 2h8v8H8V8z"/>
+                  </svg>
+                </div>
+                <div class="app-meta">
+                  <h3>SketchUp</h3>
+                  <span class="app-status text-warning">detected: 2026.2  •  update available</span>
+                </div>
+              </div>
+              <div class="app-card-body">
+                <label class="checkbox-wrapper">
+                  <input type="checkbox" checked>
+                  <span class="checkmark"></span>
+                  Enabled
+                </label>
+                <label class="checkbox-wrapper">
+                  <input type="checkbox">
+                  <span class="checkmark"></span>
+                  Start automatically
+                </label>
+              </div>
+              <div class="app-card-actions">
+                <button class="btn btn-primary">Update → v0.2.1</button>
+              </div>
+            </div>
+
+            <!-- Unreal Engine Card -->
+            <div class="app-card" data-app="unreal">
+              <div class="app-card-header">
+                <div class="app-icon-wrapper unreal-bg">
+                  <span class="app-icon-text">U</span>
+                </div>
+                <div class="app-meta">
+                  <h3>Unreal Engine</h3>
+                  <span class="app-status">detected: 5.4.0</span>
+                </div>
+              </div>
+              <div class="app-card-body">
+                <label class="checkbox-wrapper">
+                  <input type="checkbox" checked>
+                  <span class="checkmark"></span>
+                  Enabled
+                </label>
+                <label class="checkbox-wrapper">
+                  <input type="checkbox">
+                  <span class="checkmark"></span>
+                  Start automatically
+                </label>
+              </div>
+              <div class="app-card-actions">
+                <button class="btn btn-outline">Reinstall</button>
+              </div>
+            </div>
+
+            <!-- Fusion 360 Card -->
+            <div class="app-card" data-app="fusion360">
+              <div class="app-card-header">
+                <div class="app-icon-wrapper fusion-bg">
+                  <span class="app-icon-text">F</span>
+                </div>
+                <div class="app-meta">
+                  <h3>Fusion 360</h3>
+                  <span class="app-status">not detected</span>
+                </div>
+              </div>
+              <div class="app-card-body">
+                <label class="checkbox-wrapper">
+                  <input type="checkbox">
+                  <span class="checkmark"></span>
+                  Enabled
+                </label>
+                <label class="checkbox-wrapper">
+                  <input type="checkbox">
+                  <span class="checkmark"></span>
+                  Start automatically
+                </label>
+              </div>
+              <div class="app-card-actions">
+                <button class="btn btn-outline">Set up</button>
+              </div>
+            </div>
+
+            <!-- SolidWorks Card -->
+            <div class="app-card" data-app="solidworks">
+              <div class="app-card-header">
+                <div class="app-icon-wrapper solidworks-bg">
+                  <span class="app-icon-text">S</span>
+                </div>
+                <div class="app-meta">
+                  <h3>SolidWorks</h3>
+                  <span class="app-status text-success">active • connected (COM)</span>
+                </div>
+              </div>
+              <div class="app-card-body">
+                <label class="checkbox-wrapper">
+                  <input type="checkbox" checked>
+                  <span class="checkmark"></span>
+                  Enabled
+                </label>
+                <label class="checkbox-wrapper">
+                  <input type="checkbox" checked>
+                  <span class="checkmark"></span>
+                  Start automatically
+                </label>
+              </div>
+              <div class="app-card-actions">
+                <button class="btn btn-outline">Re-check</button>
+              </div>
+            </div>
+
+            <!-- Onshape Card -->
+            <div class="app-card" data-app="onshape">
+              <div class="app-card-header">
+                <div class="app-icon-wrapper onshape-bg">
+                  <svg viewBox="0 0 24 24" class="app-svg-icon" fill="currentColor">
+                    <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <circle cx="12" cy="12" r="6" fill="none" stroke="currentColor" stroke-width="2"/>
+                    <circle cx="12" cy="12" r="2" fill="currentColor"/>
+                  </svg>
+                </div>
+                <div class="app-meta">
+                  <h3>Onshape</h3>
+                  <span class="app-status">detected: web bridge</span>
+                </div>
+              </div>
+              <div class="app-card-body">
+                <label class="checkbox-wrapper">
+                  <input type="checkbox" checked id="checkbox-onshape-enabled">
+                  <span class="checkmark"></span>
+                  Enabled
+                </label>
+                <label class="checkbox-wrapper">
+                  <input type="checkbox" checked>
+                  <span class="checkmark"></span>
+                  Start automatically
+                </label>
+              </div>
+              <div class="app-card-actions">
+                <button class="btn btn-outline" id="btn-setup-onshape" onclick="openOnshapeDialog()">Enable</button>
+              </div>
+            </div>
+
+            <!-- AutoCAD Card -->
+            <div class="app-card" data-app="autocad">
+              <div class="app-card-header">
+                <div class="app-icon-wrapper autocad-bg">
+                  <span class="app-icon-text">A</span>
+                </div>
+                <div class="app-meta">
+                  <h3>AutoCAD</h3>
+                  <span class="app-status">detected: 2025</span>
+                </div>
+              </div>
+              <div class="app-card-body">
+                <label class="checkbox-wrapper">
+                  <input type="checkbox" checked>
+                  <span class="checkmark"></span>
+                  Enabled
+                </label>
+                <label class="checkbox-wrapper">
+                  <input type="checkbox">
+                  <span class="checkmark"></span>
+                  Start automatically
+                </label>
+              </div>
+              <div class="app-card-actions">
+                <button class="btn btn-outline">Reinstall</button>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+        <!-- TAB 2: Per-App Bindings -->
+        <section id="tab-bindings" class="tab-panel">
+          <div class="bindings-split-container">
+            
+            <!-- Left Persistent Sidebar Menu -->
+            <div class="bindings-left-sidebar">
+              <div class="settings-card app-selector-card">
+                <h2>Editing App</h2>
+                <div class="form-group">
+                  <div class="select-wrapper">
+                    <select id="bindings-app-select">
+                      <option value="generic">generic (default)</option>
+                      <option value="blender">blender</option>
+                      <option value="freecad">freecad</option>
+                      <option value="sketchup">sketchup</option>
+                      <option value="unreal">unreal</option>
+                      <option value="fusion360">fusion360</option>
+                      <option value="solidworks">solidworks</option>
+                      <option value="onshape">onshape</option>
+                      <option value="autocad">autocad</option>
+                    </select>
+                  </div>
+                  <span class="helper-text">Active profile driven by daemon</span>
+                </div>
+              </div>
+
+              <div class="settings-card global-app-card">
+                <h2>Profile Settings</h2>
+                <div class="card-grid">
+                  <div class="form-group">
+                    <label>Refresh Rate</label>
+                    <div class="select-wrapper">
+                      <select id="app-global-rate">
+                        <option>Default</option>
+                        <option>15</option>
+                        <option>30</option>
+                        <option>45</option>
+                        <option selected>60</option>
+                        <option>90</option>
+                        <option>120</option>
+                      </select>
+                    </div>
+                    <span class="field-hint">Hz rate sent to viewport</span>
+                  </div>
+
+                  <div class="form-group">
+                    <label>View-Pivot Hold</label>
+                    <div class="input-with-hint">
+                      <input type="text" id="app-global-hold" value="0.5" class="width-full">
+                      <span class="field-hint">seconds still before re-raycast</span>
+                    </div>
+                  </div>
+                  
+                  <div class="form-group" id="onshape-userscript-sidebar-only" style="display: none;">
+                    <label>Userscript</label>
+                    <button class="btn btn-outline width-full" id="btn-copy-userscript-sidebar">Copy userscript</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Interactive Subwindow Dashboard -->
+            <div class="bindings-dashboard-subwindow settings-card">
+              
+              <!-- Dashboard Header: Scheme Select & Binding Switch -->
+              <div class="dashboard-header-bar">
+                <div class="mode-pill-selector-wrapper">
+                  <div class="mode-pills" id="dashboard-mode-pills">
+                    <button class="mode-pill active" data-mode="orbit">Orbit</button>
+                    <button class="mode-pill" data-mode="fly" id="pill-fly" style="display: none;">Fly</button>
+                    <button class="mode-pill" data-mode="walk" id="pill-walk" style="display: none;">Walk</button>
+                    <div class="mode-pill-slider" id="mode-slider"></div>
+                  </div>
+                </div>
+                
+                <div class="bindings-switcher-hotkey">
+                  <span class="hotkey-label">Switch Key:</span>
+                  <div class="select-wrapper width-small">
+                    <select id="hotkey-select">
+                      <option value="shift">Shift</option>
+                      <option value="ctrl">Ctrl</option>
+                      <option value="alt">Alt</option>
+                      <option value="none">None</option>
+                    </select>
+                  </div>
+                  <div class="toggle-switch-wrapper">
+                    <span class="switch-label-toggle">Hold</span>
+                    <label class="toggle-switch">
+                      <input type="checkbox" id="hotkey-toggle-type" checked>
+                      <span class="toggle-slider"></span>
+                    </label>
+                    <span class="switch-label-toggle">Toggle</span>
+                  </div>
+                </div>
+              </div>
+              
+              <hr class="section-divider">
+
+              <!-- Dashboard Body: Trackball & Axis boxes -->
+              <div class="dashboard-body">
+                
+                <!-- Axis Boxes Layout surrounding the trackball visualizer -->
+                <div class="dashboard-interactive-layout">
+                  
+                  <!-- Left side: X Axis Box -->
+                  <div class="axis-settings-box" id="axis-box-x" data-axis="x">
+                    <div class="axis-header">
+                      <span class="axis-letter x-color">X</span>
+                      <span class="axis-title" id="axis-title-x">Yaw / Pan X</span>
+                    </div>
+                    <div class="axis-body">
+                      <!-- Primary turning sensitivity group -->
+                      <div class="axis-settings-group primary">
+                        <div class="group-label" id="label-primary-x">Yaw</div>
+                        <div class="form-group inline">
+                          <label>Sens</label>
+                          <div class="linked-input-wrapper">
+                            <input type="text" id="sens-input-primary-x" value="1.0" class="axis-input">
+                            <span class="link-lock-icon primary-lock" id="lock-primary-x">🔒</span>
+                          </div>
+                        </div>
+                        <label class="checkbox-wrapper">
+                          <input type="checkbox" id="invert-check-primary-x">
+                          <span class="checkmark"></span>
+                          Invert
+                        </label>
+                      </div>
+
+                      <div class="axis-group-divider"></div>
+
+                      <!-- Switched movement sensitivity group -->
+                      <div class="axis-settings-group switched">
+                        <div class="group-label" id="label-switched-x">Pan X (Strafe)</div>
+                        <div class="form-group inline">
+                          <label>Sens</label>
+                          <div class="linked-input-wrapper">
+                            <input type="text" id="sens-input-switched-x" value="0.005" class="axis-input">
+                            <span class="link-lock-icon switched-lock" id="lock-switched-x">🔒</span>
+                          </div>
+                        </div>
+                        <label class="checkbox-wrapper">
+                          <input type="checkbox" id="invert-check-switched-x">
+                          <span class="checkmark"></span>
+                          Invert
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Center: Trackball Visualizer -->
+                  <div class="trackball-visualizer-container">
+                    <div class="center-column-wrapper">
+                      <!-- Dynamic SVG representing 3D ball rotation axes -->
+                      <svg class="trackball-svg" viewBox="0 0 200 200">
+                        <!-- Base Sphere Glow -->
+                        <circle cx="100" cy="100" r="80" fill="url(#ball-gradient)" stroke="url(#gold-gradient)" stroke-width="1.5" class="ball-mesh"/>
+                        
+                        <!-- X Ring (Red/Yaw - L/R look) -->
+                        <ellipse cx="100" cy="100" rx="80" ry="25" fill="none" stroke="rgba(239, 68, 68, 0.45)" stroke-width="2" class="ball-axis-ring ring-x"/>
+                        <!-- Y Ring (Blue/Pitch - U/D look) -->
+                        <ellipse cx="100" cy="100" rx="25" ry="80" fill="none" stroke="rgba(59, 130, 246, 0.45)" stroke-width="2" class="ball-axis-ring ring-y"/>
+                        <!-- Z Ring (Gold/Roll - Twist) -->
+                        <circle cx="100" cy="100" r="65" fill="none" stroke="rgba(197, 160, 89, 0.55)" stroke-width="2.5" class="ball-axis-ring ring-z" stroke-dasharray="6 3"/>
+
+                        <!-- Center Core -->
+                        <circle cx="100" cy="100" r="10" fill="var(--gold-solid)" class="ball-core"/>
+                        
+                        <!-- SVG Gradients -->
+                        <defs>
+                          <radialGradient id="ball-gradient" cx="40%" cy="40%" r="60%">
+                            <stop offset="0%" stop-color="rgba(197, 160, 89, 0.25)"/>
+                            <stop offset="70%" stop-color="rgba(15, 23, 42, 0.6)"/>
+                            <stop offset="100%" stop-color="rgba(7, 10, 18, 0.9)"/>
+                          </radialGradient>
+                        </defs>
+                      </svg>
+                      
+                      <!-- Bottom Z-Axis Box under the sphere -->
+                      <div class="axis-settings-box" id="axis-box-z" data-axis="z">
+                        <div class="axis-header">
+                          <span class="axis-letter z-color">Z</span>
+                          <span class="axis-title" id="axis-title-z">Roll / Zoom</span>
+                        </div>
+                        <div class="axis-body">
+                          <!-- Primary turning sensitivity group -->
+                          <div class="axis-settings-group primary">
+                            <div class="group-label" id="label-primary-z">Roll</div>
+                            <div class="form-group inline">
+                              <label>Sens</label>
+                              <div class="linked-input-wrapper">
+                                <input type="text" id="sens-input-primary-z" value="1.0" class="axis-input">
+                                <span class="link-lock-icon primary-lock" id="lock-primary-z">🔒</span>
+                              </div>
+                            </div>
+                            <label class="checkbox-wrapper">
+                              <input type="checkbox" id="invert-check-primary-z">
+                              <span class="checkmark"></span>
+                              Invert
+                            </label>
+                          </div>
+
+                          <div class="axis-group-divider"></div>
+
+                          <!-- Switched movement sensitivity group -->
+                          <div class="axis-settings-group switched">
+                            <div class="group-label" id="label-switched-z">Zoom</div>
+                            <div class="form-group inline">
+                              <label>Sens</label>
+                              <div class="linked-input-wrapper">
+                                <input type="text" id="sens-input-switched-z" value="0.02" class="axis-input">
+                                <span class="link-lock-icon switched-lock" id="lock-switched-z">🔒</span>
+                              </div>
+                            </div>
+                            <label class="checkbox-wrapper">
+                              <input type="checkbox" id="invert-check-switched-z">
+                              <span class="checkmark"></span>
+                              Invert
+                            </label>
+                            
+                            <!-- Zoom specific settings embedded directly in the Z-axis box -->
+                            <div class="zoom-settings-group" id="zoom-axis-details" style="display: none;">
+                              <div class="form-group">
+                                <label>Zoom Mode</label>
+                                <div class="select-wrapper">
+                                  <select id="select-zoom-mode">
+                                    <option value="to_center">to_center</option>
+                                    <option value="to_object">to_object</option>
+                                    <option value="to_cursor" selected>to_cursor (under mouse)</option>
+                                  </select>
+                                </div>
+                              </div>
+                              <div class="form-group">
+                                <label>Zoom Dominance</label>
+                                <input type="text" id="input-zoom-dominance" value="0.8" class="axis-input width-full">
+                              </div>
+                              <label class="checkbox-wrapper">
+                                <input type="checkbox" id="check-zoom-mouse" checked>
+                                <span class="checkmark"></span>
+                                Zoom to Mouse
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <!-- Right side: Y Axis Box -->
+                  <div class="axis-settings-box" id="axis-box-y" data-axis="y">
+                    <div class="axis-header">
+                      <span class="axis-letter y-color">Y</span>
+                      <span class="axis-title" id="axis-title-y">Pitch / Pan Y</span>
+                    </div>
+                    <div class="axis-body">
+                      <!-- Primary turning sensitivity group -->
+                      <div class="axis-settings-group primary">
+                        <div class="group-label" id="label-primary-y">Pitch</div>
+                        <div class="form-group inline">
+                          <label>Sens</label>
+                          <div class="linked-input-wrapper">
+                            <input type="text" id="sens-input-primary-y" value="1.0" class="axis-input">
+                            <span class="link-lock-icon primary-lock" id="lock-primary-y">🔒</span>
+                          </div>
+                        </div>
+                        <label class="checkbox-wrapper">
+                          <input type="checkbox" id="invert-check-primary-y">
+                          <span class="checkmark"></span>
+                          Invert
+                        </label>
+                      </div>
+
+                      <div class="axis-group-divider"></div>
+
+                      <!-- Switched movement sensitivity group -->
+                      <div class="axis-settings-group switched">
+                        <div class="group-label" id="label-switched-y">Pan Y (Vertical)</div>
+                        <div class="form-group inline">
+                          <label>Sens</label>
+                          <div class="linked-input-wrapper">
+                            <input type="text" id="sens-input-switched-y" value="0.005" class="axis-input">
+                            <span class="link-lock-icon switched-lock" id="lock-switched-y">🔒</span>
+                          </div>
+                        </div>
+                        <label class="checkbox-wrapper">
+                          <input type="checkbox" id="invert-check-switched-y">
+                          <span class="checkmark"></span>
+                          Invert
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
+                <!-- Bottom panel in dashboard for Orbit / Zoom center scheme details -->
+                <div class="dashboard-scheme-footer-panel" id="dashboard-scheme-footer">
+                  
+                  <div class="scheme-footer-row" id="orbit-scheme-controls">
+                    <div class="form-group horizontal">
+                      <label>Orbit Pivot</label>
+                      <div class="select-wrapper">
+                        <select id="select-orbit-pivot">
+                          <option value="view">view</option>
+                          <option value="cursor" selected>cursor (under mouse)</option>
+                          <option value="object">object</option>
+                          <option value="origin">origin</option>
+                          <option value="selection">selection</option>
+                          <option value="cursor_3d" id="option-3d-cursor" style="display:none;">3D Cursor</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="form-group horizontal">
+                      <label>Orbit Style</label>
+                      <div class="select-wrapper">
+                        <select id="select-orbit-style">
+                          <option value="free">free</option>
+                          <option value="turntable" selected>turntable</option>
+                        </select>
+                      </div>
+                    </div>
+                    <label class="checkbox-wrapper inline-align">
+                      <input type="checkbox" id="check-lock-horizon" checked>
+                      <span class="checkmark"></span>
+                      Lock Horizon
+                    </label>
+                  </div>
+
+                  <div class="scheme-footer-row" id="flywalk-scheme-controls" style="display: none;">
+                    <div class="form-group horizontal">
+                      <label>Fly/Walk Speed</label>
+                      <input type="text" id="input-flywalk-speed" value="5.0" class="axis-input width-small">
+                    </div>
+                    <div class="form-group horizontal">
+                      <label>Auto-Depth hold (s)</label>
+                      <input type="text" id="input-flywalk-hold" value="0.5" class="axis-input width-small">
+                    </div>
+                  </div>
+
+                </div>
+
+              </div>
+
+            </div>
+
+          </div>
+        </section>
+
+        <!-- TAB 3: General Settings -->
+        <section id="tab-general" class="tab-panel">
+          <p class="panel-subtitle">Global configurations for device bluetooth, fallback control modes, and cursor gains.</p>
+
+          <div class="general-layout">
+            
+            <!-- Section 1: Device -->
+            <div class="settings-card">
+              <h2>Device</h2>
+              <div class="card-grid">
+                <div class="form-group">
+                  <label>Name</label>
+                  <div class="input-with-hint">
+                    <input type="text" value="Astrolabe" class="width-large">
+                    <span class="field-hint">BLE name to look for; applies on reconnect</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Address (optional)</label>
+                  <div class="input-with-hint">
+                    <input type="text" value="" placeholder="AA:BB:CC:DD:EE:FF" class="width-large">
+                    <span class="field-hint">Bypass name scan and connect directly to MAC; applies on reconnect</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 2: 3D navigation bridge -->
+            <div class="settings-card">
+              <h2>3D Navigation Bridge</h2>
+              <div class="card-grid">
+                <div class="form-group">
+                  <label>Default update rate (Hz)</label>
+                  <div class="input-with-hint">
+                    <input type="text" value="30" class="width-small">
+                    <span class="field-hint">global default; override per-app in Per-App Bindings tab</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 3: 3D control scheme (defaults) -->
+            <div class="settings-card">
+              <h2>3D Control Scheme (Defaults)</h2>
+              <div class="card-grid">
+                
+                <div class="form-group horizontal-split">
+                  <div class="form-group inline-stack">
+                    <label>Orbit pivot</label>
+                    <div class="select-wrapper">
+                      <select>
+                        <option value="view">view</option>
+                        <option value="cursor" selected>cursor (under mouse)</option>
+                        <option value="object">object</option>
+                        <option value="origin">origin</option>
+                        <option value="selection">selection</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="form-group inline-stack">
+                    <label>Orbit style</label>
+                    <div class="select-wrapper">
+                      <select>
+                        <option value="free">free</option>
+                        <option value="turntable" selected>turntable</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="form-group inline-stack">
+                    <label>Zoom mode</label>
+                    <div class="select-wrapper">
+                      <select>
+                        <option value="to_center">to_center</option>
+                        <option value="to_object">to_object</option>
+                        <option value="to_cursor" selected>to_cursor (under mouse)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="info-block">
+                  <p><strong>origin</strong> = rotate about the world origin (no translation); <strong>object</strong> = about model bounding-box centre; <strong>view</strong> = about the surface under the screen centre; <strong>cursor / to_cursor</strong> = about surface under mouse cursor; <strong>selection</strong> = fallback to model center if no active selection.</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 4: Pointer / scroll (cursor mode) -->
+            <div class="settings-card">
+              <h2>Pointer / Scroll (Cursor Mode)</h2>
+              <div class="card-grid">
+                <div class="form-group">
+                  <label>Cursor sensitivity</label>
+                  <div class="input-with-hint">
+                    <input type="text" value="3.5" class="width-medium">
+                    <span class="field-hint">radians → pixels speed multiplier</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Scroll gain</label>
+                  <div class="input-with-hint">
+                    <input type="text" value="1.0" class="width-medium">
+                    <span class="field-hint">radians → lines scrolled</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Scroll deadzone</label>
+                  <div class="input-with-hint">
+                    <input type="text" value="0.05" class="width-medium">
+                    <span class="field-hint">radians minimum before scroll registers</span>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Scroll dominance</label>
+                  <div class="input-with-hint">
+                    <input type="text" value="0.9" class="width-medium">
+                    <span class="field-hint">twist vs diagonal movement priority</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Section 5: Mode & buttons -->
+            <div class="settings-card">
+              <h2>Mode & Buttons</h2>
+              <div class="card-grid">
+                <div class="form-group">
+                  <label>Default mode</label>
+                  <div class="select-wrapper width-large">
+                    <select>
+                      <option value="cube" selected>cube (3D space navigation)</option>
+                      <option value="cursor">cursor (2D mouse simulation)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="form-group horizontal-split mt-4">
+                  <div class="form-group inline-stack">
+                    <label>Left button</label>
+                    <div class="select-wrapper">
+                      <select>
+                        <option value="left" selected>left</option>
+                        <option value="right">right</option>
+                        <option value="middle">middle</option>
+                        <option value="none">none</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="form-group inline-stack">
+                    <label>Right button</label>
+                    <div class="select-wrapper">
+                      <select>
+                        <option value="left">left</option>
+                        <option value="right" selected>right</option>
+                        <option value="middle">middle</option>
+                        <option value="none">none</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="form-group inline-stack">
+                    <label>Middle button</label>
+                    <div class="select-wrapper">
+                      <select>
+                        <option value="left">left</option>
+                        <option value="right">right</option>
+                        <option value="middle" selected>middle</option>
+                        <option value="none">none</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="info-block warning">
+                  <p>Button mappings are reserved (the physical device buttons are handled in hardware BLE HID mode).</p>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
+      </div>
+
+      <!-- Bottom Status Bar -->
+      <footer class="bottom-status">
+        <div class="status-left">
+          <span class="connection-text" id="footer-connection-status">Connection: active • connected (v0.1.44)</span>
+        </div>
+        <div class="status-right">
+          <span class="console-ticker" id="console-ticker">navbroker: 127.0.0.1:6000 streaming frames | active_app: blender</span>
+        </div>
+      </footer>
+
+    </main>
+  </div>
+
+  <!-- MODAL: Onshape Userscript Guide -->
+  <div class="modal-overlay" id="modal-onshape">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>Onshape — Set Up</h2>
+        <button class="btn-close" onclick="closeOnshapeDialog()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-lead">To use <strong>"cursor (under mouse)"</strong> orbit pivots, you need to install the Astrolabe helper userscript in your browser. Without it, Onshape falls back to screen-centre orbits.</p>
+        
+        <div class="status-indicator-box success" id="onshape-copy-status" style="display:none;">
+          <span class="badge-dot green animate-pulse"></span>
+          <span>Copied script source to clipboard!</span>
+        </div>
+
+        <div class="clipboard-box">
+          <button class="btn btn-primary" onclick="copyOnshapeScript()">Copy Userscript to Clipboard</button>
+          <span class="clipboard-hint">Paste this code into Violentmonkey, Tampermonkey, or Greasemonkey.</span>
+        </div>
+
+        <div class="instructions-steps">
+          <h3>Installation Steps:</h3>
+          <ol>
+            <li>Install a userscript manager extension in your browser (e.g. <strong>Violentmonkey</strong> or <strong>Tampermonkey</strong>).</li>
+            <li>Click the manager extension icon and select <strong>"Create a new script"</strong>.</li>
+            <li>Select the entire template code, delete it, and paste the Astrolabe script source.</li>
+            <li>Save the script (Ctrl+S) and refresh your Onshape tab.</li>
+            <li>In Onshape, make sure the SpaceMouse/3Dconnexion options are enabled in preferences.</li>
+          </ol>
+        </div>
+
+        <div class="dismiss-wrapper">
+          <label class="checkbox-wrapper">
+            <input type="checkbox" id="onshape-dismiss-warn">
+            <span class="checkmark"></span>
+            Do not show again for this pivot setting
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeOnshapeDialog()">Cancel</button>
+        <button class="btn btn-primary" onclick="confirmOnshapeDialog()">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Blender Autostart Shim Confirmation -->
+  <div class="modal-overlay" id="modal-blender">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>Blender — Auto-start Setup?</h2>
+        <button class="btn-close" onclick="closeBlenderDialog()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-lead">Do you want to install the Trackball add-on and auto-enable it on Blender launch?</p>
+        <p>This copies the Trackball add-on into your Blender scripts folder and writes a small startup script (<code>scripts/startup/trackball_nav_startup.py</code>) that initiates the handshake automatically.</p>
+        
+        <div class="info-block">
+          <p><strong>Yes</strong> — Install + auto-start on Blender launch (Recommended, zero friction)</p>
+          <p><strong>No</strong> — Install only; you must enable it manually under Preferences → Add-ons</p>
+          <p><strong>Cancel</strong> — Abort installation</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeBlenderDialog()">Cancel</button>
+        <button class="btn btn-outline" onclick="actionBlenderInstall(false)">No</button>
+        <button class="btn btn-primary" onclick="actionBlenderInstall(true)">Yes</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

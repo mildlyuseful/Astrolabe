@@ -589,10 +589,11 @@ def install_unreal(appdef: "AppDef", cfg) -> tuple[bool, str]:
     return True, (
         f"Trackball plugin {verb} (v{a['addin_version']}) for {', '.join(copied)}.\n\n"
         "Enable it ONCE per project: Edit -> Plugins -> search \"Trackball\" -> tick \"Trackball "
-        "Nav\" -> restart the editor (this also enables the Python Editor Script Plugin it depends "
-        "on).\n\n"
+        "Nav\" -> restart the editor (this also enables the Python Editor Script Plugin and "
+        "GeoReferencing it depends on — GeoReferencing supplies the under-cursor mouse pixel).\n\n"
         "Then open a level, switch the daemon to 3D mode, and focus the Unreal Editor — the row "
-        "flips to \"connected\" once the editor loads the plugin." + tail)
+        "flips to \"connected\" once the editor loads the plugin. For Under Cursor orbit, click "
+        "the level viewport so it has focus." + tail)
 
 
 # --- add-in version tracking + one-click / auto update --------------------------------

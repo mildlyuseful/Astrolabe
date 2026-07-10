@@ -12,7 +12,7 @@ Tests: [`tests/test_autocad_loader.py`](../../tests/test_autocad_loader.py),
 [`tests/test_integrations_autocad.py`](../../tests/test_integrations_autocad.py),
 [`tests/test_app_routing.py`](../../tests/test_app_routing.py). Wiring: `app.py`, `config.py`,
 `integrations.py`, `ui.py`, `winfocus.py`. User-facing summary: the AutoCAD section of
-[`README.md`](../../README.md). (Current at daemon `__version__` 0.1.44, plugin 0.3.1.)
+[`README.md`](../../README.md). (Current at daemon `__version__` 0.1.44, plugin 0.3.4.)
 
 ---
 
@@ -621,39 +621,49 @@ on daemon start, and `install_autocad` STAGES the copy when the DLL is locked by
 AutoCAD (it lands via the loader's copy-on-attach at the next AutoCAD start). The loader's
 `_netload_plugin` copies `version.json` alongside the DLL.
 
-### 8.17 The `cursor` orbit pivot / `to_cursor` zoom (plugin v0.3.0, values renamed in v0.3.1) — verified live
+### 8.17 The `cursor` orbit pivot / `to_cursor` zoom (plugin v0.3.0 … v0.3.3) — verified live
 
 Orbit about the point **under the mouse cursor** (the SpaceMouse "rotation center = cursor"
 behaviour). Two halves, both in the plugin (the retired COM transport had no cursor access — §6):
 
 - **Half A (the live cursor point):** a passive **`Editor.PointMonitor`** subscription, kept bound
   to the ACTIVE document from the 10 ms timer (re-subscribes on doc switch, cache dropped — the
-  AutoCAD analogue of FreeCAD's `SoLocation2Event` observer). The handler caches ONE WCS point per
-  event with the best depth available, in priority order:
+  AutoCAD analogue of FreeCAD's `SoLocation2Event` observer). `TurnForcedPickOn` keeps
+  `GetPickedEntities` alive outside a command. The handler caches ONE WCS point per event with the
+  best depth available, in priority order:
   1. **`ObjectSnappedPoint`** when `History & PointHistoryBits.ObjectSnapped` — a real point ON the
      entity;
-  2. the picked entity's depth (`GetPickedEntities()`): slide `ComputedPoint` along the view ray to
-     the entity — **exact** for top-level `Curve`s (`GetClosestPointTo(pt, viewDir, false)` =
-     projected closest point), **bbox-centre depth** for everything else. Use `ids[0]` (the
-     TOP-LEVEL entity) from the `FullSubentityPath` — deeper path entries of a block are in BLOCK
-     space, not WCS;
+  2. the picked entities' depth (`GetPickedEntities()`): for **every** top-level id in the aperture,
+     slide `ComputedPoint` along the view ray — **exact** for `Curve`s, **AABB near-face** for
+     solids — and keep the hit **closest to the camera** (v0.3.3; `paths[0]` is NOT front-to-back —
+     Conceptual often returned the back solid first). **v0.3.4:** AABB near-face always uses the
+     slab entry `tEnter` even when `ComputedPoint` lies *inside* the box (UCS plane cutting through
+     a solid) — the old `t=0` shortcut returned interior pivots with no face coordinate;
   3. raw **`ComputedPoint`** — WCS but on the UCS construction plane (right screen position, plane
      depth).
   **Pick reality (verified live):** what `GetPickedEntities` returns follows the visual style's
   aperture behaviour, same as native rollover — in **2D Wireframe a solid's face interior does NOT
-  pick** (only edges), so mid-face hovers cache the plane point (z=0 in plan); in **Realistic**
-  the face picks and the same hover cached the box-depth point (z=10). `TBNAVPTR` dumps the live
-  cache to the log to check exactly this.
+  pick** (only edges), so mid-face hovers cache the plane point; in **Realistic/Conceptual** the
+  face picks. `TBNAVPTR` dumps the live cache to the log.
+  **v0.3.2:** PointMonitor is **frozen while a GS gesture is active** (the DB camera is stale
+  mid-gesture, so a mouse move would poison the cache with a wrong WCS mapping).
 - **Half B (the pivot):** `NavMath.Apply` grew optional `orbitPivot`/`zoomPivot` args (null = the
   old orbit-about-target exactly): a rigid rotation about P (`tgt' = P + m·(tgt−P)`; the eye
   follows via `tgt' + dir'·dist`, so P keeps its exact screen position), and parallel `to_cursor`
   zoom slides the target toward P by `1/factor` (perspective falls back to the plain dolly).
   Per-gesture hold in `TryApplyGs`: the pivot is captured ONCE at the first orbit frame of a
-  gesture from the cache — validated against the drawing extents +10 % of the diagonal (a cursor
-  over empty space intersects the UCS plane arbitrarily far away → out-of-bounds falls back to
-  target orbit) — and held; a pan/zoom frame invalidates the orbit hold (re-captured at the live
-  cursor on the next orbit frame), gesture end resets both. The legacy `SetCurrentView` fallback
-  path does NOT support the cursor pivot (view-centre orbit as before).
+  gesture from the cache — validated against the drawing extents +10 % of the diagonal — and held;
+  a pan/zoom frame invalidates the orbit hold (re-captured at the live cursor on the next orbit
+  frame), gesture end resets both. **Plane / empty salvage (v0.3.2–0.3.3):**
+  1. **Expanding ray-AABB** (v0.3.3, Fusion-style `APERTURE_FRACS` of VIEWSIZE): walk model space
+     with a thickening ray and take the nearest hit — recovers 2D Wireframe mid-face / near-edge
+     when PointMonitor's aperture was empty. AutoCAD never had this before; the "expanding
+     raycast" the user remembered is Fusion's `findBRepUsingRay` loop.
+  2. Else **reproject** along the view ray to the look-at depth (`VIEWCTR` / GS target) so an
+     oblique UCS-plane intersection doesn't go OOB.
+  3. Only a point still off-model after that returns null → target orbit.
+  The legacy `SetCurrentView` fallback path does NOT support the cursor pivot (view-centre orbit
+  as before).
 - **Verification (throwaway instance, headless — no human mouse):** NETLOAD in a COM-launched
   fresh AutoCAD; the log showed the PointMonitor subscribe + **a real `SetCursorPos` sweep over
   the canvas caching points** (WM_MOUSEMOVE drives PointMonitor fine); **`TBNAVPTRTEST`** seeds a

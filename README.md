@@ -336,22 +336,24 @@ SpaceMouse orbiting your model.
      **or** — no admin needed — drop it into **your project's** `Plugins\TrackballNav` folder instead.
 2. **Enable it once:** in the editor, **Edit → Plugins → search "Trackball" → tick "Trackball Nav"**,
    then **restart the editor**. (This is the analogue of Fusion's one-time *Run on Startup*. Enabling
-   Trackball Nav also enables the **Python Editor Script Plugin** it depends on — no separate step.)
+   Trackball Nav also enables the **Python Editor Script Plugin** and **GeoReferencing** it depends
+   on — GeoReferencing supplies the under-cursor mouse pixel; no separate step.)
 3. Open a level, switch the daemon to **3D mode** (tray → Mode), and **focus** the Unreal Editor. The
    row flips to **active • connected** and the tray shows `Apps: unreal v…`. Spin the ball to orbit;
    hold **Shift** to pan/zoom. (During **Play-In-Editor** the add-on no-ops so it doesn't fight the
-   game; it also no-ops cleanly with no perspective viewport open.)
+   game; it also no-ops cleanly with no perspective viewport open.) For **Under Cursor** orbit, click
+   the **level viewport** so it has focus (clicking Details / Content Browser leaves the viewport
+   unfocused and that pivot falls back to Selection).
 4. Tuning — Unreal gets the **full Blender-style Per-App Bindings panel**:
    - **Navigation mode** — toggle **Orbit / Fly / Walk** (with Fly speed / Walk speed). *Fly* = free
      6DOF (banks on twist; forward follows pitch). *Walk* = horizon-locked look, movement stays on the
      ground plane. In **orbit** mode, un-shifted twist does **Twist action** (roll / zoom / dolly /
      none), and **Lock horizon** keeps the view level.
    - **Orbit around** — **Viewpoint** (turn the camera in place), **Auto Depth** (raycast the surface
-     under screen-centre; falls back to selection → free-fly on a miss), **Under Cursor** (*not yet
-     supported in Unreal* — the editor-viewport mouse isn't in the Python API; investigated & parked,
-     falls back to Selection), **Selection** (selected actors' bounding box), **World Origin**, and
-     **3D Cursor** (Unreal has no 3D cursor, so this orbits the selection too). **Orbit method**
-     free/turntable.
+     under screen-centre; falls back to selection → free-fly on a miss), **Under Cursor** (add-on
+     0.2.3 — raycasts under the mouse via Epic's GeoReferencing helpers; needs the viewport focused),
+     **Selection** (selected actors' bounding box), **World Origin**. (No **3D Cursor** option —
+     Unreal has none.) **Orbit method** free/turntable. **Zoom mode** includes **to_cursor**.
    - **Invert directions** — independent per mode (Orbit / Viewpoint / Fly / Walk), plus orbit/pan/zoom
      **gains** and **Viewport refresh rate**.
    Unreal is **left-handed, Z-up, centimetres**, so expect to flip a few **Invert** checkboxes the

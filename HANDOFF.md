@@ -8,7 +8,7 @@ ties them together and covers the things that span more than one component.
 
 > Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.57**, Fusion
 > add-in **0.1.14**, Blender add-on **0.1.11**, FreeCAD add-on **0.1.4**, SketchUp extension
-> **0.2.2**, Unreal add-on **0.2.2**, AutoCAD plugin **0.3.1**,
+> **0.2.2**, Unreal add-on **0.2.4**, AutoCAD plugin **0.3.4**,
 > `pyproject` version is dynamic (single-sourced from `__version__`; packaging not yet cut). Dev machine: Windows 11, Blender 5.1.1, SolidWorks
 > 2025, Fusion 360, FreeCAD 1.1.1, SketchUp 2026.2, Unreal Engine 5.8, AutoCAD 2026 installed. The firmware has no
 > version field.
@@ -403,21 +403,23 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
   `advanced` block with **orbit / fly / walk** modes (fly banks + flies along the look; walk is
   horizon-locked + ground-plane — verified they differ), **viewpoint** pivot (turn in place),
   `twist_action`, `lock_horizon`, and **per-mode inverts** — the same additive `"adv"` object Blender
-  uses (now attached per-focused-app, §12.9). Unreal has **no 3D cursor** (probed), so `cursor` orbits
-  the selection — and the under-mouse **`cursor` orbit was investigated & PARKED (add-on 0.2.2):** UE
-  5.8 Python *does* now deproject an editor-viewport pixel (`UnrealEditorSubsystem.screen_to_world`)
-  but does *not* expose the editor-viewport mouse pixel, so it needs a one-getter C++ helper or an
-  Editor Utility Widget (docs gotcha #13). Its default orbit baseline is **doubled** (`ORBIT_SCALE=2.0`)
-  because the device felt half at 1.0. **Set up** copies the plugin into each detected engine's
-  `Engine/Plugins` (writing there needs **admin** → falls back to printed manual steps / a project
-  `Plugins` dir), and the user **enables it once** in *Edit → Plugins → "Trackball" → restart* (the
-  plugin depends on the Python Editor Script Plugin, so enabling ours enables Python too). The
-  Unreal-specific traps (left-handed/Z-up/cm/degrees conventions verified live; `Rotator(roll,pitch,
-  yaw)` positional order; `make_rot_from_xz` for the rotator rebuild; `HitResult.to_dict()` for trace
-  hits; the project-centric/admin install) are in
-  [`docs/apps/unreal.md`](docs/apps/unreal.md) (read first) and the code. **API +
-  conventions + plugin auto-load verified live, headless, on Unreal Engine 5.8**; the GUI sign/scale
-  feel is a live-tune TODO.
+  uses (now attached per-focused-app, §12.9). Unreal has **no Blender-style 3D cursor** (probed). The
+  under-mouse **`cursor` orbit / `to_cursor` zoom (add-on 0.2.3)** uses Epic's stock
+  **`GeoReferencingEditorBPLibrary`** for the level-viewport mouse pixel / world ray (Half A — our
+  `.uplugin` depends on `GeoReferencing`), then `line_trace_single` + per-gesture hold (Half B);
+  needs the **viewport widget focused** (Epic's `HasFocus` gate). **`selection_overrides_pivot`
+  (0.2.4, default on)** makes a non-empty actor selection replace the designated orbit/zoom pivot.
+  Custom C++ / EUW rejected. Its default orbit baseline is **doubled** (`ORBIT_SCALE=2.0`) because
+  the device felt half at 1.0.
+  **Set up** copies the plugin into each detected engine's `Engine/Plugins` (writing there needs
+  **admin** → falls back to printed manual steps / a project `Plugins` dir), and the user **enables
+  it once** in *Edit → Plugins → "Trackball" → restart* (depends on Python Editor Script Plugin **and**
+  GeoReferencing). The Unreal-specific traps (left-handed/Z-up/cm/degrees conventions verified live;
+  `Rotator(roll,pitch,yaw)` positional order; `make_rot_from_xz` for the rotator rebuild;
+  `HitResult.to_dict()` for trace hits; the project-centric/admin install; cursor focus gate) are in
+  [`docs/apps/unreal.md`](docs/apps/unreal.md) (read first) and the code. **API + conventions +
+  plugin auto-load verified live, headless, on Unreal Engine 5.8**; GUI sign/scale + live cursor feel
+  are live-tune TODOs.
 
 ---
 
@@ -726,7 +728,8 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
   QMouseEvents through the real Qt→Quarter→Coin pipeline + an end-to-end broker run (notes §8/§9);
   only the human hover-and-orbit feel pass remains. **AutoCAD — DONE (NETLOAD plugin 0.3.0, verified
   live in a throwaway instance):** a passive `Editor.PointMonitor` caches the cursor's WCS point
-  (osnap > picked-entity depth along the view ray > UCS-plane point), extents-validated + held per
+  (osnap > nearest picked-entity AABB near-face / curve closest > expanding ray-AABB on plane
+  miss > UCS-plane view-depth salvage), extents-validated + held per
   gesture; `NavMath.Apply` grew optional orbit/zoom pivots (rigid orbit about P, parallel
   to_cursor zoom); `TBNAVPTRTEST` proved the full pipeline (P's screen offset exact, DB target
   err 0, both commit flavours) and a real cursor sweep fed the cache — human feel pass remains
@@ -793,19 +796,12 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
   and `bpy.app.background` skip. Headless probes (`blender_nav_math_test.py` +
   `_integration_probe.py`) cover the mapping, arbitrary-pixel raycast, and an e2e `op="cursor"` orbit;
   the live modal MOUSEMOVE tracking + file-load lifecycle are un-verified (Blender notes §4.5).
-  Blender's 3D cursor is its own `cursor_3d` pivot. **Unreal — INVESTIGATED & PARKED (add-on 0.2.2),
-  needs C++/EUW.** Re-probed UE 5.8 Python headlessly rather than trusting the old "editor deproject
-  not in Python" note: **Half B is now free** — `UnrealEditorSubsystem.screen_to_world(px)->(pos,dir)`
-  deprojects an editor-viewport pixel to a world ray with no C++/PIE. **Half A is the sole blocker** —
-  the editor-viewport *mouse pixel* still isn't in Python (viewport-local mouse getters are PIE-only;
-  `get_mouse_position_on_platform` is absolute-desktop and the viewport's screen origin isn't exposed to
-  localise it; `EditorViewportClient`/`EditorViewportSubsystem` absent). So it needs **either (a) a
-  tiny C++ editor module** exposing the active `FEditorViewportClient` `FViewport::GetMouseX/Y` to
-  Python (then Python does screen_to_world+trace — one C++ getter), **or (b) an Editor Utility Widget**
-  overlay that writes the cursor pixel/world-hit where Python polls. Did NOT fake a cursor —
-  `cursor` falls back to the selection centre (Unreal notes gotcha #13). **The cursor-orbit series is
-  now COMPLETE: 4 verified (FreeCAD/AutoCAD/Fusion/SolidWorks), 3 done-in-code pending live-GUI verify
-  (SketchUp/Onshape/Blender), Unreal parked with a clear C++/EUW path.**
+  Blender's 3D cursor is its own `cursor_3d` pivot. **Unreal — DONE IN CODE (add-on 0.2.3), needs
+  live-GUI verify.** Half A is Epic's stock `GeoReferencingEditorBPLibrary.get_viewport_cursor_information`
+  (plugin dependency — not a Trackball C++ module); Half B is `line_trace_single` + hold. Viewport
+  must have Slate focus. **The cursor-orbit series is now COMPLETE: 4 verified
+  (FreeCAD/AutoCAD/Fusion/SolidWorks), 4 done-in-code pending live-GUI verify
+  (SketchUp/Onshape/Blender/Unreal).**
 - **"Viewport under the cursor" targeting** (Blender quad-view) — same live-mouse limitation; v1
   targets the active/largest VIEW_3D.
 

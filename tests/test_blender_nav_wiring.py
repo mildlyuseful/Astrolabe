@@ -111,33 +111,37 @@ def test_blender_focus_sends_advanced(isolated_config):
     app = _app_with_real_config(cfg, "blender")
     app._apply_schemes()
     sent = app.broker.schemes[-1]
-    assert sent["advanced"] == cfg.data["apps"]["blender"]["advanced"]
+    adv = sent["advanced"]
+    # Core Blender advanced plus the app-root selection_overrides_pivot folded in.
+    for k, v in cfg.data["apps"]["blender"]["advanced"].items():
+        assert adv[k] == v
+    assert adv["selection_overrides_pivot"] is True
     assert {"orbit_pivot", "orbit_style", "zoom_mode"} <= set(sent)
 
 
-def test_other_app_focus_carries_no_advanced(isolated_config):
-    # The FOCUSED broker app's advanced is attached (not a fixed app's) -- needed now that BOTH Blender
-    # and Unreal have advanced blocks (the broker has one "adv" slot). Fusion has no advanced block, so
-    # focusing Fusion attaches adv=None -- and Fusion ignores "adv" anyway. The Blender/Unreal add-ons
-    # only act while THEIR app is focused, at which point their own advanced is attached (per-app tests).
+def test_fusion_focus_sends_selection_override_only(isolated_config):
+    # Fusion has no richer advanced block, but selection_overrides_pivot (app root) is folded into
+    # adv so a future Fusion add-in can read it. Fusion today ignores "adv".
     cfg = Config().load()
     app = _app_with_real_config(cfg, "fusion360")
     app._apply_schemes()
     sent = app.broker.schemes[-1]
-    assert sent["advanced"] is None
+    assert sent["advanced"] == {"selection_overrides_pivot": True}
     assert {"orbit_pivot", "orbit_style", "zoom_mode"} <= set(sent)
 
 
 def test_unreal_focus_sends_its_advanced(isolated_config):
     # Unreal has its own advanced block (orbit/fly/walk, twist action, lock-horizon, per-mode inverts);
-    # focusing Unreal attaches Unreal's advanced, not Blender's.
+    # focusing Unreal attaches Unreal's advanced, not Blender's, with selection_overrides_pivot folded.
     cfg = Config().load()
     app = _app_with_real_config(cfg, "unreal")
     app._apply_schemes()
     sent = app.broker.schemes[-1]
-    assert sent["advanced"] == cfg.data["apps"]["unreal"]["advanced"]
-    assert sent["advanced"]["nav_mode"] == "orbit"
-    assert sent["advanced"] is not cfg.data["apps"]["blender"]["advanced"]
+    adv = sent["advanced"]
+    assert adv["nav_mode"] == "orbit"
+    assert adv["selection_overrides_pivot"] is True
+    assert adv["nav_mode"] == cfg.data["apps"]["unreal"]["advanced"]["nav_mode"]
+    assert adv is not cfg.data["apps"]["blender"]["advanced"]
 
 
 def test_sketchup_focus_sends_its_advanced(isolated_config):
@@ -145,6 +149,7 @@ def test_sketchup_focus_sends_its_advanced(isolated_config):
     app = _app_with_real_config(cfg, "sketchup")
     app._apply_schemes()
     sent = app.broker.schemes[-1]
-    assert sent["advanced"] == cfg.data["apps"]["sketchup"]["advanced"]
-    assert sent["advanced"]["nav_mode"] == "orbit"
+    adv = sent["advanced"]
+    assert adv["nav_mode"] == "orbit"
+    assert adv["selection_overrides_pivot"] is True
     assert sent["advanced"] is not cfg.data["apps"]["blender"]["advanced"]
