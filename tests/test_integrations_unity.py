@@ -1,5 +1,6 @@
 """Unity integration registry: bundled UPM package, install into project Packages/, auto_update."""
 import json
+import os
 import sys
 
 import pytest
@@ -92,3 +93,41 @@ def test_status_line_reflects_detection(monkeypatch):
     assert "detected" in integrations.status_line(appdef).lower()
     monkeypatch.setattr(appdef, "detect", lambda: None)
     assert integrations.status_line(appdef) == "not detected"
+
+
+def test_hub_projects_v1_unwraps_data(tmp_path, monkeypatch):
+    """Unity Hub stores projects under schema_version + data{path: record}."""
+    proj = _fake_project(tmp_path, "My project")
+    hub = tmp_path / "UnityHub"
+    hub.mkdir()
+    (hub / "projects-v1.json").write_text(
+        json.dumps({
+            "schema_version": "v1",
+            "data": {
+                str(proj): {"title": "My project", "path": str(proj), "version": "6000.5.3f1"},
+            },
+        }),
+        encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    found = integrations._unity_hub_recent_projects()
+    assert any(os.path.normcase(os.path.abspath(p)) == os.path.normcase(os.path.abspath(str(proj)))
+               for p in found)
+
+
+def test_install_from_hub_projects_json(isolated_config, tmp_path, monkeypatch):
+    proj = _fake_project(tmp_path, "My project")
+    hub = tmp_path / "UnityHub"
+    hub.mkdir()
+    (hub / "projects-v1.json").write_text(
+        json.dumps({
+            "schema_version": "v1",
+            "data": {str(proj): {"path": str(proj), "title": "My project"}},
+        }),
+        encoding="utf-8")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr(integrations, "detect_unity", lambda: r"C:\Unity\Unity.exe")
+    monkeypatch.setattr(integrations, "_unity_running_project_paths", lambda: [])
+    cfg = Config().load()
+    ok, msg = integrations.install(integrations.APPS_BY_KEY["unity"], cfg)
+    assert ok is True, msg
+    assert (proj / "Packages" / "com.astrolabe.trackball-nav" / "package.json").exists()

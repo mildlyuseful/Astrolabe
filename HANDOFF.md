@@ -713,10 +713,11 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
   the same WAMP NL-Proxy) is still in-scope for the existing Onshape bridge.
 
 - **Unity / Godot / Rhino** — **IMPLEMENTED (branch feature/unity-godot-rhino-integrations).**
-  Unity (UPM Scene-view package) and Godot (EditorPlugin) ship the full Unreal/Blender-parity
-  suite; Rhino 8 ships the lean default suite with under-cursor + `selection_overrides_pivot`.
-  Live GUI verify (orbit feel, cursor pivot, selection override) still needed on the user's
-  open editors. See `docs/apps/{unity,godot,rhino}.md`.
+  Unity (UPM Scene-view package, add-in 0.1.6) and Godot (EditorPlugin) ship the full
+  Unreal/Blender-parity suite; Rhino 8 ships the lean default suite with under-cursor +
+  `selection_overrides_pivot`. Unity live-verified (cursor pivot, zoom/`cameraDistance`,
+  Dynamic Clipping override, pivot-extent cap). Godot is turntable-only (no roll). See
+  `docs/apps/{unity,godot,rhino}.md`.
 
 **Control features (need a new channel/signal)**
 - **Discrete view ops** — Frame/View Selected, ortho axis snaps (Front/Top/Right), 15° orbit steps,

@@ -378,12 +378,25 @@ Unity's **Scene view** is driven by a bundled UPM package (`com.astrolabe.trackb
 auto-starts via `[InitializeOnLoad]`. Full Blender/Unreal-parity suite (orbit/fly/walk, under-cursor,
 selection override). Play mode is ignored.
 
-1. Open a Unity project, then Settings → **3D Apps** → Unity → **Set up** (copies into
-   `Packages/com.astrolabe.trackball-nav/`).
+1. Open a Unity project (or leave one open), then Settings → **3D Apps** → Unity → **Set up**
+   (copies into `Packages/com.astrolabe.trackball-nav/`).
 2. Let Unity reimport / domain-reload (or restart the Editor).
 3. Daemon **3D mode**, focus Unity — row shows **connected**.
 
-> Maintainer guide: [`docs/apps/unity.md`](docs/apps/unity.md).
+Set up finds projects from running `Unity.exe` `-projectpath` args (hidden PowerShell CIM; no
+console flash) and Unity Hub `%APPDATA%\UnityHub\projects-v1.json` (including the Hub v1
+`data` wrapper). If none are found, the dialog stages the package and gives a **Copy** path for
+manual install into `<YourProject>\Packages\com.astrolabe.trackball-nav\`.
+
+**Per-App Bindings (Unity)** also expose:
+- **Override Unity Dynamic Clipping** (default on) — Scene View Camera → Dynamic Clipping can
+  feel like auto zoom-to-fit; the add-on forces fixed near/far while navigating, and restores
+  Dynamic Clipping when you turn the override off (nudge the trackball once after toggling).
+- **Pivot extent limit ×** (default `8`) — caps under-cursor / auto-depth pivots at
+  `scene size × multiplier` so near-horizon hits do not fling the camera away.
+
+> Maintainer guide: [`docs/apps/unity.md`](docs/apps/unity.md) (cameraDistance vs size, picking
+> without PlaceObject, dyn-clip / pivot-extent notes).
 
 ### Godot (implemented — EditorPlugin)
 Godot 4's editor 3D viewport uses the same full control suite as Unity/Unreal.

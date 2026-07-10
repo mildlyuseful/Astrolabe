@@ -133,7 +133,8 @@ namespace Astrolabe.TrackballNav
             return h.sqrMagnitude > 1e-12f ? h.normalized : Vector3.zero;
         }
 
-        // SceneView stores pivot+size+rotation; convert to/from free-fly eye.
+        // SceneView stores pivot+size+rotation; size is a fit-sphere radius.
+        // Callers must pass eye→pivot distance (SceneView.cameraDistance), not raw size.
         public static Cam FromSceneView(Vector3 pivot, Quaternion rotation, float size)
         {
             float dist = Mathf.Max(size, DistMin);

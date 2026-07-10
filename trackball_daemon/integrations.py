@@ -14,10 +14,25 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
+
+
+def _hidden_check_output(args, *, timeout=8) -> str:
+    """subprocess.check_output that does not flash a console window on Windows."""
+    kw = dict(stderr=subprocess.DEVNULL, text=True, timeout=timeout)
+    if sys.platform == "win32":
+        # CREATE_NO_WINDOW (0x08000000) + hidden STARTUPINFO — needed for powershell/wmic.
+        kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        kw["startupinfo"] = si
+    return subprocess.check_output(args, **kw)
 
 
 @dataclass
@@ -641,64 +656,105 @@ def install_unreal(appdef: "AppDef", cfg) -> tuple[bool, str]:
 
 
 # --- Unity Editor: UPM package into the open project's Packages/ folder -----------------
+_unity_running_cache = (0.0, [])  # (monotonic_ts, paths)
+
+
 def _unity_running_project_paths() -> list:
-    """Project paths from running Unity.exe command lines (-projectpath), best-effort."""
+    """Project paths from running Unity.exe command lines (-projectpath), best-effort.
+
+    Prefers Win32_Process via PowerShell (WMIC is removed on many Win11 installs).
+    Cached briefly — UI status / auto_update call this often and must not flash consoles.
+    """
+    global _unity_running_cache
+    now = time.monotonic()
+    if now - _unity_running_cache[0] < 2.5:
+        return list(_unity_running_cache[1])
+
     paths = []
+    lines = []
     try:
-        import subprocess
-        out = subprocess.check_output(
-            ["wmic", "process", "where", "name='Unity.exe'", "get", "CommandLine"],
-            stderr=subprocess.DEVNULL, text=True, timeout=5)
-        for line in out.splitlines():
-            low = line.lower()
-            if "-projectpath" not in low:
-                continue
-            # -projectpath "C:\path with spaces"  OR  -projectpath C:\path
-            idx = low.index("-projectpath") + len("-projectpath")
-            rest = line[idx:].strip()
-            if rest.startswith('"'):
-                end = rest.find('"', 1)
-                p = rest[1:end] if end > 0 else rest[1:]
-            else:
-                p = rest.split()[0] if rest.split() else ""
-            if p and os.path.isdir(p):
-                paths.append(p)
+        ps = (
+            "Get-CimInstance Win32_Process -Filter \"Name='Unity.exe'\" "
+            "| Select-Object -ExpandProperty CommandLine"
+        )
+        out = _hidden_check_output(
+            ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
+            timeout=8)
+        lines = out.splitlines()
     except Exception:
-        pass
+        try:
+            out = _hidden_check_output(
+                ["wmic", "process", "where", "name='Unity.exe'", "get", "CommandLine"],
+                timeout=5)
+            lines = out.splitlines()
+        except Exception:
+            lines = []
+    for line in lines:
+        low = line.lower()
+        if "-projectpath" not in low:
+            continue
+        # -projectpath "C:\path with spaces"  OR  -projectpath C:\path
+        idx = low.index("-projectpath") + len("-projectpath")
+        rest = line[idx:].strip()
+        if rest.startswith('"'):
+            end = rest.find('"', 1)
+            p = rest[1:end] if end > 0 else rest[1:]
+        else:
+            p = rest.split()[0] if rest.split() else ""
+        if p and os.path.isdir(p):
+            paths.append(p)
+    _unity_running_cache = (now, list(paths))
     return paths
 
 
 def _unity_hub_recent_projects() -> list:
-    """Recent project paths from Unity Hub's secondary install path / projectBasePath prefs."""
+    """Recent project paths from Unity Hub ``%APPDATA%\\UnityHub\\projects-v1.json``.
+
+    Current Hub format::
+
+        {"schema_version": "v1", "data": {"C:\\\\path": {"path": "C:\\\\path", ...}, ...}}
+
+    Older builds used a flat dict/list or ``projectBasePaths.json``.
+    """
     paths = []
     la = os.environ.get("APPDATA", "")
-    # Hub stores projects in AppData\\Roaming\\UnityHub\\projects-v1.json (varies by Hub version).
     candidates = [
         Path(la) / "UnityHub" / "projects-v1.json",
         Path(la) / "UnityHub" / "projectBasePaths.json",
     ]
+
+    def _take(p) -> None:
+        if p and os.path.isdir(p):
+            paths.append(p)
+
+    def _walk(obj) -> None:
+        if isinstance(obj, dict):
+            # Hub v1: unwrap {"schema_version", "data": {path: record, ...}}
+            if "data" in obj and isinstance(obj["data"], dict):
+                for key, rec in obj["data"].items():
+                    if isinstance(rec, dict):
+                        _take(rec.get("path") or rec.get("projectPath") or key)
+                    elif isinstance(rec, str):
+                        _take(rec)
+                return
+            for _k, v in obj.items():
+                if isinstance(v, dict):
+                    _take(v.get("path") or v.get("projectPath"))
+                elif isinstance(v, str):
+                    _take(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                if isinstance(item, str):
+                    _take(item)
+                elif isinstance(item, dict):
+                    _take(item.get("path") or item.get("projectPath"))
+
     for cand in candidates:
         if not cand.exists():
             continue
         try:
             with open(cand, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            if isinstance(data, dict):
-                for _k, v in data.items():
-                    if isinstance(v, dict):
-                        p = v.get("path") or v.get("projectPath")
-                        if p and os.path.isdir(p):
-                            paths.append(p)
-                    elif isinstance(v, str) and os.path.isdir(v):
-                        paths.append(v)
-            elif isinstance(data, list):
-                for item in data:
-                    if isinstance(item, str) and os.path.isdir(item):
-                        paths.append(item)
-                    elif isinstance(item, dict):
-                        p = item.get("path") or item.get("projectPath")
-                        if p and os.path.isdir(p):
-                            paths.append(p)
+                _walk(json.load(f))
         except Exception:
             continue
     return paths
@@ -777,13 +833,20 @@ def install_unity(appdef: "AppDef", cfg) -> tuple[bool, str]:
 
 
 # --- Godot 4: EditorPlugin into the open project's addons/ folder ----------------------
+_godot_running_cache = (0.0, [])
+
+
 def _godot_running_project_paths() -> list:
+    global _godot_running_cache
+    now = time.monotonic()
+    if now - _godot_running_cache[0] < 2.5:
+        return list(_godot_running_cache[1])
+
     paths = []
     try:
-        import subprocess
-        out = subprocess.check_output(
+        out = _hidden_check_output(
             ["wmic", "process", "where", "name like 'Godot%'", "get", "CommandLine"],
-            stderr=subprocess.DEVNULL, text=True, timeout=5)
+            timeout=5)
         for line in out.splitlines():
             # Godot is often launched as: Godot_v4.x.x.exe --path "C:\project"  or with project.godot arg
             low = line.lower()
@@ -805,6 +868,7 @@ def _godot_running_project_paths() -> list:
                         paths.append(p)
     except Exception:
         pass
+    _godot_running_cache = (now, list(paths))
     return paths
 
 

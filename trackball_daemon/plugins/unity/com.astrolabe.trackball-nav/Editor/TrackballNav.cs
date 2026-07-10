@@ -15,11 +15,15 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.0";
+        const string AddinVersion = "0.1.6";
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.35f;
         const float ObjCacheSec = 0.5f;
+        const float SceneExtentCacheSec = 1.5f;
         const float BboxMargin = 0.10f;
+        const float DefaultPivotExtentMult = 8f;
+        const float MaxSceneSize = 1e7f;
+        const int MaxTrisExact = 100000; // skip exact triangle tests on huge meshes (use bounds)
 
         static readonly ConcurrentQueue<string> Queue = new ConcurrentQueue<string>();
         static readonly object GestureLock = new object();
@@ -35,8 +39,19 @@ namespace Astrolabe.TrackballNav
         static Vector3? _objCenter;
         static Bounds? _objBbox;
         static string _lastScheme;
-        static Vector2 _sceneMouseGui;   // last Scene GUI mouse (top-left origin), updated in duringSceneGui
+        static Vector2 _sceneMouseGui;   // last Scene GUI mouse (top-left origin)
         static bool _hasSceneMouse;
+        static Ray _cursorRay;           // world ray under the mouse (from GUIPointToWorldRay)
+        static bool _hasCursorRay;
+        // Hit under the mouse — resolved via Physics / IntersectRayMesh (no PlaceObject).
+        static Vector3? _cursorHit;
+        static bool _cursorHitValid;
+        static double _lastCursorMissLog;
+        static bool _dynClipOverridden;
+        static bool? _savedDynClip;
+        static float _pivotExtentMult = DefaultPivotExtentMult;
+        static double _sceneExtentT;
+        static float _sceneExtentR = 10f;
 
         static TrackballNav()
         {
@@ -56,6 +71,12 @@ namespace Astrolabe.TrackballNav
             _zoomGesturePivot = null;
             _focusDist = TrackballNavCamera.DistDefault;
             _hasSceneMouse = false;
+            _hasCursorRay = false;
+            _cursorHit = null;
+            _cursorHitValid = false;
+            _dynClipOverridden = false;
+            _savedDynClip = null;
+            _pivotExtentMult = DefaultPivotExtentMult;
             _reader = new Thread(() => ReaderLoop(_cts.Token)) { IsBackground = true, Name = "trackball-nav-reader" };
             _reader.Start();
             EditorApplication.update += Pump;
@@ -77,12 +98,261 @@ namespace Astrolabe.TrackballNav
         {
             var e = Event.current;
             if (e == null) return;
+            // Mouse events only — never Layout/Repaint (nested OnGUI blanks the Scene view).
             if (e.type == EventType.MouseMove || e.type == EventType.MouseDrag ||
-                e.type == EventType.MouseDown || e.type == EventType.Repaint)
+                e.type == EventType.MouseDown)
             {
                 _sceneMouseGui = e.mousePosition;
                 _hasSceneMouse = true;
+                try
+                {
+                    // Correct Scene-view GUI → world ray (ScreenPointToRay Y mapping is wrong here).
+                    _cursorRay = HandleUtility.GUIPointToWorldRay(e.mousePosition);
+                    _hasCursorRay = true;
+                }
+                catch { return; }
+                ResolveCursorHit(allowPickGameObject: true);
             }
+        }
+
+        // Physics + mesh raycast along the stored cursor ray. Safe from EditorApplication.update
+        // (no PlaceObject). PickGameObject only when allowPickGameObject (mouse OnGUI).
+        static void ResolveCursorHit(bool allowPickGameObject)
+        {
+            _cursorHit = null;
+            _cursorHitValid = false;
+            if (!_hasCursorRay) return;
+
+            var ray = _cursorRay;
+            float maxD = MaxPivotDistanceCached();
+
+            if (Physics.Raycast(ray, out var ph, maxD, ~0, QueryTriggerInteraction.Ignore) &&
+                IsValidPivotHit(ray, ph.point, maxD))
+            {
+                _cursorHit = ph.point;
+                _cursorHitValid = true;
+                return;
+            }
+
+            if (TryMeshRaycast(ray, maxD, out var meshPt) && IsValidPivotHit(ray, meshPt, maxD))
+            {
+                _cursorHit = meshPt;
+                _cursorHitValid = true;
+                return;
+            }
+
+            if (allowPickGameObject)
+            {
+                try
+                {
+                    var go = HandleUtility.PickGameObject(_sceneMouseGui, false);
+                    if (go != null && TryRendererHit(go, ray, out var pt) && IsValidPivotHit(ray, pt, maxD))
+                    {
+                        _cursorHit = pt;
+                        _cursorHitValid = true;
+                    }
+                }
+                catch { /* ignore */ }
+            }
+        }
+
+        // Re-cast from the update pump so trackball orbit works without moving the mouse.
+        static void EnsureCursorHit(SceneView sv)
+        {
+            RefreshSceneExtentIfNeeded();
+            if (!_hasCursorRay)
+            {
+                if (!_hasSceneMouse || sv == null || sv.camera == null) return;
+                // Last-resort ray if we only have GUI coords (no prior GUIPointToWorldRay).
+                var cam = sv.camera;
+                _cursorRay = cam.ScreenPointToRay(new Vector3(_sceneMouseGui.x, cam.pixelHeight - _sceneMouseGui.y, 0f));
+                _hasCursorRay = true;
+            }
+            ResolveCursorHit(allowPickGameObject: false);
+        }
+
+        static bool IsValidPivotHit(Ray ray, Vector3 point, float maxD)
+        {
+            if (float.IsNaN(point.x) || float.IsNaN(point.y) || float.IsNaN(point.z)) return false;
+            var to = point - ray.origin;
+            float along = Vector3.Dot(to, ray.direction);
+            if (along < TrackballNavCamera.DistMin) return false;
+            if (along > maxD) return false;
+            if (to.magnitude > maxD * 1.01f) return false;
+            return true;
+        }
+
+        // Editor meshes usually have no colliders. Prefer exact triangle hits; fall back to
+        // renderer AABB. (HandleUtility.IntersectRayMesh is missing on some Unity builds.)
+        static bool TryMeshRaycast(Ray ray, float maxD, out Vector3 point)
+        {
+            point = default;
+            float bestExact = maxD;
+            float bestBounds = maxD;
+            bool haveExact = false;
+            bool haveBounds = false;
+            try
+            {
+#pragma warning disable CS0618
+                var filters = UnityEngine.Object.FindObjectsOfType<MeshFilter>();
+#pragma warning restore CS0618
+                if (filters == null) return false;
+                foreach (var mf in filters)
+                {
+                    if (mf == null || mf.sharedMesh == null) continue;
+                    if (!mf.gameObject.activeInHierarchy) continue;
+                    var rend = mf.GetComponent<Renderer>();
+                    if (rend != null && !rend.enabled) continue;
+
+                    float bd = maxD + 1f;
+                    bool boundsHit = rend != null && rend.bounds.IntersectRay(ray, out bd) &&
+                                     bd >= 0f && bd <= maxD;
+                    if (!boundsHit && rend != null) continue;
+
+                    if (boundsHit && bd < bestBounds)
+                    {
+                        bestBounds = bd;
+                        haveBounds = true;
+                        if (!haveExact)
+                            point = ray.GetPoint(bd);
+                    }
+
+                    var mesh = mf.sharedMesh;
+                    int triCount = mesh.triangles != null ? mesh.triangles.Length / 3 : 0;
+                    if (triCount <= 0 || triCount > MaxTrisExact) continue;
+                    if (TryRaycastMeshTriangles(ray, mesh, mf.transform.localToWorldMatrix, maxD,
+                            out var exactPt, out float exactD) && exactD < bestExact)
+                    {
+                        bestExact = exactD;
+                        point = exactPt;
+                        haveExact = true;
+                    }
+                }
+            }
+            catch { /* ignore */ }
+            return haveExact || haveBounds;
+        }
+
+        static bool TryRaycastMeshTriangles(Ray ray, Mesh mesh, Matrix4x4 localToWorld, float maxD,
+            out Vector3 point, out float dist)
+        {
+            point = default;
+            dist = maxD;
+            int[] tris;
+            Vector3[] verts;
+            try
+            {
+                tris = mesh.triangles;
+                verts = mesh.vertices;
+            }
+            catch { return false; }
+            if (tris == null || verts == null || tris.Length < 3) return false;
+
+            bool found = false;
+            for (int i = 0; i + 2 < tris.Length; i += 3)
+            {
+                int i0 = tris[i], i1 = tris[i + 1], i2 = tris[i + 2];
+                if ((uint)i0 >= (uint)verts.Length || (uint)i1 >= (uint)verts.Length ||
+                    (uint)i2 >= (uint)verts.Length) continue;
+                Vector3 v0 = localToWorld.MultiplyPoint3x4(verts[i0]);
+                Vector3 v1 = localToWorld.MultiplyPoint3x4(verts[i1]);
+                Vector3 v2 = localToWorld.MultiplyPoint3x4(verts[i2]);
+                if (!RayTriangle(ray, v0, v1, v2, out float t)) continue;
+                if (t < TrackballNavCamera.DistMin || t > dist || t > maxD) continue;
+                dist = t;
+                point = ray.GetPoint(t);
+                found = true;
+            }
+            return found;
+        }
+
+        // Möller–Trumbore ray/triangle intersection.
+        static bool RayTriangle(Ray ray, Vector3 v0, Vector3 v1, Vector3 v2, out float t)
+        {
+            t = 0f;
+            const float eps = 1e-8f;
+            Vector3 e1 = v1 - v0;
+            Vector3 e2 = v2 - v0;
+            Vector3 pvec = Vector3.Cross(ray.direction, e2);
+            float det = Vector3.Dot(e1, pvec);
+            if (det > -eps && det < eps) return false;
+            float invDet = 1f / det;
+            Vector3 tvec = ray.origin - v0;
+            float u = Vector3.Dot(tvec, pvec) * invDet;
+            if (u < 0f || u > 1f) return false;
+            Vector3 qvec = Vector3.Cross(tvec, e1);
+            float v = Vector3.Dot(ray.direction, qvec) * invDet;
+            if (v < 0f || u + v > 1f) return false;
+            t = Vector3.Dot(e2, qvec) * invDet;
+            return t > eps;
+        }
+
+        // Refresh scene AABB from EditorApplication.update only (not during OnGUI).
+        static void RefreshSceneExtentIfNeeded()
+        {
+            double now = EditorApplication.timeSinceStartup;
+            if (now - _sceneExtentT < SceneExtentCacheSec) return;
+            _sceneExtentT = now;
+            Bounds? agg = null;
+            try
+            {
+#pragma warning disable CS0618
+                var renderers = UnityEngine.Object.FindObjectsOfType<Renderer>();
+#pragma warning restore CS0618
+                if (renderers != null)
+                {
+                    foreach (var r in renderers)
+                    {
+                        if (r == null || !r.enabled || !r.gameObject.activeInHierarchy) continue;
+                        if (!agg.HasValue) agg = r.bounds;
+                        else
+                        {
+                            var b = agg.Value;
+                            b.Encapsulate(r.bounds);
+                            agg = b;
+                        }
+                    }
+                }
+            }
+            catch { /* ignore */ }
+            if (agg.HasValue)
+                _sceneExtentR = Mathf.Max(agg.Value.extents.magnitude, 0.1f);
+            else
+                _sceneExtentR = Mathf.Max(_focusDist, 1f);
+        }
+
+        static float MaxPivotDistanceCached()
+        {
+            float mult = Mathf.Max(_pivotExtentMult, 0.5f);
+            return Mathf.Max(_sceneExtentR * mult, TrackballNavCamera.DistMin * 10f);
+        }
+
+        static float MaxPivotDistance()
+        {
+            RefreshSceneExtentIfNeeded();
+            return MaxPivotDistanceCached();
+        }
+
+        static bool TryRendererHit(GameObject go, Ray ray, out Vector3 point)
+        {
+            point = default;
+            float best = float.MaxValue;
+            bool found = false;
+            var renderers = go.GetComponentsInChildren<Renderer>();
+            if (renderers != null)
+            {
+                foreach (var r in renderers)
+                {
+                    if (r == null) continue;
+                    if (r.bounds.IntersectRay(ray, out float dist) && dist >= 0f && dist < best)
+                    {
+                        best = dist;
+                        point = ray.GetPoint(dist);
+                        found = true;
+                    }
+                }
+            }
+            return found;
         }
 
         static int BridgePort()
@@ -165,6 +435,8 @@ namespace Astrolabe.TrackballNav
             if (sv == null) return;
             if (EditorApplication.isPlayingOrWillChangePlaymode) return;
 
+            RefreshSceneExtentIfNeeded();
+
             float now = (float)EditorApplication.timeSinceStartup;
             float idle;
             lock (GestureLock)
@@ -201,18 +473,26 @@ namespace Astrolabe.TrackballNav
             float walkSpeed = MiniJson.Float(adv, "walk_speed", 1f);
             var invert = MiniJson.Obj(adv, "invert") ?? new System.Collections.Generic.Dictionary<string, object>();
 
-            var sig = $"{navMode}|{op}|{style}|{zm}|{twistAction}|{lockHorizon}|{selOverride}";
+            var sig = $"{navMode}|{op}|{style}|{zm}|{twistAction}|{lockHorizon}|{selOverride}|{MiniJson.Bool(adv, "override_dynamic_clip", true)}";
             if (sig != _lastScheme)
             {
                 _lastScheme = sig;
-                Log($"scheme: nav={navMode} pivot={op} style={style} zoom={zm} twist={twistAction} horizon={lockHorizon} sel_override={selOverride}");
+                Log($"scheme: nav={navMode} pivot={op} style={style} zoom={zm} twist={twistAction} horizon={lockHorizon} sel_override={selOverride} override_dyn_clip={MiniJson.Bool(adv, "override_dynamic_clip", true)}");
             }
 
             ApplyInverts(navMode, op, ref o, ref p, ref z, invert);
 
-            float size = Mathf.Max(sv.size, TrackballNavCamera.DistMin);
-            var cam = TrackballNavCamera.FromSceneView(sv.pivot, sv.rotation, size);
-            _focusDist = TrackballNavCamera.ClampDist(size);
+            // SceneView.size is a fit-sphere radius, NOT eye→pivot distance.
+            // Real distance is sv.cameraDistance (= size/sin(fov/2) in perspective).
+            bool overrideDynClip = MiniJson.Bool(adv, "override_dynamic_clip", true);
+            float extentMult = MiniJson.Float(adv, "pivot_extent_mult", DefaultPivotExtentMult);
+            if (extentMult < 0.5f) extentMult = 0.5f;
+            _pivotExtentMult = extentMult;
+            MaybeOverrideDynamicClip(sv, overrideDynClip);
+
+            float eyeDist = ReadEyeDistance(sv);
+            var cam = TrackballNavCamera.FromSceneView(sv.pivot, sv.rotation, eyeDist);
+            _focusDist = eyeDist;
 
             bool changed;
             if (navMode == "fly")
@@ -223,11 +503,99 @@ namespace Astrolabe.TrackballNav
                 changed = ApplyOrbit(ref cam, o, p, z, op, style, zm, twistAction, lockHorizon, panScales, idle, selOverride, sv);
 
             if (!changed) return;
-            TrackballNavCamera.ToSceneView(cam, _focusDist, out var pivot, out var rot, out var newSize);
-            sv.pivot = pivot;
-            sv.rotation = rot;
-            sv.size = newSize;
+            TrackballNavCamera.ToSceneView(cam, _focusDist, out var pivot, out var rot, out _);
+            WriteSceneView(sv, pivot, rot, _focusDist);
             sv.Repaint();
+        }
+
+        // Eye→pivot distance. Never use sv.size directly for navigation math.
+        static float ReadEyeDistance(SceneView sv)
+        {
+            float d = Mathf.Abs(sv.cameraDistance);
+            if (float.IsNaN(d) || d < TrackballNavCamera.DistMin)
+                d = Mathf.Max(Mathf.Abs(sv.size), TrackballNavCamera.DistMin);
+            return TrackballNavCamera.ClampDist(d);
+        }
+
+        // Write pivot/rotation/size so Unity's cameraDistance matches the intended eye distance.
+        // Scale size by (newDist/oldDist) to preserve Unity's FOV/ortho conversion exactly.
+        static void WriteSceneView(SceneView sv, Vector3 pivot, Quaternion rotation, float eyeDist)
+        {
+            eyeDist = TrackballNavCamera.ClampDist(eyeDist);
+            if (float.IsNaN(pivot.x) || float.IsInfinity(pivot.x) ||
+                float.IsNaN(eyeDist) || eyeDist < TrackballNavCamera.DistMin)
+                return;
+
+            float oldDist = Mathf.Abs(sv.cameraDistance);
+            float oldSize = sv.size;
+            if (float.IsNaN(oldSize) || float.IsInfinity(oldSize) || oldSize <= 0f ||
+                float.IsNaN(oldDist) || oldDist < 1e-8f)
+            {
+                oldDist = eyeDist;
+                oldSize = sv.orthographic ? eyeDist * 0.5f : eyeDist * 0.5f;
+            }
+
+            float newSize;
+            if (oldDist > 1e-6f)
+                newSize = oldSize * (eyeDist / oldDist);
+            else if (sv.orthographic)
+                newSize = eyeDist * 0.5f;
+            else
+            {
+                float fov = 60f;
+                try { fov = sv.cameraSettings.fieldOfView; } catch { /* ignore */ }
+                float s = Mathf.Sin(fov * 0.5f * Mathf.Deg2Rad);
+                newSize = s > 1e-6f ? eyeDist * s : eyeDist;
+            }
+
+            if (float.IsNaN(newSize) || float.IsInfinity(newSize) || newSize <= 0f)
+                newSize = Mathf.Max(eyeDist * 0.5f, TrackballNavCamera.DistMin);
+            newSize = Mathf.Clamp(newSize, TrackballNavCamera.DistMin * 0.01f, MaxSceneSize);
+
+            sv.pivot = pivot;
+            sv.rotation = rotation;
+            sv.size = newSize;
+        }
+
+        // Scene View Camera → Dynamic Clipping: near/far = f(size). Feels like auto zoom-to-fit
+        // when looking at different scales. Override forces fixed clip planes while navigating;
+        // turning the override off restores the previous dynamicClip value.
+        static void MaybeOverrideDynamicClip(SceneView sv, bool overrideOn)
+        {
+            try
+            {
+                var cs = sv.cameraSettings;
+                if (cs == null) return;
+
+                if (overrideOn)
+                {
+                    if (_dynClipOverridden) return;
+                    if (!cs.dynamicClip) return; // already off — nothing to restore later
+                    _savedDynClip = true;
+                    float d = ReadEyeDistance(sv);
+                    cs.dynamicClip = false;
+                    cs.nearClip = Mathf.Clamp(d * 0.0005f, 0.01f, 10f);
+                    cs.farClip = Mathf.Max(1000f, d * 2000f);
+                    sv.cameraSettings = cs;
+                    _dynClipOverridden = true;
+                    Log($"dynamic-clip: overridden off (near={cs.nearClip:F3} far={cs.farClip:F0})");
+                    return;
+                }
+
+                // Override disabled — restore if we were the ones who turned it off.
+                if (_dynClipOverridden && _savedDynClip == true)
+                {
+                    cs.dynamicClip = true;
+                    sv.cameraSettings = cs;
+                    Log("dynamic-clip: restored on");
+                }
+                _dynClipOverridden = false;
+                _savedDynClip = null;
+            }
+            catch (Exception e)
+            {
+                Log($"dynamic-clip override failed: {e.Message}");
+            }
         }
 
         static bool ApplyOrbit(ref TrackballNavCamera.Cam cam, Vector3 o, Vector2 p, float z,
@@ -244,7 +612,7 @@ namespace Astrolabe.TrackballNav
                     if (twistAction == "roll" && !lockHorizon) orbitO.z = twist;
                     else if (twistAction == "zoom" || twistAction == "dolly")
                     {
-                        TrackballNavCamera.Dolly(ref cam, twist, _focusDist, null);
+                        ApplyDolly(ref cam, twist, null);
                         _gestureInvalid = true;
                         did = true;
                     }
@@ -253,7 +621,18 @@ namespace Astrolabe.TrackballNav
                 {
                     var pivot = OrbitPivot(op, cam, idle, selOverride, sv);
                     if (pivot.HasValue)
-                        _focusDist = TrackballNavCamera.ClampDist((cam.Location - pivot.Value).magnitude);
+                    {
+                        float d = (cam.Location - pivot.Value).magnitude;
+                        float maxD = MaxPivotDistance();
+                        if (d > maxD)
+                        {
+                            var dir = (pivot.Value - cam.Location);
+                            if (dir.sqrMagnitude > 1e-12f)
+                                pivot = cam.Location + dir.normalized * maxD;
+                            d = maxD;
+                        }
+                        _focusDist = TrackballNavCamera.ClampDist(d);
+                    }
                     TrackballNavCamera.Orbit(ref cam, orbitO, style == "turntable" || lockHorizon, pivot);
                     _zoomGesturePivot = null;
                     return true;
@@ -270,10 +649,24 @@ namespace Astrolabe.TrackballNav
             if (Mathf.Abs(z) > 1e-12f)
             {
                 _gestureInvalid = true;
-                TrackballNavCamera.Dolly(ref cam, z, _focusDist, ZoomToward(zm, idle, selOverride, sv));
+                ApplyDolly(ref cam, z, ZoomToward(zm, idle, selOverride, sv));
                 return true;
             }
             return false;
+        }
+
+        // Dolly the eye, then update focus distance to the look-at that stayed put.
+        // Without this, WriteSceneView keeps the old cameraDistance while the eye slides —
+        // zoom looks mild, then the next orbit snaps focusDist to the real eye→surface distance.
+        static void ApplyDolly(ref TrackballNavCamera.Cam cam, float z, Vector3? toward)
+        {
+            var lookAt = toward ?? (cam.Location + cam.Forward * TrackballNavCamera.ClampDist(_focusDist));
+            TrackballNavCamera.Dolly(ref cam, z, _focusDist, toward);
+            var toLook = lookAt - cam.Location;
+            float along = Vector3.Dot(toLook, cam.Forward);
+            // Prefer distance along view forward (eye→pivot); fall back to Euclidean if sideways.
+            float dist = along > 1e-4f ? along : toLook.magnitude;
+            _focusDist = TrackballNavCamera.ClampDist(dist);
         }
 
         static bool ApplyFly(ref TrackballNavCamera.Cam cam, Vector3 o, Vector2 p, float z, float speed)
@@ -322,7 +715,7 @@ namespace Astrolabe.TrackballNav
             {
                 if (!_gesturePivot.HasValue || _gestureInvalid || idle > PivotHoldIdle)
                 {
-                    _gesturePivot = ScreenCenterPivot(cam, sv, selOverride ? bbox : null) ?? ForwardPoint(cam);
+                    _gesturePivot = ScreenCenterPivot(cam, selOverride ? bbox : null) ?? ForwardPoint(cam);
                     _gestureInvalid = false;
                 }
                 return _gesturePivot;
@@ -331,7 +724,11 @@ namespace Astrolabe.TrackballNav
             {
                 if (!_gesturePivot.HasValue || _gestureInvalid || idle > PivotHoldIdle)
                 {
-                    _gesturePivot = CursorPivot(sv, selOverride ? bbox : null) ?? ForwardPoint(cam);
+                    EnsureCursorHit(sv);
+                    var hit = CursorPivot(selOverride ? bbox : null);
+                    if (!hit.HasValue)
+                        LogCursorMiss("orbit");
+                    _gesturePivot = hit ?? ForwardPoint(cam);
                     _gestureInvalid = false;
                 }
                 return _gesturePivot;
@@ -347,7 +744,13 @@ namespace Astrolabe.TrackballNav
             {
                 if (selOverride && center.HasValue) return center;
                 if (!_zoomGesturePivot.HasValue || idle > PivotHoldIdle)
-                    _zoomGesturePivot = CursorPivot(sv, selOverride ? bbox : null);
+                {
+                    EnsureCursorHit(sv);
+                    var hit = CursorPivot(selOverride ? bbox : null);
+                    if (!hit.HasValue)
+                        LogCursorMiss("zoom");
+                    _zoomGesturePivot = hit;
+                }
                 return _zoomGesturePivot;
             }
             return null;
@@ -359,50 +762,38 @@ namespace Astrolabe.TrackballNav
             return cam.Location + cam.Forward * d;
         }
 
-        static Vector3? ScreenCenterPivot(TrackballNavCamera.Cam cam, SceneView sv, Bounds? bbox)
+        static Vector3? ScreenCenterPivot(TrackballNavCamera.Cam cam, Bounds? bbox)
         {
             var ray = new Ray(cam.Location, cam.Forward);
-            return TraceRay(ray, bbox);
-        }
-
-        static Vector3? CursorPivot(SceneView sv, Bounds? bbox)
-        {
-            if (!_hasSceneMouse) return null;
-            var cam = sv.camera;
-            if (cam == null) return null;
-            // Scene GUI Y is top-down; camera pixel Y is bottom-up.
-            var sp = new Vector3(_sceneMouseGui.x, cam.pixelHeight - _sceneMouseGui.y, 0f);
-            var ray = cam.ScreenPointToRay(sp);
-            return TraceRay(ray, bbox);
-        }
-
-        static Vector3? TraceRay(Ray ray, Bounds? bbox)
-        {
-            if (Physics.Raycast(ray, out var hit, 1e7f))
+            float maxD = MaxPivotDistance();
+            if (Physics.Raycast(ray, out var hit, maxD, ~0, QueryTriggerInteraction.Ignore) &&
+                IsValidPivotHit(ray, hit.point, maxD))
             {
                 if (bbox.HasValue && !InBbox(hit.point, bbox.Value)) return null;
                 return hit.point;
             }
-            // Editor picking without colliders: PickGameObject along the ray.
-            try
+            if (TryMeshRaycast(ray, maxD, out var meshPt) && IsValidPivotHit(ray, meshPt, maxD))
             {
-                var go = HandleUtility.PickGameObject(HandleUtility.WorldToGUIPoint(ray.origin + ray.direction), false);
-                if (go != null)
-                {
-                    var r = go.GetComponent<Renderer>();
-                    if (r != null)
-                    {
-                        var c = r.bounds.center;
-                        if (bbox.HasValue && !InBbox(c, bbox.Value)) return null;
-                        // Approximate surface: closest point on bounds along ray.
-                        if (r.bounds.IntersectRay(ray, out float dist))
-                            return ray.GetPoint(dist);
-                        return c;
-                    }
-                }
+                if (bbox.HasValue && !InBbox(meshPt, bbox.Value)) return null;
+                return meshPt;
             }
-            catch { /* ignore */ }
             return null;
+        }
+
+        static Vector3? CursorPivot(Bounds? bbox)
+        {
+            if (!_hasSceneMouse) return null;
+            if (!_cursorHitValid || !_cursorHit.HasValue) return null;
+            if (bbox.HasValue && !InBbox(_cursorHit.Value, bbox.Value)) return null;
+            return _cursorHit;
+        }
+
+        static void LogCursorMiss(string why)
+        {
+            double now = EditorApplication.timeSinceStartup;
+            if (now - _lastCursorMissLog < 1.0) return;
+            _lastCursorMissLog = now;
+            Log($"cursor-pivot: nothing under cursor ({_sceneMouseGui.x:F0},{_sceneMouseGui.y:F0}) → view/forward fallback ({why})");
         }
 
         static bool InBbox(Vector3 p, Bounds b)

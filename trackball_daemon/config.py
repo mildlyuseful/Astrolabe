@@ -119,9 +119,15 @@ _DEFAULT_UNREAL_ADVANCED = {
     "invert": _DEFAULT_UNREAL_INVERT,   # per-mode direction flips (applied in the add-on)
 }
 
-# Unity reuses the Unreal advanced block. Godot: turntable-only, no roll (editor cursor is
-# yaw/pitch only — free orbit / twist→roll cannot persist).
+# Unity reuses the Unreal advanced block, plus a Scene-view-only override for Dynamic Clipping
+# (Camera overlay: near/far auto-fit from size — feels like zoom-to-fit while looking around).
+# Godot: turntable-only, no roll (editor cursor is yaw/pitch only — free orbit / twist→roll
+# cannot persist).
 _DEFAULT_UNITY_ADVANCED = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
+_DEFAULT_UNITY_ADVANCED["override_dynamic_clip"] = True  # force SceneView.cameraSettings.dynamicClip off
+# Soft max for under-cursor / auto-depth pivots: scene AABB radius × this multiplier.
+# Stops horizon-line hits from rocketing the camera to infinity.
+_DEFAULT_UNITY_ADVANCED["pivot_extent_mult"] = 8.0
 _DEFAULT_GODOT_ADVANCED = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
 _DEFAULT_GODOT_ADVANCED["twist_action"] = "zoom"
 _DEFAULT_GODOT_ADVANCED["lock_horizon"] = True

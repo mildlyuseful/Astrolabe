@@ -920,6 +920,20 @@ class SettingsWindow:
         self._bool_row(s3, "Pan scales with focus distance", adv + ("pan_scales_with_distance",))
         self._entry_row(s3, "Auto-depth hold (s)", ("apps", app_key, "view_pivot_hold_sec"),
                         hint="'Auto Depth' / 'Under Cursor' pivot: seconds still before it re-raycasts")
+        if app_key == "unity":
+            self._bool_row(s3, "Override Unity Dynamic Clipping",
+                           adv + ("override_dynamic_clip",))
+            ttk.Label(s3, text="Scene View Camera → Dynamic Clipping auto-fits near/far planes from "
+                               "the view size (can feel like zoom-to-fit while you look around). When "
+                               "on, Trackball Nav forces it off and uses fixed clip planes; turning "
+                               "this off restores Dynamic Clipping.",
+                      foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
+            self._entry_row(s3, "Pivot extent limit ×", adv + ("pivot_extent_mult",),
+                            hint="max under-cursor / auto-depth distance = scene size × this")
+            ttk.Label(s3, text="Caps how far a cursor/view pivot can be from the camera (scene "
+                               "AABB radius × multiplier). Stops near-horizon hits from flinging "
+                               "the view. Typical 4–16; default 8.",
+                      foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s5 = ttk.LabelFrame(parent, text="Invert directions — independent per mode")
         s5.pack(fill="x", padx=10, pady=6)
