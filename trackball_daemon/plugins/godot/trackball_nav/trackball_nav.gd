@@ -1,7 +1,7 @@
 @tool
 extends EditorPlugin
 
-const ADDIN_VERSION := "0.1.0"
+const ADDIN_VERSION := "0.1.3"
 const DEFAULT_PORT := 47900
 const PIVOT_HOLD_IDLE := 0.35
 const OBJ_CACHE_SEC := 0.5
@@ -154,14 +154,17 @@ func _apply(frame: Dictionary, idle: float) -> void:
 	var p := _vec2(frame.get("p", [0, 0]))
 	var z := float(frame.get("z", 0.0))
 	var op := str(frame.get("op", "view"))
-	var style := str(frame.get("os", "free"))
+	# Godot editor: turntable only (no free trackball / roll).
+	var style := "turntable"
 	var zm := str(frame.get("zm", "to_center"))
 	var adv: Dictionary = frame.get("adv", {})
 	if typeof(adv) != TYPE_DICTIONARY:
 		adv = {}
 	var nav_mode := str(adv.get("nav_mode", "orbit"))
-	var lock_h := bool(adv.get("lock_horizon", false))
-	var twist_action := str(adv.get("twist_action", "roll"))
+	var lock_h := true
+	var twist_action := str(adv.get("twist_action", "zoom"))
+	if twist_action == "roll":
+		twist_action = "none"
 	var pan_scales := bool(adv.get("pan_scales_with_distance", true))
 	var sel_override := bool(adv.get("selection_overrides_pivot", true))
 	var fly_speed := float(adv.get("fly_speed", 1.0))
@@ -195,24 +198,21 @@ func _apply(frame: Dictionary, idle: float) -> void:
 
 
 func _apply_orbit(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float,
-		op: String, style: String, zm: String, twist_action: String, lock_h: bool,
+		op: String, _style: String, zm: String, twist_action: String, _lock_h: bool,
 		pan_scales: bool, idle: float, sel_override: bool) -> bool:
 	if absf(o.x) > 1e-12 or absf(o.y) > 1e-12 or absf(o.z) > 1e-12:
 		var twist := o.z
-		var orbit_o := Vector3(o.x, o.y, 0.0)
+		var orbit_o := Vector3(o.x, o.y, 0.0)  # never roll
 		var did := false
-		if absf(twist) > 1e-12:
-			if twist_action == "roll" and not lock_h:
-				orbit_o.z = twist
-			elif twist_action in ["zoom", "dolly"]:
-				TrackballNavCamera.dolly(cam, twist, _focus_dist, null)
-				_gesture_invalid = true
-				did = true
-		if absf(orbit_o.x) > 1e-12 or absf(orbit_o.y) > 1e-12 or absf(orbit_o.z) > 1e-12:
+		if absf(twist) > 1e-12 and twist_action in ["zoom", "dolly"]:
+			TrackballNavCamera.dolly(cam, twist, _focus_dist, null)
+			_gesture_invalid = true
+			did = true
+		if absf(orbit_o.x) > 1e-12 or absf(orbit_o.y) > 1e-12:
 			var pivot = _orbit_pivot(op, cam, idle, sel_override)
 			if pivot != null:
 				_focus_dist = TrackballNavCamera.clamp_dist((cam.location - pivot).length())
-			TrackballNavCamera.orbit(cam, orbit_o, style == "turntable" or lock_h, pivot)
+			TrackballNavCamera.orbit(cam, orbit_o, true, pivot)  # turntable only
 			_zoom_gesture_pivot = null
 			return true
 		return did
@@ -231,7 +231,8 @@ func _apply_orbit(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float,
 
 func _apply_fly(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float, speed: float) -> bool:
 	if absf(o.x) > 1e-12 or absf(o.y) > 1e-12 or absf(o.z) > 1e-12:
-		TrackballNavCamera.look(cam, o, false)
+		# Horizon-locked look only — no bank/roll (editor cannot store it).
+		TrackballNavCamera.look(cam, Vector3(o.x, o.y, 0.0), true)
 		return true
 	if absf(p.x) > 1e-12 or absf(p.y) > 1e-12 or absf(z) > 1e-12:
 		TrackballNavCamera.fly_move(cam, p, z, _focus_dist, speed)
@@ -320,10 +321,10 @@ func _cursor_pivot(bbox):
 
 
 func _trace_ray(origin: Vector3, direction: Vector3, bbox):
-	var space := EditorInterface.get_edited_scene_root()
+	var space: Node = EditorInterface.get_edited_scene_root()
 	if space == null:
 		return null
-	var world := space.get_world_3d()
+	var world: World3D = space.get_world_3d()
 	if world == null:
 		return null
 	var n := direction.length()
@@ -333,7 +334,7 @@ func _trace_ray(origin: Vector3, direction: Vector3, bbox):
 	var query := PhysicsRayQueryParameters3D.create(origin, origin + d * TRACE_BIG)
 	query.collide_with_areas = false
 	query.collide_with_bodies = true
-	var hit := world.direct_space_state.intersect_ray(query)
+	var hit: Dictionary = world.direct_space_state.intersect_ray(query)
 	if hit.is_empty():
 		# Fallback: editor raycast against MeshInstance3D AABBs in the edited scene.
 		return _mesh_aabb_ray(origin, d, space, bbox)
@@ -358,9 +359,9 @@ func _mesh_aabb_ray(origin: Vector3, direction: Vector3, root: Node, bbox):
 		if n is MeshInstance3D:
 			var mi := n as MeshInstance3D
 			var aabb: AABB = mi.global_transform * mi.get_aabb()
-			var t = _aabb_ray(origin, direction, aabb)
+			var t: float = _aabb_ray(origin, direction, aabb)
 			if t >= 0.0 and t < best_t:
-				var p := origin + direction * t
+				var p: Vector3 = origin + direction * t
 				if bbox == null or _in_bbox(p, bbox):
 					best_t = t
 					best = p

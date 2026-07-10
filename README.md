@@ -388,10 +388,17 @@ selection override). Play mode is ignored.
 ### Godot (implemented — EditorPlugin)
 Godot 4's editor 3D viewport uses the same full control suite as Unity/Unreal.
 
-1. Open a Godot project, then Settings → **3D Apps** → Godot → **Set up** (copies into
+1. Open your project in Godot, then Settings → **3D Apps** → Godot → **Set up** (copies into
    `addons/trackball_nav/` and enables the plugin in `project.godot`).
 2. Reload the project or restart Godot.
 3. Daemon **3D mode**, focus Godot — row shows **connected**.
+
+Set up does **not** scan a fixed projects folder — it only sees running Godot `--path` /
+`project.godot` args and recent entries under `%APPDATA%\Godot\` (Godot 4 `projects.cfg`
+uses `[C:/path/to/project]` section headers). If it can't find your
+project, the dialog stages the add-on and gives **Copy** buttons for a manual install:
+copy into `<YourProject>\addons\trackball_nav\`, then enable **Trackball Nav** under
+Project → Project Settings → Plugins.
 
 > Maintainer guide: [`docs/apps/godot.md`](docs/apps/godot.md).
 

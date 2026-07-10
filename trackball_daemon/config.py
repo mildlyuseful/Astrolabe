@@ -119,9 +119,12 @@ _DEFAULT_UNREAL_ADVANCED = {
     "invert": _DEFAULT_UNREAL_INVERT,   # per-mode direction flips (applied in the add-on)
 }
 
-# Unity / Godot reuse the Unreal advanced block (free-fly editor cameras, Blender-parity suite).
+# Unity reuses the Unreal advanced block. Godot: turntable-only, no roll (editor cursor is
+# yaw/pitch only — free orbit / twist→roll cannot persist).
 _DEFAULT_UNITY_ADVANCED = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
 _DEFAULT_GODOT_ADVANCED = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
+_DEFAULT_GODOT_ADVANCED["twist_action"] = "zoom"
+_DEFAULT_GODOT_ADVANCED["lock_horizon"] = True
 
 
 def effective_scheme(general_scheme, app_scheme):
@@ -181,9 +184,10 @@ def _unity_app():
 
 
 def _godot_app():
-    """Godot editor 3D viewport: same Blender/Unreal-parity advanced block as Unity."""
+    """Godot editor 3D viewport: turntable-only (no free orbit / roll — editor limitation)."""
     a = _app()
     a["advanced"] = copy.deepcopy(_DEFAULT_GODOT_ADVANCED)
+    a["bindings"]["scheme"]["orbit_style"] = "turntable"
     return a
 
 

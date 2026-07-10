@@ -849,8 +849,12 @@ class SettingsWindow:
                            "Viewpoint (turn in place); it shares Orbit's pan/zoom inverts.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(2, 4))
 
-    def _engine_bindings_fields(self, parent, app_key, title):
-        """Shared Blender/Unreal-parity panel for Unity and Godot (free-fly editor cameras)."""
+    def _engine_bindings_fields(self, parent, app_key, title, *, no_roll=False):
+        """Shared Blender/Unreal-parity panel for Unity and Godot (free-fly editor cameras).
+
+        ``no_roll``: Godot editor viewport is yaw/pitch only — hide free orbit, roll/bank,
+        and lock-horizon (always turntable).
+        """
         base = ("apps", app_key, "bindings")
         adv = ("apps", app_key, "advanced")
         inv = adv + ("invert",)
@@ -873,23 +877,34 @@ class SettingsWindow:
         self._combo_row(s1, "Mode", adv + ("nav_mode",), values=["orbit", "fly", "walk"])
         self._entry_row(s1, "Fly speed", adv + ("fly_speed",))
         self._entry_row(s1, "Walk speed", adv + ("walk_speed",))
-        ttk.Label(s1, text="Fly = free 6DOF (banks on twist; forward follows pitch). Walk = horizon-"
-                           "locked look, movement stays on the ground plane.",
-                  foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
+        if no_roll:
+            ttk.Label(s1, text="Fly/walk look is horizon-locked (Godot's editor camera has no roll). "
+                               "Movement: fly follows view forward; walk stays on the ground plane.",
+                      foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
+        else:
+            ttk.Label(s1, text="Fly = free 6DOF (banks on twist; forward follows pitch). Walk = horizon-"
+                               "locked look, movement stays on the ground plane.",
+                      foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s2 = ttk.LabelFrame(parent, text="Orbit")
         s2.pack(fill="x", padx=10, pady=6)
-        self._mapped_combo_row(s2, "Orbit method", base + ("scheme", "orbit_style"),
-                               [("Default (General)", "default"), ("Trackball (free)", "free"),
-                                ("Turntable", "turntable")])
+        if no_roll:
+            self._mapped_combo_row(s2, "Orbit method", base + ("scheme", "orbit_style"),
+                                   [("Turntable", "turntable")])
+            self._combo_row(s2, "Twist action", adv + ("twist_action",),
+                            values=["zoom", "dolly", "none"])
+        else:
+            self._mapped_combo_row(s2, "Orbit method", base + ("scheme", "orbit_style"),
+                                   [("Default (General)", "default"), ("Trackball (free)", "free"),
+                                    ("Turntable", "turntable")])
+            self._combo_row(s2, "Twist action", adv + ("twist_action",),
+                            values=["roll", "zoom", "dolly", "none"])
+            self._bool_row(s2, "Lock horizon (keep level even in free orbit)", adv + ("lock_horizon",))
         self._mapped_combo_row(s2, "Orbit around", base + ("scheme", "orbit_pivot"),
                                [("Default (General)", "default"), ("Viewpoint (turn in place)", "viewpoint"),
                                 ("Auto Depth (surface)", "view"), ("Under Cursor (mouse)", "cursor"),
                                 ("Selection", "object"),
                                 ("World Origin", "origin")])
-        self._combo_row(s2, "Twist action", adv + ("twist_action",),
-                        values=["roll", "zoom", "dolly", "none"])
-        self._bool_row(s2, "Lock horizon (keep level even in free orbit)", adv + ("lock_horizon",))
         self._bool_row(s2, "Selection overrides orbit center",
                        ("apps", app_key, "selection_overrides_pivot"))
         ttk.Label(s2, text="\"Auto Depth\" raycasts under screen-centre; \"Under Cursor\" under the "
@@ -908,14 +923,24 @@ class SettingsWindow:
 
         s5 = ttk.LabelFrame(parent, text="Invert directions — independent per mode")
         s5.pack(fill="x", padx=10, pady=6)
-        self._invert_row(s5, "Orbit", inv + ("orbit",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
-                          ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
-        self._invert_row(s5, "Viewpoint", inv + ("viewpoint",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
-        self._invert_row(s5, "Fly", inv + ("fly",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
-                          ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+        if no_roll:
+            self._invert_row(s5, "Orbit", inv + ("orbit",),
+                             [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
+                              ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
+            self._invert_row(s5, "Viewpoint", inv + ("viewpoint",),
+                             [("Pitch", "pitch"), ("Yaw", "yaw")])
+            self._invert_row(s5, "Fly", inv + ("fly",),
+                             [("Pitch", "pitch"), ("Yaw", "yaw"),
+                              ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+        else:
+            self._invert_row(s5, "Orbit", inv + ("orbit",),
+                             [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
+                              ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
+            self._invert_row(s5, "Viewpoint", inv + ("viewpoint",),
+                             [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
+            self._invert_row(s5, "Fly", inv + ("fly",),
+                             [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
+                              ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
         self._invert_row(s5, "Walk", inv + ("walk",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"),
                           ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
@@ -932,8 +957,9 @@ class SettingsWindow:
     def _godot_bindings_fields(self, parent):
         self._engine_bindings_fields(
             parent, "godot",
-            "Godot navigation — Blender-style options for the editor 3D viewport. Applies live "
-            "when Godot is focused.")
+            "Godot navigation — editor 3D viewport (turntable only; no roll — Godot's camera "
+            "cursor is yaw/pitch only).",
+            no_roll=True)
 
     # --- tab c: general bindings --------------------------------------------------
     def _build_general_tab(self, nb):

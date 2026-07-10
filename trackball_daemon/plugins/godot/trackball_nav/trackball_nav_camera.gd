@@ -1,5 +1,8 @@
 # Pure camera math for Trackball Nav (no EditorInterface). Godot 4 is RIGHT-HANDED, Y-up.
 # Free-fly eye + orthonormal basis; orbit/pan/dolly/fly/walk synthesised like Unreal.
+#
+# The Godot editor viewport cursor is yaw/pitch only (no roll). Callers must use turntable
+# orbit and must not feed twist-as-roll — free/banked bases are not persistable there.
 extends RefCounted
 class_name TrackballNavCamera
 
@@ -74,6 +77,7 @@ static func orbit(cam: Cam, o: Vector3, turntable: bool, pivot) -> void:
 		if absf(pitch) > 1e-15:
 			_rotate_frame(cam, cam.right, pitch, pivot)
 		return
+	# Free path kept for math parity / tests; Godot plugin always passes turntable=true.
 	var axis := cam.right * pitch + cam.up * yaw + cam.forward * twist
 	var angle := axis.length()
 	if angle > 1e-12:

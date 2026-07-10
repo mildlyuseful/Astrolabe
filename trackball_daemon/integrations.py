@@ -809,11 +809,31 @@ def _godot_running_project_paths() -> list:
 
 
 def _godot_recent_projects() -> list:
-    """Godot editor recent projects: %APPDATA%\\Godot\\editor_settings-4.tres or projects.cfg."""
+    """Godot editor recent projects from %APPDATA%\\Godot\\.
+
+    Godot 4 ``projects.cfg`` stores each project as an INI section whose *name* is the
+    absolute path (forward slashes), e.g.::
+
+        [C:/Users/me/Documents/MyGame]
+        favorite=false
+
+    Older / alternate files (``editor_settings-*.tres``) may embed paths as plain text.
+    """
     paths = []
     appdata = os.environ.get("APPDATA", "")
-    # Godot 4: editor_settings-4.tres contains recent_directories / projects — also
-    # %APPDATA%\\Godot\\projects.cfg (ini-like) on some builds.
+
+    def _accept(p: str) -> None:
+        if not p:
+            return
+        p = p.strip().strip('"').replace("/", os.sep)
+        if p.lower().endswith("project.godot"):
+            p = os.path.dirname(p)
+        try:
+            if os.path.isdir(p) and (Path(p) / "project.godot").exists():
+                paths.append(p)
+        except Exception:
+            pass
+
     for name in ("projects.cfg", "editor_settings-4.tres", "editor_settings-3.tres"):
         cand = Path(appdata) / "Godot" / name
         if not cand.exists():
@@ -822,16 +842,22 @@ def _godot_recent_projects() -> list:
             text = cand.read_text(encoding="utf-8", errors="ignore")
         except Exception:
             continue
-        # Heuristic: lines/paths containing project.godot or absolute dirs with that file.
-        for raw in text.replace("\\\\", "\\").splitlines():
-            for part in raw.replace(",", " ").replace('"', " ").split():
-                p = part.strip()
+        text = text.replace("\\\\", "\\")
+        for raw in text.splitlines():
+            line = raw.strip()
+            # projects.cfg: section header is the project directory.
+            if line.startswith("[") and line.endswith("]") and len(line) > 2:
+                inner = line[1:-1].strip()
+                # Skip non-path sections (e.g. [application] if ever present).
+                if ":" in inner or inner.startswith("/") or (len(inner) >= 2 and inner[1] == ":"):
+                    _accept(inner)
+                continue
+            for part in line.replace(",", " ").replace('"', " ").split():
+                p = part.strip().strip("[]")
                 if not p:
                     continue
-                if p.lower().endswith("project.godot"):
-                    p = os.path.dirname(p)
-                if os.path.isdir(p) and (Path(p) / "project.godot").exists():
-                    paths.append(p)
+                if p.lower().endswith("project.godot") or (":" in p) or p.startswith("/"):
+                    _accept(p)
     return paths
 
 
@@ -908,9 +934,28 @@ def install_godot(appdef: "AppDef", cfg) -> tuple[bool, str]:
         a["installed"] = False
         cfg.save()
         return False, (
-            "No Godot project path was found (open a project, then Set up again).\n"
-            "A staged copy is at:\n  " + str(dest)
-        ), [("Copy staged add-on folder", str(dest))]
+            "No Godot project was found automatically.\n\n"
+            "Set up looks for projects in:\n"
+            "  • Running Godot processes (--path / project.godot on the command line)\n"
+            "  • Recent projects under %APPDATA%\\Godot\\ "
+            "(projects.cfg / editor_settings-4.tres)\n"
+            "It does not scan a fixed projects folder.\n\n"
+            "Easiest fix: open your project in Godot, then click Set up again.\n\n"
+            "Manual install:\n"
+            "  1. Copy the staged trackball_nav folder into:\n"
+            "       <YourProject>\\addons\\trackball_nav\\\n"
+            "  2. In Godot: Project → Project Settings → Plugins → enable "
+            "\"Trackball Nav\"\n"
+            "     (or add under [editor_plugins] in project.godot:\n"
+            "      enabled=PackedStringArray("
+            "\"res://addons/trackball_nav/plugin.cfg\"))\n"
+            "  3. Reload the project or restart Godot, switch the daemon to 3D mode, "
+            "and focus the editor.\n\n"
+            "Staged add-on folder:\n  " + str(dest)
+        ), [
+            ("Copy staged add-on folder", str(dest)),
+            ("Copy plugin.cfg path", "res://addons/trackball_nav/plugin.cfg"),
+        ]
     copied = []
     for proj in projects:
         dest = Path(proj) / "addons" / "trackball_nav"
