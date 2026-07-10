@@ -2,12 +2,12 @@
 and auto-update the bundled add-ons.
 
 Detection is best-effort via common Windows install paths. Every registered app has a real
-`setup`: the socket-add-on apps (Fusion, Blender, FreeCAD, SketchUp, Unreal) copy their
-bundled add-on into the host app's add-on directory, AutoCAD stages its bundled NETLOAD
-plugin, and the in-process apps (SolidWorks, Onshape) verify prerequisites and enable the
-driver (no file copy). `auto_update` re-copies a bundled add-on only when its bundled
-version is newer than the installed one (version-gated -- see HANDOFF 12.11), preserving
-the user's enabled state.
+`setup`: the socket-add-on apps (Fusion, Blender, FreeCAD, SketchUp, Unreal, Unity, Godot,
+Rhino) copy their bundled add-on into the host app's add-on directory, AutoCAD stages its
+bundled NETLOAD plugin, and the in-process apps (SolidWorks, Onshape) verify prerequisites
+and enable the driver (no file copy). `auto_update` re-copies a bundled add-on only when its
+bundled version is newer than the installed one (version-gated -- see HANDOFF 12.11),
+preserving the user's enabled state.
 """
 import glob
 import json
@@ -68,6 +68,49 @@ def _unreal_exe_glob():
 
 def detect_unreal():
     return _first_glob(_unreal_exe_glob())
+
+
+def detect_unity():
+    # Unity Hub installs editors under Editor\\Unity.exe; standalone installs vary.
+    return _first_glob(
+        os.path.join(_pf(), "Unity", "Hub", "Editor", "*", "Editor", "Unity.exe"),
+        os.path.join(_pf(), "Unity", "Editor", "Unity.exe"),
+        os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+                     "Unity", "Editor", "Unity.exe"),
+    )
+
+
+def detect_godot():
+    # Steam / itch / manual zips: Godot_v4*.exe or Godot*.exe in Program Files or user Downloads.
+    la = os.environ.get("LOCALAPPDATA", "")
+    return _first_glob(
+        os.path.join(_pf(), "Godot*", "Godot*.exe"),
+        os.path.join(_pf(), "Godot", "Godot*.exe"),
+        os.path.join(la, "Programs", "Godot*", "Godot*.exe"),
+        os.path.join(os.environ.get("USERPROFILE", ""), "Downloads", "Godot*.exe"),
+    )
+
+
+def detect_rhino():
+    # Rhino 8 default: C:\\Program Files\\Rhino 8\\System\\Rhino.exe
+    found = _first_glob(
+        os.path.join(_pf(), "Rhino 8", "System", "Rhino.exe"),
+        os.path.join(_pf(), "Rhino *", "System", "Rhino.exe"),
+    )
+    if found:
+        return found
+    # Registry fallback (non-default install path).
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SOFTWARE\McNeel\Rhinoceros\8.0\Install") as key:
+            install, _ = winreg.QueryValueEx(key, "InstallPath")
+            exe = Path(install) / "System" / "Rhino.exe"
+            if exe.exists():
+                return str(exe)
+    except Exception:
+        pass
+    return None
 
 
 def detect_fusion():
@@ -577,7 +620,8 @@ def install_unreal(appdef: "AppDef", cfg) -> tuple[bool, str]:
             "  - Copy this bundled folder into the engine's Plugins dir (as admin):\n"
             "        " + str(src) + "\n"
             "  - Or copy it into YOUR PROJECT's Plugins folder (no admin needed):\n"
-            "        <YourProject>\\Plugins\\TrackballNav")
+            "        <YourProject>\\Plugins\\TrackballNav"
+        ), [("Copy bundled plugin folder", str(src))]
     a["installed"] = True
     if not was_installed:                                # don't re-enable on an update
         a["enabled"] = True
@@ -596,6 +640,393 @@ def install_unreal(appdef: "AppDef", cfg) -> tuple[bool, str]:
         "the level viewport so it has focus." + tail)
 
 
+# --- Unity Editor: UPM package into the open project's Packages/ folder -----------------
+def _unity_running_project_paths() -> list:
+    """Project paths from running Unity.exe command lines (-projectpath), best-effort."""
+    paths = []
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["wmic", "process", "where", "name='Unity.exe'", "get", "CommandLine"],
+            stderr=subprocess.DEVNULL, text=True, timeout=5)
+        for line in out.splitlines():
+            low = line.lower()
+            if "-projectpath" not in low:
+                continue
+            # -projectpath "C:\path with spaces"  OR  -projectpath C:\path
+            idx = low.index("-projectpath") + len("-projectpath")
+            rest = line[idx:].strip()
+            if rest.startswith('"'):
+                end = rest.find('"', 1)
+                p = rest[1:end] if end > 0 else rest[1:]
+            else:
+                p = rest.split()[0] if rest.split() else ""
+            if p and os.path.isdir(p):
+                paths.append(p)
+    except Exception:
+        pass
+    return paths
+
+
+def _unity_hub_recent_projects() -> list:
+    """Recent project paths from Unity Hub's secondary install path / projectBasePath prefs."""
+    paths = []
+    la = os.environ.get("APPDATA", "")
+    # Hub stores projects in AppData\\Roaming\\UnityHub\\projects-v1.json (varies by Hub version).
+    candidates = [
+        Path(la) / "UnityHub" / "projects-v1.json",
+        Path(la) / "UnityHub" / "projectBasePaths.json",
+    ]
+    for cand in candidates:
+        if not cand.exists():
+            continue
+        try:
+            with open(cand, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                for _k, v in data.items():
+                    if isinstance(v, dict):
+                        p = v.get("path") or v.get("projectPath")
+                        if p and os.path.isdir(p):
+                            paths.append(p)
+                    elif isinstance(v, str) and os.path.isdir(v):
+                        paths.append(v)
+            elif isinstance(data, list):
+                for item in data:
+                    if isinstance(item, str) and os.path.isdir(item):
+                        paths.append(item)
+                    elif isinstance(item, dict):
+                        p = item.get("path") or item.get("projectPath")
+                        if p and os.path.isdir(p):
+                            paths.append(p)
+        except Exception:
+            continue
+    return paths
+
+
+def _unity_project_candidates() -> list:
+    """Deduped project roots: running editors first, then Hub recents."""
+    seen, out = set(), []
+    for p in _unity_running_project_paths() + _unity_hub_recent_projects():
+        ap = os.path.abspath(p)
+        if ap not in seen and os.path.isdir(ap):
+            seen.add(ap)
+            out.append(ap)
+    return out
+
+
+def unity_plugin_dir() -> Path:
+    """Primary install dir for version reads: first project Packages/…, else APPDATA fallback."""
+    projects = _unity_project_candidates()
+    if projects:
+        return Path(projects[0]) / "Packages" / "com.astrolabe.trackball-nav"
+    return Path(os.environ.get("APPDATA", "")) / "TrackballDaemon" / "unity" / "com.astrolabe.trackball-nav"
+
+
+def install_unity(appdef: "AppDef", cfg) -> tuple[bool, str]:
+    """Copy the UPM package into each detected Unity project's Packages/ folder. UPM auto-loads
+    packages under Packages/; InitializeOnLoad starts the broker client after domain reload."""
+    if not detect_unity() and not _unity_project_candidates():
+        # Still allow install into APPDATA fallback if a project path appears later — but warn.
+        pass
+    src = _bundled_addin("unity", "com.astrolabe.trackball-nav")
+    if not src.exists():
+        return False, "Bundled Unity package is missing from this build."
+    projects = _unity_project_candidates()
+    a = cfg.data["apps"][appdef.key]
+    was_installed = a.get("installed", False)
+    if not projects:
+        # Fallback: stage under APPDATA and ask the user to open a project + Set up again.
+        dest = Path(os.environ.get("APPDATA", "")) / "TrackballDaemon" / "unity" / "com.astrolabe.trackball-nav"
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+        except OSError as e:
+            return False, f"Couldn't stage the Unity package: {e}"
+        a["installed"] = False
+        cfg.save()
+        return False, (
+            "Unity Editor was detected (or not), but no open/recent project path was found.\n\n"
+            "Open a Unity project, then click Set up again — the package will be copied into\n"
+            "  <YourProject>\\Packages\\com.astrolabe.trackball-nav\\\n"
+            "A staged copy is at:\n  " + str(dest)
+        ), [("Copy staged package folder", str(dest))]
+    copied = []
+    for proj in projects:
+        dest = Path(proj) / "Packages" / "com.astrolabe.trackball-nav"
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+            copied.append(proj)
+        except OSError:
+            continue
+    if not copied:
+        return False, "Couldn't write the Unity package into any project Packages/ folder."
+    a["installed"] = True
+    if not was_installed:
+        a["enabled"] = True
+    a["addin_version"] = bundled_addin_version(appdef.key) or ""
+    cfg.save()
+    verb = "updated" if was_installed else "installed"
+    return True, (
+        f"Trackball Nav package {verb} (v{a['addin_version']}) into {len(copied)} project(s).\n\n"
+        "Unity will import the UPM package on the next domain reload (or restart the Editor).\n"
+        "Switch the daemon to 3D mode and focus Unity — the row flips to \"connected\" once the "
+        "Editor script handshakes. Scene view only (not Play mode)."
+    )
+
+
+# --- Godot 4: EditorPlugin into the open project's addons/ folder ----------------------
+def _godot_running_project_paths() -> list:
+    paths = []
+    try:
+        import subprocess
+        out = subprocess.check_output(
+            ["wmic", "process", "where", "name like 'Godot%'", "get", "CommandLine"],
+            stderr=subprocess.DEVNULL, text=True, timeout=5)
+        for line in out.splitlines():
+            # Godot is often launched as: Godot_v4.x.x.exe --path "C:\project"  or with project.godot arg
+            low = line.lower()
+            if "--path" in low:
+                idx = low.index("--path") + len("--path")
+                rest = line[idx:].strip()
+                if rest.startswith('"'):
+                    end = rest.find('"', 1)
+                    p = rest[1:end] if end > 0 else rest[1:]
+                else:
+                    p = rest.split()[0] if rest.split() else ""
+                if p and os.path.isdir(p):
+                    paths.append(p)
+            # Bare project.godot on the command line
+            for token in line.replace('"', " ").split():
+                if token.lower().endswith("project.godot"):
+                    p = os.path.dirname(token)
+                    if p and os.path.isdir(p):
+                        paths.append(p)
+    except Exception:
+        pass
+    return paths
+
+
+def _godot_recent_projects() -> list:
+    """Godot editor recent projects: %APPDATA%\\Godot\\editor_settings-4.tres or projects.cfg."""
+    paths = []
+    appdata = os.environ.get("APPDATA", "")
+    # Godot 4: editor_settings-4.tres contains recent_directories / projects — also
+    # %APPDATA%\\Godot\\projects.cfg (ini-like) on some builds.
+    for name in ("projects.cfg", "editor_settings-4.tres", "editor_settings-3.tres"):
+        cand = Path(appdata) / "Godot" / name
+        if not cand.exists():
+            continue
+        try:
+            text = cand.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            continue
+        # Heuristic: lines/paths containing project.godot or absolute dirs with that file.
+        for raw in text.replace("\\\\", "\\").splitlines():
+            for part in raw.replace(",", " ").replace('"', " ").split():
+                p = part.strip()
+                if not p:
+                    continue
+                if p.lower().endswith("project.godot"):
+                    p = os.path.dirname(p)
+                if os.path.isdir(p) and (Path(p) / "project.godot").exists():
+                    paths.append(p)
+    return paths
+
+
+def _godot_project_candidates() -> list:
+    seen, out = set(), []
+    for p in _godot_running_project_paths() + _godot_recent_projects():
+        ap = os.path.abspath(p)
+        if ap not in seen and (Path(ap) / "project.godot").exists():
+            seen.add(ap)
+            out.append(ap)
+    return out
+
+
+def _godot_enable_plugin(project_godot: Path) -> None:
+    """Idempotently enable res://addons/trackball_nav/plugin.cfg under [editor_plugins]."""
+    text = project_godot.read_text(encoding="utf-8") if project_godot.exists() else ""
+    plugin = "res://addons/trackball_nav/plugin.cfg"
+    if plugin in text:
+        return
+    marker = "[editor_plugins]"
+    enabled_line_prefix = "enabled=PackedStringArray("
+    if marker not in text:
+        text = text.rstrip() + f"\n\n{marker}\n{enabled_line_prefix}\"{plugin}\")\n"
+    else:
+        lines = text.splitlines(True)
+        out, done = [], False
+        for line in lines:
+            if (not done) and line.startswith("enabled=PackedStringArray("):
+                if line.rstrip().endswith(")"):
+                    inner = line[len(enabled_line_prefix):].rstrip()
+                    if inner.endswith(")"):
+                        inner = inner[:-1]
+                    inner = inner.strip()
+                    new_inner = (inner + f", \"{plugin}\"") if inner else f"\"{plugin}\""
+                    out.append(f"{enabled_line_prefix}{new_inner})\n")
+                else:
+                    out.append(line)
+                done = True
+            else:
+                out.append(line)
+        if not done:
+            out2 = []
+            for line in out:
+                out2.append(line)
+                if line.strip() == marker:
+                    out2.append(f"{enabled_line_prefix}\"{plugin}\")\n")
+            out = out2
+        text = "".join(out)
+    project_godot.write_text(text, encoding="utf-8")
+
+
+def godot_plugin_dir() -> Path:
+    projects = _godot_project_candidates()
+    if projects:
+        return Path(projects[0]) / "addons" / "trackball_nav"
+    return Path(os.environ.get("APPDATA", "")) / "TrackballDaemon" / "godot" / "trackball_nav"
+
+
+def install_godot(appdef: "AppDef", cfg) -> tuple[bool, str]:
+    """Copy the EditorPlugin into each detected Godot project's addons/ and enable it."""
+    src = _bundled_addin("godot", "trackball_nav")
+    if not src.exists():
+        return False, "Bundled Godot add-on is missing from this build."
+    projects = _godot_project_candidates()
+    a = cfg.data["apps"][appdef.key]
+    was_installed = a.get("installed", False)
+    if not projects:
+        dest = Path(os.environ.get("APPDATA", "")) / "TrackballDaemon" / "godot" / "trackball_nav"
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+        except OSError as e:
+            return False, f"Couldn't stage the Godot add-on: {e}"
+        a["installed"] = False
+        cfg.save()
+        return False, (
+            "No Godot project path was found (open a project, then Set up again).\n"
+            "A staged copy is at:\n  " + str(dest)
+        ), [("Copy staged add-on folder", str(dest))]
+    copied = []
+    for proj in projects:
+        dest = Path(proj) / "addons" / "trackball_nav"
+        try:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src, dest, dirs_exist_ok=True)
+            _godot_enable_plugin(Path(proj) / "project.godot")
+            copied.append(proj)
+        except OSError:
+            continue
+    if not copied:
+        return False, "Couldn't write the Godot add-on into any project addons/ folder."
+    a["installed"] = True
+    if not was_installed:
+        a["enabled"] = True
+    a["addin_version"] = bundled_addin_version(appdef.key) or ""
+    cfg.save()
+    verb = "updated" if was_installed else "installed"
+    return True, (
+        f"Trackball Nav {verb} (v{a['addin_version']}) into {len(copied)} Godot project(s).\n\n"
+        "The plugin is enabled in project.godot. Reload the project or restart Godot, switch the "
+        "daemon to 3D mode, and focus the editor — the row flips to \"connected\" on handshake."
+    )
+
+
+# --- Rhino 8: Python scripts + startup command ----------------------------------------
+def rhino_scripts_dir() -> Path:
+    return (Path(os.environ.get("APPDATA", "")) / "McNeel" / "Rhinoceros" / "8.0" /
+            "scripts" / "TrackballNav")
+
+
+def _rhino_startup_command(start_py: Path) -> str:
+    # Rhino 8 Python 3: RunPythonScript works for both; -_ form is non-interactive.
+    return f'_-RunPythonScript "{start_py}"'
+
+
+def _rhino_append_startup_command(cmd: str) -> bool:
+    """Best-effort: append cmd to Rhino 8 scheme settings StartupCommands if not present."""
+    settings = (Path(os.environ.get("APPDATA", "")) / "McNeel" / "Rhinoceros" / "8.0" /
+                "settings" / "settings-Scheme__Default.xml")
+    if not settings.exists():
+        return False
+    try:
+        text = settings.read_text(encoding="utf-8")
+    except Exception:
+        return False
+    if "TrackballNav" in text and "RunPythonScript" in text:
+        return True  # already registered
+    # Rhino stores startup as a child value; try a few known shapes.
+    needle = 'key="StartupCommands"'
+    if needle not in text:
+        # Insert a minimal entry before </settings> or at end of known block — if we can't find
+        # a safe insertion point, skip (user can add manually).
+        return False
+    # Common shape: <value>existing</value> under StartupCommands — append with newline.
+    import re as _re
+    pattern = _re.compile(
+        r'(key="StartupCommands"[^>]*>\s*<value>)(.*?)(</value>)',
+        _re.DOTALL | _re.IGNORECASE)
+    m = pattern.search(text)
+    if not m:
+        return False
+    existing = m.group(2).strip()
+    if "TrackballNav" in existing:
+        return True
+    new_val = (existing + "\n" + cmd) if existing else cmd
+    text = text[:m.start(2)] + new_val + text[m.end(2):]
+    try:
+        settings.write_text(text, encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def install_rhino(appdef: "AppDef", cfg) -> tuple[bool, str]:
+    """Copy Python TrackballNav into Rhino 8 user scripts and register a startup command."""
+    if not detect_rhino():
+        return False, "Rhino 8 was not found on this machine — install it first."
+    src = _bundled_addin("rhino", "TrackballNav")
+    if not src.exists():
+        return False, "Bundled Rhino add-on is missing from this build."
+    dest = rhino_scripts_dir()
+    a = cfg.data["apps"][appdef.key]
+    was_installed = a.get("installed", False)
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dest, dirs_exist_ok=True)
+    except OSError as e:
+        return False, f"Couldn't write the Rhino add-on: {e}"
+    start_py = dest / "start.py"
+    cmd = _rhino_startup_command(start_py)
+    auto = _rhino_append_startup_command(cmd)
+    a["installed"] = True
+    if not was_installed:
+        a["enabled"] = True
+    a["addin_version"] = bundled_addin_version(appdef.key) or ""
+    cfg.save()
+    verb = "updated" if was_installed else "installed"
+    if auto:
+        return True, (
+            f"Trackball Nav {verb} (v{a['addin_version']}) to:\n  {dest}\n\n"
+            "A Rhino startup command was registered so Trackball Nav loads on the next "
+            "Rhino launch.\n\n"
+            "Restart Rhino, switch the daemon to 3D mode, and focus Rhino — the row flips to "
+            "\"connected\" once the script handshakes."
+        )
+    return True, (
+        f"Trackball Nav {verb} (v{a['addin_version']}) to:\n  {dest}\n\n"
+        "Could not auto-register the startup command. In Rhino, type Options in the "
+        "command line, open General → \"Run these commands every time Rhino starts\", "
+        "and add the command below (or run it once after opening Rhino).\n\n"
+        "Restart Rhino, switch the daemon to 3D mode, and focus Rhino — the row flips to "
+        "\"connected\" once the script handshakes."
+    ), [("Copy startup command", cmd)]
+
+
 # --- add-in version tracking + one-click / auto update --------------------------------
 # Apps that ship a bundled add-in: key -> (bundled subpath, dest folder, manifest filename).
 _ADDINS = {
@@ -605,6 +1036,9 @@ _ADDINS = {
     "freecad": ("freecad/TrackballNav", freecad_user_mod_dir, "version.json"),
     "sketchup": ("sketchup/trackball_nav", _sketchup_primary_addon_dir, "version.json"),
     "unreal": ("unreal/TrackballNav", unreal_plugin_dir, "version.json"),
+    "unity": ("unity/com.astrolabe.trackball-nav", unity_plugin_dir, "version.json"),
+    "godot": ("godot/trackball_nav", godot_plugin_dir, "version.json"),
+    "rhino": ("rhino/TrackballNav", rhino_scripts_dir, "version.json"),
     "autocad": ("autocad", _acad_runtime_plugin_dir, "version.json"),
 }
 ADDIN_KEYS = set(_ADDINS)
@@ -655,7 +1089,7 @@ def auto_update(cfg) -> list:
         old = installed_addin_version(key)
         if old is not None and update_available(key):
             appdef = APPS_BY_KEY[key]
-            ok, _msg = appdef.setup(appdef, cfg)
+            ok, _msg, _copies = normalize_install_result(appdef.setup(appdef, cfg))
             if ok:
                 updated.append((key, old, bundled_addin_version(key)))
     return updated
@@ -666,6 +1100,9 @@ APPS = [
     AppDef("freecad",    "FreeCAD",    True,  detect_freecad, setup=install_freecad),
     AppDef("sketchup",   "SketchUp",   True,  detect_sketchup, setup=install_sketchup),
     AppDef("unreal",     "Unreal Engine", True, detect_unreal, setup=install_unreal),
+    AppDef("unity",      "Unity",      True,  detect_unity, setup=install_unity),
+    AppDef("godot",      "Godot",      True,  detect_godot, setup=install_godot),
+    AppDef("rhino",      "Rhino",      True,  detect_rhino, setup=install_rhino),
     AppDef("fusion360",  "Fusion 360", True,  detect_fusion, setup=install_fusion),
     AppDef("solidworks", "SolidWorks", True,  detect_solidworks, setup=setup_solidworks),
     AppDef("onshape",    "Onshape",    False, detect_onshape, setup=setup_onshape),
@@ -683,8 +1120,9 @@ def status_line(appdef: AppDef) -> str:
     return found if appdef.key == "onshape" else f"detected: {found}"
 
 
-def install(appdef: AppDef, cfg) -> tuple[bool, str]:
-    """Set up the integration. Returns (ok, message). Persists installed/enabled to config."""
+def install(appdef: AppDef, cfg):
+    """Set up the integration. Returns ``(ok, message)`` or ``(ok, message, copyables)``
+    where ``copyables`` is a list of ``(button_label, text_to_copy)`` for the UI dialog."""
     if appdef.setup is not None:                 # app with a real installer (e.g. Fusion)
         return appdef.setup(appdef, cfg)
     found = appdef.detect()
@@ -698,3 +1136,12 @@ def install(appdef: AppDef, cfg) -> tuple[bool, str]:
         # current app has one, so this is unreachable today.
         return True, f"{appdef.name} integration enabled.\n(No bundled add-on -- nothing was copied.)"
     return True, f"{appdef.name} gesture profile enabled."
+
+
+def normalize_install_result(result):
+    """Normalize installer returns to ``(ok, message, copyables)``."""
+    if isinstance(result, tuple) and len(result) == 3:
+        ok, msg, copies = result
+        return bool(ok), str(msg), list(copies or [])
+    ok, msg = result
+    return bool(ok), str(msg), []

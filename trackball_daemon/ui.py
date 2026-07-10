@@ -223,13 +223,7 @@ class SettingsWindow:
     def _copy_onshape_userscript(self):
         """Copy the Violentmonkey/Tampermonkey userscript to the clipboard. Returns True on success."""
         from .onshape_bridge import pointer_userscript_source
-        try:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(pointer_userscript_source())
-            self.root.update_idletasks()
-            return True
-        except tk.TclError:
-            return False
+        return self._clipboard_set(pointer_userscript_source())
 
     def _show_onshape_userscript_dialog(self, *, title, lead="", show_dont_show_again=False,
                                         copy_on_open=False):
@@ -309,8 +303,11 @@ class SettingsWindow:
         ttk.Label(outer, text="Supported 3D apps — enable, set up the integration, and "
                               "choose what starts automatically.",
                   wraplength=600, foreground="#555").pack(anchor="w", padx=10, pady=(10, 6))
+        holder = ttk.Frame(outer)
+        holder.pack(fill="both", expand=True)
+        body = self._scrollable(holder)
         for appdef in integrations.APPS:
-            self._app_row(outer, appdef)
+            self._app_row(body, appdef)
         return outer
 
     def _app_status_text(self, appdef):
@@ -360,11 +357,71 @@ class SettingsWindow:
         holder["btn"] = btn
         btn.pack(side="right")
 
+    def _clipboard_set(self, text):
+        """Copy ``text`` to the clipboard. Returns True on success."""
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.root.update_idletasks()
+            return True
+        except tk.TclError:
+            return False
+
+    def _show_integration_dialog(self, title, msg, copyables=None, *, warning=False):
+        """Modal result dialog for Set up / Update. ``copyables`` is ``[(button_label, text), ...]``."""
+        parent = self.win if self.win is not None else self.root
+        dlg = tk.Toplevel(parent)
+        dlg.title(title)
+        dlg.transient(parent)
+        dlg.resizable(True, True)
+        dlg.grab_set()
+
+        body = ttk.Frame(dlg, padding=12)
+        body.pack(fill="both", expand=True)
+
+        # Scrollable message for long install notes (Unreal admin steps, etc.).
+        text_frame = ttk.Frame(body)
+        text_frame.pack(fill="both", expand=True)
+        vsb = ttk.Scrollbar(text_frame, orient="vertical")
+        text = tk.Text(text_frame, wrap="word", width=72, height=14,
+                       yscrollcommand=vsb.set, relief="flat", padx=2, pady=2)
+        vsb.config(command=text.yview)
+        vsb.pack(side="right", fill="y")
+        text.pack(side="left", fill="both", expand=True)
+        text.insert("1.0", msg)
+        text.configure(state="disabled")
+
+        status = tk.StringVar(value="")
+        ttk.Label(body, textvariable=status, foreground="#1a7f37").pack(anchor="w", pady=(8, 0))
+
+        if copyables:
+            btn_row = ttk.Frame(body)
+            btn_row.pack(fill="x", pady=(8, 0))
+
+            def _make_copy(label, payload):
+                def _copy():
+                    if self._clipboard_set(payload):
+                        status.set("Copied: " + label)
+                    else:
+                        status.set("Copy failed — select and copy from the message above.")
+                return _copy
+
+            for label, payload in copyables:
+                ttk.Button(btn_row, text=label,
+                           command=_make_copy(label, payload)).pack(side="left", padx=(0, 8))
+
+        foot = ttk.Frame(body)
+        foot.pack(fill="x", pady=(14, 0))
+        ttk.Button(foot, text="OK", command=dlg.destroy).pack(side="right")
+        dlg.protocol("WM_DELETE_WINDOW", dlg.destroy)
+        dlg.wait_window()
+
     def _do_install(self, appdef, enabled_var, status_label, holder):
         if appdef.key == "blender":
-            ok, msg = self._install_blender_interactive()
+            result = self._install_blender_interactive()
         else:
-            ok, msg = integrations.install(appdef, self.cfg)
+            result = integrations.install(appdef, self.cfg)
+        ok, msg, copyables = integrations.normalize_install_result(result)
         if ok:
             enabled_var.set(bool(self.cfg.data["apps"][appdef.key]["enabled"]))
             try:
@@ -378,9 +435,9 @@ class SettingsWindow:
                     lead=msg,
                 )
             else:
-                messagebox.showinfo("Integration", msg, parent=self.win)
+                self._show_integration_dialog("Integration", msg, copyables, warning=False)
         else:
-            messagebox.showwarning("Integration", msg, parent=self.win)
+            self._show_integration_dialog("Integration", msg, copyables, warning=True)
 
     def _install_blender_interactive(self):
         """Blender setup, asking before writing the auto-start shim (it makes our code run on every
@@ -460,6 +517,12 @@ class SettingsWindow:
         if app_key == "unreal":              # Unreal has a Blender-style richer layout too
             self._unreal_bindings_fields(parent)
             return
+        if app_key == "unity":
+            self._unity_bindings_fields(parent)
+            return
+        if app_key == "godot":
+            self._godot_bindings_fields(parent)
+            return
         base = ("apps", app_key, "bindings")
         ttk.Label(parent, text="Navigation mapping — how trackball motion drives this app.",
                   foreground="#555", wraplength=600).pack(anchor="w", padx=10, pady=(8, 2))
@@ -514,9 +577,13 @@ class SettingsWindow:
                              "surface under the centre")
         self._bool_row(parent, "Selection overrides orbit center",
                        ("apps", app_key, "selection_overrides_pivot"))
-        ttk.Label(parent, text="When on and something is selected, orbit uses the selection centre "
-                               "instead of the designated pivot (Under Cursor / Auto Depth / …). "
-                               "Not yet applied in this app's add-on — toggle is saved for when it is.",
+        sel_note = ("When on and something is selected, orbit uses the selection centre "
+                    "instead of the designated pivot (Under Cursor / Auto Depth / …).")
+        if app_key == "rhino":
+            sel_note += " Applied by the Rhino add-on."
+        else:
+            sel_note += " Not yet applied in this app's add-on — toggle is saved for when it is."
+        ttk.Label(parent, text=sel_note,
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         if app_key == "onshape":
@@ -781,6 +848,92 @@ class SettingsWindow:
         ttk.Label(s5, text="Each mode's directions are independent. \"Viewpoint\" = orbit-around "
                            "Viewpoint (turn in place); it shares Orbit's pan/zoom inverts.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(2, 4))
+
+    def _engine_bindings_fields(self, parent, app_key, title):
+        """Shared Blender/Unreal-parity panel for Unity and Godot (free-fly editor cameras)."""
+        base = ("apps", app_key, "bindings")
+        adv = ("apps", app_key, "advanced")
+        inv = adv + ("invert",)
+        ttk.Label(parent, text=title, foreground="#555",
+                  wraplength=600).pack(anchor="w", padx=10, pady=(8, 2))
+
+        s0 = ttk.LabelFrame(parent, text="Sensitivity & rate")
+        s0.pack(fill="x", padx=10, pady=6)
+        self._rate_combo(s0, "Viewport refresh rate (Hz)", ("apps", app_key, "rate_hz"),
+                         hint="Default = global; try 60")
+        self._entry_row(s0, "Orbit sensitivity", base + ("orbit", "sensitivity"),
+                        hint="1.0 = baseline (set 0.5 for the cube's 1:1)")
+        self._entry_row(s0, "Pan gain", base + ("pan", "gain"))
+        self._entry_row(s0, "Zoom gain", base + ("zoom", "gain"))
+        self._entry_row(s0, "Zoom dominance", base + ("zoom", "dominance"), hint="twist vs pan-plane")
+        self._combo_row(s0, "Orbit ↔ pan/zoom toggle", base + ("toggle",), values=["shift", "none"])
+
+        s1 = ttk.LabelFrame(parent, text="Navigation mode")
+        s1.pack(fill="x", padx=10, pady=6)
+        self._combo_row(s1, "Mode", adv + ("nav_mode",), values=["orbit", "fly", "walk"])
+        self._entry_row(s1, "Fly speed", adv + ("fly_speed",))
+        self._entry_row(s1, "Walk speed", adv + ("walk_speed",))
+        ttk.Label(s1, text="Fly = free 6DOF (banks on twist; forward follows pitch). Walk = horizon-"
+                           "locked look, movement stays on the ground plane.",
+                  foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
+
+        s2 = ttk.LabelFrame(parent, text="Orbit")
+        s2.pack(fill="x", padx=10, pady=6)
+        self._mapped_combo_row(s2, "Orbit method", base + ("scheme", "orbit_style"),
+                               [("Default (General)", "default"), ("Trackball (free)", "free"),
+                                ("Turntable", "turntable")])
+        self._mapped_combo_row(s2, "Orbit around", base + ("scheme", "orbit_pivot"),
+                               [("Default (General)", "default"), ("Viewpoint (turn in place)", "viewpoint"),
+                                ("Auto Depth (surface)", "view"), ("Under Cursor (mouse)", "cursor"),
+                                ("Selection", "object"),
+                                ("World Origin", "origin")])
+        self._combo_row(s2, "Twist action", adv + ("twist_action",),
+                        values=["roll", "zoom", "dolly", "none"])
+        self._bool_row(s2, "Lock horizon (keep level even in free orbit)", adv + ("lock_horizon",))
+        self._bool_row(s2, "Selection overrides orbit center",
+                       ("apps", app_key, "selection_overrides_pivot"))
+        ttk.Label(s2, text="\"Auto Depth\" raycasts under screen-centre; \"Under Cursor\" under the "
+                           "mouse. When \"Selection overrides…\" is on and something is selected, "
+                           "orbit/to_cursor use the selection centre instead of those pivots.",
+                  foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
+
+        s3 = ttk.LabelFrame(parent, text="Pan / Zoom")
+        s3.pack(fill="x", padx=10, pady=6)
+        self._mapped_combo_row(s3, "Zoom mode", base + ("scheme", "zoom_mode"),
+                               [("Default (General)", "default"), ("to_center", "to_center"),
+                                ("to_object", "to_object"), ("to_cursor (under mouse)", "to_cursor")])
+        self._bool_row(s3, "Pan scales with focus distance", adv + ("pan_scales_with_distance",))
+        self._entry_row(s3, "Auto-depth hold (s)", ("apps", app_key, "view_pivot_hold_sec"),
+                        hint="'Auto Depth' / 'Under Cursor' pivot: seconds still before it re-raycasts")
+
+        s5 = ttk.LabelFrame(parent, text="Invert directions — independent per mode")
+        s5.pack(fill="x", padx=10, pady=6)
+        self._invert_row(s5, "Orbit", inv + ("orbit",),
+                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
+                          ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
+        self._invert_row(s5, "Viewpoint", inv + ("viewpoint",),
+                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
+        self._invert_row(s5, "Fly", inv + ("fly",),
+                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
+                          ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+        self._invert_row(s5, "Walk", inv + ("walk",),
+                         [("Pitch", "pitch"), ("Yaw", "yaw"),
+                          ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+        ttk.Label(s5, text="Each mode's directions are independent. \"Viewpoint\" shares Orbit's "
+                           "pan/zoom inverts.",
+                  foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(2, 4))
+
+    def _unity_bindings_fields(self, parent):
+        self._engine_bindings_fields(
+            parent, "unity",
+            "Unity navigation — Blender-style options for the Scene view. Applies live when Unity "
+            "is focused (Editor only, not Play mode).")
+
+    def _godot_bindings_fields(self, parent):
+        self._engine_bindings_fields(
+            parent, "godot",
+            "Godot navigation — Blender-style options for the editor 3D viewport. Applies live "
+            "when Godot is focused.")
 
     # --- tab c: general bindings --------------------------------------------------
     def _build_general_tab(self, nb):

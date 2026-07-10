@@ -119,6 +119,10 @@ _DEFAULT_UNREAL_ADVANCED = {
     "invert": _DEFAULT_UNREAL_INVERT,   # per-mode direction flips (applied in the add-on)
 }
 
+# Unity / Godot reuse the Unreal advanced block (free-fly editor cameras, Blender-parity suite).
+_DEFAULT_UNITY_ADVANCED = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
+_DEFAULT_GODOT_ADVANCED = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
+
 
 def effective_scheme(general_scheme, app_scheme):
     """Resolve a per-app scheme against the general default (per-app 'default' => inherit)."""
@@ -169,6 +173,20 @@ def _unreal_app():
     return a
 
 
+def _unity_app():
+    """Unity Scene view: Unreal-shaped advanced block (orbit/fly/walk + under-cursor + selection)."""
+    a = _app()
+    a["advanced"] = copy.deepcopy(_DEFAULT_UNITY_ADVANCED)
+    return a
+
+
+def _godot_app():
+    """Godot editor 3D viewport: same Blender/Unreal-parity advanced block as Unity."""
+    a = _app()
+    a["advanced"] = copy.deepcopy(_DEFAULT_GODOT_ADVANCED)
+    return a
+
+
 def _sketchup_app():
     """SketchUp's shared app shape plus viewpoint/fly/walk and per-mode direction controls."""
     a = _app()
@@ -201,6 +219,9 @@ DEFAULTS = {
         "freecad":    _app(),
         "sketchup":   _sketchup_app(),
         "unreal":     _unreal_app(),
+        "unity":      _unity_app(),
+        "godot":      _godot_app(),
+        "rhino":      _app(),
         "fusion360":  _app(),
         "solidworks": _app(),
         "onshape":    _app(),

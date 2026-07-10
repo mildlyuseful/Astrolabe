@@ -1,0 +1,4 @@
+{
+  "version": "0.1.0",
+  "_comment": "Kept in sync with package.json version. Daemon integrations._ADDINS['unity'] reads this for auto_update. Bump on any Editor script change; reload = Unity recompile / domain reload."
+}

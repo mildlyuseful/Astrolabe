@@ -1,0 +1,4 @@
+{
+  "version": "0.1.0",
+  "_comment": "Kept in sync with plugin.cfg version. Daemon integrations._ADDINS['godot'] reads this for auto_update. Bump on any add-on change; reload = disable/enable plugin or restart Godot."
+}
