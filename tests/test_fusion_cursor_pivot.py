@@ -342,12 +342,12 @@ def test_orbit_pivot_cursor_falls_back_to_object_centre(monkeypatch):
     assert (p.x, p.y, p.z) == (9, 9, 9)
 
 
-def test_orbit_pivot_view_still_uses_screen_centre(monkeypatch):
+def test_orbit_pivot_screen_center_uses_viewport_center(monkeypatch):
     # regression: the _raycast_pivot refactor must not change the "view" pivot's source
     monkeypatch.setattr(tn, "_screen_center_pivot", lambda cam: _pt(7, 7, 7))
     monkeypatch.setattr(tn, "_cursor_pivot",
                         lambda cam: (_ for _ in ()).throw(AssertionError("wrong path")))
-    p = tn._orbit_pivot("view", object(), _pt(0, 0, 0), idle=10.0)
+    p = tn._orbit_pivot("screen_center", object(), _pt(0, 0, 0), idle=10.0)
     assert (p.x, p.y, p.z) == (7, 7, 7)
 
 

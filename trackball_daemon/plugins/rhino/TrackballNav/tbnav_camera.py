@@ -89,13 +89,13 @@ def _rotate_vec(v, axis, angle):
 
 
 def orbit(cam, o, turntable, pivot):
-    """Orbit eye (and optionally target for viewpoint) about pivot. pivot None => turn in place
+    """Orbit eye (and optionally target for camera) about pivot. pivot None => turn in place
     about the eye (target orbits with the look direction)."""
     pitch = o[0] * ORBIT_SCALE[0] * ORBIT_SIGN[0]
     yaw = o[1] * ORBIT_SCALE[1] * ORBIT_SIGN[1]
     twist = o[2] * ORBIT_SCALE[2] * ORBIT_SIGN[2]
     if pivot is None:
-        # Viewpoint: rotate look direction about the eye.
+        # Camera: rotate look direction about the eye.
         pivot = tuple(cam.eye)
         eye_fixed = True
     else:

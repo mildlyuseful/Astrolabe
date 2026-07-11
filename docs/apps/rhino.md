@@ -26,8 +26,8 @@ Restart Rhino once after Set up (or after an add-on version bump) so Python relo
 
 ## Controls (default / lean)
 
-Generic scheme only (no fly/walk/`advanced`). Pivots: `view`, `cursor`, `object`/`selection`,
-`origin`, plus `viewpoint` (turn in place). `selection_overrides_pivot` is applied.
+Generic scheme only (no fly/walk/`advanced`). Pivots: `screen_center`, `cursor`, `object`/`selection`,
+`origin`, plus `camera` (turn in place). `selection_overrides_pivot` is applied.
 
 ### Under-cursor pivot
 

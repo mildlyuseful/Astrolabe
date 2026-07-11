@@ -93,7 +93,7 @@ camera/view properties, all **verified against live SolidWorks** (not assumed fr
 | `IModelView.EnableGraphicsUpdate` | bool (set) | `False` suspends viewport repaints; `True` resumes. Used to make a multi-step frame one repaint (§8.7). |
 | `IModelDoc2.GraphicsRedraw2()` | — | Force a repaint after an automation change. ~5 ms (cheap — the redraw is **not** the bottleneck). |
 | `IPartDoc.GetPartBox(True)` / `IAssemblyDoc.GetBox(0)` | 6 doubles | Bounding box `(minx,miny,minz, maxx,maxy,maxz)`. **Both need `_FlagAsMethod`** (§8.1). `IModelDocExtension.GetBox` is **NOT reachable** via late dispatch. |
-| `IModelDocExtension.SelectByRay(...)` + `ISelectionMgr.GetSelectionPoint2` | — | Screen-centre raycast for the `view` pivot (§7). Extremely fussy via late dispatch (§8.9). |
+| `IModelDocExtension.SelectByRay(...)` + `ISelectionMgr.GetSelectionPoint2` | — | Screen-centre raycast for the `screen_center` pivot (§7). Extremely fussy via late dispatch (§8.9). |
 
 **Holding a pivot P fixed on screen during orbit.** Because `RotateAboutAxis` always pivots about
 the origin, to orbit about an arbitrary P we **rotate, then pan** so P keeps its screen position.
@@ -123,7 +123,7 @@ Each non-empty frame, on the worker thread:
 2. **Freeze the viewport** (`EnableGraphicsUpdate = False`) for the whole frame (§8.7).
 3. Apply **orbit**, then **pan**, then **zoom** — each in its own `try/except` so one failing COM
    call is logged once (`_warn_once`) and skipped without killing the others (§8.8).
-4. If a pan or zoom happened, **drop the held `view` pivot** (`_orbit_pivot = None`) so it
+4. If a pan or zoom happened, **drop the held `screen_center` pivot** (`_orbit_pivot = None`) so it
    re-raycasts next orbit (§8.6).
 5. **Resume** graphics + one `GraphicsRedraw2()` (§8.7).
 
@@ -146,13 +146,13 @@ one — see `config.effective_scheme`). **Five pivot modes**, all built on §4's
   translation**. The original behaviour, and the lightest path. (Re-added as a distinct mode after it
   was conflated with `object` — see §8.6.)
 - **`object`** — hold the model **bounding-box centre**. **`selection`** uses the mean of the current
-  selection points reported by `ISelectionMgr.GetSelectionPoint2`, falling back to object.
-- **`view`** — hold the **screen-centre point at the true surface depth** under the crosshair, found
+  selection points reported by `ISelectionMgr.GetSelectionPoint2` when available.
+- **`screen_center`** — hold the **screen-centre point at the true surface depth** under the crosshair, found
   by a raycast (§7). Captured once and **held** through a gesture; recomputed only after the view is
-  idle ≥ `view_pivot_hold_sec` (default 0.5 s, per-app `set_pivot_hold`) or when a pan/zoom moves it.
-- **`cursor`** — hold the surface point under the **mouse cursor** — the same raycast as `view`,
+  idle ≥ `screen_center_pivot_hold_sec` (default 0.5 s, per-app `set_pivot_hold`) or when a pan/zoom moves it.
+- **`cursor`** — hold the surface point under the **mouse cursor** — the same raycast as `screen_center`,
   aimed through the cursor pixel instead of the screen centre (§7.5). Same capture-once-and-hold; a
-  miss / off-view cursor falls back to the object centre for the rest of the gesture.
+  miss / off-view cursor continues through the configured global chain.
 
 Orbit **style**: `free` rotates about the composed camera-space axis (`vx·col0 + vy·col1 + vz·col2`);
 `turntable` yaws about `WORLD_UP` + pitches about camera-right, **roll dropped**, composed into one
@@ -162,11 +162,11 @@ at once (§8.6).
 
 ---
 
-## 7. The `view` pivot screen-centre raycast (`_view_pivot`, `_raycast_depth`, `_get_pick_handles`)
+## 7. The `screen_center` pivot screen-centre raycast (`_screen_center_pivot`, `_raycast_depth`, `_get_pick_handles`)
 
 **Why:** the camera "target" / screen-centre point sits on the optical axis at an **arbitrary depth**.
 Pinning the pivot there (e.g. at the object-centre depth) makes the model **swing** whenever that
-depth ≠ the surface you're actually looking at. So `view` casts a ray straight down the screen-centre
+depth ≠ the surface you're actually looking at. So `screen_center` casts a ray straight down the screen-centre
 optical axis and pins the pivot at the **true surface depth** under the crosshair — exactly what
 SolidWorks' own middle-drag orbit does.
 
@@ -183,21 +183,24 @@ SolidWorks' own middle-drag orbit does.
    (a fat aperture selects several faces).
 4. **Validate** each hit lies inside the bbox expanded by `_RAY_BBOX_MARGIN` (10 %) of its diagonal —
    guards against a bogus/sentinel point.
-5. **No valid hit at any radius → fall back to the object-centre depth** (the old behaviour).
-6. Only the **depth** (`col2·hit`) is used; `_view_pivot` keeps the in-plane position at the screen
+5. **No valid hit at any radius → return no pivot**, so resolution continues through the configured
+   global chain from its first entry.
+6. Only the **depth** (`col2·hit`) is used; `_screen_center_pivot` keeps the in-plane position at the screen
    centre. The pivot is then **held for the whole gesture** (§6), so the raycast runs **once per
    gesture (~16 ms warm)**, never per frame.
 
 **It mutates the selection set**, so `_raycast_depth` **saves** the user's selection
 (`GetSelectedObject6`), **clears** before each cast (to isolate the hit), reads the point(s), then
 **restores** (`ent.Select(True)` per saved entity). All of this is heavily guarded — any failure
-returns `None` and `view` simply keeps the object-centre depth. The pick handles
+returns `None`, making `screen_center` unavailable so the resolver continues the configured chain.
+The pick handles
 (`model.Extension`, `model.SelectionManager`) are fetched + method-flagged in `_live_view` and
 cached. See §8.9 for the brutal `SelectByRay` marshaling gotchas — **this is where almost all the
 debugging time on this feature went.**
 
-The whole feature can be disabled with the module constant `VIEW_PIVOT_RAYCAST = False` (then `view`
-reverts to screen-centre-at-object-depth), mirroring the `FORCE_REDRAW` escape hatch.
+The whole feature can be disabled with `SCREEN_CENTER_PIVOT_RAYCAST = False`; `screen_center` then
+reports itself unavailable and resolution continues through the configured chain, mirroring the
+`FORCE_REDRAW` escape hatch.
 
 ---
 
@@ -321,10 +324,10 @@ Each is *symptom → cause → fix*. Most cost real debugging or live probing.
 This is the messiest history; the current design is the resolution of several rounds of feedback.
 - **Perceived drift is NOT a math error.** The rotate-then-pan recenter is exact to ~1e-16 (verified).
   The user suspected a discrete rotate/translate integration error — **there isn't one.**
-- **Real cause of perceived drift:** a **stale** `view` pivot. After a pan, the screen-centre point
+- **Real cause of perceived drift:** a **stale** `screen_center` pivot. After a pan, the screen-centre point
   changes, but a held pivot wasn't updated → the next orbit swung about the old point. **Fix:** drop
-  the held pivot on **any pan/zoom** (in `_flush`), and recapture after idle ≥ `view_pivot_hold_sec`.
-- **"Orbit gets stuck on `view` when I switch to `object`":** `set_scheme` didn't release the held
+  the held pivot on **any pan/zoom** (in `_flush`), and recapture after idle ≥ `screen_center_pivot_hold_sec`.
+- **"Orbit gets stuck on `screen_center` when I switch to `object`":** `set_scheme` didn't release the held
   pivot. **Fix:** `set_scheme` sets `_orbit_pivot = None`.
 - **Capture the pivot ONCE per gesture and HOLD it.** Re-computing the screen-centre pivot every frame
   chases a moving target (it crawls) and triples the COM round-trips. Capturing once (like native
@@ -353,7 +356,7 @@ This is the messiest history; the current design is the resolution of several ro
   op skip the rest and dead-screen the viewport; don't reintroduce that.
 
 ### 8.9 `SelectByRay` is the worst offender — it silently selects NOTHING unless you type its args exactly
-This is the big one for the `view`-pivot raycast (§7). All found by **live probing** (you cannot
+This is the big one for the `screen_center`-pivot raycast (§7). All found by **live probing** (you cannot
 introspect: `GetTypeInfo()` raises `'Invalid index'` on these dispatches, the same makepy-hostility
 that blocks everything else).
 - **`Tol` MUST be a `VT_I4` integer VARIANT.** Passed as a Python/float double, `SelectByRay` returns
@@ -383,14 +386,14 @@ that blocks everything else).
 - Parts use `IPartDoc.GetPartBox(True)` (tight geometry box); assemblies use `IAssemblyDoc.GetBox(0)`
   (chosen by `model.GetType`: 1=part, 2=assembly, 3=drawing). Both need `_FlagAsMethod`.
 - **`IModelDocExtension.GetBox` is NOT reachable** via late dispatch — don't try to "simplify" the
-  two-API split into it. Drawings/empty docs return `None`, and `object`/`view` pivots fall back
+  two-API split into it. Drawings/empty docs return `None`, and `object`/`screen_center` pivots fall back
   gracefully (origin-like / object-depth).
 
 ### 8.11 Property reads dominate cost — cache handles, track state, predict analytically
 - Measured per-call over out-of-process COM: `ActiveDoc`/`ActiveView` ~17 ms, `Translation3` read
   ~19 ms, `Orientation3` ~20 ms, `CreateVector`/set `Translation3` ~13 ms, `RotateAboutAxis` ~6 ms,
   **`GraphicsRedraw2` only ~5 ms.** The **redraw is not the bottleneck — property reads are.**
-- So: cache `model`/`view` (revalidate every `_VIEW_TTL` = 1 s, which doubles as the liveness probe);
+- So: cache `model`/`screen_center` (revalidate every `_VIEW_TTL` = 1 s, which doubles as the liveness probe);
   **track** `Translation3`/`Scale2` across our own writes instead of re-reading; predict the
   post-rotation columns analytically (Rodrigues) instead of a second `Orientation3` read. This is what
   makes a pivot-holding orbit (which must pan every frame) as smooth as the old origin-only orbit
@@ -399,7 +402,7 @@ that blocks everything else).
   ~6.2 ms, GetSelectedObjectCount2 ~3.7 ms, GetSelectionPoint2 ~3.3 ms → **~16 ms total, once per
   gesture.** Negligible; don't pre-optimize it.
 
-### 8.12 The `view`-pivot aperture is scaled by the bbox diagonal, not the viewport extent
+### 8.12 The `screen_center`-pivot aperture is scaled by the bbox diagonal, not the viewport extent
 - The "natural" scale for the ray aperture is the on-screen view half-height, but the **viewport's
   pixel extent isn't cheaply available over COM**. We use the **bounding-box diagonal** as the length
   scale for the aperture sweep, the origin pushback, and the validation margin. It's robust (always
@@ -451,12 +454,12 @@ channel goes the wrong way.**
 | `PAN_SIGN` / `PAN_SCALE` | `(1,-1)` / `0.2` | pan direction / magnitude (screen meters; do NOT divide by Scale2) |
 | `ZOOM_SIGN` / `ZOOM_SCALE` | `1.0` / `0.5` | zoom direction / per-frame aggressiveness |
 | `FORCE_REDRAW` | `True` | one `GraphicsRedraw2` per frame; `False` lifts the rate if SW already repaints (§8.7) |
-| `VIEW_PIVOT_RAYCAST` | `True` | `view` pivot uses the surface raycast (§7); `False` = screen-centre at object depth |
+| `SCREEN_CENTER_PIVOT_RAYCAST` | `True` | `screen_center` uses the surface raycast; `False` makes the method unavailable so the chain continues. |
 | `_RAY_APERTURE_FRACS` | `(.005,.015,.045,.135)` | aperture sweep (× bbox diagonal), smallest-first (§7, §8.12) |
 | `_RAY_PUSH` | `4.0` | ray origin pushback (× bbox diagonal) — starts outside the model |
 | `_RAY_BBOX_MARGIN` | `0.10` | accept a hit only within bbox + N× diagonal |
 | `_CURSOR_XF_ALIGN_TOL` | `0.05` | `cursor` pivot: how far `Transform`'s in-plane rows may drift from the camera axes before the mapping is distrusted (§7.5) |
-| `DEFAULT_PIVOT_HOLD` | `0.5` | `view`/`cursor` pivot re-capture idle threshold (per-app `view_pivot_hold_sec`) |
+| `DEFAULT_PIVOT_HOLD` | `0.5` | `screen_center`/`cursor` pivot re-capture idle threshold (per-app `screen_center_pivot_hold_sec`) |
 | `DEFAULT_FLUSH_HZ` | `30` | flush/refresh rate (per-app `rate_hz`; `0` ⇒ global `bridge.rate_hz`) |
 | `_VIEW_TTL` | `1.0` | view-handle revalidation period (also the liveness probe) |
 | `_OBJ_CACHE_TTL` | `0.5` | bbox cache lifetime |
@@ -478,7 +481,7 @@ and is usually running with a part open. The driver can be exercised end-to-end:
   from trackball_daemon.solidworks_driver import SolidWorksDriver
   pythoncom.CoInitialize()
   drv = SolidWorksDriver(); drv._attach()
-  drv.set_scheme("view", "free", "to_center"); drv.set_pivot_hold(0.5)
+  drv.set_scheme("screen_center", "free", "to_center"); drv.set_pivot_hold(0.5)
   drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))   # one orbit frame
   print(drv._orbit_pivot)                         # the captured pivot
   ```
@@ -515,7 +518,7 @@ back independently via `ScreenToClient` + the `Transform` inverse — returned e
 
 ## 11. Status & known limitations (at handoff)
 
-- **Working & live-verified:** attach/connection status; orbit with all five pivots; the `view`
+- **Working & live-verified:** attach/connection status; orbit with all five pivots; the `screen_center`
   surface-depth raycast (pivot at true surface depth, held-pivot screen drift ~0); the **`cursor`
   pivot** (OS cursor → `Transform` inverse → raycast, verified to < 0.1 mm against known corners,
   §7.5/§10) and **`to_cursor` zoom**; pan; zoom (`to_center`/`to_object`); orbit styles
@@ -526,6 +529,11 @@ back independently via `ScreenToClient` + the `Transform` inverse — returned e
 - **Limitations:** `selection` == `object` (no per-entity selection pivot over COM; §8.13); the
   raycast aperture is bbox-scaled, not viewport-scaled (§8.12); drawings have no box (pivots degrade
   gracefully). The out-of-process COM rate is below an in-process add-in's, by design (§8.14).
+  **`camera` (turn-in-place) is unsupported** — the resolver skips it like `cursor_3d` and the
+  configured chain continues (a `camera` primary keeps its selection-override exemption). It is
+  implementable with the already-verified view transform (rotate the Orientation3 basis while
+  holding the eye fixed — the same ops orbit uses with pivot = eye) — **candidate for future
+  development**, matching Blender/SketchUp/Unreal/Unity/Godot/Rhino/AutoCAD.
 
 ---
 
@@ -533,7 +541,7 @@ back independently via `ScreenToClient` + the `Transform` inverse — returned e
 
 - **`solidworks_driver.py`** — the whole driver: worker loop (`_run`/`_flush`), attach
   (`_attach`/`_find_running_sw`), the verified camera ops (`_apply_orbit`/`_apply_pan`/`_apply_zoom`),
-  the `view`-pivot raycast (`_view_pivot`/`_raycast_depth`/`_get_pick_handles`/`_save`/`_restore`),
+  the `screen_center`-pivot raycast (`_screen_center_pivot`/`_raycast_depth`/`_get_pick_handles`/`_save`/`_restore`),
   the `cursor`-pivot mapping (`_cursor_pivot`/`_cursor_screen_ab`/`_cursor_client_point`, reusing
   `_raycast_depth`), caching (`_live_view`/`_object_box`), and the math helpers (`_rodrigues`,
   quaternion, `_variant`).
@@ -543,13 +551,13 @@ back independently via `ScreenToClient` + the `Transform` inverse — returned e
   `_on_sw_connection_changed`/`_refresh_connected_apps`; `start()`/`stop()` lifecycle. SolidWorks is
   matched as the foreground app by the **process name `sldworks`** (`_APP_PROC_HINTS`).
 - **`config.py`** — the `solidworks` app uses the shared `_app()` shape: `rate_hz` (0 ⇒ global),
-  `view_pivot_hold_sec` (0.5), and `bindings.scheme` (per-app override, `"default"` inherits general).
-  The general default scheme is `pivot=view, style=free, zoom=to_center`.
+  `screen_center_pivot_hold_sec` (0.5), and `bindings.scheme` (per-app override, `"default"` inherits general).
+  The general default scheme is `pivot=screen_center, style=free, zoom=to_center`.
 - **`integrations.py`** — `detect_solidworks` (globs `SLDWORKS.exe`) and `setup_solidworks` (verify SW
   + pywin32, mark enabled; **no add-in to copy**). SolidWorks is **not** in the add-in copy/update set.
 - **`ui.py`** — the "Orbit pivot" dropdowns (labels map to the stored values
   `view / cursor / object / origin / selection`; the under-mouse pivot shows as "cursor (under
-  mouse)") and the "View-pivot hold (s)" entry. SolidWorks honours all five pivots (`origin` and
+  mouse)") and the "Screen Center pivot hold (s)" entry. SolidWorks honours all five pivots (`origin` and
   `selection`-vs-`object` are SolidWorks-distinct).
 - **`winfocus.py`** — `foreground_process_name` (used to route to SolidWorks when `sldworks` is
   frontmost).

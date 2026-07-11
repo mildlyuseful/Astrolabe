@@ -38,9 +38,9 @@ def _bare_app():
     app.config = SimpleNamespace(data={
         "active_app": "fusion360",
         "bridge": {"rate_hz": 30},
-        "general": {"scheme": {"orbit_pivot": "view", "orbit_style": "free", "zoom_mode": "to_center"}},
+        "general": {"scheme": {"orbit_pivot": "screen_center", "orbit_style": "free", "zoom_mode": "to_center"}},
         "apps": {
-            "solidworks": dict(rate_hz=60, view_pivot_hold_sec=0.75,
+            "solidworks": dict(rate_hz=60, screen_center_pivot_hold_sec=0.75,
                                bindings=_scheme(pivot="object", zoom="to_object")),
             "autocad": dict(rate_hz=45, bindings=_scheme(pivot="origin", style="turntable")),
             "sketchup": dict(rate_hz=0, bindings=_scheme()),
@@ -181,8 +181,8 @@ def test_focus_applies_solidworks_scheme():
     assert app.sw_driver.schemes[-1] == {
         "orbit_pivot": "object", "orbit_style": "free", "zoom_mode": "to_object",
         "selection_overrides_pivot": True,
-        "orbit_pivot_fallbacks": ["cursor_3d", "viewpoint", "object", "origin"]}
-    assert app.sw_driver.holds[-1] == 0.75       # per-app view-pivot hold pushed to the driver
+        "orbit_pivot_fallbacks": ["cursor_3d", "camera", "object", "origin"]}
+    assert app.sw_driver.holds[-1] == 0.75       # per-app screen-center-pivot hold pushed to the driver
 
 
 def test_focus_applies_autocad_rate_and_scheme():

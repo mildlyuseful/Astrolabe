@@ -140,8 +140,8 @@ then `view_location = pivot + R @ (view_location - pivot)` so the eye rotates ri
 The `cursor` pivot orbits about the surface **under the mouse** (a SpaceMouse's "rotation center =
 cursor"). Two halves, like the other apps:
 - **Half B (the raycast) — solid, headless-tested.** `region_2d_to_origin_3d` + `region_2d_to_vector_3d`
-  + `scene.ray_cast` already unproject *any* region pixel; `_raycast_center` was refactored into
-  `_raycast_pixel(rv, region, x, y)` (+ a thin centre wrapper). `scene.ray_cast` returns only real
+  + `scene.ray_cast` already unproject *any* region pixel; `_raycast_screen_center` delegates to
+  `_raycast_pixel(rv, region, x, y)`. `scene.ray_cast` returns only real
   geometry hits (no sentinel), so no bbox gate is needed. The integration probe raycasts an arbitrary
   pixel (centre hits the cube, a corner misses) headlessly.
 - **Half A (the live mouse) — the architectural friction.** Blender has no on-demand mouse getter
@@ -150,7 +150,7 @@ cursor"). Two halves, like the other apps:
   `as_pointer()` on every `MOUSEMOVE`, and returns `{'PASS_THROUGH'}` so it **never consumes events**
   (normal select/orbit/draw are untouched). The timer maps the cache into the target region on demand:
   `_region_pixel_from_window` (pure: `mouse - region.x/y`, in-range check) → `_raycast_cursor`. Off the
-  viewport / over empty space / not cached yet → **selection-median fallback**.
+  viewport / over empty space / not cached yet → method unavailable; continue the global chain.
 - **Lifecycle friction (real, documented, handled).** A modal operator (a) **can't be invoked from the
   restricted `register()` context** → deferred via a `0.2 s` timer; (b) is **cancelled on file load** →
   a `@persistent` `load_post` handler restarts it (and `_tracker["gen"]` supersedes any straggler so
@@ -162,7 +162,7 @@ cursor"). Two halves, like the other apps:
   `_cursor` → `_raycast_cursor` path with a synthetic cached position (centre hits the cube, off-region
   → None), and an end-to-end `op="cursor"` orbit that moves `view_location`. **Un-verified (needs the
   GUI):** that the modal operator actually receives `MOUSEMOVE` and tracks the live cursor while
-  orbiting, and its lifecycle across real file loads. To verify live: set Orbit around = *Under Cursor
+  orbiting, and its lifecycle across real file loads. To verify live: set Orbit pivot = *Under Cursor
   (mouse)*, hover different faces while orbiting, and watch `blender_addin.log` for the
   `under-cursor hit @px(...)` line. Alternative Half A (not taken): Win32 `GetCursorPos` mapped via the
   Blender window's screen rect — but Blender doesn't expose the window's screen origin, so it'd need
@@ -179,15 +179,15 @@ cursor"). Two halves, like the other apps:
   (ball-forward = thrust, ball-sideways = strafe, twist = rise/fall).
 - **walk**: like fly but horizon-locked look (no bank) and horizontal-plane movement.
 
-### 5.2 Pivots (`scheme.orbit_pivot`, relabelled "Orbit around" in the UI)
-`viewpoint` → the **eye** (turn in place — see Solved Problem #5); `view` → **auto-depth** raycast
-under the screen centre (held per gesture); `cursor` → **under-mouse** raycast (auto-depth under the
+### 5.2 Pivots (`scheme.orbit_pivot`, labelled "Orbit pivot" in the UI)
+`camera` → the **eye** (turn in place — see Solved Problem #5); `screen_center` → **screen-center** raycast
+under the screen centre (held per gesture); `cursor` → **under-mouse** raycast (screen-center under the
 *mouse*, held per gesture; needs the modal mouse tracker — see §4.5 / Gotcha #4 — with a
-selection-median fallback); `object` → selection median; `cursor_3d` → 3D cursor; `origin` → world
-origin; unknown → `view_location` (Blender default). `viewpoint` is a Blender-only value added to the
-generic `orbit_pivot` enum. `view` and `cursor` **share the one per-gesture hold slot** (`_gesture`),
+configured-chain continuation); `object` → selection median; `cursor_3d` → 3D cursor; `origin` → world
+origin. Unknown or unavailable methods are skipped by the configured candidate chain. `screen_center`
+and `cursor` **share the one per-gesture hold slot** (`_gesture`),
 which is fine because only one pivot is active at a time. Add-on 0.1.12 applies
-`selection_overrides_pivot` to every external pivot; `viewpoint` remains true turn-in-place.
+`selection_overrides_pivot` to every external pivot; `camera` remains true turn-in-place.
 
 ### 5.3 Baseline constants (top of the add-on — tune here, not in the daemon)
 | Const | Meaning / why |
@@ -197,17 +197,17 @@ which is fine because only one pivot is active at a time. Add-on 0.1.12 applies
 | `ZOOM_SCALE=0.5`, `ZOOM_SIGN` | zoom factor per delta. |
 | `DOLLY_SCALE=0.5` | dolly distance per delta (× view_distance). |
 | `FLY_MOVE`, `WALK_MOVE = 0.5` | fly/walk move scale. Floored at `view_distance≥1` (`_move_scale`) so movement never vanishes up close (Solved Problem #6). |
-| `PIVOT_HOLD_IDLE=0.35` | seconds of no frames that ends a gesture → re-raycast the auto-depth pivot. |
+| `PIVOT_HOLD_IDLE=0.35` | seconds of no frames that ends a gesture → re-raycast the screen-center pivot. |
 | `_TIMER_INTERVAL=1/90` | main-thread poll rate. |
 | `_DEFAULT_PORT=47900` | broker port fallback if `bridge.json` is missing. |
 
 ### 5.4 Per-mode, per-axis inverts (`advanced.invert`)
-Structure: `invert.{orbit,viewpoint,fly,walk}.<axis>`. Applied **in the add-on**, in `_apply`, just
+Structure: `invert.{orbit,camera,fly,walk}.<axis>`. Applied **in the add-on**, in `_apply`, just
 before the dispatch — because the same physical channel means different things per mode (ball
 forward/back is *orbit pan-Y* but *fly/walk forward*), so a single invert set can't flip one without
 the other (Gotcha #6, Solved Problem #4/#8). Defaults bake in the "inside-out" roll fix:
-`viewpoint.roll` and `fly.bank` start **on** so first-person roll matches external-pivot orbit.
-`viewpoint` shares orbit's pan/zoom inverts. This **replaced** the old single `invert_viewpoint_roll`
+`camera.roll` and `fly.bank` start **on** so first-person roll matches external-pivot orbit.
+`camera` shares orbit's pan/zoom inverts. This **replaced** the old single `invert_camera_roll`
 flag — that key is now ignored if present in an old config.
 
 > The *generic* per-app invert (`bindings.invert` orbit/pan/zoom, applied in `output.py`) is **hidden
@@ -227,15 +227,15 @@ from inside Blender, independent of broker/`nav_mode`-delivery timing.
 ## 6. Configuration reference (`apps.blender` in the JSON config)
 - `bindings.*` — generic per-app: `orbit.sensitivity`, `pan.gain`, `zoom.gain`, `zoom.dominance`,
   `toggle` ("shift"/"none"), and `scheme` (`orbit_pivot`/`orbit_style`/`zoom_mode`). Blender defaults
-  `scheme.orbit_pivot` to `"viewpoint"`. `bindings.invert` exists but is unused for Blender (see §5.4).
+  `scheme.orbit_pivot` to `"camera"`. `bindings.invert` exists but is unused for Blender (see §5.4).
 - `advanced.*` — Blender-only: `nav_mode`, `lock_horizon`, `twist_action`, `zoom_style`,
   `zoom_to_mouse`, `lock_camera_to_view`, `pan_scales_with_distance`, `fly_speed`, `walk_speed`, and
   the per-mode `invert` block.
-- `rate_hz`, `view_pivot_hold_sec` — per-app rate and the auto-depth hold.
+- `rate_hz`, `screen_center_pivot_hold_sec` — per-app rate and the screen-center hold.
 
 Everything is **additive + deep-merged** (`config._deep_merge`), so new keys appear on existing
 configs automatically — **no `CONFIG_VERSION` bump** when adding Blender options. Caveat: deep-merge
-never *removes* keys, so retired keys (e.g. `invert_viewpoint_roll`) linger harmlessly on old configs.
+never *removes* keys, so retired keys (e.g. `invert_camera_roll`) linger harmlessly on old configs.
 
 How `advanced` reaches the add-on: `App._apply_schemes` attaches `advanced` (a **live reference** to
 the config dict) to the broker scheme on every push, `NavBroker._build_frame` serialises it as `"adv"`
@@ -331,15 +331,15 @@ These were all found via live trackball testing; the fixes are in the code but t
    *Root cause:* the add-on rotates the view by exactly the broker delta (measured gain 1.000), and the
    **dual-sensor device reports ~2× the physical angle.** *Fix:* `ORBIT_SCALE = 0.5` so Sensitivity 1.0
    is a true 1:1 ball→view orbit. Pan/zoom kept their feel-based scales.
-4. **Twist-roll felt inverted in fly/walk/viewpoint vs object orbit.**
+4. **Twist-roll felt inverted in fly/walk/camera vs object orbit.**
    *Root cause:* the world-space roll is the *same* sign everywhere, but rolling **inside-out**
    (first-person / about the eye) *feels* opposite to rolling **outside-in** (about an external pivot).
-   *Fix:* default-invert `viewpoint.roll` + `fly.bank`. Later generalised to the full per-mode invert
+   *Fix:* default-invert `camera.roll` + `fly.bank`. Later generalised to the full per-mode invert
    set (Problem #8).
-5. **"Viewpoint" orbit swung around a seemingly arbitrary point instead of turning the camera.**
+5. **"Camera" orbit swung around a seemingly arbitrary point instead of turning the camera.**
    *Root cause:* it orbited `view_location`, which sits far in front after any fly/look or at a large
-   view distance. *Fix:* the `viewpoint` pivot now rotates about the **eye** — "turn the camera in
-   place." (`view`/`object`/`cursor_3d`/`origin` still orbit external points.)
+   view distance. *Fix:* the `camera` pivot now rotates about the **eye** — "turn the camera in
+   place." (`screen_center`/`object`/`cursor_3d`/`origin` still orbit external points.)
 6. **Shift-to-move did nothing in fly/walk.**
    *Two root causes:* (a) the camera-view bug (#2); (b) the mapping/scale — pushing the ball forward
    *strafed vertically* and movement was scaled purely by `view_distance` (→ ~0 when zoomed in close).
@@ -349,10 +349,10 @@ These were all found via live trackball testing; the fixes are in the code but t
    *Constraint:* can't drive Blender's native modal (Gotcha #5). *Fix:* the Alt+\` operator/override
    (§5.5) — switches the *trackball's* mode locally.
 8. **User wanted granular control over every direction (e.g. invert walk-forward without touching
-   orbit) and the 3 viewpoint axes, not just roll; and the two Blender tabs were confusing.**
+   orbit) and the 3 camera axes, not just roll; and the two Blender tabs were confusing.**
    *Fix:* the per-mode/per-axis `invert` structure (§5.4), and **merged** the separate "Blender
-   Advanced" tab into *Per-App Bindings → blender* (now scrollable). The old `invert_viewpoint_roll`
-   flag was replaced by `invert.viewpoint.roll` + `invert.fly.bank`.
+   Advanced" tab into *Per-App Bindings → blender* (now scrollable). The old `invert_camera_roll`
+   flag was replaced by `invert.camera.roll` + `invert.fly.bank`.
 
 ---
 

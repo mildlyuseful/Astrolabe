@@ -32,7 +32,7 @@ you to open a project and Set up again. Manual: copy the staged folder into
 
 ## Controls (Unreal/Blender parity)
 
-Orbit / fly / walk, pivots (`viewpoint`, `view`, `cursor`, `object`, `origin`), free/turntable,
+Orbit / fly / walk, pivots (`camera`, `screen_center`, `cursor`, `object`, `origin`), free/turntable,
 `twist_action`, `selection_overrides_pivot`, `to_cursor` zoom. Under-cursor stores a world ray on
 mouse move via `HandleUtility.GUIPointToWorldRay`, then hits with Physics / own mesh triangle
 tests (AABB fallback). Re-cast from the update pump. Never uses `PlaceObject` or
@@ -47,7 +47,7 @@ uses `cameraDistance` (`size / sin(fov/2)` in perspective) and writes size back 
 `advanced.override_dynamic_clip` (default on) forces it off and installs fixed near/far while
 navigating; turning the toggle off restores Dynamic Clipping.
 
-**Pivot extent:** `advanced.pivot_extent_mult` (default `8`) caps under-cursor / auto-depth
+**Pivot extent:** `advanced.pivot_extent_mult` (default `8`) caps under-cursor / screen-center
 pivots at `scene_AABB_radius × mult` from the camera. Hits beyond that (e.g. near the horizon)
 are rejected so the view does not rocket away.
 

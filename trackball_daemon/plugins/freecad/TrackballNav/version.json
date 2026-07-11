@@ -1,4 +1,4 @@
 {
-  "version": "0.1.7",
-  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_freecad.py. The daemon's integrations._ADDINS['freecad'] reads this (like Fusion's TrackballNav.manifest / Blender's version.json) to drive auto_update. 0.1.1: PAN_SCALE fix. 0.1.2: true 1:1 orbit. 0.1.3: pointer pivot. 0.1.4: scheme value rename. 0.1.5: selection override. 0.1.6: world-space project bounds."
+  "version": "0.1.8",
+  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_freecad.py. 0.1.8: canonical camera/screen_center pivot names."
 }

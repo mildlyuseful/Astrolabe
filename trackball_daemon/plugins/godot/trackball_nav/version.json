@@ -1,4 +1,4 @@
 {
-  "version": "0.1.4",
-  "_comment": "Kept in sync with plugin.cfg / ADDIN_VERSION. 0.1.3: revert level_horizon (mirrored flicker); turntable-only + no roll/bank. 0.1.1: Godot 4.7 := types."
+  "version": "0.1.6",
+  "_comment": "Kept in sync with plugin.cfg / ADDIN_VERSION. 0.1.6: strip dead _walk_meshes and the selection-bbox gating from the ray pivots. 0.1.5: canonical camera/screen_center pivot names."
 }

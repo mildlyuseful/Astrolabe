@@ -12,6 +12,15 @@ from . import integrations
 from .config import ORBIT_PIVOT_METHODS, normalize_orbit_pivot_fallbacks
 
 _PAD = {"padx": 8, "pady": 4}
+_PIVOT_LABELS = {
+    "camera": "Camera",
+    "screen_center": "Screen Center",
+    "cursor": "Under Cursor (mouse)",
+    "selection": "Selection",
+    "cursor_3d": "3D Cursor",
+    "object": "Model Center",
+    "origin": "World Origin",
+}
 
 
 class SettingsWindow:
@@ -224,11 +233,7 @@ class SettingsWindow:
     def _orbit_fallback_editor(self, parent):
         """Ordered global pivot-fallback editor; edits save/apply immediately."""
         keys = ("general", "orbit_pivot_fallbacks")
-        labels = {
-            "cursor": "Under Cursor", "cursor_3d": "3D Cursor", "view": "Auto Depth",
-            "viewpoint": "Viewpoint", "selection": "Selection", "object": "Object",
-            "origin": "World Origin",
-        }
+        labels = _PIVOT_LABELS
         row = ttk.Frame(parent)
         row.pack(fill="x", padx=8, pady=(3, 5))
         ttk.Label(row, text="Failure fallback order", width=24, anchor="nw").pack(side="left")
@@ -360,8 +365,8 @@ class SettingsWindow:
             return
         self._show_onshape_userscript_dialog(
             title="Onshape — under-cursor orbit",
-            lead="Orbit pivot \"cursor (under mouse)\" needs the Astrolabe userscript in your "
-                 "Onshape browser. Without it, orbit falls back to the screen centre.",
+            lead="Orbit pivot \"Under Cursor (mouse)\" needs the Astrolabe userscript in your "
+                 "Onshape browser. Without a hit, the configured fallback chain is used.",
             show_dont_show_again=True,
         )
     @staticmethod
@@ -584,7 +589,7 @@ class SettingsWindow:
         if app_key == "blender":             # Blender has its own richer, merged layout (below)
             self._blender_bindings_fields(parent)
             return
-        if app_key == "sketchup":            # SketchUp has viewpoint/fly/walk + per-mode inverts
+        if app_key == "sketchup":            # SketchUp has camera/fly/walk + per-mode inverts
             self._sketchup_bindings_fields(parent)
             return
         if app_key == "unreal":              # Unreal has a Blender-style richer layout too
@@ -631,13 +636,23 @@ class SettingsWindow:
                   foreground="#555").pack(anchor="w", padx=10, pady=(10, 0))
         # Stored values match the labels since the v3 config migration: "cursor"/"to_cursor" =
         # the under-mouse pivot (pre-v3 "pointer"/"to_pointer"), "selection" = the old stored
-        # "cursor" (selection fallback; Blender's 3D cursor is its own "cursor_3d" value in the
+        # "cursor" (under-mouse raycast; Blender's 3D cursor is its own "cursor_3d" value in the
         # Blender panel). The retired legacy to_cursor (a to_center alias) migrated to
         # to_center and is no longer offered.
+        pivot_options = [("Default (General)", "default")]
+        # Onshape gets no Camera option: it is orthographic, where turn-in-place degenerates
+        # to sliding the image around, so the bridge skips the method entirely.
+        if app_key in ("autocad", "rhino"):
+            pivot_options.append((_PIVOT_LABELS["camera"], "camera"))
+        pivot_options.append((_PIVOT_LABELS["screen_center"], "screen_center"))
+        pivot_options.extend([
+            (_PIVOT_LABELS["cursor"], "cursor"),
+            (_PIVOT_LABELS["selection"], "selection"),
+            (_PIVOT_LABELS["object"], "object"),
+            (_PIVOT_LABELS["origin"], "origin"),
+        ])
         self._mapped_combo_row(parent, "Orbit pivot", base + ("scheme", "orbit_pivot"),
-                               [("default", "default"), ("view", "view"),
-                                ("cursor (under mouse)", "cursor"), ("object", "object"),
-                                ("origin", "origin"), ("selection", "selection")],
+                               pivot_options,
                                on_change=(self._warn_onshape_cursor_userscript_if_needed
                                           if app_key == "onshape" else None))
         self._combo_row(parent, "Orbit style", base + ("scheme", "orbit_style"),
@@ -645,13 +660,13 @@ class SettingsWindow:
         self._mapped_combo_row(parent, "Zoom mode", base + ("scheme", "zoom_mode"),
                                [("default", "default"), ("to_center", "to_center"),
                                 ("to_object", "to_object"), ("to_cursor (under mouse)", "to_cursor")])
-        self._entry_row(parent, "View-pivot hold (s)", ("apps", app_key, "view_pivot_hold_sec"),
-                        hint="'view' pivot only (SolidWorks): seconds still before it re-raycasts the "
-                             "surface under the centre")
+        self._entry_row(parent, "Screen Center hold (s)",
+                        ("apps", app_key, "screen_center_pivot_hold_sec"),
+                        hint="seconds still before Screen Center raycasts again (SolidWorks)")
         self._bool_row(parent, "Selection overrides orbit center",
                        ("apps", app_key, "selection_overrides_pivot"))
         sel_note = ("When on and something is selected, orbit uses the selection centre "
-                    "instead of the designated pivot (Under Cursor / Auto Depth / …).")
+                    "instead of the designated pivot (Under Cursor / Screen Center / …).")
         sel_note += " Applied live by this app's integration."
         ttk.Label(parent, text=sel_note,
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
@@ -659,7 +674,7 @@ class SettingsWindow:
         if app_key == "onshape":
             box = ttk.LabelFrame(parent, text="Under-cursor orbit — userscript")
             box.pack(fill="x", padx=10, pady=(12, 4))
-            ttk.Label(box, text="Required only when Orbit pivot = cursor (under mouse). Copies the "
+            ttk.Label(box, text="Required only when Orbit pivot = Under Cursor (mouse). Copies the "
                                 "Violentmonkey/Tampermonkey script that reports the exact #canvas "
                                 "pointer to the local bridge.",
                       foreground="#555", wraplength=600).pack(anchor="w", padx=10, pady=(4, 2))
@@ -717,18 +732,19 @@ class SettingsWindow:
         self._mapped_combo_row(s2, "Orbit method", base + ("scheme", "orbit_style"),
                                [("Default (General)", "default"), ("Trackball (free)", "free"),
                                 ("Turntable", "turntable")])
-        self._mapped_combo_row(s2, "Orbit around", base + ("scheme", "orbit_pivot"),
-                               [("Default (General)", "default"), ("Viewpoint", "viewpoint"),
-                                ("Auto Depth (surface)", "view"), ("Under Cursor (mouse)", "cursor"),
-                                ("Selection", "object"),
-                                ("3D Cursor", "cursor_3d"), ("World Origin", "origin")])
+        self._mapped_combo_row(s2, "Orbit pivot", base + ("scheme", "orbit_pivot"),
+                               [("Default (General)", "default"), ("Camera", "camera"),
+                                ("Screen Center", "screen_center"),
+                                ("Under Cursor (mouse)", "cursor"), ("Selection", "selection"),
+                                ("3D Cursor", "cursor_3d"), ("Model Center", "object"),
+                                ("World Origin", "origin")])
         self._combo_row(s2, "Twist action", adv + ("twist_action",),
                         values=["roll", "zoom", "dolly", "none"])
         self._bool_row(s2, "Lock horizon (keep level even in trackball)", adv + ("lock_horizon",))
         self._bool_row(s2, "Selection overrides orbit center",
                        ("apps", "blender", "selection_overrides_pivot"))
         ttk.Label(s2, text="When on and something is selected, orbit uses the selection centre "
-                           "instead of the designated pivot (Viewpoint remains turn-in-place).",
+                           "instead of the designated pivot (Camera remains turn-in-place).",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s3 = ttk.LabelFrame(parent, text="Pan / Zoom")
@@ -736,8 +752,9 @@ class SettingsWindow:
         self._combo_row(s3, "Zoom style", adv + ("zoom_style",), values=["zoom", "dolly"])
         self._bool_row(s3, "Zoom to mouse (screen-centre surface)", adv + ("zoom_to_mouse",))
         self._bool_row(s3, "Pan scales with view distance", adv + ("pan_scales_with_distance",))
-        self._entry_row(s3, "Auto-depth hold (s)", ("apps", "blender", "view_pivot_hold_sec"),
-                        hint="'Auto Depth' / 'Under Cursor' pivot: seconds still before it re-raycasts")
+        self._entry_row(s3, "Screen Center hold (s)",
+                        ("apps", "blender", "screen_center_pivot_hold_sec"),
+                        hint="Screen Center / Under Cursor: seconds still before it raycasts again")
 
         s4 = ttk.LabelFrame(parent, text="Camera view")
         s4.pack(fill="x", padx=10, pady=6)
@@ -748,7 +765,7 @@ class SettingsWindow:
         self._invert_row(s5, "Orbit", inv + ("orbit",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
                           ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
-        self._invert_row(s5, "Viewpoint", inv + ("viewpoint",),
+        self._invert_row(s5, "Camera", inv + ("camera",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
         self._invert_row(s5, "Fly", inv + ("fly",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
@@ -757,7 +774,7 @@ class SettingsWindow:
                          [("Pitch", "pitch"), ("Yaw", "yaw"),
                           ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
         ttk.Label(s5, text="Each mode's directions are independent — e.g. flip Walk ▸ Fwd without "
-                           "touching Orbit. \"Viewpoint\" = orbit-around Viewpoint (turn in place); it "
+                           "touching Orbit. \"Camera\" turns the camera in place; it "
                            "shares Orbit's pan/zoom inverts.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(2, 4))
 
@@ -766,7 +783,7 @@ class SettingsWindow:
         base = ("apps", "sketchup", "bindings")
         adv = ("apps", "sketchup", "advanced")
         inv = adv + ("invert",)
-        ttk.Label(parent, text="SketchUp navigation — orbit, viewpoint, fly, and architectural "
+        ttk.Label(parent, text="SketchUp navigation — orbit, camera-look, fly, and architectural "
                               "walk controls in one place. Applies live to the focused model.",
                   foreground="#555", wraplength=600).pack(anchor="w", padx=10, pady=(8, 2))
 
@@ -797,26 +814,27 @@ class SettingsWindow:
         self._mapped_combo_row(s2, "Orbit method", base + ("scheme", "orbit_style"),
                                [("Default (General)", "default"), ("Trackball (free)", "free"),
                                 ("Turntable", "turntable")])
-        self._mapped_combo_row(s2, "Orbit around", base + ("scheme", "orbit_pivot"),
-                               [("Default (General)", "default"),
-                                ("Viewpoint (turn in place)", "viewpoint"),
-                                ("Auto Depth (surface)", "view"), ("Under Cursor (mouse)", "cursor"),
-                                ("Model Centre", "object"),
+        self._mapped_combo_row(s2, "Orbit pivot", base + ("scheme", "orbit_pivot"),
+                               [("Default (General)", "default"), ("Camera", "camera"),
+                                ("Screen Center", "screen_center"),
+                                ("Under Cursor (mouse)", "cursor"), ("Selection", "selection"),
+                                ("Model Center", "object"),
                                 ("World Origin", "origin")])
         self._bool_row(s2, "Lock horizon (keep level in free orbit)", adv + ("lock_horizon",))
         self._bool_row(s2, "Selection overrides orbit center",
                        ("apps", "sketchup", "selection_overrides_pivot"))
         ttk.Label(s2, text="When on and something is selected, orbit uses the selection bounds "
-                           "centre instead of the designated pivot (Viewpoint remains turn-in-place).",
+                           "centre instead of the designated pivot (Camera remains turn-in-place).",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s3 = ttk.LabelFrame(parent, text="Pan / Zoom")
         s3.pack(fill="x", padx=10, pady=6)
-        self._entry_row(s3, "Auto-depth hold (s)", ("apps", "sketchup", "view_pivot_hold_sec"),
-                        hint="'Auto Depth' pivot: seconds still before it re-raycasts")
-        ttk.Label(s3, text="SketchUp has no 3D cursor target here. Auto Depth raycasts the surface "
+        self._entry_row(s3, "Screen Center hold (s)",
+                        ("apps", "sketchup", "screen_center_pivot_hold_sec"),
+                        hint="seconds still before Screen Center raycasts again")
+        ttk.Label(s3, text="SketchUp has no 3D cursor target here. Screen Center raycasts the surface "
                            "under the viewport centre; Under Cursor raycasts the surface under the "
-                           "MOUSE (both held per gesture); Model Centre uses model.bounds.",
+                           "MOUSE (both held per gesture); Model Center uses model.bounds.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
         s5 = ttk.LabelFrame(parent, text="Invert directions — independent per mode")
@@ -824,7 +842,7 @@ class SettingsWindow:
         self._invert_row(s5, "Orbit", inv + ("orbit",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
                           ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
-        self._invert_row(s5, "Viewpoint", inv + ("viewpoint",),
+        self._invert_row(s5, "Camera", inv + ("camera",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
         self._invert_row(s5, "Fly", inv + ("fly",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
@@ -832,13 +850,13 @@ class SettingsWindow:
         self._invert_row(s5, "Walk", inv + ("walk",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"),
                           ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
-        ttk.Label(s5, text="Viewpoint turns the camera in place and shares Orbit's pan/zoom "
+        ttk.Label(s5, text="Camera turns in place and shares Orbit's pan/zoom "
                            "inverts. Fly and Walk movement directions are independent.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(2, 4))
 
     def _unreal_bindings_fields(self, parent):
         """The full Unreal control set (Blender-style), in one place. Mirrors _blender_bindings_fields,
-        adapted to the editor's free-fly eye+rotator camera: orbit/fly/walk modes, viewpoint pivot,
+        adapted to the editor's free-fly eye+rotator camera: orbit/fly/walk modes, camera pivot,
         twist action, lock-horizon, per-mode inverts. (No zoom-style / zoom-to-mouse / camera-lock —
         not applicable in Unreal.) Sensitivities/toggle/rate write apps.unreal.bindings; mode/orbit/
         pan options write apps.unreal.advanced; per-mode flips write advanced.invert. All apply live."""
@@ -874,10 +892,11 @@ class SettingsWindow:
         self._mapped_combo_row(s2, "Orbit method", base + ("scheme", "orbit_style"),
                                [("Default (General)", "default"), ("Trackball (free)", "free"),
                                 ("Turntable", "turntable")])
-        self._mapped_combo_row(s2, "Orbit around", base + ("scheme", "orbit_pivot"),
-                               [("Default (General)", "default"), ("Viewpoint (turn in place)", "viewpoint"),
-                                ("Auto Depth (surface)", "view"), ("Under Cursor (mouse)", "cursor"),
-                                ("Selection", "object"),
+        self._mapped_combo_row(s2, "Orbit pivot", base + ("scheme", "orbit_pivot"),
+                               [("Default (General)", "default"), ("Camera", "camera"),
+                                ("Screen Center", "screen_center"),
+                                ("Under Cursor (mouse)", "cursor"), ("Selection", "selection"),
+                                ("Model Center", "object"),
                                 ("World Origin", "origin")])
         self._combo_row(s2, "Twist action", adv + ("twist_action",),
                         values=["roll", "zoom", "dolly", "none"])
@@ -885,7 +904,7 @@ class SettingsWindow:
         self._bool_row(s2, "Selection overrides orbit center",
                        ("apps", "unreal", "selection_overrides_pivot"))
         ttk.Label(s2, text="Unreal has no 3D cursor, so no 3D-cursor option is shown. "
-                           "\"Auto Depth\" raycasts under screen-centre; \"Under Cursor\" under the "
+                           "\"Screen Center\" raycasts under the viewport center; \"Under Cursor\" under the "
                            "mouse (viewport must be focused). When \"Selection overrides…\" is on "
                            "and actors are selected, orbit/to_cursor use the selection centre "
                            "instead of those pivots.",
@@ -897,15 +916,16 @@ class SettingsWindow:
                                [("Default (General)", "default"), ("to_center", "to_center"),
                                 ("to_object", "to_object"), ("to_cursor (under mouse)", "to_cursor")])
         self._bool_row(s3, "Pan scales with focus distance", adv + ("pan_scales_with_distance",))
-        self._entry_row(s3, "Auto-depth hold (s)", ("apps", "unreal", "view_pivot_hold_sec"),
-                        hint="'Auto Depth' / 'Under Cursor' pivot: seconds still before it re-raycasts")
+        self._entry_row(s3, "Screen Center hold (s)",
+                        ("apps", "unreal", "screen_center_pivot_hold_sec"),
+                        hint="Screen Center / Under Cursor: seconds still before it raycasts again")
 
         s5 = ttk.LabelFrame(parent, text="Invert directions — independent per mode")
         s5.pack(fill="x", padx=10, pady=6)
         self._invert_row(s5, "Orbit", inv + ("orbit",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
                           ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
-        self._invert_row(s5, "Viewpoint", inv + ("viewpoint",),
+        self._invert_row(s5, "Camera", inv + ("camera",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
         self._invert_row(s5, "Fly", inv + ("fly",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
@@ -913,8 +933,8 @@ class SettingsWindow:
         self._invert_row(s5, "Walk", inv + ("walk",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"),
                           ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
-        ttk.Label(s5, text="Each mode's directions are independent. \"Viewpoint\" = orbit-around "
-                           "Viewpoint (turn in place); it shares Orbit's pan/zoom inverts.",
+        ttk.Label(s5, text="Each mode's directions are independent. Camera turns in place and "
+                           "shares Orbit's pan/zoom inverts.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(2, 4))
 
     def _engine_bindings_fields(self, parent, app_key, title, *, no_roll=False):
@@ -968,14 +988,15 @@ class SettingsWindow:
             self._combo_row(s2, "Twist action", adv + ("twist_action",),
                             values=["roll", "zoom", "dolly", "none"])
             self._bool_row(s2, "Lock horizon (keep level even in free orbit)", adv + ("lock_horizon",))
-        self._mapped_combo_row(s2, "Orbit around", base + ("scheme", "orbit_pivot"),
-                               [("Default (General)", "default"), ("Viewpoint (turn in place)", "viewpoint"),
-                                ("Auto Depth (surface)", "view"), ("Under Cursor (mouse)", "cursor"),
-                                ("Selection", "object"),
+        self._mapped_combo_row(s2, "Orbit pivot", base + ("scheme", "orbit_pivot"),
+                               [("Default (General)", "default"), ("Camera", "camera"),
+                                ("Screen Center", "screen_center"),
+                                ("Under Cursor (mouse)", "cursor"), ("Selection", "selection"),
+                                ("Model Center", "object"),
                                 ("World Origin", "origin")])
         self._bool_row(s2, "Selection overrides orbit center",
                        ("apps", app_key, "selection_overrides_pivot"))
-        ttk.Label(s2, text="\"Auto Depth\" raycasts under screen-centre; \"Under Cursor\" under the "
+        ttk.Label(s2, text="\"Screen Center\" raycasts under the viewport center; \"Under Cursor\" under the "
                            "mouse. When \"Selection overrides…\" is on and something is selected, "
                            "orbit/to_cursor use the selection centre instead of those pivots.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
@@ -986,8 +1007,9 @@ class SettingsWindow:
                                [("Default (General)", "default"), ("to_center", "to_center"),
                                 ("to_object", "to_object"), ("to_cursor (under mouse)", "to_cursor")])
         self._bool_row(s3, "Pan scales with focus distance", adv + ("pan_scales_with_distance",))
-        self._entry_row(s3, "Auto-depth hold (s)", ("apps", app_key, "view_pivot_hold_sec"),
-                        hint="'Auto Depth' / 'Under Cursor' pivot: seconds still before it re-raycasts")
+        self._entry_row(s3, "Screen Center hold (s)",
+                        ("apps", app_key, "screen_center_pivot_hold_sec"),
+                        hint="Screen Center / Under Cursor: seconds still before it raycasts again")
         if app_key == "unity":
             self._bool_row(s3, "Override Unity Dynamic Clipping",
                            adv + ("override_dynamic_clip",))
@@ -997,8 +1019,8 @@ class SettingsWindow:
                                "this off restores Dynamic Clipping.",
                       foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
             self._entry_row(s3, "Pivot extent limit ×", adv + ("pivot_extent_mult",),
-                            hint="max under-cursor / auto-depth distance = scene size × this")
-            ttk.Label(s3, text="Caps how far a cursor/view pivot can be from the camera (scene "
+                            hint="max under-cursor / screen-center distance = scene size × this")
+            ttk.Label(s3, text="Caps how far an Under Cursor / Screen Center pivot can be from the camera (scene "
                                "AABB radius × multiplier). Stops near-horizon hits from flinging "
                                "the view. Typical 4–16; default 8.",
                       foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
@@ -1009,7 +1031,7 @@ class SettingsWindow:
             self._invert_row(s5, "Orbit", inv + ("orbit",),
                              [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
                               ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
-            self._invert_row(s5, "Viewpoint", inv + ("viewpoint",),
+            self._invert_row(s5, "Camera", inv + ("camera",),
                              [("Pitch", "pitch"), ("Yaw", "yaw")])
             self._invert_row(s5, "Fly", inv + ("fly",),
                              [("Pitch", "pitch"), ("Yaw", "yaw"),
@@ -1018,7 +1040,7 @@ class SettingsWindow:
             self._invert_row(s5, "Orbit", inv + ("orbit",),
                              [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
                               ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
-            self._invert_row(s5, "Viewpoint", inv + ("viewpoint",),
+            self._invert_row(s5, "Camera", inv + ("camera",),
                              [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
             self._invert_row(s5, "Fly", inv + ("fly",),
                              [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
@@ -1026,7 +1048,7 @@ class SettingsWindow:
         self._invert_row(s5, "Walk", inv + ("walk",),
                          [("Pitch", "pitch"), ("Yaw", "yaw"),
                           ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
-        ttk.Label(s5, text="Each mode's directions are independent. \"Viewpoint\" shares Orbit's "
+        ttk.Label(s5, text="Each mode's directions are independent. Camera shares Orbit's "
                            "pan/zoom inverts.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(2, 4))
 
@@ -1062,10 +1084,10 @@ class SettingsWindow:
         secS = ttk.LabelFrame(outer, text="3D control scheme (defaults)")
         secS.pack(fill="x", padx=10, pady=6)
         self._mapped_combo_row(secS, "Orbit pivot", ("general", "scheme", "orbit_pivot"),
-                               [("view", "view"), ("cursor (under mouse)", "cursor"),
-                                ("3D cursor", "cursor_3d"), ("viewpoint", "viewpoint"),
-                                ("object", "object"), ("origin", "origin"),
-                                ("selection", "selection")])
+                               [("Camera", "camera"), ("Screen Center", "screen_center"),
+                                ("Under Cursor (mouse)", "cursor"), ("Selection", "selection"),
+                                ("3D Cursor", "cursor_3d"), ("Model Center", "object"),
+                                ("World Origin", "origin")])
         self._combo_row(secS, "Orbit style", ("general", "scheme", "orbit_style"),
                         values=["free", "turntable"])
         self._mapped_combo_row(secS, "Zoom mode", ("general", "scheme", "zoom_mode"),
@@ -1075,7 +1097,7 @@ class SettingsWindow:
         ttk.Label(secS, text="The selected pivot is tried first. If it is unavailable, resolution "
                              "restarts at item 1 of the fallback order; unsupported methods are "
                              "skipped. An empty list means no fallback. Selection Override still "
-                             "wins when enabled, except Viewpoint always turns in place. Per-app "
+                             "wins when enabled, except Camera always turns in place. Per-app "
                              "pivot choices can override the General default.",
                   foreground="#888", wraplength=600).pack(anchor="w", padx=10, pady=(2, 6))
 

@@ -59,9 +59,9 @@ and only flows in **3D mode** (tray → Mode), so the mouse cursor is untouched 
 integration. The selected per-app pivot is always attempted first. If it is unavailable (for
 example, Under Cursor misses), resolution restarts at item 1 of this chain. A host skips methods it
 cannot implement, duplicate/unknown stored values are removed, and an empty chain means the failed
-primary method produces no orbit. The shipped order is **3D Cursor → Viewpoint → Object → World
+primary method produces no orbit. The shipped order is **3D Cursor → Camera → Model Center → World
 Origin**; Origin is therefore the terminal default unless the user removes it. **Selection overrides
-orbit center** remains higher priority when enabled, except a selected primary **Viewpoint** always
+orbit center** remains higher priority when enabled, except a selected primary **Camera** always
 turns in place. Ray-derived results are held for the gesture.
 
 ### Fusion 360 (implemented)
@@ -82,7 +82,7 @@ turns in place. Ray-derived results are held for the gesture.
    - **General → 3D navigation bridge → Default update rate (Hz)** — the global fallback used
      by any app whose per-app rate is **Default** (default 30).
    - Intrinsic per-axis orientation also lives in the add-in (`ORBIT_SCALE`/`ZOOM_SIGN`).
-   - **Control scheme**: the usual **Orbit pivot / Orbit style / Zoom mode** dropdowns. `view`
+   - **Control scheme**: the usual **Orbit pivot / Orbit style / Zoom mode** dropdowns. `screen_center`
      raycasts the surface under the screen centre (`findBRepUsingRay`) and holds it per gesture;
      **"cursor (under mouse)" (add-in 0.1.17+) raycasts the surface under the MOUSE CURSOR
      instead** — hover the feature you care about and spin the ball — and **"to_cursor (under
@@ -125,12 +125,12 @@ and moves the active view's camera.
    - **Orbit pivot** — `origin` rotates about the model origin (the lightest path); `object`
      rotates about the model's bounding-box centre; `selection` uses the mean of SolidWorks'
      selected-entity points;
-     `view` rotates about the surface **under the centre of the screen** — found by a raycast,
+     `screen_center` rotates about the surface **under the centre of the screen** — found by a raycast,
      exactly like SolidWorks' own middle-drag orbit — and **holds it for the whole gesture**;
      **`cursor` rotates about the surface under the MOUSE CURSOR** — the same raycast aimed
      through the cursor instead of the screen centre (hover the feature you care about and spin
      the ball), held per gesture; misses continue through the global fallback chain.
-   - **View-pivot hold (s)** (Per-App Bindings, `view`/`cursor` pivots) — seconds the view must be
+   - **Screen Center pivot hold (s)** (Per-App Bindings, `screen_center`/`cursor` pivots) — seconds the view must be
      still before the pivot re-raycasts. Default **0.5**; `0` recomputes at the start of
      every orbit; a pan/zoom always recomputes it immediately.
    - **Orbit style** — `free` (all three axes, with roll) or `turntable` (yaw about world-up +
@@ -188,14 +188,18 @@ Architecture, Mechanical) are all `acad.exe` and expose the same automation obje
    motion, the same interaction mode AutoCAD's own orbit uses there.
 4. **Control scheme** (the **Orbit pivot / Orbit style / Zoom mode** dropdowns in Per-App Bindings,
    same as the other apps — per app or **Default** to inherit General):
-   - **Orbit pivot** — `origin` (WCS origin), `object` (drawing-extents centre), `view` (the current
-     view **target** — AutoCAD's native target orbit), `selection` (selected entities' aggregate
-     geometric-extents centre, falling back to object), and
+   - **Orbit pivot** — `camera` (turn in place), `origin` (WCS origin), `object`
+     (drawing-extents centre), `selection` (selected entities' aggregate geometric-extents centre),
+     **`screen_center` — orbit about the first surface under the VIEWPORT CENTRE** (plugin 0.3.8+:
+     an expanding model-space ray through the view centre, strict — nothing under the centre
+     continues through the configured fallback chain), and
      **`cursor` — orbit about the point under the MOUSE CURSOR** (the plugin
      watches the cursor via `PointMonitor`, holds the point under it when a gesture starts, and
      orbits the view rigidly around it; `to_cursor` zoom keeps that point fixed while zooming. In a
      shaded visual style the depth comes from the entity under the cursor; in 2D wireframe faces
-     don't pick, so mid-face hovers use the construction-plane point — still under the cursor).
+     don't pick, so mid-face hovers are recovered by the same strict expanding ray as
+     `screen_center`. Plugin 0.3.9+: hovering **empty space is a miss** — orbit continues through
+     the configured fallback chain instead of pivoting about empty air).
      **Selection overrides orbit center** makes a non-empty selection win over the chosen pivot.
    - **Orbit style** — `free` or `turntable` (yaw about world-up + pitch about camera-right; AutoCAD
      is **Z-up**). Unlike the old COM path, the plugin sets `VIEWTWIST` directly, so free-roll works.
@@ -247,10 +251,14 @@ cert/trust details: [`docs/apps/onshape.md`](docs/apps/onshape.md).)
    + **Control scheme**) and **Viewport refresh rate** apply as for the other apps. Camera math is a
    reuse of the Fusion add-in's orbit/pan/zoom-about-a-pivot (the bridge decodes Onshape's
    `view.affine` to eye + a camera basis, applies the change, re-encodes), so **orbit pivot / orbit
-   style / zoom mode** are all honored (`view` pivot raycasts the surface under the screen centre via
-   Onshape's navlib hit-test, falling back to the model centre; **`cursor` (Under Cursor)** aims that
+   style / zoom mode** are all honored (`screen_center` raycasts the first surface under the viewport
+   center via Onshape's navlib hit-test — only a **real** surface counts: Onshape fabricates a
+   point at scene depth when the ray misses, and the bridge rejects those so a miss falls through
+   the configured fallback chain; **`cursor` (Under Cursor (mouse))** aims that
    same hit-test through the OS mouse — done in code, needs a live calibration of the canvas insets,
-   see [`docs/apps/onshape.md`](docs/apps/onshape.md) §8.14; `to_cursor` falls back to `to_center`).
+   see [`docs/apps/onshape.md`](docs/apps/onshape.md) §8.14; `to_cursor` falls back to `to_center`.
+   There is **no Camera pivot** for Onshape: its view is orthographic, so turn-in-place degenerates
+   to sliding the image — the bridge skips `camera` in any chain).
    - Intrinsic per-axis orientation lives at the top of `onshape_bridge.py`
      (`ORBIT_SIGN`/`PAN_SIGN`/`PAN_SCALE`/`ZOOM_SIGN`/`ZOOM_SCALE`, and `WORLD_UP` for the turntable
      azimuth — Onshape's scene up may be Y or Z, so verify turntable and flip `WORLD_UP` if verticals
@@ -285,7 +293,7 @@ the active 3D view's **Coin (pivy) camera**.
    cleanly — open a part first.)
 4. Tuning — the same **Per-App Bindings** (orbit/pan/zoom **gains**, **Invert axes**, **Viewport
    refresh rate**) and **Control scheme** (**Orbit pivot**, **Orbit style** free/turntable, **Zoom
-   mode**) as the other apps. The `view` pivot raycasts the surface under the screen centre (via
+   mode**) as the other apps. The `screen_center` pivot raycasts the surface under the screen centre (via
    FreeCAD's `getObjectInfo`) and holds it for the gesture, exactly like native middle-drag orbit;
    the **"cursor (under mouse)" pivot raycasts the surface under the MOUSE CURSOR** instead (and
    **"to_cursor (under mouse)"** zooms about it) — hover the point you care about and spin the
@@ -319,8 +327,8 @@ SketchUp for Web is not supported (it has no local scripting hook).
 3. Open a model, switch the daemon to **3D mode**, and **focus SketchUp**. The row flips to
    **active • connected** and the tray shows `Apps: sketchup v…`.
 4. In **Per-App Bindings → sketchup**, choose:
-   - **Orbit** — normal object/view-centred navigation. **Viewpoint** turns the camera in place;
-     **Auto Depth** raycasts the surface under the viewport centre and holds it for the gesture;
+   - **Orbit** — normal object/view-centred navigation. **Camera** turns the camera in place;
+     **Screen Center** raycasts the surface under the viewport centre and holds it for the gesture;
      **Under Cursor** raycasts the surface under the **mouse** instead (add-on 0.2.2 — needs a
      one-time live check, see the maintainer notes).
    - **Fly** — unconstrained 6DOF look; hold **Shift** to strafe/advance and rise/fall.
@@ -331,7 +339,7 @@ SketchUp for Web is not supported (it has no local scripting hook).
 
 SketchUp is right-handed, Z-up, and stores model coordinates in **inches**. The bundled baseline
 signs are starting defaults; use the per-app Invert checkboxes for the physical sign/feel pass.
-Add-on updates are version-gated and take effect on SketchUp's next launch. Viewpoint/fly/walk were
+Add-on updates are version-gated and take effect on SketchUp's next launch. Camera/fly/walk were
 added in extension `0.2.0`.
 
 > Maintainer guide, verified live on SketchUp 2026.2.243:
@@ -360,18 +368,18 @@ SpaceMouse orbiting your model.
    hold **Shift** to pan/zoom. (During **Play-In-Editor** the add-on no-ops so it doesn't fight the
    game; it also no-ops cleanly with no perspective viewport open.) For **Under Cursor** orbit, click
    the **level viewport** so it has focus (clicking Details / Content Browser leaves the viewport
-   unfocused and that pivot falls back to Selection).
+   unfocused and that pivot continues through the configured fallback chain).
 4. Tuning — Unreal gets the **full Blender-style Per-App Bindings panel**:
    - **Navigation mode** — toggle **Orbit / Fly / Walk** (with Fly speed / Walk speed). *Fly* = free
      6DOF (banks on twist; forward follows pitch). *Walk* = horizon-locked look, movement stays on the
      ground plane. In **orbit** mode, un-shifted twist does **Twist action** (roll / zoom / dolly /
      none), and **Lock horizon** keeps the view level.
-   - **Orbit around** — **Viewpoint** (turn the camera in place), **Auto Depth** (raycast the surface
-     under screen-centre; falls back to selection → free-fly on a miss), **Under Cursor** (add-on
+   - **Orbit pivot** — **Camera** (turn the camera in place), **Screen Center** (raycast the first
+     surface under the viewport center), **Under Cursor (mouse)** (add-on
      0.2.3 — raycasts under the mouse via Epic's GeoReferencing helpers; needs the viewport focused),
      **Selection** (selected actors' bounding box), **World Origin**. (No **3D Cursor** option —
      Unreal has none.) **Orbit method** free/turntable. **Zoom mode** includes **to_cursor**.
-   - **Invert directions** — independent per mode (Orbit / Viewpoint / Fly / Walk), plus orbit/pan/zoom
+   - **Invert directions** — independent per mode (Orbit / Camera / Fly / Walk), plus orbit/pan/zoom
      **gains** and **Viewport refresh rate**.
    Unreal is **left-handed, Z-up, centimetres**, so expect to flip a few **Invert** checkboxes the
    first time — the add-on's intrinsic signs (`ORBIT_SIGN`/`PAN_*`/`ZOOM_*` in `tbnav_unreal_camera.py`)
@@ -408,7 +416,7 @@ manual install into `<YourProject>\Packages\com.astrolabe.trackball-nav\`.
 - **Override Unity Dynamic Clipping** (default on) — Scene View Camera → Dynamic Clipping can
   feel like auto zoom-to-fit; the add-on forces fixed near/far while navigating, and restores
   Dynamic Clipping when you turn the override off (nudge the trackball once after toggling).
-- **Pivot extent limit ×** (default `8`) — caps under-cursor / auto-depth pivots at
+- **Pivot extent limit ×** (default `8`) — caps under-cursor / screen-center pivots at
   `scene size × multiplier` so near-horizon hits do not fling the camera away.
 
 > Maintainer guide: [`docs/apps/unity.md`](docs/apps/unity.md) (cameraDistance vs size, picking

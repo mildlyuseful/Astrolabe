@@ -25,10 +25,10 @@ _DEFAULT_3D_BINDINGS = {
     # per-axis direction flips (user preference, on top of the base signs). All default off.
     "invert": {"orbit": [False, False, False], "pan": [False, False], "zoom": False},
     # per-app control scheme; "default" inherits the General default (see DEFAULTS["general"]).
-    # orbit_pivot: view | cursor | object | origin | selection (+ viewpoint in Blender/SketchUp/
-    # Unreal, + cursor_3d in Blender); zoom_mode: to_center | to_object | to_cursor.
-    # "cursor"/"to_cursor" target the surface under the MOUSE CURSOR; apps without a cursor
-    # resolver fall back to their view/object pivot. "selection" is the selection/bbox pivot;
+    # orbit_pivot: screen_center | camera | cursor | selection | cursor_3d | object | origin.
+    # "cursor"/"to_cursor" target the surface under the MOUSE CURSOR; when an app cannot resolve
+    # a pivot method, orbit resolution continues through the configured global chain. "selection"
+    # is the selected-items pivot; "object" is the model/project bounds centre;
     # "cursor_3d" is Blender's 3D cursor. (v3 migration renamed pointer->cursor,
     # cursor->selection/cursor_3d, to_pointer->to_cursor; the retired to_cursor alias of
     # to_center migrated to to_center.) effective_scheme passes values through untouched, so
@@ -39,12 +39,12 @@ _DEFAULT_3D_BINDINGS = {
 SCHEME_FIELDS = ("orbit_pivot", "orbit_style", "zoom_mode")
 
 # Canonical identifiers accepted by the global orbit-pivot fallback editor and sent to every
-# integration.  Integrations simply skip methods they cannot implement.  ``viewpoint`` is kept
-# distinct from ``view``: it means turn the camera in place, while ``view`` means the surface under
-# the screen centre.
-ORBIT_PIVOT_METHODS = ("cursor", "cursor_3d", "view", "viewpoint",
-                       "selection", "object", "origin")
-DEFAULT_ORBIT_PIVOT_FALLBACKS = ("cursor_3d", "viewpoint", "object", "origin")
+# integration. ``camera`` means turn the camera in place; ``screen_center`` means raycast the first
+# surface hit under the center of the viewport. These names intentionally describe different jobs.
+ORBIT_PIVOT_METHODS = ("camera", "screen_center", "cursor", "selection", "cursor_3d",
+                       "object", "origin")
+DEFAULT_ORBIT_PIVOT_FALLBACKS = ("cursor_3d", "camera", "object", "origin")
+_LEGACY_ORBIT_PIVOT_NAMES = {"view": "screen_center", "viewpoint": "camera"}
 
 
 def normalize_orbit_pivot_fallbacks(value):
@@ -57,6 +57,7 @@ def normalize_orbit_pivot_fallbacks(value):
         return list(DEFAULT_ORBIT_PIVOT_FALLBACKS)
     out = []
     for method in value:
+        method = _LEGACY_ORBIT_PIVOT_NAMES.get(method, method)
         if method in ORBIT_PIVOT_METHODS and method not in out:
             out.append(method)
     return out
@@ -65,6 +66,7 @@ def normalize_orbit_pivot_fallbacks(value):
 def orbit_pivot_candidates(primary, fallbacks):
     """Primary first, then the global chain from its beginning, with duplicates removed."""
     out = []
+    primary = _LEGACY_ORBIT_PIVOT_NAMES.get(primary, primary)
     for method in [primary] + normalize_orbit_pivot_fallbacks(fallbacks):
         if method in ORBIT_PIVOT_METHODS and method not in out:
             out.append(method)
@@ -73,12 +75,12 @@ def orbit_pivot_candidates(primary, fallbacks):
 # --- Per-mode, per-axis direction flips for Blender. The add-on interprets the same physical axes
 #     differently per nav mode (e.g. ball forward = orbit-pan-vertical, but fly/walk-forward), so a
 #     single invert set can't flip one without the other. These are applied IN THE ADD-ON per mode,
-#     giving independent control. Defaults bake in the "inside-out" roll fix: viewpoint roll + fly
-#     bank are inverted vs external-pivot orbit. ("viewpoint" shares orbit's pan/zoom inverts.)
+#     giving independent control. Defaults bake in the "inside-out" roll fix: camera roll + fly
+#     bank are inverted vs external-pivot orbit. ("camera" shares orbit's pan/zoom inverts.)
 _DEFAULT_BLENDER_INVERT = {
     "orbit":     {"pitch": False, "yaw": False, "twist": False,
                   "pan_x": False, "pan_y": False, "zoom": False},
-    "viewpoint": {"pitch": False, "yaw": False, "roll": True},
+    "camera":    {"pitch": False, "yaw": False, "roll": True},
     "fly":       {"pitch": False, "yaw": False, "bank": True,
                   "forward": False, "strafe": False, "vertical": False},
     "walk":      {"pitch": False, "yaw": False,
@@ -88,7 +90,7 @@ _DEFAULT_BLENDER_INVERT = {
 # --- Blender-only "Advanced" nav options. Deep-merged in additively, so they appear on existing
 #     configs WITHOUT a CONFIG_VERSION bump. The parts that map to the generic scheme are NOT
 #     duplicated here -- orbit method <-> scheme.orbit_style (free/turntable) and orbit-around <->
-#     scheme.orbit_pivot (with a Blender-only extra value "viewpoint") stay the single source of
+#     scheme.orbit_pivot stay the single source of
 #     truth. See docs/apps/blender_design.md for the reconciliation table.
 _DEFAULT_BLENDER_ADVANCED = {
     "nav_mode": "orbit",            # orbit | fly | walk
@@ -104,13 +106,13 @@ _DEFAULT_BLENDER_ADVANCED = {
 }
 
 
-# --- SketchUp: Blender-parity orbit/viewpoint/fly/walk controls. SketchUp has an explicit
+# --- SketchUp: Blender-parity orbit/camera/fly/walk controls. SketchUp has an explicit
 #     eye/target/up camera, so these options are applied by the Ruby extension. Per-mode inverts
 #     match Blender's names and inside-out roll/bank defaults; there is no 3D-cursor option. -------
 _DEFAULT_SKETCHUP_INVERT = {
     "orbit":     {"pitch": False, "yaw": False, "twist": False,
                   "pan_x": False, "pan_y": False, "zoom": False},
-    "viewpoint": {"pitch": False, "yaw": False, "roll": True},
+    "camera":    {"pitch": False, "yaw": False, "roll": True},
     "fly":       {"pitch": False, "yaw": False, "bank": True,
                   "forward": False, "strafe": False, "vertical": False},
     "walk":      {"pitch": False, "yaw": False,
@@ -134,7 +136,7 @@ _DEFAULT_SKETCHUP_ADVANCED = {
 _DEFAULT_UNREAL_INVERT = {
     "orbit":     {"pitch": False, "yaw": False, "twist": False,
                   "pan_x": False, "pan_y": False, "zoom": False},
-    "viewpoint": {"pitch": False, "yaw": False, "roll": False},
+    "camera":    {"pitch": False, "yaw": False, "roll": False},
     "fly":       {"pitch": False, "yaw": False, "bank": False,
                   "forward": False, "strafe": False, "vertical": False},
     "walk":      {"pitch": False, "yaw": False,
@@ -157,7 +159,7 @@ _DEFAULT_UNREAL_ADVANCED = {
 # cannot persist).
 _DEFAULT_UNITY_ADVANCED = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
 _DEFAULT_UNITY_ADVANCED["override_dynamic_clip"] = True  # force SceneView.cameraSettings.dynamicClip off
-# Soft max for under-cursor / auto-depth pivots: scene AABB radius × this multiplier.
+# Soft max for under-cursor / screen-center pivots: scene AABB radius × this multiplier.
 # Stops horizon-line hits from rocketing the camera to infinity.
 _DEFAULT_UNITY_ADVANCED["pivot_extent_mult"] = 8.0
 _DEFAULT_GODOT_ADVANCED = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
@@ -183,10 +185,10 @@ def _app(enabled=False):
         # Per-app viewport refresh / flush rate (Hz) sent to this CAD app. 0 = use the global
         # bridge.rate_hz default. Lets each app run at its own rate (e.g. SolidWorks at 60).
         "rate_hz": 0,
-        # "view" orbit pivot only: seconds the view must be still (no orbit/pan/zoom) before the
-        # screen-centre pivot is recomputed. Holds the pivot steady during a gesture; re-settles to
+        # Screen Center only: seconds the view must be still before its raycast is recomputed.
+        # Holds the pivot steady during a gesture; re-settles to
         # the current centre after a pause. (SolidWorks driver; other apps recompute per frame.)
-        "view_pivot_hold_sec": 0.5,
+        "screen_center_pivot_hold_sec": 0.5,
         # When True and something is selected, orbit (and supported to_cursor zoom paths) use the
         # selection centre instead of the designated pivot. Every integration consumes this setting;
         # it is deep-merged onto existing configs without a CONFIG_VERSION bump.
@@ -197,9 +199,9 @@ def _app(enabled=False):
 
 def _blender_app():
     """Blender's app config: the shared shape plus the Blender-only `advanced` block, with the
-    Blender-native default orbit pivot 'viewpoint' (orbit about view_location)."""
+    Blender-native default orbit pivot 'camera' (turn in place about the eye)."""
     a = _app()
-    a["bindings"]["scheme"]["orbit_pivot"] = "viewpoint"
+    a["bindings"]["scheme"]["orbit_pivot"] = "camera"
     a["advanced"] = copy.deepcopy(_DEFAULT_BLENDER_ADVANCED)
     return a
 
@@ -207,7 +209,7 @@ def _blender_app():
 def _unreal_app():
     """Unreal's app config: the shared shape plus the Unreal `advanced` block (orbit/fly/walk modes,
     twist action, lock-horizon, per-mode inverts), mirroring Blender's richer set. Default orbit
-    pivot stays 'view' (raycast the surface, falling back to selection / free-fly)."""
+    pivot stays 'screen_center' (raycast the first surface under the viewport center)."""
     a = _app()
     a["advanced"] = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
     return a
@@ -229,13 +231,13 @@ def _godot_app():
 
 
 def _sketchup_app():
-    """SketchUp's shared app shape plus viewpoint/fly/walk and per-mode direction controls."""
+    """SketchUp's shared app shape plus camera/fly/walk and per-mode direction controls."""
     a = _app()
     a["advanced"] = copy.deepcopy(_DEFAULT_SKETCHUP_ADVANCED)
     return a
 
 
-CONFIG_VERSION = 3
+CONFIG_VERSION = 4
 
 DEFAULTS = {
     "version": CONFIG_VERSION,
@@ -253,7 +255,7 @@ DEFAULTS = {
         # reserved: the device handles physical buttons in HID mode; kept here for the UI
         "buttons": {"left": "left", "right": "right", "middle": "middle"},
         # default 3D control scheme (per-app can override). Defaults == current behavior.
-        "scheme": {"orbit_pivot": "view", "orbit_style": "free", "zoom_mode": "to_center"},
+        "scheme": {"orbit_pivot": "screen_center", "orbit_style": "free", "zoom_mode": "to_center"},
         # If the selected pivot cannot resolve, every integration restarts here (it does not begin
         # after the failed method). Unsupported methods are skipped by that integration.
         "orbit_pivot_fallbacks": list(DEFAULT_ORBIT_PIVOT_FALLBACKS),
@@ -346,8 +348,8 @@ class Config:
             changed = True
         if from_version < 3:
             # v3: scheme values renamed to match the UI labels. Under-mouse "pointer"/
-            # "to_pointer" became "cursor"/"to_cursor"; the old "cursor" (selection fallback,
-            # 3D cursor in Blender) split into "selection" / Blender-only "cursor_3d"; the
+            # "to_pointer" became "cursor"/"to_cursor"; the old "cursor" (a selection-style pivot,
+            # and specifically the 3D cursor in Blender) split into "selection" / "cursor_3d"; the
             # retired legacy "to_cursor" (a to_center alias everywhere) maps to "to_center".
             # Order matters: retire old to_cursor BEFORE to_pointer takes that name.
             pivot_map = {"pointer": "cursor", "cursor": "selection"}
@@ -368,6 +370,24 @@ class Config:
             _remap(self.data["general"].get("scheme"))
             for key, app in self.data["apps"].items():
                 _remap(app.get("bindings", {}).get("scheme"), blender=(key == "blender"))
+            changed = True
+        if from_version < 4:
+            # v4: disambiguate camera turn-in-place from the viewport-center raycast everywhere.
+            # Also rename the related invert group and SolidWorks hold setting.
+            def _rename_pivot(scheme):
+                if isinstance(scheme, dict):
+                    op = scheme.get("orbit_pivot")
+                    scheme["orbit_pivot"] = _LEGACY_ORBIT_PIVOT_NAMES.get(op, op)
+
+            _rename_pivot(self.data["general"].get("scheme"))
+            for app in self.data["apps"].values():
+                _rename_pivot(app.get("bindings", {}).get("scheme"))
+                if "view_pivot_hold_sec" in app:
+                    app["screen_center_pivot_hold_sec"] = app.pop("view_pivot_hold_sec")
+                invert = app.get("advanced", {}).get("invert")
+                if isinstance(invert, dict) and "viewpoint" in invert:
+                    invert["camera"] = _deep_merge(
+                        invert.get("camera") or {}, invert.pop("viewpoint"))
             changed = True
         self.data["version"] = CONFIG_VERSION
         return changed

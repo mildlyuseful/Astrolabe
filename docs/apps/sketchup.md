@@ -122,7 +122,7 @@ WORLD_UP = Geom::Vector3d.new(0, 0, 1)
   object centre stays fixed. Factors and eye-target distance are clamped so the eye never crosses
   the target.
 
-### Viewpoint, fly, and walk (`0.2.0`)
+### Camera, fly, and walk (`0.2.0`)
 
 SketchUp now consumes the same additive broker `adv` shape used by Blender/Unreal:
 
@@ -134,14 +134,14 @@ SketchUp now consumes the same additive broker `adv` shape used by Blender/Unrea
   "walk_speed": 1.0,
   "invert": {
     "orbit": {"pitch":false,"yaw":false,"twist":false,"pan_x":false,"pan_y":false,"zoom":false},
-    "viewpoint": {"pitch":false,"yaw":false,"roll":true},
+    "camera": {"pitch":false,"yaw":false,"roll":true},
     "fly": {"pitch":false,"yaw":false,"bank":true,"forward":false,"strafe":false,"vertical":false},
     "walk": {"pitch":false,"yaw":false,"forward":false,"strafe":false,"vertical":false}
   }
 }
 ```
 
-- **Viewpoint** is an orbit pivot, not a separate mode: rotate target/up about `cam.eye`, leaving the
+- **Camera** is an orbit pivot, not a separate mode: rotate target/up about `cam.eye`, leaving the
   eye and focal distance fixed. Its pitch/yaw/roll inversions are independent; pan/zoom share the
   Orbit group, matching Blender.
 - **Fly look** also rotates about the eye but is unconstrained and uses twist as bank. Shift channels
@@ -159,14 +159,14 @@ where the active mode is known.
 ## 5. Pivots and the live raytest
 
 - `origin` → `ORIGIN`
-- `viewpoint` → camera eye (turn in place)
+- `camera` → camera eye (turn in place)
 - `object` → `model.bounds.center`
-- `selection` → aggregate bounds centre of the current `model.selection` (object centre fallback)
-- `view` → surface under the viewport **centre**, else object centre
+- `selection` → aggregate bounds centre of the current `model.selection`
+- `screen_center` → surface under the viewport **centre**, else object centre
 - `cursor` → surface under the **mouse cursor** (add-on 0.2.2) — the same `pickray`/`raytest` as
-  `view`, aimed through the live cursor pixel instead of the centre. See §5.5.
+  `screen_center`, aimed through the live cursor pixel instead of the centre. See §5.5.
 
-Both `view` and `cursor` share `held_raycast_pivot`: the hit is captured once and **held** through
+Both `screen_center` and `cursor` share `held_raycast_pivot`: the hit is captured once and **held** through
 the orbit gesture, reacquired after pan/zoom or 0.35 s idle (so the pivot never chases the moving
 surface), and validated only inside `model.bounds` expanded by 10% of its diagonal — else the
 object centre.
@@ -207,7 +207,7 @@ back to the object centre.
 > (`sketchup_nav_selftest.rb` feeds a synthetic pixel). A GUI pass must confirm (1) `WindowFromPoint`
 > over the drawing area returns the GL window whose client rect **is** the viewport (origin at its
 > top-left, no inset), and (2) the pivot lands under the cursor while orbiting. If (1) is off, the
-> aspect gate + bbox validation degrade to the object-centre fallback rather than mispivoting. Run
+> aspect gate + bbox validation continue through the configured chain rather than mispivoting. Run
 > `TrackballNav::CursorTracker.selftest` in the Ruby Console, hover a face, and read the add-on log to
 > check the reported viewport pixel. (This is the one app in the series verified only offline — the
 > two halves each rest on a proven primitive: `pickray`/`raytest` is live-verified, and the
@@ -255,8 +255,8 @@ load '<repo>/tools/sketchup_nav_selftest.rb'  # use your checkout's absolute pat
 ```
 
 The self-test creates a temporary box inside an abortable operation and currently performs 28 live
-assertions: the original orbit/pan/zoom/raycast checks plus viewpoint eye/focal hold, independent
-viewpoint pitch reversal, fly look/move/vector preservation, fly-forward inversion, walk horizon
+assertions: the original orbit/pan/zoom/raycast checks plus camera eye/focal hold, independent
+camera pitch reversal, fly look/move/vector preservation, fly-forward inversion, walk horizon
 lock, ground-plane walk movement, and — new in 0.2.2 — the **`cursor` pivot** (a synthetic
 off-centre pixel raycasts a *different* surface point than the centre, nil pixel yields no pivot,
 and a held cursor pivot stays rigid vs the eye through an orbit). It writes
@@ -272,7 +272,7 @@ Verified on this machine:
 
 - live camera/accessor/rotation/redraw/timer/socket probe: pass;
 - production Ruby module load from the repo: pass;
-- viewpoint/fly/walk production self-test (23 checks): pass;
+- camera/fly/walk production self-test (23 checks): pass;
 - broker hello observed by the running daemon with the loaded add-on version: pass;
 - production Ruby Console self-test: pass;
 - automatic loader from the real Plugins directory: pass (fresh normal launch produced a new

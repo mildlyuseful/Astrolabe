@@ -20,7 +20,7 @@ from System.Windows.Forms import Cursor
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.11"          # 0.1.11: configurable orbit-pivot fallback chain.
+ADDIN_VERSION = "0.1.12"          # 0.1.12: camera/screen_center canonical pivot names.
 _DEFAULT_PORT = 47900
 PIVOT_HOLD_IDLE = 0.35
 OBJ_CACHE_SEC = 0.5
@@ -367,15 +367,15 @@ def _cursor_pivot(view, bbox):
         xy, x, y, w, h = _cursor_frustum_xy(view)
         if xy is None:
             _log_rl("cpivot", "cursor-pivot: mouse outside view (%.0f,%.0f in %.0fx%.0f) → "
-                    "view/forward fallback" % (x, y, w, h))
+                    "fallback chain" % (x, y, w, h))
             return None
         hit = _raycast_client(view, xy[0], xy[1], bbox)
         if hit is None:
             _log_rl("cpivot", "cursor-pivot: nothing under cursor (%.0f,%.0f) → "
-                    "view/forward fallback" % (xy[0], xy[1]))
+                    "fallback chain" % (xy[0], xy[1]))
         return hit
     except Exception:
-        _log_rl("cpivot", "cursor-pivot: exception → view/forward fallback")
+        _log_rl("cpivot", "cursor-pivot: exception → fallback chain")
         return None
 
 
@@ -387,17 +387,17 @@ def _forward_point(cam):
 
 def _orbit_pivot(op, cam, view, idle, sel_override=True, candidates=None):
     center, bbox = _selection_center()
-    if sel_override and op != "viewpoint" and center is not None:
+    if sel_override and op != "camera" and center is not None:
         return center
     ray_bbox = bbox if sel_override else None
     if _gesture["pivot"] is not None and not _gesture["invalid"] and idle <= PIVOT_HOLD_IDLE:
         return _gesture["pivot"]
     for method in (candidates or [op]):
-        if method == "viewpoint":
+        if method == "camera":
             point = tuple(cam.eye)
         elif method == "origin":
             point = (0.0, 0.0, 0.0)
-        elif method == "view":
+        elif method == "screen_center":
             point = _screen_center_pivot(view, ray_bbox)
         elif method == "cursor":
             point = _cursor_pivot(view, ray_bbox)
@@ -430,7 +430,7 @@ def _apply(view, frame, idle):
     o = list(frame.get("o", [0.0, 0.0, 0.0]))
     p = list(frame.get("p", [0.0, 0.0]))
     z = float(frame.get("z", 0.0))
-    op = frame.get("op", "view")
+    op = frame.get("op", "screen_center")
     style = frame.get("os", "free")
     zm = frame.get("zm", "to_center")
     adv = frame.get("adv") or {}

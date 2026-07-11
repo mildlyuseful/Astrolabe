@@ -68,15 +68,15 @@ top of `TrackballNav.py`; the daemon's Per-App Bindings scale from that baseline
    view px for diagnosis. Mixed-DPI multi-monitor is bounded by the range check + fallback but
    not fully verified.
 6. **`findBRepUsingRay` on the root component may miss bodies inside assembly occurrences**
-   (degrades to the object-centre fallback). Revisit if assembly orbit feels off.
+   (continues through the configured pivot chain). Revisit if assembly orbit feels off.
 
-## 4. The view-pivot / cursor-pivot raycast
+## 4. The screen-center-pivot / cursor-pivot raycast
 
 Shared concept (HANDOFF §7): pivot on the real surface depth, validate against the model bbox,
-fall back to the model centre on a miss, hold the pivot for the whole gesture (re-cast on
-pan/zoom or after the idle hold time). Fusion specifics:
+continue through the configured fallback chain on a miss, hold the pivot for the whole gesture
+(re-cast on pan/zoom or after the idle hold time). Fusion specifics:
 
-- `view` pivot: ray down the **screen centre** via `findBRepUsingRay` (aperture grows ×3 until a
+- `screen_center` pivot: ray down the **screen centre** via `findBRepUsingRay` (aperture grows ×3 until a
   hit, smallest wins).
 - `cursor` pivot / `to_cursor` zoom (born 0.1.11–0.1.13 as `pointer`/`to_pointer`; renamed in
   0.1.14 with the daemon's config v3): `GetCursorPos` → DPI divide →
@@ -90,6 +90,13 @@ pan/zoom or after the idle hold time). Fusion specifics:
   world-space bounds of `app.userInterface.activeSelections`. `selection_overrides_pivot` makes
   that centre replace the designated orbit/to-cursor pivot; disabling it restores the requested
   pivot.
+- **`camera` (turn-in-place) is currently unsupported** — the resolver skips it like `cursor_3d`
+  and the configured chain continues (a `camera` primary still keeps its selection-override
+  exemption). This is a capability gap, not a geometric impossibility: Fusion's viewport is
+  perspective-capable, so a real turn-in-place (rotate the camera basis about `camera.eye` with
+  the eye fixed) is implementable — **candidate for future development**. Today only
+  Blender/SketchUp/Unreal/Unity/Godot/Rhino/AutoCAD implement camera turn-in-place; Fusion,
+  SolidWorks, and FreeCAD skip it (and Onshape skips it on purpose — orthographic).
 
 ## 5. Testing
 

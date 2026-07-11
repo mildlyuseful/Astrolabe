@@ -57,7 +57,14 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.6";   // 0.3.6: configurable pivot fallback chain.
+        public const string PluginVersion = "0.3.9";   // 0.3.9: cursor pivot is strict too — no
+                                                       // construction-plane/view-depth synthesis;
+                                                       // empty-space hovers miss and continue the
+                                                       // configured chain.
+                                                       // 0.3.8: real screen_center pivot (strict
+                                                       // expanding ray through the viewport centre;
+                                                       // a miss continues the configured chain).
+                                                       // 0.3.7: canonical camera/screen_center names.
                                                        // 0.3.5: real origin/object/selection pivots
                                                        // + selection_overrides_pivot.
                                                        // 0.3.4: AabbNearHit always uses the near
@@ -89,9 +96,9 @@ namespace TrackballNav
 
         readonly object _lock = new object();
         readonly double[] _acc = new double[6];
-        string _opPivot = "view", _oStyle = "free", _zMode = "to_center";
+        string _opPivot = "screen_center", _oStyle = "free", _zMode = "to_center";
         bool _selectionOverrides = true;
-        List<string> _pivotCandidates = new List<string> { "view" };
+        List<string> _pivotCandidates = new List<string> { "screen_center" };
         volatile bool _stop;
         volatile bool _connected;
         Thread _sockThread;
@@ -136,8 +143,9 @@ namespace TrackballNav
         // an active object snap > the picked entity's depth along the view ray > the raw
         // ComputedPoint (which lies on the UCS construction plane, NOT the 3D surface).
         // _ptrOnEntity = true when the cache used an osnap / picked-entity depth (false = plane
-        // point — CapturePointerPivot reprojects it to the view-target depth so 2D Wireframe
-        // mid-face hovers don't go OOB on oblique views).
+        // point — only the cursor's construction-plane projection, NOT a target: 0.3.9+
+        // CapturePointerPivot then walks the strict expanding ray for a real surface and
+        // otherwise reports a MISS so the configured fallback chain continues).
         Document _pmDoc;                   // doc whose Editor.PointMonitor we're subscribed to
         bool _ptrValid;
         bool _ptrOnEntity;
@@ -145,7 +153,8 @@ namespace TrackballNav
         DateTime _ptrAt;
 
         // "cursor"/"to_cursor" per-gesture holds: captured at the first orbit/zoom frame of a
-        // gesture from the pointer cache (null = no/off-model cursor point -> plain target orbit),
+        // gesture from the pointer cache (null = no target under the cursor -> orbit falls
+        // through the configured chain; to_cursor zoom degrades to the plain dolly),
         // then HELD so the pivot never chases a moving target. A pan/zoom frame invalidates the
         // orbit hold (the view moved under the cursor); orbit/pan invalidate the zoom hold; a
         // gesture end (EndGesture) resets both.
@@ -664,8 +673,11 @@ namespace TrackballNav
         // Depth of one entity along the view ray through onPlane. Curves: projected closest
         // point (accepted when within `radius` of the ray). Everything else: AABB near-face
         // (thickened by `radius` for the expanding aperture search). id must be top-level.
+        // `strict` drops the radius-0 bbox-centre depth synthesis: only a real (radius-
+        // thickened) ray/AABB intersection counts — the honesty the screen_center pivot
+        // needs, while the cursor pivot keeps the lenient under-the-mouse depth salvage.
         static Point3d? EntityRayDepth(Transaction tr, ObjectId id, Point3d onPlane,
-                                       Vector3d viewDirUnit, double radius)
+                                       Vector3d viewDirUnit, double radius, bool strict = false)
         {
             try
             {
@@ -684,9 +696,14 @@ namespace TrackballNav
                 try { ext = ent.GeometricExtents; }
                 catch { return null; }                 // no extents (lights, cameras, …)
                 if (radius <= 0.0)
-                    return NavMath.AabbNearHit(onPlane, viewDirUnit, ext.MinPoint, ext.MaxPoint)
-                        ?? NavMath.AtViewDepth(onPlane, viewDirUnit,
+                {
+                    var near = NavMath.AabbNearHit(onPlane, viewDirUnit,
+                                                   ext.MinPoint, ext.MaxPoint);
+                    if (near.HasValue || strict)
+                        return near;
+                    return NavMath.AtViewDepth(onPlane, viewDirUnit,
                                ext.MinPoint + (ext.MaxPoint - ext.MinPoint) * 0.5);
+                }
                 return NavMath.AabbNearHitThick(onPlane, viewDirUnit,
                                                 ext.MinPoint, ext.MaxPoint, radius);
             }
@@ -698,7 +715,7 @@ namespace TrackballNav
         // at gesture capture -- not per mouse move. Fracs of VIEWSIZE / field height.
         static readonly double[] s_apertureFracs = { 0.0, 0.02, 0.05, 0.10, 0.20 };
 
-        Point3d? ExpandRayDepth(Point3d onPlane, Vector3d viewDirUnit)
+        Point3d? ExpandRayDepth(Point3d onPlane, Vector3d viewDirUnit, bool strict = false)
         {
             try
             {
@@ -723,7 +740,7 @@ namespace TrackballNav
                         double bestScore = double.NegativeInfinity;
                         foreach (ObjectId id in ms)
                         {
-                            var hit = EntityRayDepth(tr, id, onPlane, viewDirUnit, radius);
+                            var hit = EntityRayDepth(tr, id, onPlane, viewDirUnit, radius, strict);
                             if (!hit.HasValue)
                                 continue;
                             double score = NavMath.CameraDepthScore(hit.Value, viewDirUnit);
@@ -759,64 +776,49 @@ namespace TrackballNav
             catch { depthPoint = SysPt("TARGET"); }
         }
 
-        // The held "cursor" pivot: the cached cursor point, validated against the drawing
-        // extents grown by 10% of their diagonal. Plane misses first try an expanding
-        // model-space ray (2D Wireframe mid-face / near-edge); failing that, reproject to
-        // view-target depth. null only when there is no cache, or the point is still
-        // off-model after salvage.
+        // The held "cursor" pivot: the cached cursor point when it lies ON an entity (osnap /
+        // picked depth), else a STRICT expanding model-space ray through the cursor — that
+        // recovers 2D Wireframe mid-face / near-edge, where faces never pick. 0.3.9 dropped
+        // the construction-plane / view-depth synthesis: hovering empty space is a MISS and
+        // returns null so the configured fallback chain continues, the same actual-target-or-
+        // fall-through contract as screen_center and the other hosts' ray pivots. Both paths
+        // stay validated against the drawing extents grown by 10% of their diagonal.
         Point3d? CapturePointerPivot()
         {
             if (!_ptrValid)
             {
-                LogRL("ptr-none", "pointer pivot: no cursor point cached yet -> target orbit");
+                LogRL("ptr-none", "pointer pivot: no cursor point cached yet -> next candidate");
                 return null;
             }
             var p = _ptrPoint;
             try
             {
-                PivotViewBasis(out var vd, out var depth);
+                PivotViewBasis(out var vd, out _);
                 var mn = SysPt("EXTMIN");
                 var mx = SysPt("EXTMAX");
-                bool oob = !NavMath.InsideGrownExtents(p, mn, mx);
 
                 if (!_ptrOnEntity)
                 {
-                    // Expanding aperture (Fusion-style): recover a real surface when the
+                    // Plane sample = only the cursor's screen position, not a target. Expanding
+                    // aperture (Fusion-style, strict): recover a real surface when the
                     // PointMonitor aperture was empty -- the common 2D Wireframe mid-face case.
-                    var expanded = ExpandRayDepth(p, vd);
-                    if (expanded.HasValue && NavMath.InsideGrownExtents(expanded.Value, mn, mx))
+                    var expanded = ExpandRayDepth(p, vd, strict: true);
+                    if (!expanded.HasValue
+                        || !NavMath.InsideGrownExtents(expanded.Value, mn, mx))
                     {
-                        LogRL("ptr-expand",
-                              $"pointer pivot: expanding ray hit -> "
-                              + $"({expanded.Value.X:0.###},{expanded.Value.Y:0.###},{expanded.Value.Z:0.###})");
-                        p = expanded.Value;
-                        oob = false;
+                        LogRL("ptr-miss",
+                              "pointer pivot: nothing under the cursor -> next candidate");
+                        return null;
                     }
-                    else
-                    {
-                        var fixedPt = NavMath.AtViewDepth(p, vd, depth);
-                        LogRL("ptr-plane",
-                              "pointer pivot: plane/empty hit -> view-depth under cursor");
-                        p = fixedPt;
-                        oob = !NavMath.InsideGrownExtents(p, mn, mx);
-                    }
+                    LogRL("ptr-expand",
+                          $"pointer pivot: expanding ray hit -> "
+                          + $"({expanded.Value.X:0.###},{expanded.Value.Y:0.###},{expanded.Value.Z:0.###})");
+                    p = expanded.Value;
                 }
-                else if (oob)
-                {
-                    var fixedPt = NavMath.AtViewDepth(p, vd, depth);
-                    if (NavMath.InsideGrownExtents(fixedPt, mn, mx))
-                    {
-                        LogRL("ptr-reproj",
-                              "pointer pivot: entity sample OOB -> reprojected to view depth");
-                        p = fixedPt;
-                        oob = false;
-                    }
-                }
-
-                if (oob)
+                else if (!NavMath.InsideGrownExtents(p, mn, mx))
                 {
                     LogRL("ptr-oob",
-                          "pointer pivot: cursor point outside the drawing extents -> target orbit");
+                          "pointer pivot: entity sample outside the drawing extents -> next candidate");
                     return null;
                 }
             }
@@ -824,6 +826,35 @@ namespace TrackballNav
             LogRL("ptr-hit",
                   $"pointer pivot: ({p.X:0.###},{p.Y:0.###},{p.Z:0.###}) held for the gesture");
             return p;
+        }
+
+        // The held "screen_center" pivot: the first surface under the viewport CENTRE — the
+        // same expanding model-space ray the cursor pivot uses, aimed through the view centre
+        // instead of the mouse, but STRICT: no construction-plane or view-depth synthesis.
+        // Nothing under the centre returns null so the configured chain continues (parity
+        // with Fusion/SolidWorks/Onshape screen_center). Held per gesture like the others.
+        Point3d? CaptureScreenCenterPivot()
+        {
+            try
+            {
+                PivotViewBasis(out var vd, out var centre);   // centre = a point ON the view axis
+                var hit = ExpandRayDepth(centre, vd, strict: true);
+                if (hit.HasValue)
+                {
+                    var mn = SysPt("EXTMIN");
+                    var mx = SysPt("EXTMAX");
+                    if (NavMath.InsideGrownExtents(hit.Value, mn, mx))
+                    {
+                        LogRL("sc-hit", $"screen-center pivot: ({hit.Value.X:0.###},"
+                              + $"{hit.Value.Y:0.###},{hit.Value.Z:0.###}) held for the gesture");
+                        return hit;
+                    }
+                }
+            }
+            catch (System.Exception ex) { LogOnce("sc-capture", ex); }
+            LogRL("sc-miss",
+                  "screen-center pivot: no surface under the viewport centre -> next candidate");
+            return null;
         }
 
         // --- the GS transport: live kernel view, regen-free (docs 8.15) -------------------------
@@ -960,7 +991,7 @@ namespace TrackballNav
         Point3d? ResolveOrbitPivot(Document doc, string opv, bool selectionOverrides,
                                    List<string> candidates)
         {
-            var selected = selectionOverrides && opv != "viewpoint"
+            var selected = selectionOverrides && opv != "camera"
                 ? CaptureSelectionCenter(doc) : null;
             if (selected.HasValue)
                 return selected;
@@ -969,8 +1000,8 @@ namespace TrackballNav
                 Point3d? point = null;
                 switch (method)
                 {
-                    case "viewpoint": point = _cam.Pos; break;
-                    case "view": point = _cam.Tgt; break;
+                    case "camera": point = _cam.Pos; break;
+                    case "screen_center": point = CaptureScreenCenterPivot(); break;
                     case "origin": point = Point3d.Origin; break;
                     case "object": point = CaptureDrawingCenter(); break;
                     case "selection": point = CaptureSelectionCenter(doc); break;

@@ -15,7 +15,7 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.7";
+        const string AddinVersion = "0.1.8";
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.35f;
         const float ObjCacheSec = 0.5f;
@@ -460,7 +460,7 @@ namespace Astrolabe.TrackballNav
             var o = MiniJson.Vec3(frame, "o");
             var p = MiniJson.Vec2(frame, "p");
             float z = MiniJson.Float(frame, "z");
-            string op = MiniJson.Str(frame, "op", "view");
+            string op = MiniJson.Str(frame, "op", "screen_center");
             string style = MiniJson.Str(frame, "os", "free");
             string zm = MiniJson.Str(frame, "zm", "to_center");
             var adv = MiniJson.Obj(frame, "adv") ?? new System.Collections.Generic.Dictionary<string, object>();
@@ -711,16 +711,16 @@ namespace Astrolabe.TrackballNav
             bool selOverride, System.Collections.Generic.List<string> candidates, SceneView sv)
         {
             SelectionCenter(out var center, out var bbox);
-            if (selOverride && op != "viewpoint" && center.HasValue) return center;
+            if (selOverride && op != "camera" && center.HasValue) return center;
             if (_gesturePivot.HasValue && !_gestureInvalid && idle <= PivotHoldIdle)
                 return _gesturePivot;
             foreach (var method in candidates)
             {
                 Vector3? point = null;
-                if (method == "viewpoint") point = cam.Location;
+                if (method == "camera") point = cam.Location;
                 else if (method == "origin") point = Vector3.zero;
                 else if (method == "object" || method == "selection") point = center;
-                else if (method == "view")
+                else if (method == "screen_center")
                     point = ScreenCenterPivot(cam, selOverride ? bbox : null);
                 else if (method == "cursor")
                 {
@@ -795,7 +795,7 @@ namespace Astrolabe.TrackballNav
             double now = EditorApplication.timeSinceStartup;
             if (now - _lastCursorMissLog < 1.0) return;
             _lastCursorMissLog = now;
-            Log($"cursor-pivot: nothing under cursor ({_sceneMouseGui.x:F0},{_sceneMouseGui.y:F0}) → view/forward fallback ({why})");
+            Log($"cursor-pivot: nothing under cursor ({_sceneMouseGui.x:F0},{_sceneMouseGui.y:F0}) → fallback chain ({why})");
         }
 
         static bool InBbox(Vector3 p, Bounds b)
@@ -878,9 +878,9 @@ namespace Astrolabe.TrackballNav
             else
             {
                 var ob = MiniJson.Obj(inv, "orbit") ?? new System.Collections.Generic.Dictionary<string, object>();
-                if (op == "viewpoint")
+                if (op == "camera")
                 {
-                    var vp = MiniJson.Obj(inv, "viewpoint") ?? new System.Collections.Generic.Dictionary<string, object>();
+                    var vp = MiniJson.Obj(inv, "camera") ?? new System.Collections.Generic.Dictionary<string, object>();
                     o = new Vector3(o.x * Sgn(MiniJson.Bool(vp, "pitch")), o.y * Sgn(MiniJson.Bool(vp, "yaw")),
                         o.z * Sgn(MiniJson.Bool(vp, "roll")));
                 }

@@ -37,7 +37,7 @@ PAN_SCALE = 0.14                 # broker pan delta -> fraction of view extents 
 ZOOM_SCALE = 0.25                # broker zoom delta -> fraction of view extents (baseline zoom feel)
 ZOOM_SIGN = 1.0                  # twist->zoom direction
 
-ADDIN_VERSION = "0.1.17"         # 0.1.17: configurable orbit-pivot fallback chain.
+ADDIN_VERSION = "0.1.18"         # 0.1.18: camera/screen_center canonical pivot names.
                                  # 0.1.16: read selection from app.userInterface.activeSelections.
                                  # 0.1.15: real selection/origin pivots + selection override.
                                  # 0.1.14: scheme values renamed (pointer->cursor, cursor->selection,
@@ -97,7 +97,7 @@ def _bridge_port():
 _WORLD_UP = (0.0, 0.0, 1.0)              # Fusion is Z-up; turntable azimuth axis
 _obj_cache = {"t": 0.0, "p": None}      # cached object bounding-box center (recomputed lazily)
 
-# "view" orbit pivot: instead of the camera look-at target (which sits at an arbitrary depth on the
+# `screen_center`: instead of the camera look-at target (arbitrary depth), raycast the
 # optical axis), raycast down the screen centre to the REAL surface depth under the crosshair, so the
 # thing you're looking at stays put during orbit -- like native right/middle-drag orbit. Computed ONCE
 # per gesture and HELD; re-cast only after the view moves (pan/zoom) or the gesture ends (idle).
@@ -222,7 +222,7 @@ def _in_bbox(p, bb):
 def _nearest_ray_hit(root, origin, direction, tol):
     """Nearest visible BRep-face hit along the ray origin + t*direction, within proximity `tol` (cm).
     Returns a cloned Point3D (safe to hold across frames) or None. Never raises -> a failed/absent
-    pick API just falls back to the object centre.
+    pick API leaves the method unavailable so the resolver can continue the configured chain.
 
     findBRepUsingRay(originPoint, rayDirection, entityType, proximityTolerance, visibleEntitiesOnly,
     hitPoints) -> ObjectCollection of faces; `hitPoints` is filled in parallel with the hit points.
@@ -249,7 +249,7 @@ def _nearest_ray_hit(root, origin, direction, tol):
 
 
 def _raycast_pivot(design, origin, d, half_h, label):
-    """Shared aperture-expanding raycast used by BOTH the screen-centre ("view") and the cursor
+    """Shared aperture-expanding raycast used by both `screen_center` and `cursor`
     pivots: try small->large ray thickness to catch thin/edge features, validate the hit against the
     model bbox, return the nearest surface Point3D or None (continue the configured chain)."""
     root = design.rootComponent
@@ -281,7 +281,7 @@ def _screen_center_pivot(cam):
     half_h = max(cam.viewExtents * 0.5, 1e-4)          # on-screen half-extent in world units (cm)
     pb = RAY_PUSHBACK * half_h
     origin = adsk.core.Point3D.create(tgt.x - d.x * pb, tgt.y - d.y * pb, tgt.z - d.z * pb)  # behind, outside
-    return _raycast_pivot(design, origin, d, half_h, "view-pivot")
+    return _raycast_pivot(design, origin, d, half_h, "screen-center-pivot")
 
 
 def _cursor_screen_pos():
@@ -439,10 +439,10 @@ def _orbit_pivot(op, cam, tgt, idle, sel_override=True, candidates=None):
                          gesture and HELD (so the point under the crosshair stays put) -- like native
                          right-drag orbit. Re-cast when the gesture ends (idle) or the view moves.
       cursor          -> raycast the surface under the LIVE MOUSE CURSOR (read fresh at gesture
-                         start), same per-gesture hold + fallbacks as `view`.
+                         start), same per-gesture hold as `screen_center`.
       object / selection -> model bounding-box centre.
     Each method may fail honestly; ``candidates`` is the daemon-expanded global chain."""
-    selected = _selection_center() if (sel_override and op != "viewpoint") else None
+    selected = _selection_center() if (sel_override and op != "camera") else None
     if selected is not None:
         return selected
     if _gesture["pivot"] is not None and idle <= PIVOT_HOLD_IDLE:
@@ -451,7 +451,7 @@ def _orbit_pivot(op, cam, tgt, idle, sel_override=True, candidates=None):
     for method in (candidates if candidates is not None else [op, "object"]):
         if method == "origin":
             point = adsk.core.Point3D.create(0.0, 0.0, 0.0)
-        elif method == "view":
+        elif method == "screen_center":
             point = _screen_center_pivot(cam)
         elif method == "cursor":
             point = _cursor_pivot(cam)
@@ -459,7 +459,7 @@ def _orbit_pivot(op, cam, tgt, idle, sel_override=True, candidates=None):
             point = _selection_center()
         elif method == "object":
             point = _object_center(None)
-        else:                                      # viewpoint / cursor_3d unsupported in Fusion
+        else:                                      # camera / cursor_3d unsupported in Fusion
             continue
         if point is not None:
             _gesture["pivot"] = point
@@ -492,7 +492,7 @@ def _apply(frame):
         o = frame.get("o", [0.0, 0.0, 0.0])
         p = frame.get("p", [0.0, 0.0])
         z = float(frame.get("z", 0.0))
-        op = frame.get("op", "view")          # orbit pivot: view | object | cursor
+        op = frame.get("op", "screen_center") # orbit pivot: screen_center | camera | object | cursor
         style = frame.get("os", "free")       # orbit style: free | turntable
         zm = frame.get("zm", "to_center")     # zoom mode:  to_center | to_object | to_cursor
         adv = frame.get("adv") or {}

@@ -49,7 +49,7 @@ module TrackballNav
         orbit = numeric_array(frame['o'] || frame[:o], 3)
         pan = numeric_array(frame['p'] || frame[:p], 2)
         zoom = numeric(frame['z'] || frame[:z])
-        pivot_id = (frame['op'] || frame[:op] || 'view').to_s
+        pivot_id = (frame['op'] || frame[:op] || 'screen_center').to_s
         style = (frame['os'] || frame[:os] || 'free').to_s
         zoom_mode = (frame['zm'] || frame[:zm] || 'to_center').to_s
         advanced = frame['adv'] || frame[:adv] || {}
@@ -68,10 +68,10 @@ module TrackballNav
 
         changed = case nav_mode
                   when 'fly'
-                    invalidate_view_pivot! if has_pan || has_zoom
+                    invalidate_orbit_pivot! if has_pan || has_zoom
                     fly_camera(view, camera, orbit, pan, zoom, advanced)
                   when 'walk'
-                    invalidate_view_pivot! if has_pan || has_zoom
+                    invalidate_orbit_pivot! if has_pan || has_zoom
                     walk_camera(view, camera, orbit, pan, zoom, advanced)
                   else
                     if has_orbit
@@ -80,10 +80,10 @@ module TrackballNav
                                    advanced.fetch('selection_overrides_pivot', true) == true,
                                    advanced['orbit_pivot_candidates'] || [pivot_id])
                     elsif has_pan
-                      invalidate_view_pivot!
+                      invalidate_orbit_pivot!
                       pan_camera(view, camera, pan)
                     else
-                      invalidate_view_pivot!
+                      invalidate_orbit_pivot!
                       zoom_camera(model, camera, zoom, zoom_mode)
                     end
                   end
@@ -132,12 +132,12 @@ module TrackballNav
       end
 
       def screen_center_pivot(model, view)
-        raytest_pixel(model, view, view.vpwidth * 0.5, view.vpheight * 0.5, 'view-pivot')
+        raytest_pixel(model, view, view.vpwidth * 0.5, view.vpheight * 0.5, 'screen-center-pivot')
       end
 
       # Raycast the surface under the LIVE MOUSE CURSOR (the same pick as screen_center_pivot,
       # aimed through @cursor_pixel instead of the centre). Returns a world Point3d or nil (no
-      # cursor pixel / off-model) -> the caller falls back to the object centre. Half B of the
+      # cursor pixel / off-model), allowing the resolver to continue the configured chain. Half B of the
       # 'cursor' pivot; half A (getting @cursor_pixel) is the live tracker in cursor.rb.
       def cursor_pivot(model, view)
         px = @cursor_pixel
@@ -313,17 +313,17 @@ module TrackballNav
 
       def orbit_pivot(model, view, eye, target, pivot_id, idle, selection_overrides = true,
                       candidates = nil)
-        selected = selection_center(model) if selection_overrides && pivot_id != 'viewpoint'
+        selected = selection_center(model) if selection_overrides && pivot_id != 'camera'
         return selected if selected
         return @gesture_pivot.clone if @gesture_pivot && idle <= PIVOT_HOLD_IDLE
 
         (candidates || [pivot_id]).each do |method|
           point = case method
-                  when 'viewpoint' then eye.clone
+                  when 'camera' then eye.clone
                   when 'origin' then ORIGIN.clone
                   when 'selection' then selection_center(model)
                   when 'object' then object_center(model, nil)
-                  when 'view' then screen_center_pivot(model, view)
+                  when 'screen_center' then screen_center_pivot(model, view)
                   when 'cursor'
                     @cursor_refresh&.call(view)
                     cursor_pivot(model, view)
@@ -336,7 +336,7 @@ module TrackballNav
         nil
       end
 
-      def invalidate_view_pivot!
+      def invalidate_orbit_pivot!
         @gesture_pivot = nil
       end
 
@@ -357,8 +357,8 @@ module TrackballNav
           zoom = signed(zoom, config, 'vertical')
         else
           orbit_config = invert['orbit'] || {}
-          if pivot_id == 'viewpoint'
-            rotation = invert['viewpoint'] || {}
+          if pivot_id == 'camera'
+            rotation = invert['camera'] || {}
             orbit = [signed(orbit[0], rotation, 'pitch'), signed(orbit[1], rotation, 'yaw'),
                      signed(orbit[2], rotation, 'roll')]
           else

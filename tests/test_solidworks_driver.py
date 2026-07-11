@@ -391,7 +391,7 @@ def test_object_orbit_pans_to_hold_centroid():
 
 
 def test_view_orbit_rotates_and_pans_to_hold_pivot():
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     _model, view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0))   # centroid (1,1,1)
     drv._flush((0.1, 0.05, 0.0, 0.0, 0.0, 0.0))
     assert len(view.rotations) == 1
@@ -400,7 +400,7 @@ def test_view_orbit_rotates_and_pans_to_hold_pivot():
 
 def test_set_scheme_releases_held_pivot():
     # Switching the pivot mid-use must take effect immediately, not stay stuck on the held pivot.
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     _model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0))
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
     assert drv._orbit_pivot is not None
@@ -411,16 +411,16 @@ def test_set_scheme_releases_held_pivot():
 def test_flush_freezes_graphics_around_ops():
     # The whole camera change is wrapped in EnableGraphicsUpdate False->True so the rotate + recenter
     # pan show as ONE redraw (no flicker through the intermediate), then a single GraphicsRedraw2.
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     model, view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0))
     drv._flush((0.05, 0.03, 0.0, 0.0, 0.0, 0.0))
     assert view.graphics_update_calls == [False, True]   # frozen for the ops, resumed before redraw
     assert model.redraws == 1                             # exactly one repaint, at the end
 
 
-def test_pan_recomputes_view_pivot():
+def test_pan_recomputes_screen_center_pivot():
     # Panning moves the screen centre, so a held 'view' pivot must be dropped and recomputed.
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     _model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0))
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))            # orbit -> capture view pivot
     assert drv._orbit_pivot is not None
@@ -428,9 +428,9 @@ def test_pan_recomputes_view_pivot():
     assert drv._orbit_pivot is None
 
 
-def test_view_pivot_held_within_threshold_recomputed_after():
+def test_screen_center_pivot_held_within_threshold_recomputed_after():
     # Held while the view stays busy; recomputed once it has been idle past the threshold.
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     drv.set_pivot_hold(0.5)
     _model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0))
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
@@ -443,57 +443,57 @@ def test_view_pivot_held_within_threshold_recomputed_after():
     assert drv._orbit_pivot is not p1
 
 
-def test_view_pivot_without_raycast_is_unavailable():
+def test_screen_center_pivot_without_raycast_is_unavailable():
     drv = SolidWorksDriver()
     model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0))   # centroid (1,1,1)
     drv._scale = 4.0; drv._trans = [0.0, 0.0, 0.0]
     # No pick handles means the method fails; the resolver, not this method, chooses the fallback.
-    assert drv._view_pivot((1, 0, 0), (0, 1, 0), (0, 0, 1), model) is None
+    assert drv._screen_center_pivot((1, 0, 0), (0, 1, 0), (0, 0, 1), model) is None
 
 
 # --- 'view' pivot screen-centre raycast (SelectByRay) ---------------------------------
-def test_view_pivot_uses_raycast_surface_depth():
+def test_screen_center_pivot_uses_raycast_surface_depth():
     # The 'view' pivot's DEPTH comes from a screen-centre raycast, not the object centre. Identity
     # orientation -> c2=(0,0,1), screen-centre offset 0 -> pivot = (0,0,depth) = (0,0,hit.z).
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     _model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0),
                                   ray_hits=[(0.0, (1.0, 1.0, 1.5))])     # surface at depth 1.5
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
     assert drv._orbit_pivot == pytest.approx((0.0, 0.0, 1.5))            # NOT the object centre (1.0)
 
 
-def test_view_pivot_raycast_miss_continues_to_object_method():
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+def test_screen_center_pivot_raycast_miss_continues_to_object_method():
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0), ray_hits=None)  # always miss
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
     assert drv._orbit_pivot == pytest.approx((1.0, 1.0, 1.0))            # object method
     assert len(model._ext.ray_calls) == len(solidworks_driver._RAY_APERTURE_FRACS)  # grew through all
 
 
-def test_view_pivot_raycast_rejects_out_of_bbox_hit():
+def test_screen_center_pivot_raycast_rejects_out_of_bbox_hit():
     # A hit well outside the bbox (+margin) is bogus -> rejected -> continue to object.
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     _model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0),
                                   ray_hits=[(0.0, (0.0, 0.0, 100.0))])
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
     assert drv._orbit_pivot == pytest.approx((1.0, 1.0, 1.0))
 
 
-def test_view_pivot_raycast_expands_aperture_until_hit():
+def test_screen_center_pivot_raycast_expands_aperture_until_hit():
     # Small apertures miss; the radius grows x3 until one hits, and the FIRST hit wins.
     box = (0.0, 0.0, 0.0, 2.0, 2.0, 2.0)
     diag = math.sqrt(12.0)
     thresh = solidworks_driver._RAY_APERTURE_FRACS[2] * diag - 1e-9    # only the 3rd radius is big enough
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     model, _view = _attach_fakes(drv, box=box, ray_hits=[(thresh, (1.0, 1.0, 1.5))])
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
     assert drv._orbit_pivot == pytest.approx((0.0, 0.0, 1.5))
     assert len(model._ext.ray_calls) == 3                              # 2 misses then a hit -> stop
 
 
-def test_view_pivot_raycast_picks_nearest_among_multiple_hits():
+def test_screen_center_pivot_raycast_picks_nearest_among_multiple_hits():
     # Several faces in a fat aperture -> take the one nearest the viewer (largest c2.hit).
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0),
                                  ray_hits=[(0.0, (1.0, 1.0, 1.2)), (0.0, (1.0, 1.0, 1.8))])
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
@@ -501,9 +501,9 @@ def test_view_pivot_raycast_picks_nearest_among_multiple_hits():
     assert len(model._ext.ray_calls) == 1                             # both hit at the first aperture
 
 
-def test_view_pivot_raycast_passes_integer_tol():
+def test_screen_center_pivot_raycast_passes_integer_tol():
     # Regression: SelectByRay's Tol arg must marshal as an INTEGER or it silently selects nothing.
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0),
                                  ray_hits=[(0.0, (1.0, 1.0, 1.5))])
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
@@ -514,7 +514,7 @@ def test_view_pivot_raycast_passes_integer_tol():
 def test_raycast_saves_and_restores_user_selection():
     # SelectByRay clobbers the selection set; the user's selection must come back afterwards.
     drv = SolidWorksDriver(); drv.set_scheme(
-        "view", "free", "to_center", selection_overrides_pivot=False)
+        "screen_center", "free", "to_center", selection_overrides_pivot=False)
     model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0),
                                  ray_hits=[(0.0, (1.0, 1.0, 1.5))])
     drv._flush((0.0, 0.0, 0.0, 0.0, 0.0, 0.0))            # prime _live_view (sets the pick handles)
@@ -528,7 +528,7 @@ def test_raycast_saves_and_restores_user_selection():
 
 
 def test_selection_override_wins_without_mutating_selection():
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0),
                                  ray_hits=[(0.0, (1.0, 1.0, 1.5))])
     drv._flush((0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
@@ -542,7 +542,7 @@ def test_selection_override_wins_without_mutating_selection():
 
 def test_selection_override_can_be_disabled():
     drv = SolidWorksDriver(); drv.set_scheme(
-        "view", "free", "to_center", selection_overrides_pivot=False)
+        "screen_center", "free", "to_center", selection_overrides_pivot=False)
     model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0),
                                  ray_hits=[(0.0, (1.0, 1.0, 1.5))])
     drv._flush((0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
@@ -560,14 +560,14 @@ def test_object_orbit_does_not_raycast():
 
 
 def test_flush_turntable_drops_roll():
-    drv = SolidWorksDriver(); drv.set_scheme("view", "turntable", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "turntable", "to_center")
     _model, view = _attach_fakes(drv)
     drv._flush((0.0, 0.0, 0.5, 0.0, 0.0, 0.0))  # pure roll -> turntable has no roll channel
     assert view.rotations == []
 
 
 def test_flush_turntable_yaw_is_about_world_up():
-    drv = SolidWorksDriver(); drv.set_scheme("view", "turntable", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "turntable", "to_center")
     _model, view = _attach_fakes(drv)
     drv._flush((0.0, 0.3, 0.0, 0.0, 0.0, 0.0))  # pure yaw
     assert len(view.rotations) == 1
@@ -577,7 +577,7 @@ def test_flush_turntable_yaw_is_about_world_up():
 
 
 def test_flush_zoom_to_object_zooms_and_recenters():
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_object")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_object")
     _model, view = _attach_fakes(drv, box=(-0.5, -0.5, 0.0, 1.5, 1.5, 0.0))  # centre (0.5,0.5,0)
     drv._flush((0.0, 0.0, 0.0, 0.0, 0.0, 0.5))
     assert len(view.zooms) == 1                 # zoomed
@@ -589,7 +589,7 @@ def test_flush_zoom_to_object_zooms_and_recenters():
 
 
 def test_flush_zoom_to_center_does_not_pan():
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_center")
     _model, view = _attach_fakes(drv, box=(-0.5, -0.5, 0.0, 0.5, 0.5, 0.0))
     drv._flush((0.0, 0.0, 0.0, 0.0, 0.0, 0.5))
     assert len(view.zooms) == 1
@@ -793,7 +793,7 @@ def test_cursor_orbit_unmappable_cursor_falls_back_without_raycast():
 
 
 def test_zoom_to_cursor_holds_cursor_point():
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_cursor")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_cursor")
     a, b = 0.00635, 0.003175
     _model, view = _cursor_setup(drv, ray_hits=[(0.0, (0.006, 0.003, 0.1))], a=a, b=b)
     drv._flush((0, 0, 0, 0, 0, 0.5))
@@ -810,7 +810,7 @@ def test_zoom_to_cursor_holds_cursor_point():
 
 
 def test_zoom_to_cursor_miss_is_plain_center_zoom():
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_cursor")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_cursor")
     _model, view = _cursor_setup(drv, ray_hits=None)
     drv._flush((0, 0, 0, 0, 0, 0.5))
     assert len(view.zooms) == 1
@@ -818,7 +818,7 @@ def test_zoom_to_cursor_miss_is_plain_center_zoom():
 
 
 def test_orbit_and_pan_reset_zoom_cursor_pivot():
-    drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_cursor")
+    drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_cursor")
     _model, _view = _cursor_setup(drv)
     drv._zoom_pivot = (1.0, 2.0, 3.0)
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))             # orbit -> reset
@@ -831,5 +831,5 @@ def test_orbit_and_pan_reset_zoom_cursor_pivot():
 def test_set_scheme_releases_zoom_pivot():
     drv = SolidWorksDriver()
     drv._zoom_pivot = (1.0, 2.0, 3.0)
-    drv.set_scheme("view", "free", "to_center")
+    drv.set_scheme("screen_center", "free", "to_center")
     assert drv._zoom_pivot is None

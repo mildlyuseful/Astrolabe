@@ -159,7 +159,7 @@ class App:
                 **self._effective_scheme("solidworks"),
                 selection_overrides_pivot=bool(swcfg.get("selection_overrides_pivot", True)),
                 orbit_pivot_fallbacks=fallbacks)
-            self.sw_driver.set_pivot_hold(swcfg.get("view_pivot_hold_sec", 0.5))
+            self.sw_driver.set_pivot_hold(swcfg.get("screen_center_pivot_hold_sec", 0.5))
         if self.onshape_bridge is not None:
             oncfg = self.config.data["apps"].get("onshape") or {}
             self.onshape_bridge.set_scheme(

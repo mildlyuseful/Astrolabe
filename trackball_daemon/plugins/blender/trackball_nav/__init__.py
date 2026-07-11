@@ -9,7 +9,7 @@ CustomEvent hop).
 Why Blender gets its own, richer driver than the CAD add-ins: Blender's viewport is a
 `RegionView3D` (view_location / view_rotation / view_distance / view_perspective) rather than
 an eye+look-at camera, and it natively supports many navigation styles -- turntable vs
-trackball, fly/walk, view roll, dolly-vs-zoom, lock-horizon, auto-depth, orbit-around-
+trackball, fly/walk, view roll, dolly-vs-zoom, lock-horizon, screen-center, orbit-around-
 selection, camera-lock. Those are exposed in the daemon's Blender "Advanced" settings and
 arrive here as an additive `"adv"` object on each broker frame (Fusion ignores it).
 
@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 13),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 14),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.13"                   # 0.1.13: configurable orbit-pivot fallback chain.
+ADDIN_VERSION = "0.1.14"                   # 0.1.14: camera/screen_center canonical pivot names.
                                            # 0.1.12: selection_overrides_pivot is functional.
                                            # 0.1.10: 3D-cursor pivot value renamed cursor->cursor_3d
                                            # (daemon config v3; "cursor" now means under-the-mouse).
@@ -68,7 +68,7 @@ FLY_MOVE = 0.5                  # fly strafe/thrust per delta, x view_distance
 WALK_MOVE = 0.5                 # walk move per delta, x view_distance
 
 DIST_MIN, DIST_MAX = 1e-3, 1e6  # view_distance clamp (Blender's own range is wide)
-PIVOT_HOLD_IDLE = 0.35          # s without frames that ends a gesture -> re-raycast the auto-depth pivot
+PIVOT_HOLD_IDLE = 0.35          # s without frames that ends a gesture -> re-raycast the screen-center pivot
 
 _DEFAULT_PORT = 47900
 
@@ -78,7 +78,7 @@ _q = queue.Queue()
 _reader_thread = None
 _TIMER_INTERVAL = 1.0 / 90.0    # main-thread poll rate (cheap queue drain)
 
-# auto-depth ("view" pivot): raycast the surface under the screen centre ONCE per gesture and
+# Screen Center (`screen_center`): raycast the first surface under the viewport center once and
 # HOLD it (so the point under the crosshair stays put during orbit). Invalidated on pan/zoom/idle.
 # The under-mouse "cursor" pivot shares this hold slot (only one pivot is active at a time).
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
@@ -276,7 +276,7 @@ def _resolve_target():
 def _raycast_pixel(rv, region, x, y):
     """Raycast the surface under region pixel (x, y) (region bottom-left origin, like Blender's own
     `region_2d_*`). Returns a world Vector (a real geometry hit -- `scene.ray_cast` returns no
-    sentinel, so no bbox gate is needed), or None. Shared by the auto-depth centre and the
+    sentinel, so no bbox gate is needed), or None. Shared by the screen-center centre and the
     under-mouse cursor pivots."""
     try:
         from bpy_extras import view3d_utils as v3d
@@ -294,11 +294,11 @@ def _raycast_pixel(rv, region, x, y):
     return None
 
 
-def _raycast_center(rv, region):
-    """Auto-depth pivot: raycast the surface under the region centre. World Vector or None."""
+def _raycast_screen_center(rv, region):
+    """Screen Center pivot: raycast the surface under the region centre. World Vector or None."""
     hit = _raycast_pixel(rv, region, region.width * 0.5, region.height * 0.5)
-    _log_rl("vpivot", ("auto-depth hit -> (%.2f,%.2f,%.2f)" % (hit.x, hit.y, hit.z)) if hit is not None
-            else "auto-depth: no surface under centre -> viewpoint fallback")
+    _log_rl("vpivot", ("screen-center hit -> (%.2f,%.2f,%.2f)" % (hit.x, hit.y, hit.z)) if hit is not None
+            else "screen-center: no surface under centre -> continue configured chain")
     return hit
 
 
@@ -330,12 +330,12 @@ def _raycast_cursor(rv, region, win):
     nothing under it)."""
     pix = _cursor_region_pixel(region, win)
     if pix is None:
-        _log_rl("cpivot", "under-cursor: no cached cursor in this region -> selection fallback")
+        _log_rl("cpivot", "under-cursor: no cached cursor in this region -> continue configured chain")
         return None
     hit = _raycast_pixel(rv, region, pix[0], pix[1])
     _log_rl("cpivot", ("under-cursor hit @px(%.0f,%.0f) -> (%.2f,%.2f,%.2f)"
                        % (pix[0], pix[1], hit.x, hit.y, hit.z)) if hit is not None
-            else "under-cursor: no surface under cursor px(%.0f,%.0f) -> selection fallback"
+            else "under-cursor: no surface under cursor px(%.0f,%.0f) -> continue configured chain"
                  % (pix[0], pix[1]))
     return hit
 
@@ -357,30 +357,29 @@ def _cursor_location():
 
 
 def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True, candidates=None):
-    """Resolve the orbit pivot Vector for pivot id `op`, or None (== orbit about view_location).
-      viewpoint -> the EYE: turns the camera in place (look around), independent of how far the orbit
+    """Resolve the first available pivot Vector from the canonical candidate list, or None.
+      camera -> the EYE: turns the camera in place (look around), independent of how far the orbit
                    point/view_location happens to be. (Earlier this orbited view_location, which sits
                    far in front after fly/look or at a large view distance -> felt like orbiting an
                    arbitrary point; rotating about the eye is "turn the camera".)
-      view      -> auto-depth raycast under the screen centre (per-gesture HOLD)
-      cursor    -> auto-depth raycast under the MOUSE (per-gesture HOLD; needs the modal mouse
-                   tracker's cached position -> selection-median fallback when the cursor is off the
-                   viewport / over empty space / not cached yet)
-      object    -> selection median      cursor_3d -> 3D cursor        origin -> world origin
+      screen_center -> first surface under the viewport center (per-gesture HOLD)
+      cursor    -> raycast under the MOUSE (per-gesture HOLD; requires the modal mouse tracker's
+                   cached position)
+      selection/object -> selection median   cursor_3d -> 3D cursor   origin -> world origin
     When ``sel_override`` is enabled, a non-empty selection wins over every external pivot. The
-    viewpoint mode remains a true turn-in-place operation, matching Unity/Godot/Rhino. Anything
-    unavailable methods are skipped; None means the configured chain was exhausted."""
-    if sel_override and op != "viewpoint":
+    camera mode remains a true turn-in-place operation, matching Unity/Godot/Rhino. Unavailable
+    methods are skipped; None means the configured chain was exhausted."""
+    if sel_override and op != "camera":
         selected = _selection_median()
         if selected is not None:
             return selected
     if _gesture["pivot"] is not None and not _gesture["invalid"] and idle <= PIVOT_HOLD_IDLE:
         return _gesture["pivot"]
     for method in (candidates or [op]):
-        if method == "viewpoint":
+        if method == "camera":
             point = _eye(rv)
-        elif method == "view":
-            point = _raycast_center(rv, region)
+        elif method == "screen_center":
+            point = _raycast_screen_center(rv, region)
         elif method == "cursor":
             point = _raycast_cursor(rv, region, win)
         elif method in ("selection", "object"):
@@ -414,7 +413,7 @@ def _apply_orbit(win, rv, region, o, frame, adv, idle):
     style = frame.get("os", "free")
     lock = bool(adv.get("lock_horizon", False))
     twist_action = adv.get("twist_action", "roll")
-    op = frame.get("op", "viewpoint")
+    op = frame.get("op", "camera")
     pitch = o[0] * ORBIT_SCALE[0]
     yaw = o[1] * ORBIT_SCALE[1]
     twist = o[2] * ORBIT_SCALE[2]
@@ -490,7 +489,7 @@ def _apply(target, frame, idle):
     o = frame.get("o", [0.0, 0.0, 0.0])
     p = frame.get("p", [0.0, 0.0])
     z = float(frame.get("z", 0.0))
-    op = frame.get("op", "viewpoint")
+    op = frame.get("op", "camera")
     style = frame.get("os", "free")
     zm = frame.get("zm", "to_center")
     adv = frame.get("adv") or {}
@@ -531,7 +530,7 @@ def _apply(target, frame, idle):
     # Per-mode, per-axis direction flips (config invert.<mode>.<axis>). Applied here, not in the
     # daemon, because the same physical channel means different things per mode (ball forward/back is
     # orbit pan-Y but fly/walk forward), so independent inverts are only possible once the mode is
-    # known. "viewpoint" gets its own rotation inverts and shares orbit's pan/zoom inverts.
+    # known. "camera" gets its own rotation inverts and shares orbit's pan/zoom inverts.
     inv = adv.get("invert") or {}
     if nav_mode == "fly":
         f = inv.get("fly", {})
@@ -545,8 +544,8 @@ def _apply(target, frame, idle):
         z = z * _sgn(w.get("vertical"))
     else:                                           # orbit
         ob = inv.get("orbit", {})
-        if op == "viewpoint":
-            vp = inv.get("viewpoint", {})
+        if op == "camera":
+            vp = inv.get("camera", {})
             o = [o[0] * _sgn(vp.get("pitch")), o[1] * _sgn(vp.get("yaw")), o[2] * _sgn(vp.get("roll"))]
         else:
             o = [o[0] * _sgn(ob.get("pitch")), o[1] * _sgn(ob.get("yaw")), o[2] * _sgn(ob.get("twist"))]
@@ -566,14 +565,14 @@ def _apply(target, frame, idle):
             _apply_orbit(_win, rv, region, o, frame, adv, idle)
         elif p[0] or p[1]:
             _pan(rv, p[0], p[1], bool(adv.get("pan_scales_with_distance", True)))
-            _gesture["invalid"] = True              # view moved -> recast auto-depth next orbit
+            _gesture["invalid"] = True              # view moved -> recast screen-center next orbit
         elif z:
             if adv.get("zoom_style", "zoom") == "dolly":
                 _dolly(rv, z)
             else:
                 pivot = None
                 if adv.get("zoom_to_mouse", False):
-                    pivot = _raycast_center(rv, region)    # best-effort: screen-centre surface
+                    pivot = _raycast_screen_center(rv, region)    # best-effort: screen-centre surface
                 _zoom(rv, z, pivot)
             _gesture["invalid"] = True
 

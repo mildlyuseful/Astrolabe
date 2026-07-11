@@ -233,13 +233,13 @@ def test_cursor_pivot_y_flip_path():
 
 
 # --- _orbit_pivot op=="cursor": per-gesture hold + fallbacks ------------------------------
-def test_orbit_pivot_cursor_differs_from_view():
+def test_orbit_pivot_cursor_differs_from_screen_center():
     view = _view_both_hits()
     fc._cursor.update(px=PTR_PX)
     p_ptr = fc._orbit_pivot("cursor", view, DOC, _ortho_cam(), idle=10.0)
     fc._gesture.update(pivot=None)            # fresh gesture for the other scheme
-    p_view = fc._orbit_pivot("view", view, DOC, _ortho_cam(), idle=10.0)
-    assert p_ptr == PTR_HIT and p_view == CENTER_HIT and p_ptr != p_view
+    p_center = fc._orbit_pivot("screen_center", view, DOC, _ortho_cam(), idle=10.0)
+    assert p_ptr == PTR_HIT and p_center == CENTER_HIT and p_ptr != p_center
 
 
 def test_orbit_pivot_cursor_holds_for_the_gesture():

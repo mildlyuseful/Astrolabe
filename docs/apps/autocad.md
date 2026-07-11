@@ -207,10 +207,16 @@ and tracks `_dir/_size/_center` across its own writes**, re-reading direction+si
 
 - **`origin`** — the WCS origin `(0,0,0)`.
 - **`object`** — the **drawing-extents centre** (`EXTMIN`/`EXTMAX` midpoint). **`selection`** uses
-  the aggregate `Entity.GeometricExtents` centre of the implied selection and falls back to object.
-- **`view`** (the general default) — the tracked **`_center`** (the point currently screen-centred).
-  AutoCAD has **no COM screen-centre raycast**, so unlike SolidWorks/Fusion/Onshape there is no true
-  "surface under the crosshair" pivot; `view` orbits about whatever is centred. (See §8.6.)
+  the aggregate `Entity.GeometricExtents` centre of the implied selection when available.
+- **`camera`** — the camera position; orbiting around it turns the view in place.
+- **`screen_center`** — **plugin 0.3.8+**: the first surface under the **viewport centre**, found by
+  the same expanding model-space ray the cursor pivot uses (aimed through the view centre), but
+  **strict** — no construction-plane or view-depth synthesis. Nothing under the centre makes the
+  method unavailable and the configured fallback chain continues. Held per gesture. The archived COM
+  fallback still has no viewport-centre pick. (See §8.6.)
+  **Plugin 0.3.9 made `cursor` strict the same way**: the construction-plane / view-depth salvage
+  was dropped, so hovering empty space is a miss that continues the chain (2D-Wireframe mid-face
+  hovers are still recovered — the strict expanding ray hits the solid's AABB).
 - **`cursor`** — TRUE under-the-mouse orbit, but **only in the NETLOAD plugin** (§8.17: an
   in-process `Editor.PointMonitor` caches the cursor point; `to_cursor` zoom rides the same cache).
   This COM fallback has no cursor hit-test, so here `cursor` degrades to the extents centre like
@@ -308,11 +314,22 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   (§8.4) — the driver never calls `SetVariable` on the view, and even if it recurred the guard logs it
   once and the next frame recovers.
 
-### 8.6 No COM screen-centre raycast → `view` is not a true surface pivot
+### 8.6 `screen_center` — no first-hit API, so the plugin walks its own ray (0.3.8)
 - Unlike SolidWorks (`SelectByRay`), Fusion (`findBRepUsingRay`), Onshape (navlib `hit.lookat`),
-  Blender (`scene.ray_cast`) and FreeCAD (`getObjectInfo`), **AutoCAD exposes no cheap COM screen-centre
-  pick** for the model-space viewport. So `view` orbits about the current **Target** (AutoCAD's native
-  target orbit). Plugin 0.3.5 resolves `selection` independently from the selected entities'
+  Blender (`scene.ray_cast`) and FreeCAD (`getObjectInfo`), **AutoCAD exposes no cheap screen-centre
+  pick API** for the model-space viewport. Treating AutoCAD's camera target as Screen Center caused
+  the exact semantic collision the canonical names are meant to prevent, so plugin 0.3.7 reported the
+  method unavailable. **Plugin 0.3.8 implements it honestly**: `CaptureScreenCenterPivot` aims the
+  §8.17 expanding model-space ray (`ExpandRayDepth`) through the **view centre** (`PivotViewBasis` —
+  the GS shadow target during a gesture) in **strict mode**: `EntityRayDepth(strict:true)` accepts
+  only a real (radius-thickened) ray/AABB or curve intersection and drops the radius-0 bbox-centre
+  depth synthesis the cursor pivot keeps for its under-the-mouse salvage. A miss returns null and the
+  configured fallback chain continues — the same "actual target or fall through" contract as the
+  other hosts. AABB near-face is the depth approximation (GeometricExtents is all AutoCAD offers
+  without firing real selection), so on very non-boxy geometry the pivot can sit slightly off the
+  true surface — same accuracy class as the cursor pivot's expanded hits. Needs a live feel pass.
+  Plugin 0.3.7 resolves `selection`
+  independently from the selected entities'
   aggregate geometric extents and `selection_overrides_pivot` can make it replace any designated
   pivot. The archived COM transport still lacks this path; the in-process plugin is the sole live
   navigation transport.
@@ -654,14 +671,16 @@ behaviour). Two halves, both in the plugin (the retired COM transport had no cur
   Per-gesture hold in `TryApplyGs`: the pivot is captured ONCE at the first orbit frame of a
   gesture from the cache — validated against the drawing extents +10 % of the diagonal — and held;
   a pan/zoom frame invalidates the orbit hold (re-captured at the live cursor on the next orbit
-  frame), gesture end resets both. **Plane / empty salvage (v0.3.2–0.3.3):**
-  1. **Expanding ray-AABB** (v0.3.3, Fusion-style `APERTURE_FRACS` of VIEWSIZE): walk model space
-     with a thickening ray and take the nearest hit — recovers 2D Wireframe mid-face / near-edge
-     when PointMonitor's aperture was empty. AutoCAD never had this before; the "expanding
-     raycast" the user remembered is Fusion's `findBRepUsingRay` loop.
-  2. Else **reproject** along the view ray to the look-at depth (`VIEWCTR` / GS target) so an
-     oblique UCS-plane intersection doesn't go OOB.
-  3. Only a point still off-model after that returns null → target orbit.
+  frame), gesture end resets both. **Plane / empty handling (v0.3.9, strict):** a plane-only
+  sample (no entity under the cursor) tries the **expanding ray-AABB** (v0.3.3, Fusion-style
+  `APERTURE_FRACS` of VIEWSIZE): walk model space with a thickening ray in **strict mode**
+  (`EntityRayDepth(strict:true)` — real ray/AABB or curve intersections only) and take the nearest
+  hit — recovers 2D Wireframe mid-face / near-edge when PointMonitor's aperture was empty. Nothing
+  hit → **null → the configured fallback chain continues.** The v0.3.2–0.3.3 salvage behaviors
+  (reproject the plane point / an OOB entity sample to the `VIEWCTR`/GS-target view depth — "still
+  under the cursor", but a fabricated pivot in empty space) were REMOVED in 0.3.9 to match the
+  actual-target-or-fall-through contract of every other host's ray pivots; an OOB entity sample
+  now also returns null instead of reprojecting.
   The legacy `SetCurrentView` fallback path does NOT support the cursor pivot (view-centre orbit
   as before).
 - **Verification (throwaway instance, headless — no human mouse):** NETLOAD in a COM-launched
@@ -717,7 +736,7 @@ For the ARCHIVED COM transport the recipe was:
   from trackball_daemon.autocad_driver import AutoCADDriver   # restored from the archive
   pythoncom.CoInitialize()
   drv = AutoCADDriver(); drv._attach()
-  drv.set_scheme("view", "turntable", "to_center")
+  drv.set_scheme("screen_center", "turntable", "to_center")
   drv._flush((0.0, 0.1, 0.0, 0.0, 0.0, 0.0))   # one turntable-yaw frame
   print(drv._acad.ActiveDocument.GetVariable("VIEWDIR"))
   ```
@@ -759,8 +778,12 @@ real COM behaviour — that's what this section's live testing is for.
 - **Needs a feel/sign pass on hardware** if anything feels off: the plugin's
   `OrbitSign`/`Pan*`/`Zoom*` constants in `Plugin.cs` (drawing units vary wildly, so pan/zoom
   scale especially).
-- **Limitations:** plugin pivot modes `origin`/`object` still orbit like `view`, and `to_object`
-  zoom is TODO; pre-2025 AutoCAD (no .NET 8 host) has **no transport** since the COM fallback was
+- **Limitations:** `to_object` zoom is TODO; the `screen_center` pivot (0.3.8) needs a live feel
+  pass and its depth is AABB-near-face approximate (§8.6); the `cursor` pivot's 0.3.9 strictness
+  (empty-space hover = miss → chain; 2D-Wireframe mid-face recovery now rides the strict expanding
+  ray) also needs a live re-check — the pre-0.3.9 behavior was live-verified WITH the salvage
+  paths that were since removed; pre-2025 AutoCAD (no .NET 8 host) has
+  **no transport** since the COM fallback was
   retired (§8.18) — it would need a .NET Framework plugin variant; paper space no-ops. The COM
   transport's own ceilings (reassign-regen per orbit commit, no `VIEWTWIST`, no raycast — §8.4/
   §8.6/§8.10/§8.13) now matter only if the archive is ever resurrected.

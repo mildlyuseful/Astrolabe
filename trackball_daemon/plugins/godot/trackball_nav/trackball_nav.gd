@@ -1,11 +1,10 @@
 @tool
 extends EditorPlugin
 
-const ADDIN_VERSION := "0.1.4"
+const ADDIN_VERSION := "0.1.6"
 const DEFAULT_PORT := 47900
 const PIVOT_HOLD_IDLE := 0.35
 const OBJ_CACHE_SEC := 0.5
-const BBOX_MARGIN := 0.10
 const TRACE_BIG := 1.0e7
 
 var _stop := false
@@ -19,7 +18,6 @@ var _zoom_gesture_pivot = null
 var _focus_dist := 10.0
 var _obj_cache_t := 0.0
 var _obj_center = null
-var _obj_bbox = null
 var _last_scheme := ""
 var _host := "?"
 
@@ -153,7 +151,7 @@ func _apply(frame: Dictionary, idle: float) -> void:
 	var o := _vec3(frame.get("o", [0, 0, 0]))
 	var p := _vec2(frame.get("p", [0, 0]))
 	var z := float(frame.get("z", 0.0))
-	var op := str(frame.get("op", "view"))
+	var op := str(frame.get("op", "screen_center"))
 	# Godot editor: turntable only (no free trackball / roll).
 	var style := "turntable"
 	var zm := str(frame.get("zm", "to_center"))
@@ -261,23 +259,21 @@ func _apply_walk(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float, 
 
 func _orbit_pivot(op: String, cam: TrackballNavCamera.Cam, idle: float, sel_override: bool,
 		candidates: Array):
-	var sel := _selection_center()
-	var center = sel[0]
-	var bbox = sel[1]
-	if sel_override and op != "viewpoint" and center != null:
+	var center = _selection_center()
+	if sel_override and op != "camera" and center != null:
 		return center
 	if _gesture_pivot != null and not _gesture_invalid and idle <= PIVOT_HOLD_IDLE:
 		return _gesture_pivot
 	for method in candidates:
 		var point = null
-		if method == "viewpoint":
+		if method == "camera":
 			point = cam.location
 		elif method == "origin":
 			point = Vector3.ZERO
-		elif method == "view":
-			point = _screen_center_pivot(cam, bbox if sel_override else null)
+		elif method == "screen_center":
+			point = _screen_center_pivot(cam)
 		elif method == "cursor":
-			point = _cursor_pivot(bbox if sel_override else null)
+			point = _cursor_pivot()
 		elif method in ["object", "selection"]:
 			point = center
 		if point != null:
@@ -288,16 +284,14 @@ func _orbit_pivot(op: String, cam: TrackballNavCamera.Cam, idle: float, sel_over
 
 
 func _zoom_toward(zm: String, idle: float, sel_override: bool):
-	var sel := _selection_center()
-	var center = sel[0]
-	var bbox = sel[1]
+	var center = _selection_center()
 	if zm == "to_object":
 		return center
 	if zm == "to_cursor":
 		if sel_override and center != null:
 			return center
 		if _zoom_gesture_pivot == null or idle > PIVOT_HOLD_IDLE:
-			_zoom_gesture_pivot = _cursor_pivot(bbox if sel_override else null)
+			_zoom_gesture_pivot = _cursor_pivot()
 		return _zoom_gesture_pivot
 	return null
 
@@ -307,11 +301,11 @@ func _forward_point(cam: TrackballNavCamera.Cam) -> Vector3:
 	return cam.location + cam.forward * d
 
 
-func _screen_center_pivot(cam: TrackballNavCamera.Cam, bbox):
-	return _trace_ray(cam.location, cam.forward, bbox)
+func _screen_center_pivot(cam: TrackballNavCamera.Cam):
+	return _trace_ray(cam.location, cam.forward)
 
 
-func _cursor_pivot(bbox):
+func _cursor_pivot():
 	var vp := EditorInterface.get_editor_viewport_3d(0)
 	if vp == null:
 		return null
@@ -321,10 +315,10 @@ func _cursor_pivot(bbox):
 	var mouse := vp.get_mouse_position()
 	var origin := camera.project_ray_origin(mouse)
 	var direction := camera.project_ray_normal(mouse)
-	return _trace_ray(origin, direction, bbox)
+	return _trace_ray(origin, direction)
 
 
-func _trace_ray(origin: Vector3, direction: Vector3, bbox):
+func _trace_ray(origin: Vector3, direction: Vector3):
 	var space: Node = EditorInterface.get_edited_scene_root()
 	if space == null:
 		return null
@@ -341,20 +335,13 @@ func _trace_ray(origin: Vector3, direction: Vector3, bbox):
 	var hit: Dictionary = world.direct_space_state.intersect_ray(query)
 	if hit.is_empty():
 		# Fallback: editor raycast against MeshInstance3D AABBs in the edited scene.
-		return _mesh_aabb_ray(origin, d, space, bbox)
-	var p: Vector3 = hit["position"]
-	if bbox != null and not _in_bbox(p, bbox):
-		return null
-	return p
+		return _mesh_aabb_ray(origin, d, space)
+	return hit["position"]
 
 
-func _mesh_aabb_ray(origin: Vector3, direction: Vector3, root: Node, bbox):
+func _mesh_aabb_ray(origin: Vector3, direction: Vector3, root: Node):
 	var best_t := TRACE_BIG
 	var best = null
-	_walk_meshes(root, origin, direction, best_t, best, bbox)
-	# GDScript can't pass by ref easily — reimplement inline:
-	best_t = TRACE_BIG
-	best = null
 	var stack: Array = [root]
 	while not stack.is_empty():
 		var n: Node = stack.pop_back()
@@ -365,15 +352,9 @@ func _mesh_aabb_ray(origin: Vector3, direction: Vector3, root: Node, bbox):
 			var aabb: AABB = mi.global_transform * mi.get_aabb()
 			var t: float = _aabb_ray(origin, direction, aabb)
 			if t >= 0.0 and t < best_t:
-				var p: Vector3 = origin + direction * t
-				if bbox == null or _in_bbox(p, bbox):
-					best_t = t
-					best = p
+				best_t = t
+				best = origin + direction * t
 	return best
-
-
-func _walk_meshes(_root, _o, _d, _bt, _b, _bb) -> void:
-	pass
 
 
 func _aabb_ray(origin: Vector3, direction: Vector3, aabb: AABB) -> float:
@@ -403,48 +384,32 @@ func _aabb_ray(origin: Vector3, direction: Vector3, aabb: AABB) -> float:
 	return tmin if tmin >= 0.0 else tmax
 
 
-func _selection_center() -> Array:
+func _selection_center():
 	var now := Time.get_ticks_msec() / 1000.0
 	if _obj_center != null and now - _obj_cache_t < OBJ_CACHE_SEC:
-		return [_obj_center, _obj_bbox]
+		return _obj_center
 	var nodes := EditorInterface.get_selection().get_selected_nodes()
 	if nodes.is_empty():
 		_obj_center = null
-		_obj_bbox = null
 		_obj_cache_t = now
-		return [null, null]
+		return null
 	var sum := Vector3.ZERO
 	var n := 0
-	var agg = null
 	for node in nodes:
 		if node is Node3D:
 			var p: Vector3 = (node as Node3D).global_position
-			var b := AABB(p - Vector3.ONE * 0.05, Vector3.ONE * 0.1)
 			if node is MeshInstance3D:
 				var mi := node as MeshInstance3D
-				b = mi.global_transform * mi.get_aabb()
-				p = b.get_center()
+				p = (mi.global_transform * mi.get_aabb()).get_center()
 			sum += p
 			n += 1
-			if agg == null:
-				agg = b
-			else:
-				agg = (agg as AABB).merge(b)
 	if n == 0:
 		_obj_center = null
-		_obj_bbox = null
 		_obj_cache_t = now
-		return [null, null]
+		return null
 	_obj_center = sum / float(n)
-	_obj_bbox = agg
 	_obj_cache_t = now
-	return [_obj_center, _obj_bbox]
-
-
-func _in_bbox(p: Vector3, bbox: AABB) -> bool:
-	var grow := bbox.size.length() * BBOX_MARGIN
-	var g := bbox.grow(grow)
-	return g.has_point(p)
+	return _obj_center
 
 
 func _sgn(flag: bool) -> float:
@@ -465,8 +430,8 @@ func _apply_inverts(nav_mode: String, op: String, o: Vector3, p: Vector2, z: flo
 		z *= _sgn(bool(w.get("vertical", false)))
 	else:
 		var ob: Dictionary = inv.get("orbit", {})
-		if op == "viewpoint":
-			var vp: Dictionary = inv.get("viewpoint", {})
+		if op == "camera":
+			var vp: Dictionary = inv.get("camera", {})
 			o = Vector3(o.x * _sgn(bool(vp.get("pitch", false))), o.y * _sgn(bool(vp.get("yaw", false))),
 				o.z * _sgn(bool(vp.get("roll", false))))
 		else:

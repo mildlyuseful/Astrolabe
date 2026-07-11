@@ -36,7 +36,7 @@ world_back  = view_rotation @ (0,0, 1)   # toward the eye
 eye         = view_location + world_back * view_distance
 ```
 
-Because orbit is **natively about `view_location`**, the trackball-native pivot ("viewpoint") is
+Because orbit is **natively about `view_location`**, the trackball-native pivot ("camera") is
 trivial: rotate `view_rotation`, leave `view_location` alone. Every other pivot is handled by one
 unified trick (see §4).
 
@@ -57,7 +57,7 @@ the add-on only bakes in a baseline sign/scale and the scheme.
 | D | Zoom | `view_distance *= factor` (ortho scale follows) | Shift + twist, `zoom_style="zoom"` |
 | E | Dolly | translate `view_location` along `world_fwd` | `zoom_style="dolly"`, or `twist_action="dolly"` |
 | F | View roll | rotate about `world_fwd` | `twist_action="roll"` (default) |
-| G | Orbit pivot | unified rotate-about-P (§4): viewpoint / selection / auto-depth / 3D-cursor / origin | `orbit_pivot` (generic, +`viewpoint`) |
+| G | Orbit pivot | unified rotate-about-P (§4): camera / selection / screen-center / 3D-cursor / origin | `orbit_pivot` (generic, +`camera`) |
 | H | Fly | look = orbit about the **eye**; Shift+ball forward/back = thrust, sideways = strafe, twist = rise/fall (scale floored so it never vanishes up close) | `nav_mode="fly"` (or the in-Blender toggle), `fly_speed` |
 | I | Walk | like fly but horizon-locked look + horizontal-plane move (forward/strafe), twist = rise/fall | `nav_mode="walk"`, `walk_speed` |
 | J | Camera view | `lock_camera_to_view` on → drive `scene.camera.matrix_world` from the view; **off → navigating exits camera view to PERSP** (v0.1.6, like Blender — else rv edits are invisible while the camera is rendered) | `lock_camera_to_view` |
@@ -83,25 +83,26 @@ parts that map, and put **only genuinely Blender-only** options in `apps.blender
 | Blender concept | Stored in (single source) | Notes |
 |-----------------|---------------------------|-------|
 | Orbit method (Trackball/Turntable) | generic `orbit_style` (`free`/`turntable`) | relabelled "Orbit method" in the Blender UI |
-| Orbit around | generic `orbit_pivot` | **extended** with a Blender-only value `viewpoint` (see below) |
+| Orbit pivot | generic `orbit_pivot` | uses the shared canonical pivot identifiers |
 | Zoom to | generic — *not used by Blender*; Blender uses `advanced.zoom_to_mouse` | Blender's native pref is literally a "Zoom to Mouse" checkbox |
 
 `orbit_pivot` value → Blender pivot:
 
-| generic `orbit_pivot` | Blender "Orbit around" | pivot point |
+| generic `orbit_pivot` | Blender "Orbit pivot" | pivot point |
 |-----------------------|------------------------|-------------|
-| `viewpoint` *(new, Blender-only)* | Viewpoint (default) | the **eye** — turns the camera in place (look around), independent of the orbit-point distance. (v0.1.4; was `view_location`, which sits far in front after fly/look and felt like orbiting an arbitrary point.) |
-| `view` | Auto Depth | **raycast** the surface under the screen centre (per-gesture hold) |
-| `object` | Selection | median of `selected_objects` world origins |
+| `camera` | Camera (default) | the **eye** — turns the camera in place (look around), independent of the orbit-point distance. (v0.1.4; was `view_location`, which sits far in front after fly/look and felt like orbiting an arbitrary point.) |
+| `screen_center` | Screen Center | **raycast** the surface under the screen centre (per-gesture hold) |
+| `cursor` | Under Cursor (mouse) | **raycast** the surface under the live mouse cursor (per-gesture hold) |
+| `selection` | Selection | median of `selected_objects` world origins |
+| `object` | Model Center | currently resolves to the same selected-object median in Blender |
 | `cursor_3d` | 3D Cursor | `scene.cursor.location` |
 | `origin` | World origin | `(0,0,0)` |
 
 > Decision: rather than duplicate an `orbit_around` key in `advanced` (which would create a second
-> source of truth), we add the single extra value `"viewpoint"` to the generic `orbit_pivot` enum.
-> It is exposed **only** in the Blender bindings section; the General/other-app combos keep their original
-> four values, and the broker only ever streams the *focused* app's scheme, so Fusion/SolidWorks
-> never see `viewpoint`. Any unknown/failed pivot falls back to `viewpoint` (orbit about
-> `view_location`).
+> source of truth), every integration uses the shared canonical `orbit_pivot` identifiers. The broker
+> streams the focused app's effective scheme and ordered candidate list. An integration skips methods
+> it cannot resolve, and the next configured candidate is tried; there is no hidden app-specific
+> fallback.
 
 ### `apps.blender.advanced` (Blender-only; additive, deep-merged — no CONFIG_VERSION bump)
 ```jsonc
@@ -117,7 +118,7 @@ parts that map, and put **only genuinely Blender-only** options in `apps.blender
   "walk_speed": 1.0,
   "invert": {                     // per-mode, per-axis direction flips (applied IN THE ADD-ON)
     "orbit":     {"pitch": false, "yaw": false, "twist": false, "pan_x": false, "pan_y": false, "zoom": false},
-    "viewpoint": {"pitch": false, "yaw": false, "roll": true},   // shares orbit's pan/zoom inverts
+    "camera": {"pitch": false, "yaw": false, "roll": true},   // shares orbit's pan/zoom inverts
     "fly":       {"pitch": false, "yaw": false, "bank": true, "forward": false, "strafe": false, "vertical": false},
     "walk":      {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false}
   }
@@ -127,11 +128,11 @@ parts that map, and put **only genuinely Blender-only** options in `apps.blender
 `invert` is per-mode because the same physical channel means different things per nav mode (ball
 forward/back is orbit pan-Y but fly/walk *forward*), so a single invert set can't flip one without the
 other. The add-on applies these to o/p/z per mode just before the dispatch, so e.g. flipping
-`walk.forward` doesn't touch orbit. Defaults bake in the "inside-out" roll fix (`viewpoint.roll` and
+`walk.forward` doesn't touch orbit. Defaults bake in the "inside-out" roll fix (`camera.roll` and
 `fly.bank` start inverted vs external-pivot orbit). This **replaced** the old single
-`invert_viewpoint_roll` flag.
+`invert_camera_roll` flag.
 Dropped from the brief's starting shape because they are reconciled into the generic scheme:
-`orbit_method` (→ `orbit_style`) and `orbit_around` (→ `orbit_pivot` + `viewpoint`).
+`orbit_method` (→ `orbit_style`) and `orbit_around` (→ `orbit_pivot` + `camera`).
 
 ### Plumbing
 The add-on only learns settings via the broker. The broker frame is **additively** extended with an
@@ -171,11 +172,11 @@ the dropdown re-takes control. Rebind via Preferences ▸ Keymap (search "Trackb
 
 ```
 view_rotation = (R @ view_rotation).normalized()
-if pivot is not None:                       # pivot == None  ⇒ orbit about view_location (viewpoint)
+if pivot is not None:                       # pivot == None  ⇒ orbit about view_location (camera)
     view_location = pivot + R @ (view_location - pivot)
 ```
 
-This keeps the pivot fixed on screen for *every* non-viewpoint pivot, because the eye derives from
+This keeps the pivot fixed on screen for *every* non-camera pivot, because the eye derives from
 `view_location + back*distance` and `back = R@back` after the rotation (same algebra as Fusion's
 "rotate then translate to hold the pivot").
 
@@ -189,7 +190,7 @@ This keeps the pivot fixed on screen for *every* non-viewpoint pivot, because th
   `view_location = P + (view_location-P)*factor`
 * **Dolly** `view_location += world_fwd * (scale·z·view_distance)`
 * **Selection median** mean of `selected_objects[i].matrix_world.translation`
-* **Auto-depth** `region_2d_to_origin_3d` + `region_2d_to_vector_3d` at the region centre →
+* **Screen Center** `region_2d_to_origin_3d` + `region_2d_to_vector_3d` at the region centre →
   `scene.ray_cast(evaluated_depsgraph_get(), origin, dir)` → `location` (held per gesture; recast on
   pan/zoom or after `PIVOT_HOLD_IDLE`)
 
@@ -201,14 +202,14 @@ orbit (v0.1.3). Pan/zoom keep their feel-based scales.
 
 ### Roll sign convention (now per-mode, v0.1.9)
 The camera's *world-space* roll for a given twist is the same sign for every pivot, but rolling
-**inside-out** (first-person: fly/walk, and the `viewpoint` pivot — you roll about the eye / the
+**inside-out** (first-person: fly/walk, and the `camera` pivot — you roll about the eye / the
 point you're looking at) *feels* opposite to rolling **outside-in** (orbiting an external pivot:
-object / auto-depth / cursor / origin). The defaults bake this in: `invert.viewpoint.roll` and
+object / screen-center / cursor / origin). The defaults bake this in: `invert.camera.roll` and
 `invert.fly.bank` start **on**, so first-person roll matches external-pivot orbit out of the box. Both
 (and every other axis) are independently toggleable in the merged Blender bindings UI. (`walk` has no
 bank by design — horizon-locked.)
 
-### Per-gesture pivot hold (auto-depth)
+### Per-gesture pivot hold (screen-center)
 Mirrors Fusion's `_gesture`/`_screen_center_pivot`: the screen-centre surface point is raycast
 **once** at the start of an orbit gesture and **held**, so the thing under the crosshair stays put.
 It is invalidated when the view translates (pan/zoom/dolly set `pivot_invalid`) or after

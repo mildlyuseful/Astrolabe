@@ -240,7 +240,8 @@ def test_selection_override_off_ignores_bbox_gate(monkeypatch):
 def test_selection_override_on_rejects_hit_outside_bbox_then_uses_selection(monkeypatch):
     monkeypatch.setattr(tn, "_selection_center", lambda: ((5.0, 5.0, 5.0), BBOX))
     # With override on, selection wins immediately — no raycast.
-    assert tn._orbit_pivot("view", _cam(), idle=10.0, sel_override=True) == (5.0, 5.0, 5.0)
+    assert tn._orbit_pivot("screen_center", _cam(), idle=10.0,
+                           sel_override=True) == (5.0, 5.0, 5.0)
 
 
 def test_zoom_to_cursor_honours_selection_override(monkeypatch):
@@ -270,7 +271,7 @@ def test_zoom_toward_to_center_is_none():
     assert tn._zoom_toward("to_center", idle=10.0) is None
 
 
-def test_view_pivot_still_uses_camera_forward():
+def test_screen_center_pivot_uses_camera_forward():
     cam = _cam()
     assert tn._screen_center_pivot(cam, BBOX) == PTR_HIT
     start = _SystemLibrary.calls[0][:3]
