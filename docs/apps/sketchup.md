@@ -132,6 +132,12 @@ SketchUp now consumes the same additive broker `adv` shape used by Blender/Unrea
   "lock_horizon": false,
   "fly_speed": 1.0,
   "walk_speed": 1.0,
+  "axis_source": {
+    "orbit": {"pitch":0,"yaw":1,"twist":2,"pan_x":0,"pan_y":1,"zoom":2},
+    "camera": {"pitch":0,"yaw":1,"roll":2},
+    "fly": {"pitch":0,"yaw":1,"bank":2,"forward":1,"strafe":0,"vertical":2},
+    "walk": {"pitch":0,"yaw":1,"forward":1,"strafe":0,"vertical":2}
+  },
   "invert": {
     "orbit": {"pitch":false,"yaw":false,"twist":false,"pan_x":false,"pan_y":false,"zoom":false},
     "camera": {"pitch":false,"yaw":false,"roll":true},
@@ -151,10 +157,10 @@ SketchUp now consumes the same additive broker `adv` shape used by Blender/Unrea
   world Z. Shift movement projects right/forward onto world XY; twist moves vertically along Z.
 - `lock_horizon` forces external-pivot free orbit through the same turntable/horizon rebuild.
 
-The generic per-app invert remains default-off underneath; the SketchUp UI exposes the richer
-per-mode invert groups instead. This is deliberate: the same broker pan axis means screen pan in
-Orbit, thrust in Fly, and ground-forward in Walk, so direction choices belong in the Ruby extension
-where the active mode is known.
+The generic per-app invert remains default-off underneath; the SketchUp UI exposes richer per-mode
+source and invert controls instead. Rotation actions select X/Y/Z from `orbit`; movement actions
+select X/Y/Z from `(pan.x, pan.y, zoom)`. This belongs in the Ruby extension because the same broker
+channel means screen pan in Orbit, thrust in Fly, and ground-forward in Walk.
 
 ## 5. Pivots and the live raytest
 

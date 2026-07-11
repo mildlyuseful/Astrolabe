@@ -74,3 +74,43 @@ def test_cursor_scroll_bit_exact(engine, monkeypatch):
     engine.set_mode(OutputEngine.MODE_CURSOR)
     engine.handle_packet(_pkt(0.0, 0.0, 0.05))
     assert moves == [(0, 0, 1)]
+
+
+def test_global_orientation_precedes_both_3d_and_cursor_routing(engine, monkeypatch):
+    # Logical XYZ <- raw Y, X, Z, with logical Y inverted (a 90-degree base reorientation).
+    engine.cfg.data["general"]["axis_orientation"] = {
+        "source": [1, 0, 2], "invert": [False, True, False]}
+    engine.apply_config()
+
+    nav = []
+    engine.nav_sink = lambda *a: nav.append(a)
+    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
+    engine.set_mode(OutputEngine.MODE_CUBE)
+    engine.handle_packet(_pkt(0.01, 0.02, 0.03))
+    assert nav[-1][:3] == pytest.approx((0.02, -0.01, 0.03))
+
+    moves = []
+    monkeypatch.setattr(output_mod, "send_mouse",
+                        lambda dx=0, dy=0, wheel=0: moves.append((dx, dy, wheel)))
+    engine.set_mode(OutputEngine.MODE_CURSOR)
+    engine.handle_packet(_pkt(0.01, 0.02, 0.0))
+    assert moves == [(-2, 4, 0)]
+
+
+def test_global_orientation_composes_with_distinct_per_app_axis_routes(engine, monkeypatch):
+    engine.cfg.data["general"]["axis_orientation"] = {
+        "source": [1, 0, 2], "invert": [False, False, False]}
+    engine.cfg.data["apps"]["fusion360"]["bindings"]["orbit"]["axis_source"] = [0, 1, 2]
+    engine.cfg.data["apps"]["rhino"]["bindings"]["orbit"]["axis_source"] = [2, 0, 1]
+    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
+    nav = []
+    engine.nav_sink = lambda *a: nav.append(a)
+    engine.set_mode(OutputEngine.MODE_CUBE)
+
+    engine.set_active_bindings("fusion360")
+    engine.handle_packet(_pkt(0.01, 0.02, 0.03))
+    engine.set_active_bindings("rhino")
+    engine.handle_packet(_pkt(0.01, 0.02, 0.03))
+
+    assert nav[0][:3] == pytest.approx((0.02, 0.01, 0.03))
+    assert nav[1][:3] == pytest.approx((0.03, 0.02, 0.01))

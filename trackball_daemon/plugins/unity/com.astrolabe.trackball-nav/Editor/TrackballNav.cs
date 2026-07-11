@@ -15,7 +15,7 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.8";
+        const string AddinVersion = "0.1.9";
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.35f;
         const float ObjCacheSec = 0.5f;
@@ -472,7 +472,6 @@ namespace Astrolabe.TrackballNav
             var pivotCandidates = MiniJson.StringList(adv, "orbit_pivot_candidates", op);
             float flySpeed = MiniJson.Float(adv, "fly_speed", 1f);
             float walkSpeed = MiniJson.Float(adv, "walk_speed", 1f);
-            var invert = MiniJson.Obj(adv, "invert") ?? new System.Collections.Generic.Dictionary<string, object>();
 
             var sig = $"{navMode}|{op}|{style}|{zm}|{twistAction}|{lockHorizon}|{selOverride}|{MiniJson.Bool(adv, "override_dynamic_clip", true)}";
             if (sig != _lastScheme)
@@ -481,7 +480,7 @@ namespace Astrolabe.TrackballNav
                 Log($"scheme: nav={navMode} pivot={op} style={style} zoom={zm} twist={twistAction} horizon={lockHorizon} sel_override={selOverride} override_dyn_clip={MiniJson.Bool(adv, "override_dynamic_clip", true)}");
             }
 
-            ApplyInverts(navMode, op, ref o, ref p, ref z, invert);
+            ApplyActionRouting(navMode, op, ref o, ref p, ref z, adv);
 
             // SceneView.size is a fit-sphere radius, NOT eye→pivot distance.
             // Real distance is sv.cameraDistance (= size/sin(fov/2) in perspective).
@@ -857,40 +856,59 @@ namespace Astrolabe.TrackballNav
 
         static float Sgn(bool flag) => flag ? -1f : 1f;
 
-        static void ApplyInverts(string navMode, string op, ref Vector3 o, ref Vector2 p, ref float z,
-            System.Collections.Generic.Dictionary<string, object> inv)
+        static float Routed(Vector3 values, System.Collections.Generic.Dictionary<string, object> sources,
+            System.Collections.Generic.Dictionary<string, object> inversions, string action, int defaultAxis)
         {
+            int source = (int)MiniJson.Float(sources, action, defaultAxis);
+            if (source < 0 || source > 2) source = defaultAxis;
+            return values[source] * Sgn(MiniJson.Bool(inversions, action));
+        }
+
+        static void ApplyActionRouting(string navMode, string op, ref Vector3 o, ref Vector2 p, ref float z,
+            System.Collections.Generic.Dictionary<string, object> adv)
+        {
+            var inv = MiniJson.Obj(adv, "invert") ?? new System.Collections.Generic.Dictionary<string, object>();
+            var axes = MiniJson.Obj(adv, "axis_source") ?? new System.Collections.Generic.Dictionary<string, object>();
+            Vector3 rotation = o;
+            Vector3 movement = new Vector3(p.x, p.y, z);
             if (navMode == "fly")
             {
                 var f = MiniJson.Obj(inv, "fly") ?? new System.Collections.Generic.Dictionary<string, object>();
-                o = new Vector3(o.x * Sgn(MiniJson.Bool(f, "pitch")), o.y * Sgn(MiniJson.Bool(f, "yaw")),
-                    o.z * Sgn(MiniJson.Bool(f, "bank")));
-                p = new Vector2(p.x * Sgn(MiniJson.Bool(f, "strafe")), p.y * Sgn(MiniJson.Bool(f, "forward")));
-                z *= Sgn(MiniJson.Bool(f, "vertical"));
+                var a = MiniJson.Obj(axes, "fly") ?? new System.Collections.Generic.Dictionary<string, object>();
+                o = new Vector3(Routed(rotation, a, f, "pitch", 0), Routed(rotation, a, f, "yaw", 1),
+                    Routed(rotation, a, f, "bank", 2));
+                p = new Vector2(Routed(movement, a, f, "strafe", 0),
+                    Routed(movement, a, f, "forward", 1));
+                z = Routed(movement, a, f, "vertical", 2);
             }
             else if (navMode == "walk")
             {
                 var w = MiniJson.Obj(inv, "walk") ?? new System.Collections.Generic.Dictionary<string, object>();
-                o = new Vector3(o.x * Sgn(MiniJson.Bool(w, "pitch")), o.y * Sgn(MiniJson.Bool(w, "yaw")), o.z);
-                p = new Vector2(p.x * Sgn(MiniJson.Bool(w, "strafe")), p.y * Sgn(MiniJson.Bool(w, "forward")));
-                z *= Sgn(MiniJson.Bool(w, "vertical"));
+                var a = MiniJson.Obj(axes, "walk") ?? new System.Collections.Generic.Dictionary<string, object>();
+                o = new Vector3(Routed(rotation, a, w, "pitch", 0), Routed(rotation, a, w, "yaw", 1), rotation.z);
+                p = new Vector2(Routed(movement, a, w, "strafe", 0),
+                    Routed(movement, a, w, "forward", 1));
+                z = Routed(movement, a, w, "vertical", 2);
             }
             else
             {
                 var ob = MiniJson.Obj(inv, "orbit") ?? new System.Collections.Generic.Dictionary<string, object>();
+                var oa = MiniJson.Obj(axes, "orbit") ?? new System.Collections.Generic.Dictionary<string, object>();
                 if (op == "camera")
                 {
                     var vp = MiniJson.Obj(inv, "camera") ?? new System.Collections.Generic.Dictionary<string, object>();
-                    o = new Vector3(o.x * Sgn(MiniJson.Bool(vp, "pitch")), o.y * Sgn(MiniJson.Bool(vp, "yaw")),
-                        o.z * Sgn(MiniJson.Bool(vp, "roll")));
+                    var va = MiniJson.Obj(axes, "camera") ?? new System.Collections.Generic.Dictionary<string, object>();
+                    o = new Vector3(Routed(rotation, va, vp, "pitch", 0),
+                        Routed(rotation, va, vp, "yaw", 1), Routed(rotation, va, vp, "roll", 2));
                 }
                 else
                 {
-                    o = new Vector3(o.x * Sgn(MiniJson.Bool(ob, "pitch")), o.y * Sgn(MiniJson.Bool(ob, "yaw")),
-                        o.z * Sgn(MiniJson.Bool(ob, "twist")));
+                    o = new Vector3(Routed(rotation, oa, ob, "pitch", 0),
+                        Routed(rotation, oa, ob, "yaw", 1), Routed(rotation, oa, ob, "twist", 2));
                 }
-                p = new Vector2(p.x * Sgn(MiniJson.Bool(ob, "pan_x")), p.y * Sgn(MiniJson.Bool(ob, "pan_y")));
-                z *= Sgn(MiniJson.Bool(ob, "zoom"));
+                p = new Vector2(Routed(movement, oa, ob, "pan_x", 0),
+                    Routed(movement, oa, ob, "pan_y", 1));
+                z = Routed(movement, oa, ob, "zoom", 2);
             }
         }
 

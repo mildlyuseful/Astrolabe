@@ -57,6 +57,14 @@ def test_blender_app_has_advanced_block(isolated_config):
     assert "advanced" not in cfg.data["apps"]["fusion360"]
 
 
+def test_blender_bundled_version_markers_stay_in_sync():
+    root = Path(__file__).parents[1] / "trackball_daemon/plugins/blender/trackball_nav"
+    assert json.loads((root / "version.json").read_text(encoding="utf-8"))["version"] == "0.1.15"
+    source = (root / "__init__.py").read_text(encoding="utf-8")
+    assert 'ADDIN_VERSION = "0.1.15"' in source
+    assert '"version": (0, 1, 15)' in source
+
+
 def test_advanced_appears_on_old_config_via_deep_merge(isolated_config):
     # Simulate a pre-existing v2 config that predates the advanced block.
     import copy
@@ -80,6 +88,8 @@ def test_sketchup_app_has_blender_parity_advanced_block(isolated_config):
         "pitch", "yaw", "bank", "forward", "strafe", "vertical"}
     assert set(sketchup["advanced"]["invert"]["walk"]) == {
         "pitch", "yaw", "forward", "strafe", "vertical"}
+    assert sketchup["advanced"]["axis_source"]["walk"]["forward"] == 1
+    assert sketchup["advanced"]["axis_source"]["walk"]["vertical"] == 2
 
 
 def test_sketchup_advanced_appears_on_old_config_via_deep_merge(isolated_config):
@@ -184,6 +194,29 @@ def test_every_socket_integration_consumes_expanded_pivot_candidates():
     ]
     for source in sources:
         assert "orbit_pivot_candidates" in source.read_text(encoding="utf-8"), source
+
+
+def test_every_rich_integration_consumes_per_action_axis_sources():
+    root = Path(__file__).parents[1]
+    sources = [
+        root / "trackball_daemon/plugins/blender/trackball_nav/__init__.py",
+        root / "trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd",
+        root / "trackball_daemon/plugins/sketchup/trackball_nav/camera.rb",
+        root / "trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs",
+        root / "trackball_daemon/plugins/unreal/TrackballNav/Content/Python/trackball_nav.py",
+    ]
+    for source in sources:
+        text = source.read_text(encoding="utf-8")
+        assert "axis_source" in text, source
+        assert "ActionRouting" in text or "action_routing" in text, source
+
+
+def test_ui_exposes_global_and_per_action_axis_routing():
+    source = (Path(__file__).parents[1] / "trackball_daemon/ui.py").read_text(encoding="utf-8")
+    assert "Physical trackball orientation" in source
+    assert "Changing a source swaps axes instead of duplicating one" in source
+    assert "Action axes & directions" in source
+    assert "Walk Fwd ← Z makes twist drive forward" in source
 
 
 def test_pivot_ui_uses_one_canonical_case_sensitive_vocabulary():

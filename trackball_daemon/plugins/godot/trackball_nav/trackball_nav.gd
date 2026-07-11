@@ -1,7 +1,7 @@
 @tool
 extends EditorPlugin
 
-const ADDIN_VERSION := "0.1.6"
+const ADDIN_VERSION := "0.1.7"
 const DEFAULT_PORT := 47900
 const PIVOT_HOLD_IDLE := 0.35
 const OBJ_CACHE_SEC := 0.5
@@ -170,17 +170,13 @@ func _apply(frame: Dictionary, idle: float) -> void:
 		pivot_candidates = [op]
 	var fly_speed := float(adv.get("fly_speed", 1.0))
 	var walk_speed := float(adv.get("walk_speed", 1.0))
-	var invert: Dictionary = adv.get("invert", {})
-	if typeof(invert) != TYPE_DICTIONARY:
-		invert = {}
-
 	var sig := "%s|%s|%s|%s|%s|%s|%s" % [nav_mode, op, style, zm, twist_action, lock_h, sel_override]
 	if sig != _last_scheme:
 		_last_scheme = sig
 		_log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s horizon=%s sel_override=%s" % [
 			nav_mode, op, style, zm, twist_action, lock_h, sel_override])
 
-	var inv_res := _apply_inverts(nav_mode, op, o, p, z, invert)
+	var inv_res := _apply_action_routing(nav_mode, op, o, p, z, adv)
 	o = inv_res[0]
 	p = inv_res[1]
 	z = inv_res[2]
@@ -416,29 +412,56 @@ func _sgn(flag: bool) -> float:
 	return -1.0 if flag else 1.0
 
 
-func _apply_inverts(nav_mode: String, op: String, o: Vector3, p: Vector2, z: float, inv: Dictionary) -> Array:
+func _routed(values: Array, sources: Dictionary, inversions: Dictionary, action: String, default: int) -> float:
+	var source := int(sources.get(action, default))
+	if source < 0 or source > 2:
+		source = default
+	return float(values[source]) * _sgn(bool(inversions.get(action, false)))
+
+
+func _apply_action_routing(nav_mode: String, op: String, o: Vector3, p: Vector2, z: float, adv: Dictionary) -> Array:
+	var inv: Dictionary = {}
+	var raw_inv = adv.get("invert", {})
+	if typeof(raw_inv) == TYPE_DICTIONARY:
+		inv = raw_inv
+	var axes: Dictionary = {}
+	var raw_axes = adv.get("axis_source", {})
+	if typeof(raw_axes) == TYPE_DICTIONARY:
+		axes = raw_axes
+	var rotation := [o.x, o.y, o.z]
+	var movement := [p.x, p.y, z]
 	if nav_mode == "fly":
 		var f: Dictionary = inv.get("fly", {})
-		o = Vector3(o.x * _sgn(bool(f.get("pitch", false))), o.y * _sgn(bool(f.get("yaw", false))),
-			o.z * _sgn(bool(f.get("bank", false))))
-		p = Vector2(p.x * _sgn(bool(f.get("strafe", false))), p.y * _sgn(bool(f.get("forward", false))))
-		z *= _sgn(bool(f.get("vertical", false)))
+		var fly_axes: Dictionary = axes.get("fly", {})
+		o = Vector3(_routed(rotation, fly_axes, f, "pitch", 0),
+			_routed(rotation, fly_axes, f, "yaw", 1), _routed(rotation, fly_axes, f, "bank", 2))
+		p = Vector2(_routed(movement, fly_axes, f, "strafe", 0),
+			_routed(movement, fly_axes, f, "forward", 1))
+		z = _routed(movement, fly_axes, f, "vertical", 2)
 	elif nav_mode == "walk":
 		var w: Dictionary = inv.get("walk", {})
-		o = Vector3(o.x * _sgn(bool(w.get("pitch", false))), o.y * _sgn(bool(w.get("yaw", false))), o.z)
-		p = Vector2(p.x * _sgn(bool(w.get("strafe", false))), p.y * _sgn(bool(w.get("forward", false))))
-		z *= _sgn(bool(w.get("vertical", false)))
+		var walk_axes: Dictionary = axes.get("walk", {})
+		o = Vector3(_routed(rotation, walk_axes, w, "pitch", 0),
+			_routed(rotation, walk_axes, w, "yaw", 1), o.z)
+		p = Vector2(_routed(movement, walk_axes, w, "strafe", 0),
+			_routed(movement, walk_axes, w, "forward", 1))
+		z = _routed(movement, walk_axes, w, "vertical", 2)
 	else:
 		var ob: Dictionary = inv.get("orbit", {})
+		var orbit_axes: Dictionary = axes.get("orbit", {})
 		if op == "camera":
 			var vp: Dictionary = inv.get("camera", {})
-			o = Vector3(o.x * _sgn(bool(vp.get("pitch", false))), o.y * _sgn(bool(vp.get("yaw", false))),
-				o.z * _sgn(bool(vp.get("roll", false))))
+			var camera_axes: Dictionary = axes.get("camera", {})
+			o = Vector3(_routed(rotation, camera_axes, vp, "pitch", 0),
+				_routed(rotation, camera_axes, vp, "yaw", 1),
+				_routed(rotation, camera_axes, vp, "roll", 2))
 		else:
-			o = Vector3(o.x * _sgn(bool(ob.get("pitch", false))), o.y * _sgn(bool(ob.get("yaw", false))),
-				o.z * _sgn(bool(ob.get("twist", false))))
-		p = Vector2(p.x * _sgn(bool(ob.get("pan_x", false))), p.y * _sgn(bool(ob.get("pan_y", false))))
-		z *= _sgn(bool(ob.get("zoom", false)))
+			o = Vector3(_routed(rotation, orbit_axes, ob, "pitch", 0),
+				_routed(rotation, orbit_axes, ob, "yaw", 1),
+				_routed(rotation, orbit_axes, ob, "twist", 2))
+		p = Vector2(_routed(movement, orbit_axes, ob, "pan_x", 0),
+			_routed(movement, orbit_axes, ob, "pan_y", 1))
+		z = _routed(movement, orbit_axes, ob, "zoom", 2)
 	return [o, p, z]
 
 

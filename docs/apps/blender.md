@@ -201,13 +201,14 @@ which is fine because only one pivot is active at a time. Add-on 0.1.12 applies
 | `_TIMER_INTERVAL=1/90` | main-thread poll rate. |
 | `_DEFAULT_PORT=47900` | broker port fallback if `bridge.json` is missing. |
 
-### 5.4 Per-mode, per-axis inverts (`advanced.invert`)
-Structure: `invert.{orbit,camera,fly,walk}.<axis>`. Applied **in the add-on**, in `_apply`, just
-before the dispatch — because the same physical channel means different things per mode (ball
-forward/back is *orbit pan-Y* but *fly/walk forward*), so a single invert set can't flip one without
-the other (Gotcha #6, Solved Problem #4/#8). Defaults bake in the "inside-out" roll fix:
+### 5.4 Per-mode action routing (`advanced.axis_source` + `advanced.invert`)
+Each action under `{orbit,camera,fly,walk}` selects source X/Y/Z and has its own invert. Routing is
+applied **in the add-on**, in `_apply_action_routing`, just before dispatch because the active mode
+can also be changed by Blender's local shortcut. Rotation actions select from `o`; shifted movement
+actions select from `(p.x,p.y,z)`. Thus Walk Forward can select Z (twist) without changing Orbit.
+Defaults reproduce the old fixed wiring. The inversion defaults still bake in the "inside-out" fix:
 `camera.roll` and `fly.bank` start **on** so first-person roll matches external-pivot orbit.
-`camera` shares orbit's pan/zoom inverts. This **replaced** the old single `invert_camera_roll`
+`camera` shares orbit's pan/zoom routes. This **replaced** the old single `invert_camera_roll`
 flag — that key is now ignored if present in an old config.
 
 > The *generic* per-app invert (`bindings.invert` orbit/pan/zoom, applied in `output.py`) is **hidden
@@ -230,11 +231,12 @@ from inside Blender, independent of broker/`nav_mode`-delivery timing.
   `scheme.orbit_pivot` to `"camera"`. `bindings.invert` exists but is unused for Blender (see §5.4).
 - `advanced.*` — Blender-only: `nav_mode`, `lock_horizon`, `twist_action`, `zoom_style`,
   `zoom_to_mouse`, `lock_camera_to_view`, `pan_scales_with_distance`, `fly_speed`, `walk_speed`, and
-  the per-mode `invert` block.
+  the per-mode `axis_source` and `invert` blocks.
 - `rate_hz`, `screen_center_pivot_hold_sec` — per-app rate and the screen-center hold.
 
 Everything is **additive + deep-merged** (`config._deep_merge`), so new keys appear on existing
-configs automatically — **no `CONFIG_VERSION` bump** when adding Blender options. Caveat: deep-merge
+configs automatically. Step 3 bumped `CONFIG_VERSION` to 5 for the cross-app global orientation;
+the Blender action maps themselves are additive. Caveat: deep-merge
 never *removes* keys, so retired keys (e.g. `invert_camera_roll`) linger harmlessly on old configs.
 
 How `advanced` reaches the add-on: `App._apply_schemes` attaches `advanced` (a **live reference** to

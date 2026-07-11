@@ -1,7 +1,7 @@
 # Unity navigation — maintainer's guide
 
 Socket add-on for the **Unity Editor Scene view** (not Play / Game view). Same NavBroker
-protocol as Unreal/Blender. Add-on `0.1.6`.
+protocol as Unreal/Blender. Add-on `0.1.9`.
 
 ## Layout
 
@@ -37,6 +37,11 @@ Orbit / fly / walk, pivots (`camera`, `screen_center`, `cursor`, `object`, `orig
 mouse move via `HandleUtility.GUIPointToWorldRay`, then hits with Physics / own mesh triangle
 tests (AABB fallback). Re-cast from the update pump. Never uses `PlaceObject` or
 `IntersectRayMesh` (missing on some Editor builds).
+
+Per-mode `advanced.axis_source` and `advanced.invert` route every Orbit/Camera/Fly/Walk action from
+X/Y/Z independently. Rotation actions use `o`; shifted movement actions use `(p.x,p.y,z)`. The
+identity/default map is behavior-neutral, while mappings such as Walk Forward ← Z make twist drive
+forward.
 
 **Distance math:** `SceneView.size` is a fit-sphere radius, not eye→pivot distance. Navigation
 uses `cameraDistance` (`size / sin(fov/2)` in perspective) and writes size back by scaling

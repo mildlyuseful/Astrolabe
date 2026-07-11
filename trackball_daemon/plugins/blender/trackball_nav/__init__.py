@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 14),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 15),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.14"                   # 0.1.14: camera/screen_center canonical pivot names.
+ADDIN_VERSION = "0.1.15"                   # 0.1.15: per-action X/Y/Z source routing.
                                            # 0.1.12: selection_overrides_pivot is functional.
                                            # 0.1.10: 3D-cursor pivot value renamed cursor->cursor_3d
                                            # (daemon config v3; "cursor" now means under-the-mouse).
@@ -53,7 +53,7 @@ ADDIN_VERSION = "0.1.14"                   # 0.1.14: camera/screen_center canoni
 
 # --- tuning: Blender's intrinsic axis orientation + baseline sensitivity. These bake in the
 #     starting feel; the daemon's Per-App Bindings (gain 1.0 = this baseline) scale from here and
-#     the Invert checkboxes flip further. SIGNS ARE STARTING GUESSES -- tune live (see notes). ---
+#     the per-action Source/Invert controls adjust further. SIGNS ARE STARTING GUESSES. -----------
 ORBIT_SCALE = (0.5, 0.5, 0.5)   # (pitch o[0], yaw o[1], twist o[2]) baseline. 0.5 so the daemon's
                                 # orbit Sensitivity 1.0 is a true 1:1 ball->view orbit: the add-on
                                 # rotates the view by exactly `o`, and the dual-sensor device reports
@@ -450,6 +450,51 @@ def _sgn(flag):
     return -1.0 if flag else 1.0
 
 
+def _routed(values, sources, inversions, action, default):
+    try:
+        source = int(sources.get(action, default))
+    except (TypeError, ValueError):
+        source = default
+    if source not in (0, 1, 2):
+        source = default
+    return values[source] * _sgn(inversions.get(action))
+
+
+def _apply_action_routing(nav_mode, op, o, p, z, adv):
+    """Route each mode action from X/Y/Z, then apply its independent invert flag."""
+    inv = adv.get("invert") or {}
+    axes = adv.get("axis_source") or {}
+    rotation = list(o)
+    movement = [p[0], p[1], z]
+    if nav_mode == "fly":
+        f, a = inv.get("fly", {}), axes.get("fly", {})
+        o = [_routed(rotation, a, f, "pitch", 0), _routed(rotation, a, f, "yaw", 1),
+             _routed(rotation, a, f, "bank", 2)]
+        p = [_routed(movement, a, f, "strafe", 0),
+             _routed(movement, a, f, "forward", 1)]
+        z = _routed(movement, a, f, "vertical", 2)
+    elif nav_mode == "walk":
+        w, a = inv.get("walk", {}), axes.get("walk", {})
+        o = [_routed(rotation, a, w, "pitch", 0), _routed(rotation, a, w, "yaw", 1), rotation[2]]
+        p = [_routed(movement, a, w, "strafe", 0),
+             _routed(movement, a, w, "forward", 1)]
+        z = _routed(movement, a, w, "vertical", 2)
+    else:
+        ob, oa = inv.get("orbit", {}), axes.get("orbit", {})
+        if op == "camera":
+            camera, ca = inv.get("camera", {}), axes.get("camera", {})
+            o = [_routed(rotation, ca, camera, "pitch", 0),
+                 _routed(rotation, ca, camera, "yaw", 1),
+                 _routed(rotation, ca, camera, "roll", 2)]
+        else:
+            o = [_routed(rotation, oa, ob, "pitch", 0), _routed(rotation, oa, ob, "yaw", 1),
+                 _routed(rotation, oa, ob, "twist", 2)]
+        p = [_routed(movement, oa, ob, "pan_x", 0),
+             _routed(movement, oa, ob, "pan_y", 1)]
+        z = _routed(movement, oa, ob, "zoom", 2)
+    return o, p, z
+
+
 def _apply_fly(rv, o, p, z, adv):
     speed = float(adv.get("fly_speed", 1.0))
     if o[0] or o[1] or o[2]:                       # un-shifted ball -> look
@@ -527,30 +572,7 @@ def _apply(target, frame, idle):
     if has_input and before_persp == 'CAMERA' and not bool(adv.get("lock_camera_to_view", False)):
         rv.view_perspective = 'PERSP'
 
-    # Per-mode, per-axis direction flips (config invert.<mode>.<axis>). Applied here, not in the
-    # daemon, because the same physical channel means different things per mode (ball forward/back is
-    # orbit pan-Y but fly/walk forward), so independent inverts are only possible once the mode is
-    # known. "camera" gets its own rotation inverts and shares orbit's pan/zoom inverts.
-    inv = adv.get("invert") or {}
-    if nav_mode == "fly":
-        f = inv.get("fly", {})
-        o = [o[0] * _sgn(f.get("pitch")), o[1] * _sgn(f.get("yaw")), o[2] * _sgn(f.get("bank"))]
-        p = [p[0] * _sgn(f.get("strafe")), p[1] * _sgn(f.get("forward"))]
-        z = z * _sgn(f.get("vertical"))
-    elif nav_mode == "walk":
-        w = inv.get("walk", {})
-        o = [o[0] * _sgn(w.get("pitch")), o[1] * _sgn(w.get("yaw")), o[2]]
-        p = [p[0] * _sgn(w.get("strafe")), p[1] * _sgn(w.get("forward"))]
-        z = z * _sgn(w.get("vertical"))
-    else:                                           # orbit
-        ob = inv.get("orbit", {})
-        if op == "camera":
-            vp = inv.get("camera", {})
-            o = [o[0] * _sgn(vp.get("pitch")), o[1] * _sgn(vp.get("yaw")), o[2] * _sgn(vp.get("roll"))]
-        else:
-            o = [o[0] * _sgn(ob.get("pitch")), o[1] * _sgn(ob.get("yaw")), o[2] * _sgn(ob.get("twist"))]
-        p = [p[0] * _sgn(ob.get("pan_x")), p[1] * _sgn(ob.get("pan_y"))]
-        z = z * _sgn(ob.get("zoom"))
+    o, p, z = _apply_action_routing(nav_mode, op, o, p, z, adv)
 
     if nav_mode == "fly":
         _apply_fly(rv, o, p, z, adv)

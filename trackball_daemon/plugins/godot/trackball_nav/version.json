@@ -1,4 +1,4 @@
 {
-  "version": "0.1.6",
-  "_comment": "Kept in sync with plugin.cfg / ADDIN_VERSION. 0.1.6: strip dead _walk_meshes and the selection-bbox gating from the ray pivots. 0.1.5: canonical camera/screen_center pivot names."
+  "version": "0.1.7",
+  "_comment": "Kept in sync with plugin.cfg / ADDIN_VERSION. 0.1.7: per-action X/Y/Z source routing."
 }

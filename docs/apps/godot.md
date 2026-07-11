@@ -1,7 +1,7 @@
 # Godot navigation — maintainer's guide
 
 Socket **EditorPlugin** for Godot 4's editor 3D viewport. Same NavBroker protocol as
-Unreal/Unity. Add-on `0.1.3`.
+Unreal/Unity. Add-on `0.1.7`.
 
 ## Editor camera limits
 
@@ -53,6 +53,10 @@ Set up still stages a copy at
 3. Reload the project or restart Godot.
 
 ## Controls (Unreal/Blender parity)
+
+Every visible Orbit/Camera/Fly/Walk action has an independent X/Y/Z source and invert under
+`advanced.axis_source` / `advanced.invert`. Godot still drops unsupported roll/bank output; source
+routing does not bypass the editor camera's yaw/pitch limitation.
 
 Orbit / fly / walk, under-cursor via `EditorInterface.get_editor_viewport_3d(0)` mouse
 ray, selection AABB override, same `adv` block as Unreal/Unity.

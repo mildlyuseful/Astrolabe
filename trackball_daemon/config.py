@@ -36,6 +36,85 @@ _DEFAULT_3D_BINDINGS = {
     "scheme": {"orbit_pivot": "default", "orbit_style": "default", "zoom_mode": "default"},
 }
 
+# Physical device orientation. ``source[i]`` says which raw sensor axis becomes logical X/Y/Z;
+# it must remain a permutation so no physical axis is accidentally duplicated or lost. Inversion
+# is applied after the permutation and before both cursor and 3D routing.
+DEFAULT_AXIS_ORIENTATION = {"source": [0, 1, 2], "invert": [False, False, False]}
+
+
+def normalize_axis_permutation(value):
+    """Return a safe raw->logical XYZ permutation, or identity for malformed input."""
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        return [0, 1, 2]
+    try:
+        out = [int(v) for v in value]
+    except (TypeError, ValueError):
+        return [0, 1, 2]
+    return out if sorted(out) == [0, 1, 2] else [0, 1, 2]
+
+
+def swap_axis_source(value, target, wanted):
+    """Change one logical-axis source by swapping, preserving a valid permutation."""
+    out = normalize_axis_permutation(value)
+    target = normalize_axis_index(target, 0)
+    wanted = normalize_axis_index(wanted, target)
+    other = out.index(wanted)
+    out[target], out[other] = out[other], out[target]
+    return out
+
+
+def normalize_axis_inversions(value):
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        return [False, False, False]
+    return [bool(v) for v in value]
+
+
+def normalize_axis_index(value, default):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return int(default)
+    return value if value in (0, 1, 2) else int(default)
+
+
+# Rich integrations first receive the app's ordinary orbit vector (X/Y/Z) and shifted movement
+# vector (Pan X/Pan Y/Zoom). Each action can independently select one member of its vector. The
+# defaults reproduce the pre-v5 fixed wiring exactly; duplication is intentionally allowed here.
+DEFAULT_ACTION_AXIS_SOURCE = {
+    "orbit":  {"pitch": 0, "yaw": 1, "twist": 2, "pan_x": 0, "pan_y": 1, "zoom": 2},
+    "camera": {"pitch": 0, "yaw": 1, "roll": 2},
+    "fly":    {"pitch": 0, "yaw": 1, "bank": 2,
+               "forward": 1, "strafe": 0, "vertical": 2},
+    "walk":   {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2},
+}
+
+
+def normalize_action_axis_sources(value):
+    """Deep-normalize rich per-action source indices while preserving the complete schema."""
+    value = value if isinstance(value, dict) else {}
+    out = {}
+    for mode, defaults in DEFAULT_ACTION_AXIS_SOURCE.items():
+        supplied = value.get(mode) if isinstance(value.get(mode), dict) else {}
+        out[mode] = {action: normalize_axis_index(supplied.get(action, default), default)
+                     for action, default in defaults.items()}
+    return out
+
+
+def normalize_binding_axis_sources(bindings):
+    """Normalize the ordinary per-app orbit/pan/zoom source indices in-place."""
+    if not isinstance(bindings, dict):
+        return
+    orbit = bindings.get("orbit") or {}
+    src = orbit.get("axis_source")
+    if not isinstance(src, (list, tuple)) or len(src) != 3:
+        src = [0, 1, 2]
+    orbit["axis_source"] = [normalize_axis_index(src[i], i) for i in range(3)]
+    pan = bindings.get("pan") or {}
+    pan["x_src"] = normalize_axis_index(pan.get("x_src"), 1)
+    pan["y_src"] = normalize_axis_index(pan.get("y_src"), 0)
+    zoom = bindings.get("zoom") or {}
+    zoom["src"] = normalize_axis_index(zoom.get("src"), 2)
+
 SCHEME_FIELDS = ("orbit_pivot", "orbit_style", "zoom_mode")
 
 # Canonical identifiers accepted by the global orbit-pivot fallback editor and sent to every
@@ -72,9 +151,8 @@ def orbit_pivot_candidates(primary, fallbacks):
             out.append(method)
     return out
 
-# --- Per-mode, per-axis direction flips for Blender. The add-on interprets the same physical axes
-#     differently per nav mode (e.g. ball forward = orbit-pan-vertical, but fly/walk-forward), so a
-#     single invert set can't flip one without the other. These are applied IN THE ADD-ON per mode,
+# --- Per-mode action routing for Blender. The add-on interprets the same inputs differently per nav
+#     mode, so source selection and inversion are applied IN THE ADD-ON once the mode is known,
 #     giving independent control. Defaults bake in the "inside-out" roll fix: camera roll + fly
 #     bank are inverted vs external-pivot orbit. ("camera" shares orbit's pan/zoom inverts.)
 _DEFAULT_BLENDER_INVERT = {
@@ -103,11 +181,12 @@ _DEFAULT_BLENDER_ADVANCED = {
     "fly_speed": 1.0,
     "walk_speed": 1.0,
     "invert": _DEFAULT_BLENDER_INVERT,   # per-mode direction flips (applied in the add-on)
+    "axis_source": DEFAULT_ACTION_AXIS_SOURCE,
 }
 
 
 # --- SketchUp: Blender-parity orbit/camera/fly/walk controls. SketchUp has an explicit
-#     eye/target/up camera, so these options are applied by the Ruby extension. Per-mode inverts
+#     eye/target/up camera, so these options are applied by the Ruby extension. Per-mode routes
 #     match Blender's names and inside-out roll/bank defaults; there is no 3D-cursor option. -------
 _DEFAULT_SKETCHUP_INVERT = {
     "orbit":     {"pitch": False, "yaw": False, "twist": False,
@@ -125,10 +204,11 @@ _DEFAULT_SKETCHUP_ADVANCED = {
     "fly_speed": 1.0,
     "walk_speed": 1.0,
     "invert": _DEFAULT_SKETCHUP_INVERT,
+    "axis_source": DEFAULT_ACTION_AXIS_SOURCE,
 }
 
 
-# --- Unreal: per-mode direction flips + the "advanced" nav options, mirroring Blender's richer set
+# --- Unreal: per-mode action routes + the "advanced" nav options, mirroring Blender's richer set
 #     but adapted to the editor's free-fly eye+rotator camera. Dropped vs Blender: zoom_style (Unreal
 #     zoom IS a dolly -- no view-distance), zoom_to_mouse (use zoom_mode), lock_camera_to_view (no
 #     editor-camera-view equivalent). Applied IN THE ADD-ON per mode (same reason as Blender, §12.9).
@@ -150,7 +230,8 @@ _DEFAULT_UNREAL_ADVANCED = {
     "pan_scales_with_distance": True,
     "fly_speed": 1.0,
     "walk_speed": 1.0,
-    "invert": _DEFAULT_UNREAL_INVERT,   # per-mode direction flips (applied in the add-on)
+    "invert": _DEFAULT_UNREAL_INVERT,   # paired with axis_source in the add-on
+    "axis_source": DEFAULT_ACTION_AXIS_SOURCE,
 }
 
 # Unity reuses the Unreal advanced block, plus a Scene-view-only override for Dynamic Clipping
@@ -208,7 +289,7 @@ def _blender_app():
 
 def _unreal_app():
     """Unreal's app config: the shared shape plus the Unreal `advanced` block (orbit/fly/walk modes,
-    twist action, lock-horizon, per-mode inverts), mirroring Blender's richer set. Default orbit
+    twist action, lock-horizon, per-mode action routes), mirroring Blender's richer set. Default orbit
     pivot stays 'screen_center' (raycast the first surface under the viewport center)."""
     a = _app()
     a["advanced"] = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
@@ -237,7 +318,7 @@ def _sketchup_app():
     return a
 
 
-CONFIG_VERSION = 4
+CONFIG_VERSION = 5
 
 DEFAULTS = {
     "version": CONFIG_VERSION,
@@ -248,6 +329,7 @@ DEFAULTS = {
     },
     "general": {
         "default_mode": "cube",                              # "cube" (3D nav) | "cursor" (pointer)
+        "axis_orientation": copy.deepcopy(DEFAULT_AXIS_ORIENTATION),
         # CURSOR-mode pointer mapping (MOUSE_* constants)
         "cursor": {"x_src": 1, "x_sign": 1.0, "y_src": 0, "y_sign": 1.0, "gain": 216.0},
         # CURSOR-mode wheel mapping (SCROLL_* constants)
@@ -324,6 +406,26 @@ class Config:
                 return self
             self.data = _deep_merge(DEFAULTS, disk)
             changed = self._migrate(int(disk.get("version", 1)))
+            orientation = self.data["general"].get("axis_orientation") or {}
+            normalized_orientation = {
+                "source": normalize_axis_permutation(orientation.get("source")),
+                "invert": normalize_axis_inversions(orientation.get("invert")),
+            }
+            if orientation != normalized_orientation:
+                self.data["general"]["axis_orientation"] = normalized_orientation
+                changed = True
+            for app in self.data["apps"].values():
+                bindings = app.get("bindings") or {}
+                before = copy.deepcopy(bindings)
+                normalize_binding_axis_sources(bindings)
+                if bindings != before:
+                    changed = True
+                advanced = app.get("advanced")
+                if isinstance(advanced, dict):
+                    sources = normalize_action_axis_sources(advanced.get("axis_source"))
+                    if advanced.get("axis_source") != sources:
+                        advanced["axis_source"] = sources
+                        changed = True
             disk_general = disk.get("general") or {}
             raw_fallbacks = disk_general.get(
                 "orbit_pivot_fallbacks", list(DEFAULT_ORBIT_PIVOT_FALLBACKS))
@@ -388,6 +490,10 @@ class Config:
                 if isinstance(invert, dict) and "viewpoint" in invert:
                     invert["camera"] = _deep_merge(
                         invert.get("camera") or {}, invert.pop("viewpoint"))
+            changed = True
+        if from_version < 5:
+            # v5 adds the global physical orientation and rich per-action axis routing. Defaults
+            # are identity mappings, so migration is behavior-neutral; load() validates them.
             changed = True
         self.data["version"] = CONFIG_VERSION
         return changed

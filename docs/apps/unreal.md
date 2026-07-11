@@ -183,10 +183,10 @@ broker frame — see §5.1), interpreted for the editor's free-fly camera. `conf
 - **Zoom mode** (`scheme.zoom_mode`): `to_center` → dolly along forward; `to_object` → dolly toward the
   selection centre; `to_cursor` → dolly toward the under-mouse surface hit (same Geo ray + trace as
   cursor orbit, own `_zoom_gesture` hold; miss → forward dolly).
-- **Per-mode inverts** (`advanced.invert.<orbit|camera|fly|walk>.<axis>`): applied **in the add-on**
-  (like Blender, §12.9) — the same physical channel means different things per mode, so independent
-  inverts are only possible once the mode is known. Signs default **off** (best-guess, live-tune) —
-  Unlike Blender, no baked-in roll/bank inverts (settle them on the device).
+- **Per-mode action routes** (`advanced.axis_source` + `advanced.invert`): every action selects
+  X/Y/Z and can invert independently in the add-on, where the active mode is known. Rotation uses
+  `o`; shifted movement uses `(p.x,p.y,z)`, so twist can drive Walk Forward. Defaults preserve the
+  old wiring. Unlike Blender, no roll/bank inversion is baked in.
 - **`advanced.pan_scales_with_distance`**: pan scaled by the focus distance (zoom-stable) vs a fixed
   reference distance.
 

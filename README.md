@@ -46,6 +46,20 @@ The UI and the output engine read/write this single file. Edits made in the UI a
 (device name/address apply on the next reconnect). Hand-editing the file and restarting is
 reflected in the UI. Defaults reproduce the original `cube_test.py` behavior exactly.
 
+### Axis orientation and action routing
+
+**General → Physical trackball orientation** defines one global physical-to-logical X/Y/Z mapping.
+Each logical axis selects one physical axis and can be inverted. Selecting an axis already in use
+swaps the two assignments, keeping a valid permutation at every live edit. This transform happens
+once at packet ingress, before both pointer mode and every 3D-app binding, so rotating the trackball
+base or changing body-relative orientation has the same effect throughout the daemon.
+
+Every ordinary per-app Orbit/Pan/Zoom action exposes its own **Source X/Y/Z** selector beside
+**Invert**. Apps with Orbit/Fly/Walk controls additionally expose a source and invert for every
+mode-specific action. Those routes are independent: for example, setting **Walk → Fwd → Source Z**
+makes twist drive forward without changing Orbit or Fly. Identity/default routes preserve the
+pre-v5 behavior exactly.
+
 ## 3D-app integrations
 
 The daemon drives CAD apps like a 3Dconnexion SpaceMouse: a local **nav broker** streams
@@ -73,8 +87,8 @@ turns in place. Ray-derived results are held for the gesture.
    shows `Apps: fusion360 v…`. Switch the daemon to **3D mode** and spin the ball with Fusion
    focused. Hold **Shift** to pan/zoom instead of orbit.
 4. Tuning (all in the daemon):
-   - **Per-App Bindings** → orbit/pan/zoom **gains**, **Invert axes** checkboxes (orbit
-     X/Y/Z, pan X/Y, zoom), and **Viewport refresh rate (Hz)** — all **per app**.
+   - **Per-App Bindings** → orbit/pan/zoom **gains**, per-action **Source X/Y/Z + Invert**, and
+     **Viewport refresh rate (Hz)** — all **per app**.
    - **Viewport refresh rate (Hz)** (Per-App Bindings, per app): the rate the daemon pushes
      view updates to that app. Pick a preset (15–120) or type a value; **Default** uses the
      global rate. Raise it for smoother motion (e.g. 60), lower it if the app lags. Applies
@@ -118,7 +132,7 @@ and moves the active view's camera.
    SolidWorks 2025. Tuning: the same **Per-App Bindings** (gains + Invert axes) as the other
    apps, plus intrinsic constants at the top of `solidworks_driver.py` (`ORBIT_SIGN`,
    `PAN_SCALE`/`PAN_SIGN`, `ZOOM_SCALE`/`ZOOM_SIGN`, `WORLD_UP`, `FORCE_REDRAW`) — flip a sign
-   there if an axis feels backwards, or just use the Invert checkboxes.
+   there if an axis feels backwards, or use the per-action Source/Invert controls.
 4. **Control scheme** (the **Orbit pivot / Orbit style / Zoom mode** dropdowns in Per-App
    Bindings, same as the other apps — set per app or leave on **Default** to inherit General →
    3D control scheme). All three are applied, verified live with zero drift of the held point:
@@ -379,7 +393,7 @@ SpaceMouse orbiting your model.
      0.2.3 — raycasts under the mouse via Epic's GeoReferencing helpers; needs the viewport focused),
      **Selection** (selected actors' bounding box), **World Origin**. (No **3D Cursor** option —
      Unreal has none.) **Orbit method** free/turntable. **Zoom mode** includes **to_cursor**.
-   - **Invert directions** — independent per mode (Orbit / Camera / Fly / Walk), plus orbit/pan/zoom
+   - **Action Source + Invert** — independent per mode (Orbit / Camera / Fly / Walk), plus orbit/pan/zoom
      **gains** and **Viewport refresh rate**.
    Unreal is **left-handed, Z-up, centimetres**, so expect to flip a few **Invert** checkboxes the
    first time — the add-on's intrinsic signs (`ORBIT_SIGN`/`PAN_*`/`ZOOM_*` in `tbnav_unreal_camera.py`)

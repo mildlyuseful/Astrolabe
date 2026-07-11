@@ -6,8 +6,12 @@ everything else must pass through untouched.
 """
 import json
 
-from trackball_daemon.config import (Config, CONFIG_VERSION, DEFAULT_ORBIT_PIVOT_FALLBACKS,
-                                     normalize_orbit_pivot_fallbacks, orbit_pivot_candidates)
+from trackball_daemon.config import (Config, CONFIG_VERSION, DEFAULT_ACTION_AXIS_SOURCE,
+                                     DEFAULT_ORBIT_PIVOT_FALLBACKS,
+                                     normalize_action_axis_sources,
+                                     normalize_axis_permutation,
+                                     normalize_orbit_pivot_fallbacks, orbit_pivot_candidates,
+                                     swap_axis_source)
 
 
 def _write_v2(tmp_path, general_scheme, app_schemes):
@@ -125,3 +129,40 @@ def test_candidates_always_restart_at_front_of_chain():
 def test_legacy_pivot_names_are_normalized_at_runtime_boundaries():
     assert orbit_pivot_candidates("view", ["viewpoint", "origin"]) == [
         "screen_center", "camera", "origin"]
+
+
+def test_v5_adds_identity_global_and_action_axis_routing(isolated_config):
+    d = isolated_config / "TrackballDaemon"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "config.json").write_text(json.dumps({
+        "version": 4,
+        "general": {"axis_orientation": {"source": [0, 0, 7], "invert": [True]}},
+        "apps": {
+            "blender": {"advanced": {"axis_source": {
+                "walk": {"forward": 2, "vertical": 99}}}},
+            "fusion360": {"bindings": {
+                "orbit": {"axis_source": [2, -1, 0]},
+                "pan": {"x_src": 8, "y_src": 2},
+                "zoom": {"src": "bad"},
+            }},
+        },
+    }), encoding="utf-8")
+    cfg = Config().load()
+    assert cfg.data["version"] == CONFIG_VERSION == 5
+    assert cfg.data["general"]["axis_orientation"] == {
+        "source": [0, 1, 2], "invert": [False, False, False]}
+    assert cfg.data["apps"]["blender"]["advanced"]["axis_source"]["walk"] == {
+        "pitch": 0, "yaw": 1, "forward": 2, "strafe": 0, "vertical": 2}
+    fusion = cfg.data["apps"]["fusion360"]["bindings"]
+    assert fusion["orbit"]["axis_source"] == [2, 1, 0]
+    assert (fusion["pan"]["x_src"], fusion["pan"]["y_src"], fusion["zoom"]["src"]) == (1, 2, 2)
+
+
+def test_axis_normalizers_validate_global_permutation_but_allow_action_duplicates():
+    assert normalize_axis_permutation([1, 0, 2]) == [1, 0, 2]
+    assert normalize_axis_permutation([1, 1, 2]) == [0, 1, 2]
+    assert swap_axis_source([0, 1, 2], 0, 1) == [1, 0, 2]
+    assert swap_axis_source([1, 0, 2], 1, 2) == [1, 2, 0]
+    routed = normalize_action_axis_sources({"walk": {"forward": 2, "vertical": 2}})
+    assert routed["walk"]["forward"] == routed["walk"]["vertical"] == 2
+    assert set(routed) == set(DEFAULT_ACTION_AXIS_SOURCE)

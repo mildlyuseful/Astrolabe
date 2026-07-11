@@ -5,7 +5,7 @@ require 'socket'
 require 'json'
 
 module TrackballNav
-  ADDIN_VERSION = '0.2.5' unless const_defined?(:ADDIN_VERSION, false)
+  ADDIN_VERSION = '0.2.6' unless const_defined?(:ADDIN_VERSION, false)
   DEFAULT_PORT = 47_900 unless const_defined?(:DEFAULT_PORT, false)
   TIMER_INTERVAL = 0.02 unless const_defined?(:TIMER_INTERVAL, false)
   RETRY_INTERVAL = 1.5 unless const_defined?(:RETRY_INTERVAL, false)

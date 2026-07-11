@@ -64,7 +64,12 @@ module TrackballNav
 
         idle = now - @gesture_time
         @gesture_time = now
-        orbit, pan, zoom = apply_mode_inversions(nav_mode, pivot_id, orbit, pan, zoom, advanced)
+        orbit, pan, zoom = apply_action_routing(nav_mode, pivot_id, orbit, pan, zoom, advanced)
+        # Source routing can move a shifted input between pan and zoom (for example twist/Z ->
+        # Walk Forward), so dispatch must use the routed channels rather than the pre-route flags.
+        has_orbit = orbit.any? { |value| value != 0.0 }
+        has_pan = pan.any? { |value| value != 0.0 }
+        has_zoom = zoom != 0.0
 
         changed = case nav_mode
                   when 'fly'
@@ -340,33 +345,56 @@ module TrackballNav
         @gesture_pivot = nil
       end
 
-      def apply_mode_inversions(nav_mode, pivot_id, orbit, pan, zoom, advanced)
+      def routed(values, sources, inversions, action, default)
+        source = Integer(sources.fetch(action, default))
+        source = default unless source.between?(0, 2)
+        signed(values[source], inversions, action)
+      rescue ArgumentError, TypeError
+        signed(values[default], inversions, action)
+      end
+
+      def apply_action_routing(nav_mode, pivot_id, orbit, pan, zoom, advanced)
         invert = advanced['invert']
         invert = {} unless invert.is_a?(Hash)
+        axes = advanced['axis_source']
+        axes = {} unless axes.is_a?(Hash)
+        rotation_inputs = orbit.dup
+        movement = [pan[0], pan[1], zoom]
         case nav_mode
         when 'fly'
           config = invert['fly'] || {}
-          orbit = [signed(orbit[0], config, 'pitch'), signed(orbit[1], config, 'yaw'),
-                   signed(orbit[2], config, 'bank')]
-          pan = [signed(pan[0], config, 'strafe'), signed(pan[1], config, 'forward')]
-          zoom = signed(zoom, config, 'vertical')
+          source = axes['fly'] || {}
+          orbit = [routed(rotation_inputs, source, config, 'pitch', 0),
+                   routed(rotation_inputs, source, config, 'yaw', 1),
+                   routed(rotation_inputs, source, config, 'bank', 2)]
+          pan = [routed(movement, source, config, 'strafe', 0),
+                 routed(movement, source, config, 'forward', 1)]
+          zoom = routed(movement, source, config, 'vertical', 2)
         when 'walk'
           config = invert['walk'] || {}
-          orbit = [signed(orbit[0], config, 'pitch'), signed(orbit[1], config, 'yaw'), 0.0]
-          pan = [signed(pan[0], config, 'strafe'), signed(pan[1], config, 'forward')]
-          zoom = signed(zoom, config, 'vertical')
+          source = axes['walk'] || {}
+          orbit = [routed(rotation_inputs, source, config, 'pitch', 0),
+                   routed(rotation_inputs, source, config, 'yaw', 1), 0.0]
+          pan = [routed(movement, source, config, 'strafe', 0),
+                 routed(movement, source, config, 'forward', 1)]
+          zoom = routed(movement, source, config, 'vertical', 2)
         else
           orbit_config = invert['orbit'] || {}
+          orbit_source = axes['orbit'] || {}
           if pivot_id == 'camera'
-            rotation = invert['camera'] || {}
-            orbit = [signed(orbit[0], rotation, 'pitch'), signed(orbit[1], rotation, 'yaw'),
-                     signed(orbit[2], rotation, 'roll')]
+            camera_invert = invert['camera'] || {}
+            camera_source = axes['camera'] || {}
+            orbit = [routed(rotation_inputs, camera_source, camera_invert, 'pitch', 0),
+                     routed(rotation_inputs, camera_source, camera_invert, 'yaw', 1),
+                     routed(rotation_inputs, camera_source, camera_invert, 'roll', 2)]
           else
-            orbit = [signed(orbit[0], orbit_config, 'pitch'), signed(orbit[1], orbit_config, 'yaw'),
-                     signed(orbit[2], orbit_config, 'twist')]
+            orbit = [routed(rotation_inputs, orbit_source, orbit_config, 'pitch', 0),
+                     routed(rotation_inputs, orbit_source, orbit_config, 'yaw', 1),
+                     routed(rotation_inputs, orbit_source, orbit_config, 'twist', 2)]
           end
-          pan = [signed(pan[0], orbit_config, 'pan_x'), signed(pan[1], orbit_config, 'pan_y')]
-          zoom = signed(zoom, orbit_config, 'zoom')
+          pan = [routed(movement, orbit_source, orbit_config, 'pan_x', 0),
+                 routed(movement, orbit_source, orbit_config, 'pan_y', 1)]
+          zoom = routed(movement, orbit_source, orbit_config, 'zoom', 2)
         end
         [orbit, pan, zoom]
       end

@@ -1,4 +1,4 @@
 {
-  "version": "0.2.6",
-  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.6: canonical camera/screen_center pivot names."
+  "version": "0.2.7",
+  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.7: per-action X/Y/Z source routing."
 }

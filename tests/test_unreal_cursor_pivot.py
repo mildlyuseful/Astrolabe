@@ -131,6 +131,25 @@ def _cam():
     return tn.cammath.Camera((0.0, 0.0, 100.0), (0.0, 0.0, -1.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
 
 
+def test_action_axis_routing_can_make_twist_drive_walk_forward():
+    adv = {
+        "axis_source": {"walk": {
+            "pitch": 0, "yaw": 1, "forward": 2, "strafe": 0, "vertical": 1}},
+        "invert": {"walk": {"forward": True}},
+    }
+    o, p, z = tn._apply_action_routing("walk", "camera", [1.0, 2.0, 3.0],
+                                       [4.0, 5.0], 6.0, adv)
+    assert o == [1.0, 2.0, 3.0]
+    assert p == [4.0, -6.0]       # movement Z (twist) -> forward, then inverted
+    assert z == 5.0               # movement Y -> vertical
+
+
+def test_action_axis_routing_defaults_are_bit_identical():
+    o, p, z = tn._apply_action_routing("fly", "camera", [1.0, 2.0, 3.0],
+                                       [4.0, 5.0], 6.0, {})
+    assert (o, p, z) == ([1.0, 2.0, 3.0], [4.0, 5.0], 6.0)
+
+
 @pytest.fixture(autouse=True)
 def _reset():
     tn._gesture.update(t=0.0, pivot=None, invalid=True)

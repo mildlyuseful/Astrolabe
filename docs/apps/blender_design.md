@@ -116,6 +116,12 @@ parts that map, and put **only genuinely Blender-only** options in `apps.blender
   "pan_scales_with_distance": true,
   "fly_speed": 1.0,
   "walk_speed": 1.0,
+  "axis_source": {                // each action independently selects X=0, Y=1, or Z=2
+    "orbit": {"pitch":0,"yaw":1,"twist":2,"pan_x":0,"pan_y":1,"zoom":2},
+    "camera": {"pitch":0,"yaw":1,"roll":2},
+    "fly": {"pitch":0,"yaw":1,"bank":2,"forward":1,"strafe":0,"vertical":2},
+    "walk": {"pitch":0,"yaw":1,"forward":1,"strafe":0,"vertical":2}
+  },
   "invert": {                     // per-mode, per-axis direction flips (applied IN THE ADD-ON)
     "orbit":     {"pitch": false, "yaw": false, "twist": false, "pan_x": false, "pan_y": false, "zoom": false},
     "camera": {"pitch": false, "yaw": false, "roll": true},   // shares orbit's pan/zoom inverts
@@ -125,10 +131,9 @@ parts that map, and put **only genuinely Blender-only** options in `apps.blender
 }
 ```
 
-`invert` is per-mode because the same physical channel means different things per nav mode (ball
-forward/back is orbit pan-Y but fly/walk *forward*), so a single invert set can't flip one without the
-other. The add-on applies these to o/p/z per mode just before the dispatch, so e.g. flipping
-`walk.forward` doesn't touch orbit. Defaults bake in the "inside-out" roll fix (`camera.roll` and
+`axis_source` and `invert` are per-mode because the same channel means different things per nav mode.
+The add-on routes each action immediately before dispatch, so Walk Forward can select Z (twist)
+without changing Orbit. Defaults bake in the "inside-out" roll fix (`camera.roll` and
 `fly.bank` start inverted vs external-pivot orbit). This **replaced** the old single
 `invert_camera_roll` flag.
 Dropped from the brief's starting shape because they are reconciled into the generic scheme:

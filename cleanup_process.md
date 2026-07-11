@@ -188,17 +188,48 @@ Cross-app pivot alignment check (cursory, code-only, 2026-07-11) — findings an
   `cursor_3d`/`object`/`origin`) and the sel-override camera exemption are uniform across all
   eleven integrations; ray pivots hold per gesture everywhere.
 
-## [ ] Step 3 — Global axis orientation and per-action axis routing
+## [x] Step 3 — Global axis orientation and per-action axis routing
 
 Goal: make physical trackball orientation global and host-independent.
 
-- Add a global X/Y/Z permutation and per-axis inversion applied once before cursor/3D routing.
-- Add a safe calibration UI that can represent a 90-degree base rotation, horizontal-axis swaps,
-  and inversions.
-- For every per-app action that currently has an invert checkbox, add an X/Y/Z source selector.
-- Keep mode-specific semantics independent (for example, twist can drive Walk Forward without
-  changing Orbit Twist).
-- Add config migration, permutation validation, bit-exact default tests, and cross-app routing tests.
+Completed:
+
+1. Config v5 adds `general.axis_orientation = {source:[0,1,2], invert:[false,false,false]}`.
+   `OutputEngine` applies this physical-to-logical transform once, immediately after decoding a BLE
+   packet and before both pointer and 3D routing.
+2. The General UI has a permutation-safe **Physical trackball orientation** editor. Choosing an
+   already-used source swaps it with the other logical axis, so a live edit never duplicates or
+   drops a physical axis. Independent X/Y/Z inversions and Reset Orientation are included. A
+   horizontal 90° base rotation is representable as X←Y, Y←X + invert one of those axes.
+3. Every ordinary app's Orbit X/Y/Z, Pan X/Y, and Zoom controls now show a Source X/Y/Z selector
+   beside Invert; the pre-existing `bindings.orbit.axis_source`, `pan.*_src`, and `zoom.src` fields
+   are no longer hidden in JSON.
+4. Blender, SketchUp, Unreal, Unity, and Godot now receive `advanced.axis_source` alongside
+   `advanced.invert`. Every visible Orbit/Camera/Fly/Walk action selects X/Y/Z independently in the
+   host add-on, where the actual navigation mode is known (including Blender's local mode override).
+   Rotation actions select from `o`; shifted movement actions select from `(p.x,p.y,z)`. For example,
+   Walk Forward←Z makes twist drive forward without changing Orbit or Fly.
+5. Malformed global permutations reset to identity; malformed ordinary/action sources reset only
+   the affected field. Action-source duplication is intentionally allowed. All defaults reproduce
+   the pre-v5 fixed wiring and the original cube/cursor output bit-for-bit.
+6. Updated the README, maintainer docs, migration tests, cross-app composition tests, source-routing
+   tests, bundled add-in versions, and version-manifest assertions.
+
+Acceptance/verification:
+
+- `pytest -q` — 316 passed.
+- Default cube orbit/pan/zoom and pointer/scroll golden-value tests remain exact.
+- Tests cover global swap+invert before both pointer/3D paths, distinct per-app routes composed after
+  the same global orientation, v4→v5 migration/validation, and twist/Z→Walk Forward with inversion.
+- `dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj --no-restore` — ALL PASS.
+- `python -m compileall -q trackball_daemon` and `git diff --check` — passed.
+- Ruby, Godot, and Unity command-line compilers are not installed. Their routing implementations are
+  source-covered but need normal host-GUI live verification after the bundled updates are installed.
+
+Versions: daemon 0.1.63; Blender 0.1.15; SketchUp 0.2.6; Unreal 0.2.7; Unity 0.1.9;
+Godot 0.1.7. Other integration versions are unchanged.
+
+Commit: `feat: add global and per-action axis routing`.
 
 ## [ ] Step 4 — Baked software alignment and resettable default profiles
 

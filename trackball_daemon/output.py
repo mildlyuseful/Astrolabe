@@ -1,9 +1,8 @@
 """Output / injection layer.
 
-The SendInput primitive, the quaternion helpers, and the per-packet routing math are
-COPIED VERBATIM from the original cube_test.py -- the only change is that the numbers
-(gains, signs, axis sources, dominance/deadzone, distance clamp) are read from the live
-config object instead of module constants. The behavior and math are identical.
+The SendInput primitive and quaternion helpers originate in cube_test.py. A validated global
+raw-to-logical axis orientation is applied once at packet ingress; cursor and per-app mappings then
+consume the same logical XYZ vector. Identity defaults preserve the original behavior exactly.
 """
 import ctypes
 import math
@@ -153,6 +152,10 @@ class OutputEngine:
     def apply_config(self):
         """Refresh the cached mapping numbers from config (call after any config change)."""
         g = self.cfg.data["general"]
+        orientation = g.get("axis_orientation") or {}
+        self.global_src = [int(v) for v in orientation.get("source", [0, 1, 2])]
+        self.global_sign = [-1.0 if v else 1.0
+                            for v in orientation.get("invert", [False, False, False])]
         c, s = g["cursor"], g["scroll"]
         self.c_xsrc, self.c_xsign = int(c["x_src"]), float(c["x_sign"])
         self.c_ysrc, self.c_ysign = int(c["y_src"]), float(c["y_sign"])
@@ -213,12 +216,14 @@ class OutputEngine:
         if sink is not None:
             sink(ox, oy, oz, px, py, zoom)
 
-    # --- the data path (verbatim math from the original on_rotation) --------------
+    # --- the data path -------------------------------------------------------------
     def handle_packet(self, data):
         if len(data) < 12:
             return
-        rx, ry, rz = struct.unpack_from("<fff", data, 0)
-        recv = (rx, ry, rz)
+        raw = struct.unpack_from("<fff", data, 0)
+        # The one physical-orientation transform. Everything downstream (pointer, cube, broker,
+        # per-app action routing) speaks this same body-relative logical XYZ frame.
+        recv = tuple(self.global_sign[i] * raw[self.global_src[i]] for i in range(3))
 
         mode = self.mode
         if mode != self._last_mode:                 # reset cursor accumulators on any switch

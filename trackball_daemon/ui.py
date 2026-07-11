@@ -9,7 +9,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from . import integrations
-from .config import ORBIT_PIVOT_METHODS, normalize_orbit_pivot_fallbacks
+from .config import (ORBIT_PIVOT_METHODS, normalize_axis_permutation,
+                     normalize_orbit_pivot_fallbacks, swap_axis_source)
 
 _PAD = {"padx": 8, "pady": 4}
 _PIVOT_LABELS = {
@@ -195,6 +196,73 @@ class SettingsWindow:
         ttk.Checkbutton(parent, text=label, variable=var,
                         command=lambda: self._set_and_save(keys, bool(var.get()))).pack(side="left", padx=4)
         return var
+
+    def _axis_combo(self, parent, keys, width=4):
+        """Compact X/Y/Z source selector for an action. Duplicate sources are allowed."""
+        labels = ("X", "Y", "Z")
+        try:
+            current = int(self._get(keys))
+        except (TypeError, ValueError):
+            current = 0
+        var = tk.StringVar(value=labels[current] if current in (0, 1, 2) else "X")
+        combo = ttk.Combobox(parent, textvariable=var, values=labels,
+                             state="readonly", width=width)
+        combo.pack(side="left", padx=(2, 5))
+        combo.bind("<<ComboboxSelected>>",
+                   lambda _e: self._set_and_save(keys, labels.index(var.get())))
+        return var
+
+    def _global_axis_orientation_editor(self, parent):
+        """Permutation-safe physical orientation editor.
+
+        Selecting an already-used source swaps it with the affected logical axis, so every edit
+        remains a complete permutation and can apply live without a transient duplicated axis.
+        """
+        source_keys = ("general", "axis_orientation", "source")
+        invert_keys = ("general", "axis_orientation", "invert")
+        labels = ("X", "Y", "Z")
+        sources = normalize_axis_permutation(self._get(source_keys))
+        vars_ = []
+        combos = []
+        invert_vars = []
+
+        for target in range(3):
+            row = ttk.Frame(parent)
+            row.pack(fill="x", padx=12, pady=2)
+            ttk.Label(row, text=f"Logical {labels[target]}", width=12, anchor="w").pack(side="left")
+            ttk.Label(row, text="uses physical", foreground="#555").pack(side="left")
+            var = tk.StringVar(value=labels[sources[target]])
+            combo = ttk.Combobox(row, textvariable=var, values=labels,
+                                 state="readonly", width=4)
+            combo.pack(side="left", padx=(5, 12))
+            invert_vars.append(self._invert_check(row, "Invert", invert_keys + (target,)))
+            vars_.append(var)
+            combos.append(combo)
+
+        def select(target):
+            current = normalize_axis_permutation(self._get(source_keys))
+            wanted = labels.index(vars_[target].get())
+            current = swap_axis_source(current, target, wanted)
+            for i, var in enumerate(vars_):
+                var.set(labels[current[i]])
+            self._set_and_save(source_keys, current)
+
+        for i, combo in enumerate(combos):
+            combo.bind("<<ComboboxSelected>>", lambda _e, target=i: select(target))
+
+        def reset():
+            for i, var in enumerate(vars_):
+                var.set(labels[i])
+            for var in invert_vars:
+                var.set(False)
+            self._set_and_save(source_keys, [0, 1, 2])
+            self._set_and_save(invert_keys, [False, False, False])
+
+        ttk.Button(parent, text="Reset orientation", command=reset).pack(
+            anchor="w", padx=12, pady=(4, 2))
+        ttk.Label(parent, text="Changing a source swaps axes instead of duplicating one. This mapping "
+                               "is applied once to both pointer and 3D modes before app settings.",
+                  foreground="#888", wraplength=590).pack(anchor="w", padx=12, pady=(0, 5))
 
     def _bool_row(self, parent, label, keys):
         """Full-width checkbox bound to a boolean config key (saves + applies live on toggle)."""
@@ -589,7 +657,7 @@ class SettingsWindow:
         if app_key == "blender":             # Blender has its own richer, merged layout (below)
             self._blender_bindings_fields(parent)
             return
-        if app_key == "sketchup":            # SketchUp has camera/fly/walk + per-mode inverts
+        if app_key == "sketchup":            # SketchUp has camera/fly/walk + per-mode routes
             self._sketchup_bindings_fields(parent)
             return
         if app_key == "unreal":              # Unreal has a Blender-style richer layout too
@@ -618,19 +686,9 @@ class SettingsWindow:
         self._combo_row(parent, "Orbit ↔ pan/zoom toggle", base + ("toggle",),
                         values=["shift", "none"])
 
-        ttk.Label(parent, text="Invert axes (per this app):", foreground="#555").pack(
+        ttk.Label(parent, text="Action axis and direction (per this app):", foreground="#555").pack(
             anchor="w", padx=10, pady=(10, 0))
-        r1 = ttk.Frame(parent); r1.pack(fill="x", padx=18, pady=2)
-        ttk.Label(r1, text="Orbit", width=7, anchor="w").pack(side="left")
-        self._invert_check(r1, "X", base + ("invert", "orbit", 0))
-        self._invert_check(r1, "Y", base + ("invert", "orbit", 1))
-        self._invert_check(r1, "Z", base + ("invert", "orbit", 2))
-        r2 = ttk.Frame(parent); r2.pack(fill="x", padx=18, pady=2)
-        ttk.Label(r2, text="Pan", width=7, anchor="w").pack(side="left")
-        self._invert_check(r2, "X", base + ("invert", "pan", 0))
-        self._invert_check(r2, "Y", base + ("invert", "pan", 1))
-        ttk.Label(r2, text="     ").pack(side="left")
-        self._invert_check(r2, "Zoom", base + ("invert", "zoom"))
+        self._binding_axis_rows(parent, base)
 
         ttk.Label(parent, text="Control scheme (Default = use the General default):",
                   foreground="#555").pack(anchor="w", padx=10, pady=(10, 0))
@@ -684,26 +742,46 @@ class SettingsWindow:
                            copy_on_open=True,
                        )).pack(anchor="w", padx=10, pady=(2, 8))
 
-        ttk.Label(parent,
-                  text="Which received axis feeds orbit/pan/zoom lives in the config file; "
-                       "edits here apply live.",
-                  foreground="#888", wraplength=600).pack(anchor="w", padx=10, pady=(10, 2))
+        ttk.Label(parent, text="Sources refer to logical axes after the global physical orientation. "
+                               "Edits apply live.", foreground="#888", wraplength=600).pack(
+            anchor="w", padx=10, pady=(10, 2))
 
-    def _invert_row(self, parent, label, base_keys, items):
-        """A labelled row of inline invert checkboxes. `items` = [(text, key), ...] under base_keys."""
-        row = ttk.Frame(parent)
-        row.pack(fill="x", padx=12, pady=2)
-        ttk.Label(row, text=label, width=10, anchor="w").pack(side="left")
-        for text, key in items:
-            self._invert_check(row, text, base_keys + (key,))
+    def _binding_axis_rows(self, parent, base):
+        rows = [
+            ("Orbit X", base + ("orbit", "axis_source", 0), base + ("invert", "orbit", 0)),
+            ("Orbit Y", base + ("orbit", "axis_source", 1), base + ("invert", "orbit", 1)),
+            ("Orbit Z", base + ("orbit", "axis_source", 2), base + ("invert", "orbit", 2)),
+            ("Pan X", base + ("pan", "x_src"), base + ("invert", "pan", 0)),
+            ("Pan Y", base + ("pan", "y_src"), base + ("invert", "pan", 1)),
+            ("Zoom", base + ("zoom", "src"), base + ("invert", "zoom")),
+        ]
+        for label, source, invert in rows:
+            row = ttk.Frame(parent)
+            row.pack(fill="x", padx=18, pady=1)
+            ttk.Label(row, text=label, width=12, anchor="w").pack(side="left")
+            ttk.Label(row, text="Source").pack(side="left")
+            self._axis_combo(row, source)
+            self._invert_check(row, "Invert", invert)
+
+    def _action_routing_group(self, parent, label, advanced_keys, items):
+        """Source selector + existing inversion for each rich mode-specific action."""
+        axis = advanced_keys + ("axis_source", label.lower())
+        invert = advanced_keys + ("invert", label.lower())
+        for index, (text, key) in enumerate(items):
+            row = ttk.Frame(parent)
+            row.pack(fill="x", padx=12, pady=1)
+            ttk.Label(row, text=label if index == 0 else "", width=10, anchor="w").pack(side="left")
+            ttk.Label(row, text=text, width=10, anchor="w").pack(side="left")
+            ttk.Label(row, text="Source").pack(side="left")
+            self._axis_combo(row, axis + (key,))
+            self._invert_check(row, "Invert", invert + (key,))
 
     def _blender_bindings_fields(self, parent):
         """The full Blender control set in one place (merged from the former 'Blender Advanced' tab).
         Sensitivities/toggle/rate write apps.blender.bindings; mode/orbit/pan-zoom/camera write
-        apps.blender.advanced; per-mode direction flips write advanced.invert. All apply live."""
+        apps.blender.advanced; per-mode routes write advanced.axis_source/invert. All apply live."""
         base = ("apps", "blender", "bindings")
         adv = ("apps", "blender", "advanced")
-        inv = adv + ("invert",)
         ttk.Label(parent, text="Blender navigation — every option in one place. Applies live to a "
                               "focused Blender viewport.", foreground="#555", wraplength=600).pack(
             anchor="w", padx=10, pady=(8, 2))
@@ -760,29 +838,28 @@ class SettingsWindow:
         s4.pack(fill="x", padx=10, pady=6)
         self._bool_row(s4, "Lock camera to view (drive the scene camera)", adv + ("lock_camera_to_view",))
 
-        s5 = ttk.LabelFrame(parent, text="Invert directions — independent per mode")
+        s5 = ttk.LabelFrame(parent, text="Action axes & directions — independent per mode")
         s5.pack(fill="x", padx=10, pady=6)
-        self._invert_row(s5, "Orbit", inv + ("orbit",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
-                          ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
-        self._invert_row(s5, "Camera", inv + ("camera",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
-        self._invert_row(s5, "Fly", inv + ("fly",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
-                          ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
-        self._invert_row(s5, "Walk", inv + ("walk",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"),
-                          ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
-        ttk.Label(s5, text="Each mode's directions are independent — e.g. flip Walk ▸ Fwd without "
-                           "touching Orbit. \"Camera\" turns the camera in place; it "
-                           "shares Orbit's pan/zoom inverts.",
+        self._action_routing_group(s5, "Orbit", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
+                                    ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
+        self._action_routing_group(s5, "Camera", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
+        self._action_routing_group(s5, "Fly", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
+                                    ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+        self._action_routing_group(s5, "Walk", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"),
+                                    ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+        ttk.Label(s5, text="Each action selects X/Y/Z and can invert independently. For example, "
+                           "Walk Fwd ← Z makes twist drive forward. Camera shares Orbit's "
+                           "pan/zoom action mappings.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(2, 4))
 
     def _sketchup_bindings_fields(self, parent):
         """SketchUp's Blender-parity camera controls, minus Blender's 3D-cursor/camera-view options."""
         base = ("apps", "sketchup", "bindings")
         adv = ("apps", "sketchup", "advanced")
-        inv = adv + ("invert",)
         ttk.Label(parent, text="SketchUp navigation — orbit, camera-look, fly, and architectural "
                               "walk controls in one place. Applies live to the focused model.",
                   foreground="#555", wraplength=600).pack(anchor="w", padx=10, pady=(8, 2))
@@ -837,32 +914,31 @@ class SettingsWindow:
                            "MOUSE (both held per gesture); Model Center uses model.bounds.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
-        s5 = ttk.LabelFrame(parent, text="Invert directions — independent per mode")
+        s5 = ttk.LabelFrame(parent, text="Action axes & directions — independent per mode")
         s5.pack(fill="x", padx=10, pady=6)
-        self._invert_row(s5, "Orbit", inv + ("orbit",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
-                          ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
-        self._invert_row(s5, "Camera", inv + ("camera",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
-        self._invert_row(s5, "Fly", inv + ("fly",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
-                          ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
-        self._invert_row(s5, "Walk", inv + ("walk",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"),
-                          ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
-        ttk.Label(s5, text="Camera turns in place and shares Orbit's pan/zoom "
-                           "inverts. Fly and Walk movement directions are independent.",
+        self._action_routing_group(s5, "Orbit", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
+                                    ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
+        self._action_routing_group(s5, "Camera", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
+        self._action_routing_group(s5, "Fly", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
+                                    ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+        self._action_routing_group(s5, "Walk", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"),
+                                    ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+        ttk.Label(s5, text="Each action selects X/Y/Z and can invert independently. Camera shares "
+                           "Orbit's pan/zoom action mappings.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(2, 4))
 
     def _unreal_bindings_fields(self, parent):
         """The full Unreal control set (Blender-style), in one place. Mirrors _blender_bindings_fields,
         adapted to the editor's free-fly eye+rotator camera: orbit/fly/walk modes, camera pivot,
-        twist action, lock-horizon, per-mode inverts. (No zoom-style / zoom-to-mouse / camera-lock —
+        twist action, lock-horizon, per-mode action routes. (No zoom-style / zoom-to-mouse / camera-lock —
         not applicable in Unreal.) Sensitivities/toggle/rate write apps.unreal.bindings; mode/orbit/
-        pan options write apps.unreal.advanced; per-mode flips write advanced.invert. All apply live."""
+        pan options write apps.unreal.advanced; per-mode routes write advanced.axis_source/invert."""
         base = ("apps", "unreal", "bindings")
         adv = ("apps", "unreal", "advanced")
-        inv = adv + ("invert",)
         ttk.Label(parent, text="Unreal navigation — Blender-style options in one place. Applies live "
                               "to a focused Unreal Editor perspective viewport.", foreground="#555",
                   wraplength=600).pack(anchor="w", padx=10, pady=(8, 2))
@@ -920,21 +996,21 @@ class SettingsWindow:
                         ("apps", "unreal", "screen_center_pivot_hold_sec"),
                         hint="Screen Center / Under Cursor: seconds still before it raycasts again")
 
-        s5 = ttk.LabelFrame(parent, text="Invert directions — independent per mode")
+        s5 = ttk.LabelFrame(parent, text="Action axes & directions — independent per mode")
         s5.pack(fill="x", padx=10, pady=6)
-        self._invert_row(s5, "Orbit", inv + ("orbit",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
-                          ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
-        self._invert_row(s5, "Camera", inv + ("camera",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
-        self._invert_row(s5, "Fly", inv + ("fly",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
-                          ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
-        self._invert_row(s5, "Walk", inv + ("walk",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"),
-                          ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
-        ttk.Label(s5, text="Each mode's directions are independent. Camera turns in place and "
-                           "shares Orbit's pan/zoom inverts.",
+        self._action_routing_group(s5, "Orbit", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
+                                    ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
+        self._action_routing_group(s5, "Camera", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
+        self._action_routing_group(s5, "Fly", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
+                                    ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+        self._action_routing_group(s5, "Walk", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"),
+                                    ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+        ttk.Label(s5, text="Each action selects X/Y/Z and can invert independently. Camera shares "
+                           "Orbit's pan/zoom action mappings.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(2, 4))
 
     def _engine_bindings_fields(self, parent, app_key, title, *, no_roll=False):
@@ -945,7 +1021,6 @@ class SettingsWindow:
         """
         base = ("apps", app_key, "bindings")
         adv = ("apps", app_key, "advanced")
-        inv = adv + ("invert",)
         ttk.Label(parent, text=title, foreground="#555",
                   wraplength=600).pack(anchor="w", padx=10, pady=(8, 2))
 
@@ -1025,31 +1100,31 @@ class SettingsWindow:
                                "the view. Typical 4–16; default 8.",
                       foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
 
-        s5 = ttk.LabelFrame(parent, text="Invert directions — independent per mode")
+        s5 = ttk.LabelFrame(parent, text="Action axes & directions — independent per mode")
         s5.pack(fill="x", padx=10, pady=6)
         if no_roll:
-            self._invert_row(s5, "Orbit", inv + ("orbit",),
-                             [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
-                              ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
-            self._invert_row(s5, "Camera", inv + ("camera",),
-                             [("Pitch", "pitch"), ("Yaw", "yaw")])
-            self._invert_row(s5, "Fly", inv + ("fly",),
-                             [("Pitch", "pitch"), ("Yaw", "yaw"),
-                              ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+            self._action_routing_group(s5, "Orbit", adv,
+                                       [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
+                                        ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
+            self._action_routing_group(s5, "Camera", adv,
+                                       [("Pitch", "pitch"), ("Yaw", "yaw")])
+            self._action_routing_group(s5, "Fly", adv,
+                                       [("Pitch", "pitch"), ("Yaw", "yaw"),
+                                        ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
         else:
-            self._invert_row(s5, "Orbit", inv + ("orbit",),
-                             [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
-                              ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
-            self._invert_row(s5, "Camera", inv + ("camera",),
-                             [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
-            self._invert_row(s5, "Fly", inv + ("fly",),
-                             [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
-                              ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
-        self._invert_row(s5, "Walk", inv + ("walk",),
-                         [("Pitch", "pitch"), ("Yaw", "yaw"),
-                          ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
-        ttk.Label(s5, text="Each mode's directions are independent. Camera shares Orbit's "
-                           "pan/zoom inverts.",
+            self._action_routing_group(s5, "Orbit", adv,
+                                       [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
+                                        ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
+            self._action_routing_group(s5, "Camera", adv,
+                                       [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll")])
+            self._action_routing_group(s5, "Fly", adv,
+                                       [("Pitch", "pitch"), ("Yaw", "yaw"), ("Bank", "bank"),
+                                        ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+        self._action_routing_group(s5, "Walk", adv,
+                                   [("Pitch", "pitch"), ("Yaw", "yaw"),
+                                    ("Fwd", "forward"), ("Strafe", "strafe"), ("Up/Dn", "vertical")])
+        ttk.Label(s5, text="Each action selects X/Y/Z and can invert independently. Camera shares "
+                           "Orbit's pan/zoom action mappings.",
                   foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(2, 4))
 
     def _unity_bindings_fields(self, parent):
@@ -1075,6 +1150,10 @@ class SettingsWindow:
                         hint="applies on reconnect")
         self._entry_row(sec1, "Address (optional)", ("device", "address"), cast=str, width=22,
                         hint="AA:BB:..  applies on reconnect")
+
+        secA = ttk.LabelFrame(outer, text="Physical trackball orientation")
+        secA.pack(fill="x", padx=10, pady=6)
+        self._global_axis_orientation_editor(secA)
 
         secB = ttk.LabelFrame(outer, text="3D navigation bridge")
         secB.pack(fill="x", padx=10, pady=6)

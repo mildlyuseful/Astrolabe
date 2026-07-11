@@ -28,7 +28,7 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.6"          # 0.2.6: camera/screen_center canonical pivot names.
+ADDIN_VERSION = "0.2.7"          # 0.2.7: per-action X/Y/Z source routing.
                                  # selected, orbit/to_cursor use the selection centre instead of the
                                  # designated view/cursor/origin pivot; when False, raycasts ignore
                                  # the selection bbox gate.
@@ -450,31 +450,56 @@ def _sgn(flag):
     return -1.0 if flag else 1.0
 
 
-def _apply_inverts(nav_mode, op, o, p, z, inv):
-    """Per-mode, per-axis direction flips (config advanced.invert.<mode>.<axis>). Applied HERE, in the
-    add-on, not in the daemon -- the same physical channel means different things per mode (ball
-    forward/back is orbit pan-Y but fly/walk forward), so independent inverts are only possible once
-    the mode is known. "camera" gets its own rotation inverts and shares orbit's pan/zoom inverts.
-    Mirrors the Blender add-on exactly."""
+def _routed(values, sources, inversions, action, default):
+    """One independently routed action from a 3-axis semantic input vector."""
+    try:
+        source = int(sources.get(action, default))
+    except (TypeError, ValueError):
+        source = default
+    if source not in (0, 1, 2):
+        source = default
+    return values[source] * _sgn(inversions.get(action))
+
+
+def _apply_action_routing(nav_mode, op, o, p, z, adv):
+    """Per-mode X/Y/Z source selection plus direction inversion.
+
+    Rotation actions select from ``o``; shifted movement actions select from ``(p.x, p.y, z)``.
+    This keeps mode semantics independent and permits mappings such as Walk Forward <- Z (twist).
+    """
+    inv = adv.get("invert") or {}
+    axes = adv.get("axis_source") or {}
+    rotation = list(o)
+    movement = [p[0], p[1], z]
     if nav_mode == "fly":
         f = inv.get("fly", {})
-        o = [o[0] * _sgn(f.get("pitch")), o[1] * _sgn(f.get("yaw")), o[2] * _sgn(f.get("bank"))]
-        p = [p[0] * _sgn(f.get("strafe")), p[1] * _sgn(f.get("forward"))]
-        z = z * _sgn(f.get("vertical"))
+        a = axes.get("fly", {})
+        o = [_routed(rotation, a, f, "pitch", 0), _routed(rotation, a, f, "yaw", 1),
+             _routed(rotation, a, f, "bank", 2)]
+        p = [_routed(movement, a, f, "strafe", 0),
+             _routed(movement, a, f, "forward", 1)]
+        z = _routed(movement, a, f, "vertical", 2)
     elif nav_mode == "walk":
         w = inv.get("walk", {})
-        o = [o[0] * _sgn(w.get("pitch")), o[1] * _sgn(w.get("yaw")), o[2]]
-        p = [p[0] * _sgn(w.get("strafe")), p[1] * _sgn(w.get("forward"))]
-        z = z * _sgn(w.get("vertical"))
+        a = axes.get("walk", {})
+        o = [_routed(rotation, a, w, "pitch", 0), _routed(rotation, a, w, "yaw", 1), rotation[2]]
+        p = [_routed(movement, a, w, "strafe", 0),
+             _routed(movement, a, w, "forward", 1)]
+        z = _routed(movement, a, w, "vertical", 2)
     else:                                            # orbit
         ob = inv.get("orbit", {})
+        oa = axes.get("orbit", {})
         if op == "camera":
             vp = inv.get("camera", {})
-            o = [o[0] * _sgn(vp.get("pitch")), o[1] * _sgn(vp.get("yaw")), o[2] * _sgn(vp.get("roll"))]
+            va = axes.get("camera", {})
+            o = [_routed(rotation, va, vp, "pitch", 0), _routed(rotation, va, vp, "yaw", 1),
+                 _routed(rotation, va, vp, "roll", 2)]
         else:
-            o = [o[0] * _sgn(ob.get("pitch")), o[1] * _sgn(ob.get("yaw")), o[2] * _sgn(ob.get("twist"))]
-        p = [p[0] * _sgn(ob.get("pan_x")), p[1] * _sgn(ob.get("pan_y"))]
-        z = z * _sgn(ob.get("zoom"))
+            o = [_routed(rotation, oa, ob, "pitch", 0), _routed(rotation, oa, ob, "yaw", 1),
+                 _routed(rotation, oa, ob, "twist", 2)]
+        p = [_routed(movement, oa, ob, "pan_x", 0),
+             _routed(movement, oa, ob, "pan_y", 1)]
+        z = _routed(movement, oa, ob, "zoom", 2)
     return o, p, z
 
 
@@ -577,8 +602,7 @@ def _apply(info, frame, idle):
         _last_scheme["v"] = sig
         _log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s horizon=%s sel_override=%s" % sig)
 
-    # Per-mode direction inverts (applied here, like Blender -- see _apply_inverts).
-    o, p, z = _apply_inverts(nav_mode, op, o, p, z, adv.get("invert") or {})
+    o, p, z = _apply_action_routing(nav_mode, op, o, p, z, adv)
 
     cam = _read_camera(info)
     if nav_mode == "fly":
