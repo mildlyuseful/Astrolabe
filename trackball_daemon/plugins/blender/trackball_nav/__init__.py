@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 12),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 13),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.12"                   # reported in the handshake (shown in the daemon's tray)
+ADDIN_VERSION = "0.1.13"                   # 0.1.13: configurable orbit-pivot fallback chain.
                                            # 0.1.12: selection_overrides_pivot is functional.
                                            # 0.1.10: 3D-cursor pivot value renamed cursor->cursor_3d
                                            # (daemon config v3; "cursor" now means under-the-mouse).
@@ -356,7 +356,7 @@ def _cursor_location():
         return None
 
 
-def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True):
+def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True, candidates=None):
     """Resolve the orbit pivot Vector for pivot id `op`, or None (== orbit about view_location).
       viewpoint -> the EYE: turns the camera in place (look around), independent of how far the orbit
                    point/view_location happens to be. (Earlier this orbited view_location, which sits
@@ -369,33 +369,33 @@ def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True):
       object    -> selection median      cursor_3d -> 3D cursor        origin -> world origin
     When ``sel_override`` is enabled, a non-empty selection wins over every external pivot. The
     viewpoint mode remains a true turn-in-place operation, matching Unity/Godot/Rhino. Anything
-    unavailable falls back to None (orbit about view_location, Blender's default)."""
-    if op == "viewpoint":
-        return _eye(rv)
-    if sel_override:
+    unavailable methods are skipped; None means the configured chain was exhausted."""
+    if sel_override and op != "viewpoint":
         selected = _selection_median()
         if selected is not None:
             return selected
-    if op == "view":
-        if _gesture["pivot"] is None or _gesture["invalid"] or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _raycast_center(rv, region)
-            _gesture["invalid"] = False
+    if _gesture["pivot"] is not None and not _gesture["invalid"] and idle <= PIVOT_HOLD_IDLE:
         return _gesture["pivot"]
-    if op == "cursor":
-        if _gesture["pivot"] is None or _gesture["invalid"] or idle > PIVOT_HOLD_IDLE:
-            hit = _raycast_cursor(rv, region, win)
-            if hit is None:
-                hit = _selection_median()          # cursor off-viewport / off-geometry -> selection
-            _gesture["pivot"] = hit
+    for method in (candidates or [op]):
+        if method == "viewpoint":
+            point = _eye(rv)
+        elif method == "view":
+            point = _raycast_center(rv, region)
+        elif method == "cursor":
+            point = _raycast_cursor(rv, region, win)
+        elif method in ("selection", "object"):
+            point = _selection_median()
+        elif method == "cursor_3d":
+            point = _cursor_location()
+        elif method == "origin":
+            point = Vector((0.0, 0.0, 0.0))
+        else:
+            continue
+        if point is not None:
+            _gesture["pivot"] = point
             _gesture["invalid"] = False
-        return _gesture["pivot"]
-    if op == "object":
-        return _selection_median()
-    if op == "cursor_3d":
-        return _cursor_location()
-    if op == "origin":
-        return Vector((0.0, 0.0, 0.0))
-    return None                                    # unknowns -> orbit about view_location
+            return point
+    return None
 
 
 def _sync_camera_to_view(rv, scene):
@@ -432,10 +432,12 @@ def _apply_orbit(win, rv, region, o, frame, adv, idle):
     if pitch or yaw or roll:
         turntable = (style == "turntable") or lock
         R = _orbit_R(rv, pitch, yaw, roll, turntable)
-        _apply_world_rotation(
-            rv, R, _orbit_pivot(
-                op, rv, region, idle, win,
-                sel_override=bool(adv.get("selection_overrides_pivot", True))))
+        pivot = _orbit_pivot(
+            op, rv, region, idle, win,
+            sel_override=bool(adv.get("selection_overrides_pivot", True)),
+            candidates=adv.get("orbit_pivot_candidates") or [op])
+        if pivot is not None:
+            _apply_world_rotation(rv, R, pivot)
 
 
 def _move_scale(base, speed, rv):

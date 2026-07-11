@@ -25,7 +25,7 @@ import traceback
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.6"          # 0.1.6: exclude nested local-space shapes from the model bbox.
+ADDIN_VERSION = "0.1.7"          # 0.1.7: configurable orbit-pivot fallback chain.
                                  # 0.1.5: selection_overrides_pivot is functional.
                                  # 0.1.4: scheme values renamed (pointer->cursor,
                                  # cursor->selection, to_pointer->to_cursor; daemon config v3).
@@ -295,14 +295,14 @@ def _screen_center_pivot(view, bbox):
     except Exception:
         info = None
     if not info:
-        _log_rl("vpivot", "view-pivot: nothing under screen centre -> object-centre fallback")
+        _log_rl("vpivot", "view-pivot: nothing under screen centre -> fallback chain")
         return None
     try:
         p = (float(info["x"]), float(info["y"]), float(info["z"]))
     except Exception:
         return None
     if not _in_bbox(p, bbox):
-        _log_rl("vpivot", "view-pivot: hit outside model bbox -> object-centre fallback")
+        _log_rl("vpivot", "view-pivot: hit outside model bbox -> fallback chain")
         return None
     _log_rl("vpivot", "view-pivot: surface hit -> (%.2f,%.2f,%.2f)" % p)
     return p
@@ -399,31 +399,32 @@ def _selection_center(doc):
     return (sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n, sum(p[2] for p in pts) / n)
 
 
-def _orbit_pivot(op, view, doc, camera, idle, sel_override=True):
-    """Resolve the orbit pivot for the scheme `op`. Everything falls back to the model centre,
-    then the camera look-at, so orbit always has a sane pivot."""
-    center, bbox = _object_center(doc)
-    selected = _selection_center(doc) if sel_override or op == "selection" else None
+def _orbit_pivot(op, view, doc, camera, idle, sel_override=True, candidates=None):
+    """Resolve the selected method followed by the daemon-expanded global candidate chain."""
+    selected = _selection_center(doc) if sel_override and op != "viewpoint" else None
     if selected is not None:
         return selected
-    if op == "origin":
-        return (0.0, 0.0, 0.0)
-    if op == "view":
-        if _gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _screen_center_pivot(view, bbox)
-            if _gesture["pivot"] is None:
-                _gesture["pivot"] = center
-        return _gesture["pivot"] if _gesture["pivot"] is not None else cammath.look_at(camera)
-    if op == "cursor":
-        if _gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _cursor_pivot(view, bbox)
-            if _gesture["pivot"] is None:
-                _gesture["pivot"] = center
-        return _gesture["pivot"] if _gesture["pivot"] is not None else cammath.look_at(camera)
-    if op == "selection":
-        return center or cammath.look_at(camera)
-    # "object" and unknowns -> model centre
-    return center if center is not None else cammath.look_at(camera)
+    if _gesture["pivot"] is not None and idle <= PIVOT_HOLD_IDLE:
+        return _gesture["pivot"]
+    center, bbox = _object_center(doc)
+    legacy = candidates is None
+    for method in (candidates if candidates is not None else [op, "object"]):
+        if method == "origin":
+            point = (0.0, 0.0, 0.0)
+        elif method == "view":
+            point = _screen_center_pivot(view, bbox)
+        elif method == "cursor":
+            point = _cursor_pivot(view, bbox)
+        elif method == "selection":
+            point = _selection_center(doc)
+        elif method == "object":
+            point = center
+        else:                                      # viewpoint / cursor_3d unsupported in FreeCAD
+            continue
+        if point is not None:
+            _gesture["pivot"] = point
+            return point
+    return cammath.look_at(camera) if legacy else None
 
 
 def _zoom_pivot(zm, view, doc, idle, sel_override=True):
@@ -459,6 +460,7 @@ def _apply(view, frame, idle):
     zm = frame.get("zm", "to_center")
     adv = frame.get("adv") or {}
     sel_override = bool(adv.get("selection_overrides_pivot", True))
+    pivot_candidates = adv.get("orbit_pivot_candidates") or [op]
 
     sig = (op, style, zm)
     if sig != _last_scheme["v"]:
@@ -473,7 +475,10 @@ def _apply(view, frame, idle):
     if o[0] or o[1] or o[2]:
         _log_rl("rx_orbit", "rx orbit o=(%.4f,%.4f,%.4f) op=%s os=%s" % (o[0], o[1], o[2], op, style))
         _zoom_gesture["pivot"] = None            # view rotates -> next zoom re-raycasts its pivot
-        pivot = _orbit_pivot(op, view, doc, camera, idle, sel_override=sel_override)
+        pivot = _orbit_pivot(op, view, doc, camera, idle, sel_override=sel_override,
+                             candidates=pivot_candidates)
+        if pivot is None:
+            return
         cammath.orbit(camera, o, style == "turntable", pivot)
         changed = True
     elif p[0] or p[1]:

@@ -20,7 +20,7 @@ from System.Windows.Forms import Cursor
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.10"
+ADDIN_VERSION = "0.1.11"          # 0.1.11: configurable orbit-pivot fallback chain.
 _DEFAULT_PORT = 47900
 PIVOT_HOLD_IDLE = 0.35
 OBJ_CACHE_SEC = 0.5
@@ -385,36 +385,31 @@ def _forward_point(cam):
     return (cam.eye[0] + f[0] * d, cam.eye[1] + f[1] * d, cam.eye[2] + f[2] * d)
 
 
-def _orbit_pivot(op, cam, view, idle, sel_override=True):
-    if op == "viewpoint":
-        return None
+def _orbit_pivot(op, cam, view, idle, sel_override=True, candidates=None):
     center, bbox = _selection_center()
-    if op in ("object", "selection"):
-        return center if center is not None else _forward_point(cam)
-    if sel_override and center is not None:
+    if sel_override and op != "viewpoint" and center is not None:
         return center
     ray_bbox = bbox if sel_override else None
-    if op == "origin":
-        return (0.0, 0.0, 0.0)
-    if op == "view":
-        if _gesture["pivot"] is None or _gesture["invalid"] or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _screen_center_pivot(view, ray_bbox)
-            if _gesture["pivot"] is None:
-                _gesture["pivot"] = center if center is not None else _forward_point(cam)
-            _gesture["invalid"] = False
+    if _gesture["pivot"] is not None and not _gesture["invalid"] and idle <= PIVOT_HOLD_IDLE:
         return _gesture["pivot"]
-    if op == "cursor":
-        if _gesture["pivot"] is None or _gesture["invalid"] or idle > PIVOT_HOLD_IDLE:
-            hit = _cursor_pivot(view, ray_bbox)
-            if hit is None:
-                # Prefer real Auto Depth over a synthetic look-at point when the mouse miss.
-                hit = _screen_center_pivot(view, ray_bbox)
-            if hit is None:
-                hit = center if center is not None else _forward_point(cam)
-            _gesture["pivot"] = hit
+    for method in (candidates or [op]):
+        if method == "viewpoint":
+            point = tuple(cam.eye)
+        elif method == "origin":
+            point = (0.0, 0.0, 0.0)
+        elif method == "view":
+            point = _screen_center_pivot(view, ray_bbox)
+        elif method == "cursor":
+            point = _cursor_pivot(view, ray_bbox)
+        elif method in ("object", "selection"):
+            point = center
+        else:
+            continue
+        if point is not None:
+            _gesture["pivot"] = point
             _gesture["invalid"] = False
-        return _gesture["pivot"]
-    return _forward_point(cam)
+            return point
+    return None
 
 
 def _zoom_toward(zm, view, idle=0.0, sel_override=True):
@@ -440,6 +435,7 @@ def _apply(view, frame, idle):
     zm = frame.get("zm", "to_center")
     adv = frame.get("adv") or {}
     sel_override = bool(adv.get("selection_overrides_pivot", True))
+    pivot_candidates = adv.get("orbit_pivot_candidates") or [op]
 
     sig = (op, style, zm, sel_override)
     if sig != _last_scheme["v"]:
@@ -453,7 +449,10 @@ def _apply(view, frame, idle):
     turntable = style == "turntable"
 
     if o[0] or o[1] or o[2]:
-        pivot = _orbit_pivot(op, cam, view, idle, sel_override=sel_override)
+        pivot = _orbit_pivot(op, cam, view, idle, sel_override=sel_override,
+                             candidates=pivot_candidates)
+        if pivot is None:
+            return
         if pivot is not None:
             dist = max(cammath.DIST_MIN, cammath.v_len(cammath.v_sub(tuple(cam.eye), pivot)))
         cammath.orbit(cam, o, turntable, pivot)

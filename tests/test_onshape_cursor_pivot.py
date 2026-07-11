@@ -196,19 +196,22 @@ def test_pivot_cursor_uses_cursor_hit(bridge, monkeypatch):
     monkeypatch.setattr(bridge, "_hit_cursor", lambda *a: (1.0, 1.0, 1.0))
     monkeypatch.setattr(bridge, "_hit_center",
                         lambda *a: (_ for _ in ()).throw(AssertionError("should not reach centre")))
-    p = bridge._pivot(FakeConn(), {"op": "cursor"}, (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    p = bridge._pivot(FakeConn(), {"op": "cursor", "fallbacks": ["view", "object"]},
+                      (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
     assert p == (1.0, 1.0, 1.0)
 
 
 def test_pivot_cursor_falls_back_to_centre_then_object(bridge, monkeypatch):
     monkeypatch.setattr(bridge, "_hit_cursor", lambda *a: None)
     monkeypatch.setattr(bridge, "_hit_center", lambda *a: (7.0, 7.0, 7.0))
-    p = bridge._pivot(FakeConn(), {"op": "cursor"}, (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    p = bridge._pivot(FakeConn(), {"op": "cursor", "fallbacks": ["view", "object"]},
+                      (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
     assert p == (7.0, 7.0, 7.0)
 
     monkeypatch.setattr(bridge, "_hit_center", lambda *a: None)
     monkeypatch.setattr(bridge, "_object_center", lambda conn: (9.0, 9.0, 9.0))
-    p = bridge._pivot(FakeConn(), {"op": "cursor"}, (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    p = bridge._pivot(FakeConn(), {"op": "cursor", "fallbacks": ["view", "object"]},
+                      (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
     assert p == (9.0, 9.0, 9.0)
 
 

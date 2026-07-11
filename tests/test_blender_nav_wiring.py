@@ -127,7 +127,11 @@ def test_fusion_focus_sends_selection_override_only(isolated_config):
     app = _app_with_real_config(cfg, "fusion360")
     app._apply_schemes()
     sent = app.broker.schemes[-1]
-    assert sent["advanced"] == {"selection_overrides_pivot": True}
+    assert sent["advanced"]["selection_overrides_pivot"] is True
+    assert sent["advanced"]["orbit_pivot_fallbacks"] == [
+        "cursor_3d", "viewpoint", "object", "origin"]
+    assert sent["advanced"]["orbit_pivot_candidates"] == [
+        "view", "cursor_3d", "viewpoint", "object", "origin"]
     assert {"orbit_pivot", "orbit_style", "zoom_mode"} <= set(sent)
 
 
@@ -160,5 +164,22 @@ def test_blender_addon_consumes_selection_override():
     source = (Path(__file__).parents[1] / "trackball_daemon" / "plugins" / "blender" /
               "trackball_nav" / "__init__.py").read_text(encoding="utf-8")
     assert 'adv.get("selection_overrides_pivot", True)' in source
-    assert "if sel_override:" in source
+    assert 'if sel_override and op != "viewpoint":' in source
     assert "selected = _selection_median()" in source
+
+
+def test_every_socket_integration_consumes_expanded_pivot_candidates():
+    root = Path(__file__).parents[1]
+    sources = [
+        root / "trackball_daemon/plugins/blender/trackball_nav/__init__.py",
+        root / "trackball_daemon/plugins/freecad/TrackballNav/tbnav_freecad.py",
+        root / "trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py",
+        root / "trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd",
+        root / "trackball_daemon/plugins/rhino/TrackballNav/tbnav_rhino.py",
+        root / "trackball_daemon/plugins/sketchup/trackball_nav/camera.rb",
+        root / "trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs",
+        root / "trackball_daemon/plugins/unreal/TrackballNav/Content/Python/trackball_nav.py",
+        root / "plugin_src/autocad/TrackballNavAcad/Plugin.cs",
+    ]
+    for source in sources:
+        assert "orbit_pivot_candidates" in source.read_text(encoding="utf-8"), source

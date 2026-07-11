@@ -52,6 +52,7 @@ import sys
 import threading
 import time
 
+from .config import orbit_pivot_candidates
 from .paths import user_config_dir
 from .util import get_logger
 
@@ -893,9 +894,11 @@ class OnshapeBridge:
     def set_rate(self, hz):
         self._period = 1.0 / self._clamp_rate(hz)
 
-    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True):
+    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True,
+                   orbit_pivot_fallbacks=None):
         self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode,
-                        "sel_override": bool(selection_overrides_pivot)}
+                        "sel_override": bool(selection_overrides_pivot),
+                        "fallbacks": list(orbit_pivot_fallbacks or [])}
         self._held_pivot = None
 
     def submit(self, ox, oy, oz, px, py, zoom):
@@ -1077,6 +1080,8 @@ class OnshapeBridge:
             # Orbit about the gesture pivot, captured ONCE at the start of the gesture and held (so
             # the hit-test runs once, not per frame, and the pivot doesn't chase the moving view).
             pivot = self._gesture_pivot(conn, scheme, eye, right, up, back)
+            if pivot is None:
+                return
             eye, right, up, back = self._orbit(ox, oy, oz, eye, right, up, back, pivot, scheme)
             changed_affine = True
         elif px or py:
@@ -1204,39 +1209,28 @@ class OnshapeBridge:
     # --- scheme geometry ----------------------------------------------------------------------
     def _pivot(self, conn, scheme, eye, right, up, back):
         op = scheme.get("op", "view")
-        if scheme.get("sel_override", True):
+        if scheme.get("sel_override", True) and op != "viewpoint":
             selected = self._selection_center(conn)
             if selected is not None:
                 return selected
-        if op == "origin":
-            return (0.0, 0.0, 0.0)
-        if op == "cursor":
-            # Under-mouse: aim the hit-test through the page-reported #canvas NDC. No sample /
-            # off-canvas / miss -> screen centre (same as "view"), then model centre. Needs the
-            # userscript installed (docs §8.14); the ray/hold/fallback path is offline-tested.
-            hit = self._hit_cursor(conn, eye, right, up, back)
-            if hit is not None:
-                return hit
-            hit = self._hit_center(conn, eye, right, up, back)
-            if hit is not None:
-                return hit
-        elif op == "selection":
-            selected = self._selection_center(conn)
-            if selected is not None:
-                return selected
-            center = self._object_center(conn)
-            if center is not None:
-                return center
-        elif op == "view":
-            # Orbit about what's under the screen centre (like Onshape's own right-click orbit).
-            hit = self._hit_center(conn, eye, right, up, back)
-            if hit is not None:
-                return hit
-        center = self._object_center(conn)
-        if center is not None:
-            return center
-        # last resort: a point in front of the camera, so orbit still has a sane pivot.
-        return _v_add(eye, _v_scale(_v_neg(back), self._view_half(conn) * 4.0))
+        for method in orbit_pivot_candidates(op, scheme.get("fallbacks", [])):
+            if method == "viewpoint":
+                return eye
+            if method == "origin":
+                return (0.0, 0.0, 0.0)
+            if method == "cursor":
+                point = self._hit_cursor(conn, eye, right, up, back)
+            elif method == "view":
+                point = self._hit_center(conn, eye, right, up, back)
+            elif method == "selection":
+                point = self._selection_center(conn)
+            elif method == "object":
+                point = self._object_center(conn)
+            else:                                   # cursor_3d unsupported in Onshape
+                continue
+            if point is not None:
+                return point
+        return None
 
     def _hit_center(self, conn, eye, right, up, back):
         """navlib hit-test through the screen centre (NDC 0,0)."""

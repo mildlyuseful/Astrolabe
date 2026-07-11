@@ -38,6 +38,38 @@ _DEFAULT_3D_BINDINGS = {
 
 SCHEME_FIELDS = ("orbit_pivot", "orbit_style", "zoom_mode")
 
+# Canonical identifiers accepted by the global orbit-pivot fallback editor and sent to every
+# integration.  Integrations simply skip methods they cannot implement.  ``viewpoint`` is kept
+# distinct from ``view``: it means turn the camera in place, while ``view`` means the surface under
+# the screen centre.
+ORBIT_PIVOT_METHODS = ("cursor", "cursor_3d", "view", "viewpoint",
+                       "selection", "object", "origin")
+DEFAULT_ORBIT_PIVOT_FALLBACKS = ("cursor_3d", "viewpoint", "object", "origin")
+
+
+def normalize_orbit_pivot_fallbacks(value):
+    """Return a stable, duplicate-free fallback list.
+
+    An explicit list may be empty (the user intentionally requested no fallbacks).  Malformed
+    values use the shipped default; unknown method ids and duplicate entries are discarded.
+    """
+    if not isinstance(value, list):
+        return list(DEFAULT_ORBIT_PIVOT_FALLBACKS)
+    out = []
+    for method in value:
+        if method in ORBIT_PIVOT_METHODS and method not in out:
+            out.append(method)
+    return out
+
+
+def orbit_pivot_candidates(primary, fallbacks):
+    """Primary first, then the global chain from its beginning, with duplicates removed."""
+    out = []
+    for method in [primary] + normalize_orbit_pivot_fallbacks(fallbacks):
+        if method in ORBIT_PIVOT_METHODS and method not in out:
+            out.append(method)
+    return out
+
 # --- Per-mode, per-axis direction flips for Blender. The add-on interprets the same physical axes
 #     differently per nav mode (e.g. ball forward = orbit-pan-vertical, but fly/walk-forward), so a
 #     single invert set can't flip one without the other. These are applied IN THE ADD-ON per mode,
@@ -222,6 +254,9 @@ DEFAULTS = {
         "buttons": {"left": "left", "right": "right", "middle": "middle"},
         # default 3D control scheme (per-app can override). Defaults == current behavior.
         "scheme": {"orbit_pivot": "view", "orbit_style": "free", "zoom_mode": "to_center"},
+        # If the selected pivot cannot resolve, every integration restarts here (it does not begin
+        # after the failed method). Unsupported methods are skipped by that integration.
+        "orbit_pivot_fallbacks": list(DEFAULT_ORBIT_PIVOT_FALLBACKS),
     },
     "apps": {
         "blender":    _blender_app(),
@@ -286,7 +321,16 @@ class Config:
                 self.data = copy.deepcopy(DEFAULTS)
                 return self
             self.data = _deep_merge(DEFAULTS, disk)
-            if self._migrate(int(disk.get("version", 1))):
+            changed = self._migrate(int(disk.get("version", 1)))
+            disk_general = disk.get("general") or {}
+            raw_fallbacks = disk_general.get(
+                "orbit_pivot_fallbacks", list(DEFAULT_ORBIT_PIVOT_FALLBACKS))
+            fallbacks = normalize_orbit_pivot_fallbacks(raw_fallbacks)
+            if ("orbit_pivot_fallbacks" not in disk_general or
+                    self.data["general"].get("orbit_pivot_fallbacks") != fallbacks):
+                self.data["general"]["orbit_pivot_fallbacks"] = fallbacks
+                changed = True
+            if changed:
                 self._save_unlocked()
         return self
 

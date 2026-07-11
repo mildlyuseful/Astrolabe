@@ -15,7 +15,7 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.6";
+        const string AddinVersion = "0.1.7";
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.35f;
         const float ObjCacheSec = 0.5f;
@@ -469,6 +469,7 @@ namespace Astrolabe.TrackballNav
             string twistAction = MiniJson.Str(adv, "twist_action", "roll");
             bool panScales = MiniJson.Bool(adv, "pan_scales_with_distance", true);
             bool selOverride = MiniJson.Bool(adv, "selection_overrides_pivot", true);
+            var pivotCandidates = MiniJson.StringList(adv, "orbit_pivot_candidates", op);
             float flySpeed = MiniJson.Float(adv, "fly_speed", 1f);
             float walkSpeed = MiniJson.Float(adv, "walk_speed", 1f);
             var invert = MiniJson.Obj(adv, "invert") ?? new System.Collections.Generic.Dictionary<string, object>();
@@ -500,7 +501,8 @@ namespace Astrolabe.TrackballNav
             else if (navMode == "walk")
                 changed = ApplyWalk(ref cam, o, p, z, walkSpeed);
             else
-                changed = ApplyOrbit(ref cam, o, p, z, op, style, zm, twistAction, lockHorizon, panScales, idle, selOverride, sv);
+                changed = ApplyOrbit(ref cam, o, p, z, op, style, zm, twistAction, lockHorizon,
+                    panScales, idle, selOverride, pivotCandidates, sv);
 
             if (!changed) return;
             TrackballNavCamera.ToSceneView(cam, _focusDist, out var pivot, out var rot, out _);
@@ -600,7 +602,8 @@ namespace Astrolabe.TrackballNav
 
         static bool ApplyOrbit(ref TrackballNavCamera.Cam cam, Vector3 o, Vector2 p, float z,
             string op, string style, string zm, string twistAction, bool lockHorizon,
-            bool panScales, float idle, bool selOverride, SceneView sv)
+            bool panScales, float idle, bool selOverride,
+            System.Collections.Generic.List<string> pivotCandidates, SceneView sv)
         {
             if (Mathf.Abs(o.x) > 1e-12f || Mathf.Abs(o.y) > 1e-12f || Mathf.Abs(o.z) > 1e-12f)
             {
@@ -619,7 +622,8 @@ namespace Astrolabe.TrackballNav
                 }
                 if (Mathf.Abs(orbitO.x) > 1e-12f || Mathf.Abs(orbitO.y) > 1e-12f || Mathf.Abs(orbitO.z) > 1e-12f)
                 {
-                    var pivot = OrbitPivot(op, cam, idle, selOverride, sv);
+                    var pivot = OrbitPivot(op, cam, idle, selOverride, pivotCandidates, sv);
+                    if (!pivot.HasValue) return did;
                     if (pivot.HasValue)
                     {
                         float d = (cam.Location - pivot.Value).magnitude;
@@ -703,37 +707,35 @@ namespace Astrolabe.TrackballNav
             return false;
         }
 
-        static Vector3? OrbitPivot(string op, TrackballNavCamera.Cam cam, float idle, bool selOverride, SceneView sv)
+        static Vector3? OrbitPivot(string op, TrackballNavCamera.Cam cam, float idle,
+            bool selOverride, System.Collections.Generic.List<string> candidates, SceneView sv)
         {
-            if (op == "viewpoint") return null;
             SelectionCenter(out var center, out var bbox);
-            if (op == "object" || op == "selection")
-                return center ?? ForwardPoint(cam);
-            if (selOverride && center.HasValue) return center;
-            if (op == "origin") return Vector3.zero;
-            if (op == "view")
-            {
-                if (!_gesturePivot.HasValue || _gestureInvalid || idle > PivotHoldIdle)
-                {
-                    _gesturePivot = ScreenCenterPivot(cam, selOverride ? bbox : null) ?? ForwardPoint(cam);
-                    _gestureInvalid = false;
-                }
+            if (selOverride && op != "viewpoint" && center.HasValue) return center;
+            if (_gesturePivot.HasValue && !_gestureInvalid && idle <= PivotHoldIdle)
                 return _gesturePivot;
-            }
-            if (op == "cursor")
+            foreach (var method in candidates)
             {
-                if (!_gesturePivot.HasValue || _gestureInvalid || idle > PivotHoldIdle)
+                Vector3? point = null;
+                if (method == "viewpoint") point = cam.Location;
+                else if (method == "origin") point = Vector3.zero;
+                else if (method == "object" || method == "selection") point = center;
+                else if (method == "view")
+                    point = ScreenCenterPivot(cam, selOverride ? bbox : null);
+                else if (method == "cursor")
                 {
                     EnsureCursorHit(sv);
-                    var hit = CursorPivot(selOverride ? bbox : null);
-                    if (!hit.HasValue)
-                        LogCursorMiss("orbit");
-                    _gesturePivot = hit ?? ForwardPoint(cam);
-                    _gestureInvalid = false;
+                    point = CursorPivot(selOverride ? bbox : null);
+                    if (!point.HasValue) LogCursorMiss("orbit");
                 }
-                return _gesturePivot;
+                if (point.HasValue)
+                {
+                    _gesturePivot = point;
+                    _gestureInvalid = false;
+                    return point;
+                }
             }
-            return ForwardPoint(cam);
+            return null;
         }
 
         static Vector3? ZoomToward(string zm, float idle, bool selOverride, SceneView sv)
@@ -941,6 +943,18 @@ namespace Astrolabe.TrackballNav
             if (v is bool b) return b;
             if (v is string s) return s == "true" || s == "True" || s == "1";
             try { return Convert.ToBoolean(v); } catch { return def; }
+        }
+
+        public static System.Collections.Generic.List<string> StringList(
+            System.Collections.Generic.Dictionary<string, object> d, string key, string fallback)
+        {
+            var result = new System.Collections.Generic.List<string>();
+            if (d != null && d.TryGetValue(key, out var v) &&
+                v is System.Collections.Generic.List<object> values)
+                foreach (var item in values)
+                    if (item != null) result.Add(item.ToString());
+            if (result.Count == 0) result.Add(fallback);
+            return result;
         }
 
         public static Vector3 Vec3(System.Collections.Generic.Dictionary<string, object> d, string key)

@@ -1,4 +1,4 @@
 {
-  "version": "0.1.6",
+  "version": "0.1.7",
   "_comment": "Kept in sync with package.json / AddinVersion. 0.1.6: own triangle raycast (IntersectRayMesh missing on some Unity builds). 0.1.5: GUIPointToWorldRay + mesh pick."
 }

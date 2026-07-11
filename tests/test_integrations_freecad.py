@@ -20,7 +20,7 @@ _FAKE_021 = r"C:\Program Files\FreeCAD 0.21\bin\FreeCAD.exe"
 
 def test_freecad_is_a_bundled_addin():
     assert "freecad" in integrations.ADDIN_KEYS
-    assert integrations.bundled_addin_version("freecad") == "0.1.6"
+    assert integrations.bundled_addin_version("freecad") == "0.1.7"
     assert integrations.APPS_BY_KEY["freecad"].setup is integrations.install_freecad
 
 
@@ -47,13 +47,13 @@ def test_install_copies_addon_and_enables(isolated_config, monkeypatch):
     assert ok is True
     fc = cfg.data["apps"]["freecad"]
     assert fc["installed"] is True and fc["enabled"] is True
-    assert fc["addin_version"] == "0.1.6"
+    assert fc["addin_version"] == "0.1.7"
     dest = integrations.freecad_user_mod_dir()
     # the whole add-on must be copied -- both Init files (FreeCAD needs Init.py to load the Mod),
     # the logic module, the pure-math module, and the version manifest.
     for name in ("Init.py", "InitGui.py", "tbnav_freecad.py", "tbnav_camera.py", "version.json"):
         assert (dest / name).exists(), f"missing {name}"
-    assert integrations.installed_addin_version("freecad") == "0.1.6"
+    assert integrations.installed_addin_version("freecad") == "0.1.7"
 
 
 def test_install_fails_when_freecad_absent(isolated_config, monkeypatch):

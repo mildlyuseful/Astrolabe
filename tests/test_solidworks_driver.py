@@ -387,7 +387,7 @@ def test_object_orbit_pans_to_hold_centroid():
     drv._flush((0.1, 0.05, 0.0, 0.0, 0.0, 0.0))
     assert len(view.rotations) == 1
     assert len(view.translation_sets) == 1                  # pans to hold the off-origin centroid
-    assert drv._orbit_pivot is None                         # object uses the centroid directly, not the hold
+    assert drv._orbit_pivot == pytest.approx((1.0, 1.0, 1.0))  # chain result held for the gesture
 
 
 def test_view_orbit_rotates_and_pans_to_hold_pivot():
@@ -443,13 +443,12 @@ def test_view_pivot_held_within_threshold_recomputed_after():
     assert drv._orbit_pivot is not p1
 
 
-def test_view_pivot_is_screen_centre_at_object_depth():
+def test_view_pivot_without_raycast_is_unavailable():
     drv = SolidWorksDriver()
     model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0))   # centroid (1,1,1)
     drv._scale = 4.0; drv._trans = [0.0, 0.0, 0.0]
-    # no pick handles set (not gone through _flush) -> no raycast -> object depth.
-    # in-plane offset -T/Scale2 = 0, depth = col2.centroid = 1 -> (0,0,1)
-    assert drv._view_pivot((1, 0, 0), (0, 1, 0), (0, 0, 1), model) == pytest.approx((0.0, 0.0, 1.0))
+    # No pick handles means the method fails; the resolver, not this method, chooses the fallback.
+    assert drv._view_pivot((1, 0, 0), (0, 1, 0), (0, 0, 1), model) is None
 
 
 # --- 'view' pivot screen-centre raycast (SelectByRay) ---------------------------------
@@ -463,21 +462,21 @@ def test_view_pivot_uses_raycast_surface_depth():
     assert drv._orbit_pivot == pytest.approx((0.0, 0.0, 1.5))            # NOT the object centre (1.0)
 
 
-def test_view_pivot_raycast_miss_falls_back_to_object_depth():
+def test_view_pivot_raycast_miss_continues_to_object_method():
     drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
     model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0), ray_hits=None)  # always miss
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
-    assert drv._orbit_pivot == pytest.approx((0.0, 0.0, 1.0))            # object-centre depth
+    assert drv._orbit_pivot == pytest.approx((1.0, 1.0, 1.0))            # object method
     assert len(model._ext.ray_calls) == len(solidworks_driver._RAY_APERTURE_FRACS)  # grew through all
 
 
 def test_view_pivot_raycast_rejects_out_of_bbox_hit():
-    # A hit well outside the bbox (+margin) is bogus -> rejected -> fall back to object depth.
+    # A hit well outside the bbox (+margin) is bogus -> rejected -> continue to object.
     drv = SolidWorksDriver(); drv.set_scheme("view", "free", "to_center")
     _model, _view = _attach_fakes(drv, box=(0.0, 0.0, 0.0, 2.0, 2.0, 2.0),
                                   ray_hits=[(0.0, (0.0, 0.0, 100.0))])
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))
-    assert drv._orbit_pivot == pytest.approx((0.0, 0.0, 1.0))
+    assert drv._orbit_pivot == pytest.approx((1.0, 1.0, 1.0))
 
 
 def test_view_pivot_raycast_expands_aperture_until_hit():

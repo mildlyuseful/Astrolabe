@@ -19,7 +19,8 @@ import tkinter as tk
 from . import integrations
 from .autocad_driver import AutoCADPluginLoader
 from .ble import start_ble_thread
-from .config import Config, effective_scheme
+from .config import (Config, effective_scheme, normalize_orbit_pivot_fallbacks,
+                     orbit_pivot_candidates)
 from .navbroker import NavBroker
 from .onshape_bridge import OnshapeBridge
 from .output import OutputEngine
@@ -120,6 +121,8 @@ class App:
     def _apply_schemes(self):
         """Push each CAD app's effective control scheme to its driver. Mirrors _apply_rates:
         the broker gets the focused socket app's scheme; the SW driver gets SolidWorks'."""
+        fallbacks = normalize_orbit_pivot_fallbacks(
+            self.config.data.get("general", {}).get("orbit_pivot_fallbacks"))
         if self.broker is not None:
             key = self._engine_app
             if not key or key in self._broker_excluded_keys():
@@ -135,13 +138,16 @@ class App:
             # every socket add-on can read one place — Fusion/etc. still ignore unknown keys.
             appcfg = self.config.data["apps"].get(key) or {}
             adv = appcfg.get("advanced")
-            if adv is not None or "selection_overrides_pivot" in appcfg:
-                adv = dict(adv or {})
-                adv["selection_overrides_pivot"] = bool(
-                    appcfg.get("selection_overrides_pivot", True))
+            adv = dict(adv or {})
+            adv["selection_overrides_pivot"] = bool(
+                appcfg.get("selection_overrides_pivot", True))
+            adv["orbit_pivot_fallbacks"] = fallbacks
+            adv["orbit_pivot_candidates"] = orbit_pivot_candidates(
+                scheme["orbit_pivot"], fallbacks)
             self.broker.set_scheme(**scheme, advanced=adv)
             nav = (adv or {}).get("nav_mode")
-            sig = (key, scheme["orbit_pivot"], scheme["orbit_style"], scheme["zoom_mode"], nav)
+            sig = (key, scheme["orbit_pivot"], scheme["orbit_style"], scheme["zoom_mode"], nav,
+                   tuple(fallbacks))
             if sig != self._last_scheme_pushed:
                 self._last_scheme_pushed = sig
                 self.log.info("scheme -> %s: pivot=%s style=%s zoom=%s nav=%s"
@@ -151,13 +157,15 @@ class App:
             swcfg = self.config.data["apps"].get("solidworks") or {}
             self.sw_driver.set_scheme(
                 **self._effective_scheme("solidworks"),
-                selection_overrides_pivot=bool(swcfg.get("selection_overrides_pivot", True)))
+                selection_overrides_pivot=bool(swcfg.get("selection_overrides_pivot", True)),
+                orbit_pivot_fallbacks=fallbacks)
             self.sw_driver.set_pivot_hold(swcfg.get("view_pivot_hold_sec", 0.5))
         if self.onshape_bridge is not None:
             oncfg = self.config.data["apps"].get("onshape") or {}
             self.onshape_bridge.set_scheme(
                 **self._effective_scheme("onshape"),
-                selection_overrides_pivot=bool(oncfg.get("selection_overrides_pivot", True)))
+                selection_overrides_pivot=bool(oncfg.get("selection_overrides_pivot", True)),
+                orbit_pivot_fallbacks=fallbacks)
 
     def _app_rate(self, key):
         """Effective viewport/flush rate (Hz) for app `key`: its per-app override, or the global

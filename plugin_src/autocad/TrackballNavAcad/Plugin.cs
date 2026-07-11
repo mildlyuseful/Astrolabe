@@ -57,7 +57,7 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.5";   // keep in sync with the csproj <Version>
+        public const string PluginVersion = "0.3.6";   // 0.3.6: configurable pivot fallback chain.
                                                        // 0.3.5: real origin/object/selection pivots
                                                        // + selection_overrides_pivot.
                                                        // 0.3.4: AabbNearHit always uses the near
@@ -91,6 +91,7 @@ namespace TrackballNav
         readonly double[] _acc = new double[6];
         string _opPivot = "view", _oStyle = "free", _zMode = "to_center";
         bool _selectionOverrides = true;
+        List<string> _pivotCandidates = new List<string> { "view" };
         volatile bool _stop;
         volatile bool _connected;
         Thread _sockThread;
@@ -395,10 +396,20 @@ namespace TrackballNav
                         if (root.TryGetProperty("os", out var os)) _oStyle = os.GetString();
                         if (root.TryGetProperty("zm", out var zm)) _zMode = zm.GetString();
                         if (root.TryGetProperty("adv", out var adv) &&
-                            adv.ValueKind == JsonValueKind.Object &&
-                            adv.TryGetProperty("selection_overrides_pivot", out var sel) &&
-                            (sel.ValueKind == JsonValueKind.True || sel.ValueKind == JsonValueKind.False))
-                            _selectionOverrides = sel.GetBoolean();
+                            adv.ValueKind == JsonValueKind.Object)
+                        {
+                            if (adv.TryGetProperty("selection_overrides_pivot", out var sel) &&
+                                (sel.ValueKind == JsonValueKind.True || sel.ValueKind == JsonValueKind.False))
+                                _selectionOverrides = sel.GetBoolean();
+                            if (adv.TryGetProperty("orbit_pivot_candidates", out var chain) &&
+                                chain.ValueKind == JsonValueKind.Array)
+                            {
+                                var parsed = new List<string>();
+                                foreach (var item in chain.EnumerateArray())
+                                    if (item.ValueKind == JsonValueKind.String) parsed.Add(item.GetString());
+                                if (parsed.Count > 0) _pivotCandidates = parsed;
+                            }
+                        }
                     }
                 }
             }
@@ -433,6 +444,7 @@ namespace TrackballNav
             }
             double[] delta = null;
             string style, opv, zmv;
+            List<string> pivotCandidates;
             bool selectionOverrides;
             lock (_lock)
             {
@@ -446,6 +458,7 @@ namespace TrackballNav
                 opv = _opPivot;
                 zmv = _zMode;
                 selectionOverrides = _selectionOverrides;
+                pivotCandidates = new List<string>(_pivotCandidates);
             }
             // watchdog: if the REGEN's CommandEnded never arrives, un-wedge navigation
             if (_regenInFlight && (DateTime.UtcNow - _regenFiredAt).TotalSeconds > 2.0)
@@ -503,7 +516,8 @@ namespace TrackballNav
 
             try
             {
-                if (s_gsBroken || !TryApplyGs(doc, delta, style, opv, zmv, selectionOverrides))
+                if (s_gsBroken || !TryApplyGs(doc, delta, style, opv, zmv, selectionOverrides,
+                                              pivotCandidates))
                     Apply(doc, delta, style);          // legacy fallback (regens per frame;
                                                        // no pointer pivot -- view-centre orbit)
                 _lastFrameAt = DateTime.UtcNow;
@@ -814,7 +828,7 @@ namespace TrackballNav
 
         // --- the GS transport: live kernel view, regen-free (docs 8.15) -------------------------
         bool TryApplyGs(Document doc, double[] d, string style, string opv, string zmv,
-                        bool selectionOverrides)
+                        bool selectionOverrides, List<string> pivotCandidates)
         {
             try
             {
@@ -864,11 +878,14 @@ namespace TrackballNav
                 Point3d? orbitPivot = null, zoomPivot = null;
                 if (hasOrbit && !_heldOrbitSet)
                 {
-                    _heldOrbitPivot = ResolveOrbitPivot(doc, opv, selectionOverrides);
+                    _heldOrbitPivot = ResolveOrbitPivot(doc, opv, selectionOverrides,
+                                                        pivotCandidates);
                     _heldOrbitSet = true;
                 }
                 if (hasOrbit)
                     orbitPivot = _heldOrbitPivot;
+                if (hasOrbit && !orbitPivot.HasValue)
+                    return true;                       // configured chain exhausted: no hidden target
                 if (hasZoom && zmv == "to_cursor" && !_cam.Persp && !_heldZoomSet)
                 {
                     _heldZoomPivot = selectionOverrides ? CaptureSelectionCenter(doc) : null;
@@ -940,20 +957,28 @@ namespace TrackballNav
             catch { return null; }
         }
 
-        Point3d? ResolveOrbitPivot(Document doc, string opv, bool selectionOverrides)
+        Point3d? ResolveOrbitPivot(Document doc, string opv, bool selectionOverrides,
+                                   List<string> candidates)
         {
-            var selected = (selectionOverrides || opv == "selection")
+            var selected = selectionOverrides && opv != "viewpoint"
                 ? CaptureSelectionCenter(doc) : null;
             if (selected.HasValue)
                 return selected;
-            switch (opv)
+            foreach (var method in candidates)
             {
-                case "origin": return Point3d.Origin;
-                case "object":
-                case "selection": return CaptureDrawingCenter();
-                case "cursor": return CapturePointerPivot();
-                default: return null;               // view/unknown: the GS camera target
+                Point3d? point = null;
+                switch (method)
+                {
+                    case "viewpoint": point = _cam.Pos; break;
+                    case "view": point = _cam.Tgt; break;
+                    case "origin": point = Point3d.Origin; break;
+                    case "object": point = CaptureDrawingCenter(); break;
+                    case "selection": point = CaptureSelectionCenter(doc); break;
+                    case "cursor": point = CapturePointerPivot(); break;
+                }
+                if (point.HasValue) return point;
             }
+            return null;
         }
 
         static Point3d? CaptureDrawingCenter()

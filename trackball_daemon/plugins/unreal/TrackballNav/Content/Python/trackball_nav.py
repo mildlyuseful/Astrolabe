@@ -28,7 +28,7 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.4"          # 0.2.4: selection_overrides_pivot (adv) — when True and actors are
+ADDIN_VERSION = "0.2.5"          # 0.2.5: configurable orbit-pivot fallback chain.
                                  # selected, orbit/to_cursor use the selection centre instead of the
                                  # designated view/cursor/origin pivot; when False, raycasts ignore
                                  # the selection bbox gate.
@@ -395,39 +395,36 @@ def _forward_point(cam):
             cam.location[2] + cam.forward[2] * d)
 
 
-def _orbit_pivot(op, cam, idle, sel_override=True):
+def _orbit_pivot(op, cam, idle, sel_override=True, candidates=None):
     """Resolve the orbit pivot (a world point) for scheme ``op``, or None to turn in place about the
     eye (free-fly). When ``sel_override`` and actors are selected, the selection centre wins over
     view/cursor/origin (the designated pivot). Otherwise raycasts ignore the selection bbox gate
-    and miss falls back to a forward point — selection no longer steals the pivot."""
-    if op == "viewpoint":                    # Blender-style: orbit about the EYE = turn in place
-        return None
+    and failures continue through the daemon-expanded global candidate chain."""
     center, bbox = _selection_center()
-    if op in ("object", "selection"):
-        # "selection" historically meant a Blender-style 3D cursor; Unreal has none -> object centre.
-        return center if center is not None else _forward_point(cam)
-    if sel_override and center is not None:
+    if sel_override and op != "viewpoint" and center is not None:
         return center
-    # Designated pivot path (no selection override, or nothing selected).
     ray_bbox = bbox if sel_override else None   # bbox gate only matters when override is on
-    if op == "origin":
-        return (0.0, 0.0, 0.0)
-    if op == "view":
-        if _gesture["pivot"] is None or _gesture["invalid"] or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _screen_center_pivot(cam, ray_bbox)
-            if _gesture["pivot"] is None:
-                _gesture["pivot"] = _forward_point(cam)
-            _gesture["invalid"] = False
+    if _gesture["pivot"] is not None and not _gesture["invalid"] and idle <= PIVOT_HOLD_IDLE:
         return _gesture["pivot"]
-    if op == "cursor":
-        # Under-mouse surface: GeoReferencing Half A + line_trace Half B, held per gesture like "view".
-        if _gesture["pivot"] is None or _gesture["invalid"] or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _cursor_pivot(ray_bbox)
-            if _gesture["pivot"] is None:
-                _gesture["pivot"] = _forward_point(cam)
+    legacy = candidates is None
+    for method in (candidates if candidates is not None else [op]):
+        if method == "viewpoint":
+            point = tuple(cam.location)
+        elif method == "origin":
+            point = (0.0, 0.0, 0.0)
+        elif method == "view":
+            point = _screen_center_pivot(cam, ray_bbox)
+        elif method == "cursor":
+            point = _cursor_pivot(ray_bbox)
+        elif method in ("object", "selection"):
+            point = center
+        else:
+            continue
+        if point is not None:
+            _gesture["pivot"] = point
             _gesture["invalid"] = False
-        return _gesture["pivot"]
-    return _forward_point(cam)               # unknown -> a sane orbit point in front of the camera
+            return point
+    return _forward_point(cam) if legacy else None
 
 
 def _zoom_toward(zm, idle=0.0, sel_override=True):
@@ -482,7 +479,7 @@ def _apply_inverts(nav_mode, op, o, p, z, inv):
 
 
 def _apply_orbit(cam, o, p, z, op, style, zm, twist_action, lock, pan_scales, idle,
-                 sel_override=True):
+                 sel_override=True, pivot_candidates=None):
     """ORBIT mode: orbit (with twist routed by twist_action), pan, or dolly. Exactly one channel is
     non-zero per frame (the daemon gates them on Shift)."""
     if o[0] or o[1] or o[2]:
@@ -499,7 +496,10 @@ def _apply_orbit(cam, o, p, z, op, style, zm, twist_action, lock, pan_scales, id
                 did = True
             # "none" (or roll while horizon-locked): twist ignored
         if orbit_o[0] or orbit_o[1] or orbit_o[2]:
-            pivot = _orbit_pivot(op, cam, idle, sel_override=sel_override)
+            pivot = _orbit_pivot(op, cam, idle, sel_override=sel_override,
+                                 candidates=pivot_candidates or [op])
+            if pivot is None:
+                return did
             if pivot is not None:
                 _focus["dist"] = cammath._clamp_dist(
                     cammath.v_len(cammath.v_sub(tuple(cam.location), pivot)))
@@ -587,7 +587,8 @@ def _apply(info, frame, idle):
         changed = _apply_walk(cam, o, p, z, adv)
     else:                                            # orbit
         changed = _apply_orbit(cam, o, p, z, op, style, zm, twist_action, lock, pan_scales, idle,
-                               sel_override=sel_override)
+                               sel_override=sel_override,
+                               pivot_candidates=adv.get("orbit_pivot_candidates") or [op])
 
     if changed:
         _write_camera(cam)

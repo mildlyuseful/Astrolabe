@@ -53,6 +53,17 @@ orbit/pan/zoom deltas over `127.0.0.1`, and a thin per-app **add-on** applies th
 app's camera. Navigation is routed to whichever supported app is **focused** (and enabled),
 and only flows in **3D mode** (tray → Mode), so the mouse cursor is untouched in cursor mode.
 
+### Orbit-pivot fallback chain
+
+**General → 3D control scheme → Failure fallback order** is one ordered chain shared by every 3D
+integration. The selected per-app pivot is always attempted first. If it is unavailable (for
+example, Under Cursor misses), resolution restarts at item 1 of this chain. A host skips methods it
+cannot implement, duplicate/unknown stored values are removed, and an empty chain means the failed
+primary method produces no orbit. The shipped order is **3D Cursor → Viewpoint → Object → World
+Origin**; Origin is therefore the terminal default unless the user removes it. **Selection overrides
+orbit center** remains higher priority when enabled, except a selected primary **Viewpoint** always
+turns in place. Ray-derived results are held for the gesture.
+
 ### Fusion 360 (implemented)
 1. Settings → **3D Apps** → Fusion 360 → **Set up**. This copies the `TrackballNav` add-in
    into `%APPDATA%\Autodesk\Autodesk Fusion 360\API\AddIns\`.
@@ -73,10 +84,10 @@ and only flows in **3D mode** (tray → Mode), so the mouse cursor is untouched 
    - Intrinsic per-axis orientation also lives in the add-in (`ORBIT_SCALE`/`ZOOM_SIGN`).
    - **Control scheme**: the usual **Orbit pivot / Orbit style / Zoom mode** dropdowns. `view`
      raycasts the surface under the screen centre (`findBRepUsingRay`) and holds it per gesture;
-     **"cursor (under mouse)" (add-in 0.1.13+) raycasts the surface under the MOUSE CURSOR
+     **"cursor (under mouse)" (add-in 0.1.17+) raycasts the surface under the MOUSE CURSOR
      instead** — hover the feature you care about and spin the ball — and **"to_cursor (under
      mouse)"** zooms about it (the cursor is read fresh at each gesture start; if it isn't over
-     the viewport, it falls back to the model centre). `origin` is the world origin and
+     the viewport, it continues through the global fallback chain). `origin` is the world origin and
      `selection` uses the aggregate bounds of Fusion's active selection. **Selection overrides
      orbit center** makes that selection win over the designated pivot. (Stored scheme values:
      `cursor`/`to_cursor`. Display-scaling is handled: Fusion's
@@ -115,11 +126,10 @@ and moves the active view's camera.
      rotates about the model's bounding-box centre; `selection` uses the mean of SolidWorks'
      selected-entity points;
      `view` rotates about the surface **under the centre of the screen** — found by a raycast,
-     exactly like SolidWorks' own middle-drag orbit — and **holds it for the whole gesture**,
-     falling back to the object centre when the crosshair is off-model;
+     exactly like SolidWorks' own middle-drag orbit — and **holds it for the whole gesture**;
      **`cursor` rotates about the surface under the MOUSE CURSOR** — the same raycast aimed
      through the cursor instead of the screen centre (hover the feature you care about and spin
-     the ball), held per gesture, object-centre fallback on a miss.
+     the ball), held per gesture; misses continue through the global fallback chain.
    - **View-pivot hold (s)** (Per-App Bindings, `view`/`cursor` pivots) — seconds the view must be
      still before the pivot re-raycasts. Default **0.5**; `0` recomputes at the start of
      every orbit; a pan/zoom always recomputes it immediately.

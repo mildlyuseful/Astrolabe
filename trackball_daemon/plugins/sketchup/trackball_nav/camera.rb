@@ -77,7 +77,8 @@ module TrackballNav
                     if has_orbit
                       orbit_camera(model, view, camera, orbit, pivot_id, style, idle,
                                    advanced['lock_horizon'] == true,
-                                   advanced.fetch('selection_overrides_pivot', true) == true)
+                                   advanced.fetch('selection_overrides_pivot', true) == true,
+                                   advanced['orbit_pivot_candidates'] || [pivot_id])
                     elsif has_pan
                       invalidate_view_pivot!
                       pan_camera(view, camera, pan)
@@ -163,14 +164,15 @@ module TrackballNav
       private
 
       def orbit_camera(model, view, camera, orbit, pivot_id, style, idle, lock_horizon = false,
-                       selection_overrides = true)
+                       selection_overrides = true, candidates = nil)
         eye = camera.eye
         target = camera.target
         up = camera.up
         axes = camera_axes(eye, target, up)
         return false unless axes
 
-        pivot = orbit_pivot(model, view, eye, target, pivot_id, idle, selection_overrides)
+        pivot = orbit_pivot(model, view, eye, target, pivot_id, idle, selection_overrides,
+                            candidates)
         return false unless pivot
 
         if style == 'turntable' || lock_horizon
@@ -309,45 +311,29 @@ module TrackballNav
         true
       end
 
-      def orbit_pivot(model, view, eye, target, pivot_id, idle, selection_overrides = true)
+      def orbit_pivot(model, view, eye, target, pivot_id, idle, selection_overrides = true,
+                      candidates = nil)
         selected = selection_center(model) if selection_overrides && pivot_id != 'viewpoint'
         return selected if selected
+        return @gesture_pivot.clone if @gesture_pivot && idle <= PIVOT_HOLD_IDLE
 
-        case pivot_id
-        when 'viewpoint'
-          eye.clone
-        when 'origin'
-          ORIGIN.clone
-        when 'selection'
-          selection_center(model) || object_center(model, target)
-        when 'object'
-          object_center(model, target)
-        when 'view'
-          held_raycast_pivot(model, target, idle) { screen_center_pivot(model, view) }
-        when 'cursor'
-          # under-mouse pivot: refresh the live cursor pixel (the tracker's callable; no-op in the
-          # self-test), then raycast it -- same per-gesture hold + object-centre fallback as 'view'
-          held_raycast_pivot(model, target, idle) do
-            @cursor_refresh&.call(view)
-            cursor_pivot(model, view)
-          end
-        else
-          object_center(model, target)
-        end
-      end
-
-      # Capture a raycast pivot ONCE per gesture and HOLD it (recompute only after idle or a
-      # pan/zoom invalidation); fall back to the object centre on a miss. Shared by 'view' and
-      # 'cursor'. The block returns the surface hit (or nil).
-      def held_raycast_pivot(model, target, idle)
-        if @gesture_pivot.nil? || idle > PIVOT_HOLD_IDLE
-          hit = yield
-          @gesture_pivot = hit || object_center(model, target)
-          if hit.nil? && TrackballNav.respond_to?(:log_rate_limited)
-            TrackballNav.log_rate_limited('pivot-fallback', 'raycast pivot: object-centre fallback')
+        (candidates || [pivot_id]).each do |method|
+          point = case method
+                  when 'viewpoint' then eye.clone
+                  when 'origin' then ORIGIN.clone
+                  when 'selection' then selection_center(model)
+                  when 'object' then object_center(model, nil)
+                  when 'view' then screen_center_pivot(model, view)
+                  when 'cursor'
+                    @cursor_refresh&.call(view)
+                    cursor_pivot(model, view)
+                  end
+          if point
+            @gesture_pivot = point
+            return point.clone
           end
         end
-        @gesture_pivot.clone
+        nil
       end
 
       def invalidate_view_pivot!

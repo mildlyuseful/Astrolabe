@@ -9,6 +9,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from . import integrations
+from .config import ORBIT_PIVOT_METHODS, normalize_orbit_pivot_fallbacks
 
 _PAD = {"padx": 8, "pady": 4}
 
@@ -219,6 +220,78 @@ class SettingsWindow:
 
         combo.bind("<<ComboboxSelected>>", _on_select)
         return var
+
+    def _orbit_fallback_editor(self, parent):
+        """Ordered global pivot-fallback editor; edits save/apply immediately."""
+        keys = ("general", "orbit_pivot_fallbacks")
+        labels = {
+            "cursor": "Under Cursor", "cursor_3d": "3D Cursor", "view": "Auto Depth",
+            "viewpoint": "Viewpoint", "selection": "Selection", "object": "Object",
+            "origin": "World Origin",
+        }
+        row = ttk.Frame(parent)
+        row.pack(fill="x", padx=8, pady=(3, 5))
+        ttk.Label(row, text="Failure fallback order", width=24, anchor="nw").pack(side="left")
+        body = ttk.Frame(row)
+        body.pack(side="left", fill="x", expand=True)
+        listbox = tk.Listbox(body, height=4, width=27, exportselection=False)
+        listbox.grid(row=0, column=0, rowspan=4, sticky="nsew")
+        body.columnconfigure(0, weight=1)
+
+        chain = normalize_orbit_pivot_fallbacks(self._get(keys))
+
+        def render(select=None):
+            listbox.delete(0, "end")
+            for i, method in enumerate(chain, 1):
+                listbox.insert("end", "%d. %s" % (i, labels[method]))
+            if chain and select is not None:
+                select = max(0, min(select, len(chain) - 1))
+                listbox.selection_set(select)
+                listbox.activate(select)
+
+        def selected():
+            sel = listbox.curselection()
+            return int(sel[0]) if sel else None
+
+        def save(select=None):
+            self._set_and_save(keys, list(chain))
+            render(select)
+
+        def move(delta):
+            i = selected()
+            if i is None or not 0 <= i + delta < len(chain):
+                return
+            chain[i], chain[i + delta] = chain[i + delta], chain[i]
+            save(i + delta)
+
+        ttk.Button(body, text="Up", width=8, command=lambda: move(-1)).grid(
+            row=0, column=1, padx=(6, 0), sticky="ew")
+        ttk.Button(body, text="Down", width=8, command=lambda: move(1)).grid(
+            row=1, column=1, padx=(6, 0), sticky="ew")
+
+        add_var = tk.StringVar(value=labels[ORBIT_PIVOT_METHODS[0]])
+        add_combo = ttk.Combobox(body, textvariable=add_var,
+                                 values=[labels[m] for m in ORBIT_PIVOT_METHODS],
+                                 state="readonly", width=16)
+        add_combo.grid(row=4, column=0, sticky="w", pady=(4, 0))
+
+        def add():
+            method = next((m for m in ORBIT_PIVOT_METHODS if labels[m] == add_var.get()), None)
+            if method is not None and method not in chain:
+                chain.append(method)
+                save(len(chain) - 1)
+
+        def remove():
+            i = selected()
+            if i is not None:
+                chain.pop(i)
+                save(min(i, len(chain) - 1))
+
+        ttk.Button(body, text="Add", width=8, command=add).grid(
+            row=4, column=1, padx=(6, 0), pady=(4, 0), sticky="ew")
+        ttk.Button(body, text="Remove", width=8, command=remove).grid(
+            row=2, column=1, padx=(6, 0), sticky="ew")
+        render()
 
     def _copy_onshape_userscript(self):
         """Copy the Violentmonkey/Tampermonkey userscript to the clipboard. Returns True on success."""
@@ -990,6 +1063,7 @@ class SettingsWindow:
         secS.pack(fill="x", padx=10, pady=6)
         self._mapped_combo_row(secS, "Orbit pivot", ("general", "scheme", "orbit_pivot"),
                                [("view", "view"), ("cursor (under mouse)", "cursor"),
+                                ("3D cursor", "cursor_3d"), ("viewpoint", "viewpoint"),
                                 ("object", "object"), ("origin", "origin"),
                                 ("selection", "selection")])
         self._combo_row(secS, "Orbit style", ("general", "scheme", "orbit_style"),
@@ -997,13 +1071,12 @@ class SettingsWindow:
         self._mapped_combo_row(secS, "Zoom mode", ("general", "scheme", "zoom_mode"),
                                [("to_center", "to_center"), ("to_object", "to_object"),
                                 ("to_cursor (under mouse)", "to_cursor")])
-        ttk.Label(secS, text="Per-app overrides in Per-App Bindings. origin = rotate about the world "
-                             "origin (no translation); object = about the model centre; view = about "
-                             "the surface under the screen centre (like native middle-drag orbit); "
-                             "cursor / to_cursor = about the surface under the MOUSE CURSOR (FreeCAD, "
-                             "AutoCAD + Fusion today; other apps fall back to their view/object "
-                             "pivot); selection = the selection pivot (falls back to the model "
-                             "centre; Blender's 3D cursor is its own option in the Blender panel).",
+        self._orbit_fallback_editor(secS)
+        ttk.Label(secS, text="The selected pivot is tried first. If it is unavailable, resolution "
+                             "restarts at item 1 of the fallback order; unsupported methods are "
+                             "skipped. An empty list means no fallback. Selection Override still "
+                             "wins when enabled, except Viewpoint always turns in place. Per-app "
+                             "pivot choices can override the General default.",
                   foreground="#888", wraplength=600).pack(anchor="w", padx=10, pady=(2, 6))
 
         sec2 = ttk.LabelFrame(outer, text="Pointer / scroll (cursor mode)")

@@ -37,7 +37,7 @@ PAN_SCALE = 0.14                 # broker pan delta -> fraction of view extents 
 ZOOM_SCALE = 0.25                # broker zoom delta -> fraction of view extents (baseline zoom feel)
 ZOOM_SIGN = 1.0                  # twist->zoom direction
 
-ADDIN_VERSION = "0.1.16"         # reported in the handshake so the daemon shows the LOADED version.
+ADDIN_VERSION = "0.1.17"         # 0.1.17: configurable orbit-pivot fallback chain.
                                  # 0.1.16: read selection from app.userInterface.activeSelections.
                                  # 0.1.15: real selection/origin pivots + selection override.
                                  # 0.1.14: scheme values renamed (pointer->cursor, cursor->selection,
@@ -251,7 +251,7 @@ def _nearest_ray_hit(root, origin, direction, tol):
 def _raycast_pivot(design, origin, d, half_h, label):
     """Shared aperture-expanding raycast used by BOTH the screen-centre ("view") and the cursor
     pivots: try small->large ray thickness to catch thin/edge features, validate the hit against the
-    model bbox, return the nearest surface Point3D or None (-> object-centre fallback)."""
+    model bbox, return the nearest surface Point3D or None (continue the configured chain)."""
     root = design.rootComponent
     bb = root.boundingBox
     for frac in APERTURE_FRACS:
@@ -262,7 +262,7 @@ def _raycast_pivot(design, origin, d, half_h, label):
             _log_rl(label, "%s: surface hit (aperture=%.3f cm) -> (%.2f,%.2f,%.2f)"
                     % (label, frac * half_h, hit.x, hit.y, hit.z))
             return hit
-    _log_rl(label + "_miss", "%s: no surface hit -> object-centre fallback" % label)
+    _log_rl(label + "_miss", "%s: no surface hit -> fallback chain" % label)
     return None
 
 
@@ -392,7 +392,7 @@ def _cursor_pivot(cam):
     aimed through the cursor pixel instead of the optical axis. Ray construction: unproject the
     pixel with viewToModelSpace (its depth doesn't matter -- the point only AIMS the ray);
     perspective rays run from the eye through it, ortho rays run parallel to the view axis through
-    it (pushed back like the centre ray). Returns a Point3D or None (-> object-centre fallback)."""
+    it (pushed back like the centre ray). Returns a Point3D or None (continue the fallback chain)."""
     design = _active_design()
     vp = app.activeViewport
     if design is None or not vp:
@@ -433,7 +433,7 @@ def _cursor_pivot(cam):
     return _raycast_pivot(design, origin, d, half_h, "cursor-pivot")
 
 
-def _orbit_pivot(op, cam, tgt, idle, sel_override=True):
+def _orbit_pivot(op, cam, tgt, idle, sel_override=True, candidates=None):
     """Pivot point for an orbit gesture:
       view            -> raycast down the screen centre to the real surface depth, computed ONCE per
                          gesture and HELD (so the point under the crosshair stays put) -- like native
@@ -441,23 +441,30 @@ def _orbit_pivot(op, cam, tgt, idle, sel_override=True):
       cursor          -> raycast the surface under the LIVE MOUSE CURSOR (read fresh at gesture
                          start), same per-gesture hold + fallbacks as `view`.
       object / selection -> model bounding-box centre.
-    Everything falls back to the model centre, then the view target, when nothing is available."""
-    selected = _selection_center() if sel_override or op == "selection" else None
+    Each method may fail honestly; ``candidates`` is the daemon-expanded global chain."""
+    selected = _selection_center() if (sel_override and op != "viewpoint") else None
     if selected is not None:
         return selected
-    if op == "origin":
-        return adsk.core.Point3D.create(0.0, 0.0, 0.0)
-    if op == "view":
-        if _gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _screen_center_pivot(cam) or _object_center(tgt)
+    if _gesture["pivot"] is not None and idle <= PIVOT_HOLD_IDLE:
         return _gesture["pivot"]
-    if op == "cursor":
-        if _gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _cursor_pivot(cam) or _object_center(tgt)
-        return _gesture["pivot"]
-    if op in ("object", "selection"):
-        return _object_center(tgt)
-    return tgt
+    legacy = candidates is None
+    for method in (candidates if candidates is not None else [op, "object"]):
+        if method == "origin":
+            point = adsk.core.Point3D.create(0.0, 0.0, 0.0)
+        elif method == "view":
+            point = _screen_center_pivot(cam)
+        elif method == "cursor":
+            point = _cursor_pivot(cam)
+        elif method == "selection":
+            point = _selection_center()
+        elif method == "object":
+            point = _object_center(None)
+        else:                                      # viewpoint / cursor_3d unsupported in Fusion
+            continue
+        if point is not None:
+            _gesture["pivot"] = point
+            return point
+    return tgt if legacy else None
 
 
 def _zoom_pivot(zm, cam, tgt, idle, sel_override=True):
@@ -490,6 +497,7 @@ def _apply(frame):
         zm = frame.get("zm", "to_center")     # zoom mode:  to_center | to_object | to_cursor
         adv = frame.get("adv") or {}
         sel_override = bool(adv.get("selection_overrides_pivot", True))
+        pivot_candidates = adv.get("orbit_pivot_candidates") or [op]
         sig = (op, style, zm, sel_override)
         if sig != _last_scheme["v"]:           # confirm live scheme changes are received
             _last_scheme["v"] = sig
@@ -519,7 +527,10 @@ def _apply(frame):
         if o[0] or o[1] or o[2]:
             # ---- ORBIT: rotate eye + target + up about the chosen pivot ----
             _zoom_gesture["pivot"] = None     # view rotates -> the next zoom re-raycasts its pivot
-            pivot = _orbit_pivot(op, cam, tgt, idle, sel_override=sel_override)
+            pivot = _orbit_pivot(op, cam, tgt, idle, sel_override=sel_override,
+                                 candidates=pivot_candidates)
+            if pivot is None:
+                return
             dpt = ((pivot.x - tgt.x) ** 2 + (pivot.y - tgt.y) ** 2 + (pivot.z - tgt.z) ** 2) ** 0.5
             _log_rl("pivot", "orbit pivot=%s |P-T|=%.3f P=(%.2f,%.2f,%.2f) target=(%.2f,%.2f,%.2f)"
                     % (op, dpt, pivot.x, pivot.y, pivot.z, tgt.x, tgt.y, tgt.z))

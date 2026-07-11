@@ -1,7 +1,7 @@
 @tool
 extends EditorPlugin
 
-const ADDIN_VERSION := "0.1.3"
+const ADDIN_VERSION := "0.1.4"
 const DEFAULT_PORT := 47900
 const PIVOT_HOLD_IDLE := 0.35
 const OBJ_CACHE_SEC := 0.5
@@ -167,6 +167,9 @@ func _apply(frame: Dictionary, idle: float) -> void:
 		twist_action = "none"
 	var pan_scales := bool(adv.get("pan_scales_with_distance", true))
 	var sel_override := bool(adv.get("selection_overrides_pivot", true))
+	var pivot_candidates = adv.get("orbit_pivot_candidates", [op])
+	if typeof(pivot_candidates) != TYPE_ARRAY:
+		pivot_candidates = [op]
 	var fly_speed := float(adv.get("fly_speed", 1.0))
 	var walk_speed := float(adv.get("walk_speed", 1.0))
 	var invert: Dictionary = adv.get("invert", {})
@@ -192,14 +195,15 @@ func _apply(frame: Dictionary, idle: float) -> void:
 	elif nav_mode == "walk":
 		changed = _apply_walk(cam, o, p, z, walk_speed)
 	else:
-		changed = _apply_orbit(cam, o, p, z, op, style, zm, twist_action, lock_h, pan_scales, idle, sel_override)
+		changed = _apply_orbit(cam, o, p, z, op, style, zm, twist_action, lock_h, pan_scales,
+			idle, sel_override, pivot_candidates)
 	if changed:
 		_write_cam(camera, cam)
 
 
 func _apply_orbit(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float,
 		op: String, _style: String, zm: String, twist_action: String, _lock_h: bool,
-		pan_scales: bool, idle: float, sel_override: bool) -> bool:
+		pan_scales: bool, idle: float, sel_override: bool, pivot_candidates: Array) -> bool:
 	if absf(o.x) > 1e-12 or absf(o.y) > 1e-12 or absf(o.z) > 1e-12:
 		var twist := o.z
 		var orbit_o := Vector3(o.x, o.y, 0.0)  # never roll
@@ -209,9 +213,10 @@ func _apply_orbit(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float,
 			_gesture_invalid = true
 			did = true
 		if absf(orbit_o.x) > 1e-12 or absf(orbit_o.y) > 1e-12:
-			var pivot = _orbit_pivot(op, cam, idle, sel_override)
-			if pivot != null:
-				_focus_dist = TrackballNavCamera.clamp_dist((cam.location - pivot).length())
+			var pivot = _orbit_pivot(op, cam, idle, sel_override, pivot_candidates)
+			if pivot == null:
+				return did
+			_focus_dist = TrackballNavCamera.clamp_dist((cam.location - pivot).length())
 			TrackballNavCamera.orbit(cam, orbit_o, true, pivot)  # turntable only
 			_zoom_gesture_pivot = null
 			return true
@@ -254,33 +259,32 @@ func _apply_walk(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float, 
 	return false
 
 
-func _orbit_pivot(op: String, cam: TrackballNavCamera.Cam, idle: float, sel_override: bool):
-	if op == "viewpoint":
-		return null
+func _orbit_pivot(op: String, cam: TrackballNavCamera.Cam, idle: float, sel_override: bool,
+		candidates: Array):
 	var sel := _selection_center()
 	var center = sel[0]
 	var bbox = sel[1]
-	if op in ["object", "selection"]:
-		return center if center != null else _forward_point(cam)
-	if sel_override and center != null:
+	if sel_override and op != "viewpoint" and center != null:
 		return center
-	if op == "origin":
-		return Vector3.ZERO
-	if op == "view":
-		if _gesture_pivot == null or _gesture_invalid or idle > PIVOT_HOLD_IDLE:
-			_gesture_pivot = _screen_center_pivot(cam, bbox if sel_override else null)
-			if _gesture_pivot == null:
-				_gesture_pivot = _forward_point(cam)
-			_gesture_invalid = false
+	if _gesture_pivot != null and not _gesture_invalid and idle <= PIVOT_HOLD_IDLE:
 		return _gesture_pivot
-	if op == "cursor":
-		if _gesture_pivot == null or _gesture_invalid or idle > PIVOT_HOLD_IDLE:
-			_gesture_pivot = _cursor_pivot(bbox if sel_override else null)
-			if _gesture_pivot == null:
-				_gesture_pivot = _forward_point(cam)
+	for method in candidates:
+		var point = null
+		if method == "viewpoint":
+			point = cam.location
+		elif method == "origin":
+			point = Vector3.ZERO
+		elif method == "view":
+			point = _screen_center_pivot(cam, bbox if sel_override else null)
+		elif method == "cursor":
+			point = _cursor_pivot(bbox if sel_override else null)
+		elif method in ["object", "selection"]:
+			point = center
+		if point != null:
+			_gesture_pivot = point
 			_gesture_invalid = false
-		return _gesture_pivot
-	return _forward_point(cam)
+			return point
+	return null
 
 
 func _zoom_toward(zm: String, idle: float, sel_override: bool):

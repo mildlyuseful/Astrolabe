@@ -86,6 +86,7 @@ import math
 import threading
 import time
 
+from .config import orbit_pivot_candidates
 from .util import get_logger
 
 # pywin32 is Windows-only and optional. Import guarded so the daemon still runs (with this
@@ -281,6 +282,8 @@ class SolidWorksDriver:
         # view has been idle for >= _pivot_hold_sec, then held (so it doesn't chase a moving
         # target). origin orbit takes NO pivot (pure rotation, zero translation).
         self._orbit_pivot = None
+        self._orbit_pivot_resolved = False
+        self._orbit_pivot_found = False
         # "to_cursor" zoom's own held pivot (reset on orbit/pan and by set_scheme).
         self._zoom_pivot = None
         self._pivot_hold_sec = DEFAULT_PIVOT_HOLD
@@ -299,7 +302,8 @@ class SolidWorksDriver:
         """Live-update the flush/viewport-refresh rate (Hz). Applied on the next flush."""
         self._period = 1.0 / self._clamp_rate(hz)
 
-    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True):
+    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True,
+                   orbit_pivot_fallbacks=None):
         """Set the control scheme applied on the next flush. Parallels NavBroker.set_scheme so
         app._apply_schemes() drives SolidWorks the same way it drives the socket add-ons.
           orbit_pivot: origin | object | view | selection | cursor
@@ -316,8 +320,12 @@ class SolidWorksDriver:
                        to_center)"""
         self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode,
                         "sel_override": bool(selection_overrides_pivot)}
+        if orbit_pivot_fallbacks is not None:
+            self._scheme["fallbacks"] = list(orbit_pivot_fallbacks)
         self._selection_cache = (None, 0.0, None)
         self._orbit_pivot = None             # drop any held pivot so a pivot switch takes effect now
+        self._orbit_pivot_resolved = False
+        self._orbit_pivot_found = False
         self._zoom_pivot = None
 
     def set_pivot_hold(self, sec):
@@ -546,6 +554,8 @@ class SolidWorksDriver:
                     self._warn_once("zoom", exc)
             if px or py or zoom:
                 self._orbit_pivot = None            # pan/zoom move the screen centre -> the 'view'/
+                self._orbit_pivot_resolved = False
+                self._orbit_pivot_found = False
                 #                                     'cursor' pivot must recompute on the next orbit
             if ox or oy or oz or px or py:
                 self._zoom_pivot = None             # view rotated/moved under the cursor -> the
@@ -659,26 +669,30 @@ class SolidWorksDriver:
             return
 
         op = scheme["op"]
-        selected = self._selection_center(self._selmgr) if scheme.get("sel_override", True) else None
-        if selected is not None:
-            pivot = selected
-        elif op == "origin":
-            pivot = None                            # rotate only, no pan
-        elif op == "view":
-            if self._orbit_pivot is None or idle >= self._pivot_hold_sec:
-                self._orbit_pivot = self._view_pivot(c0, c1, c2, model)   # capture + hold
-            pivot = self._orbit_pivot
-        elif op == "cursor":
-            # the surface point under the MOUSE CURSOR, captured once + held like 'view';
-            # unmappable cursor / ray miss -> the object centre for the rest of the gesture
-            if self._orbit_pivot is None or idle >= self._pivot_hold_sec:
-                self._orbit_pivot = (self._cursor_pivot(view, c0, c1, c2, model)
-                                     or self._object_center(model))
-            pivot = self._orbit_pivot
-        elif op == "selection":
-            pivot = self._selection_center(self._selmgr) or self._object_center(model)
-        else:                          # object / selection -> bounding-box centre (fixed point)
-            pivot = self._object_center(model)
+        if not self._orbit_pivot_resolved or idle >= self._pivot_hold_sec:
+            self._orbit_pivot_resolved = True
+            self._orbit_pivot_found = False
+            self._orbit_pivot = None
+            selected = (self._selection_center(self._selmgr)
+                        if scheme.get("sel_override", True) and op != "viewpoint" else None)
+            if selected is not None:
+                self._orbit_pivot = selected
+                self._orbit_pivot_found = True
+            else:
+                fallbacks = scheme.get("fallbacks")
+                methods = (orbit_pivot_candidates(op, fallbacks) if fallbacks is not None
+                           else orbit_pivot_candidates(op, ["object", "origin"]))
+                for method in methods:
+                    found, candidate = self._resolve_orbit_pivot_method(
+                        method, view, c0, c1, c2, model)
+                    if found:
+                        self._orbit_pivot = candidate
+                        self._orbit_pivot_found = True
+                        break
+        pivot = self._orbit_pivot
+
+        if not self._orbit_pivot_found:
+            return
 
         view.RotateAboutAxis(angle, 0.0, 0.0, 0.0, ax, ay, az)   # pivots about origin
 
@@ -695,24 +709,40 @@ class SolidWorksDriver:
         view.Translation3 = self._mkvec(*new_t)
         self._trans = list(new_t)                   # keep the tracked Translation3 in sync
 
+    def _resolve_orbit_pivot_method(self, method, view, c0, c1, c2, model):
+        """Return (resolved, point). Origin deliberately resolves to ``point=None``."""
+        if method == "origin":
+            return True, None
+        if method == "view":
+            point = self._view_pivot(c0, c1, c2, model)
+        elif method == "cursor":
+            point = self._cursor_pivot(view, c0, c1, c2, model)
+        elif method == "selection":
+            point = self._selection_center(self._selmgr)
+        elif method == "object":
+            point = self._object_center(model)
+        else:                                      # viewpoint / cursor_3d unsupported here
+            return False, None
+        return point is not None, point
+
     def _view_pivot(self, c0, c1, c2, model):
         """The model point currently at the screen centre -- the pivot held by a 'view' orbit gesture.
         Its in-plane position is the screen centre; its DEPTH along the optical axis is the TRUE surface
         depth under the crosshair from a screen-centre raycast (SelectByRay), matching SolidWorks' own
-        middle-drag orbit. Falls back to the object-centre depth when the ray misses or raycasting is
-        off/unavailable (the old behaviour). None if the view scale/translation aren't known yet."""
+        middle-drag orbit. Returns None on a miss/unavailable raycast so the configured global chain
+        decides what comes next."""
         if not self._scale or self._trans is None:
             return None
         box = self._object_box(model)
         center = self._box_center(box)
+        if not VIEW_PIVOT_RAYCAST or box is None or center is None:
+            return None
         a = -self._trans[0] / self._scale           # in-plane screen-centre offset (Scale2*(col.P)+T=0)
         b = -self._trans[1] / self._scale
         obj_depth = (c2[0] * center[0] + c2[1] * center[1] + c2[2] * center[2]) if center else 0.0
-        depth = obj_depth
-        if VIEW_PIVOT_RAYCAST and box is not None:
-            rd = self._raycast_depth(model, c0, c1, c2, a, b, obj_depth, box)
-            if rd is not None:                      # true surface depth under the crosshair
-                depth = rd
+        depth = self._raycast_depth(model, c0, c1, c2, a, b, obj_depth, box)
+        if depth is None:
+            return None
         return (a * c0[0] + b * c1[0] + depth * c2[0],
                 a * c0[1] + b * c1[1] + depth * c2[1],
                 a * c0[2] + b * c1[2] + depth * c2[2])
@@ -724,7 +754,7 @@ class SolidWorksDriver:
         hit is validated against the bounding box (+margin) to reject bogus values; among the hits at a
         radius we take the one nearest the viewer (largest c2.hit). SelectByRay mutates the selection
         set, so we SAVE/clear/RESTORE the user's selection around it. Fully guarded -- any failure
-        returns None and the 'view' pivot keeps the object-centre depth. Runs once per orbit gesture."""
+        returns None and the global resolver continues with its next method. Runs once per gesture."""
         ext, selmgr = self._ext, self._selmgr
         if ext is None or selmgr is None:
             return None
@@ -879,12 +909,12 @@ class SolidWorksDriver:
     def _cursor_pivot(self, view, c0, c1, c2, model):
         """The model point under the MOUSE CURSOR: the same SelectByRay raycast as the 'view'
         pivot, aimed through the cursor's (a, b) instead of the screen centre's. Returns a model
-        point, or None (unmappable cursor / no box / ray miss) -> the caller falls back to the
-        object centre. Runs once per orbit gesture (then the pivot is held)."""
+        point, or None (unmappable cursor / no box / ray miss), allowing the configured chain to
+        continue. Runs once per orbit gesture (then the resolved pivot is held)."""
         ab = self._cursor_screen_ab(view, c0, c1)
         if ab is None:
             self._info_rl("cursor-pivot", "solidworks: cursor not over the viewport "
-                                          "(or unmapped) -> object-centre fallback")
+                                          "(or unmapped) -> fallback chain")
             return None
         a, b = ab
         box = self._object_box(model)
@@ -894,8 +924,7 @@ class SolidWorksDriver:
         obj_depth = (c2[0] * center[0] + c2[1] * center[1] + c2[2] * center[2]) if center else 0.0
         depth = self._raycast_depth(model, c0, c1, c2, a, b, obj_depth, box)
         if depth is None:
-            self._info_rl("cursor-pivot", "solidworks: nothing under the cursor -> "
-                                          "object-centre fallback")
+            self._info_rl("cursor-pivot", "solidworks: nothing under the cursor -> fallback chain")
             return None
         self._info_rl("cursor-pivot", "solidworks: cursor pivot held at (%.4f, %.4f, %.4f)"
                       % (a * c0[0] + b * c1[0] + depth * c2[0],

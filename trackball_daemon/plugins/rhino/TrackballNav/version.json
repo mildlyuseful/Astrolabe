@@ -1,4 +1,4 @@
 {
-  "version": "0.1.10",
+  "version": "0.1.11",
   "_comment": "Kept in sync with ADDIN_VERSION in tbnav_rhino.py. 0.1.10: fix silent abort — bare vector.IsTiny is a method (always truthy) in Rhino Python; restore 0.1.7 RayShoot path; add eye MeshRay on display/CreateFromBrep meshes for front face (min cam-d wins)."
 }
