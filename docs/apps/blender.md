@@ -83,10 +83,10 @@ BLE trackball
   → _apply(...)  (resolves the target VIEW_3D, applies the delta to its RegionView3D, tag_redraw)
 ```
 
-Key contract: **the daemon already scales** o/p/z (per-app sensitivity/gain + the *generic* invert in
-`output.py`). The add-on only bakes in a **baseline sign/scale** (`ORBIT_SCALE`, `PAN_SCALE`, …) and
-the **scheme/advanced** behavior. Do not re-scale in both places. (The Blender-specific *per-mode*
-inverts are the exception — they live in the add-on, see §5.4 and Gotcha #6.)
+Key contract: the daemon applies global physical orientation and the saved user layer, then sends
+Blender's immutable host correction in `adv.host_baseline`. The add-on applies that correction after
+mode-specific action routing. Its camera-math constants are neutral so the baseline is never
+double-applied. See [`../default_profiles.md`](../default_profiles.md).
 
 ---
 
@@ -118,12 +118,13 @@ under the mouse," because a timer callback has no live mouse position (see Gotch
    does nothing" reports; see Solved Problem #2/#6).
 5. **Camera-view exit**: if the viewport is showing the camera and lock-camera is off, switch to
    `PERSP` so edits are visible (Solved Problem #2).
-6. **Per-mode invert**: flip o/p/z per `advanced.invert.<mode>` (see §5.4).
-7. **Dispatch** by nav mode → `_apply_fly` / `_apply_walk` / orbit (`_apply_orbit` / `_pan` /
+6. **Per-mode action routing**: select and user-invert o/p/z per `advanced` (see §5.4).
+7. **Host alignment**: apply `advanced.host_baseline` after the action is known.
+8. **Dispatch** by nav mode → `_apply_fly` / `_apply_walk` / orbit (`_apply_orbit` / `_pan` /
    `_zoom`/`_dolly`).
-8. **Camera-lock**: if in camera view *and* lock-camera is on, drive `scene.camera.matrix_world`.
-9. **`applied ...` diagnostic** (did the view actually change? perspective/area/rotΔ/locΔ).
-10. `area.tag_redraw()`.
+9. **Camera-lock**: if in camera view *and* lock-camera is on, drive `scene.camera.matrix_world`.
+10. **`applied ...` diagnostic** (did the view actually change? perspective/area/rotΔ/locΔ).
+11. `area.tag_redraw()`.
 
 ### 4.4 The math helpers (pure; testable headless)
 `_view_axes`, `_eye`, `_orbit_R`, `_apply_world_rotation`, `_pan`, `_zoom`, `_dolly`, `_roll`,
@@ -189,14 +190,15 @@ and `cursor` **share the one per-gesture hold slot** (`_gesture`),
 which is fine because only one pivot is active at a time. Add-on 0.1.12 applies
 `selection_overrides_pivot` to every external pivot; `camera` remains true turn-in-place.
 
-### 5.3 Baseline constants (top of the add-on — tune here, not in the daemon)
-| Const | Meaning / why |
+### 5.3 Immutable host baseline
+
+Blender's orbit `0.5`, pan `(0.5,-0.5)`, zoom/dolly `0.5`, and fly/walk move `0.5`
+corrections live in `HOST_BASELINE_PROFILES`, not editable add-on constants. The add-on constants are
+all neutral and `adv.host_baseline` is the only source of intrinsic direction/feel. Runtime constants
+that remain local are:
+
+| Const | Meaning |
 |---|---|
-| `ORBIT_SCALE = (0.5,0.5,0.5)` | pitch/yaw/twist baseline. **0.5 makes daemon Sensitivity 1.0 a true 1:1 orbit** — the dual-sensor device reports ~2× the physical angle (Solved Problem #3). |
-| `PAN_SIGN`, `PAN_SCALE=0.5` | pan direction + feel (× view_distance when `pan_scales_with_distance`). |
-| `ZOOM_SCALE=0.5`, `ZOOM_SIGN` | zoom factor per delta. |
-| `DOLLY_SCALE=0.5` | dolly distance per delta (× view_distance). |
-| `FLY_MOVE`, `WALK_MOVE = 0.5` | fly/walk move scale. Floored at `view_distance≥1` (`_move_scale`) so movement never vanishes up close (Solved Problem #6). |
 | `PIVOT_HOLD_IDLE=0.35` | seconds of no frames that ends a gesture → re-raycast the screen-center pivot. |
 | `_TIMER_INTERVAL=1/90` | main-thread poll rate. |
 | `_DEFAULT_PORT=47900` | broker port fallback if `bridge.json` is missing. |
@@ -206,8 +208,9 @@ Each action under `{orbit,camera,fly,walk}` selects source X/Y/Z and has its own
 applied **in the add-on**, in `_apply_action_routing`, just before dispatch because the active mode
 can also be changed by Blender's local shortcut. Rotation actions select from `o`; shifted movement
 actions select from `(p.x,p.y,z)`. Thus Walk Forward can select Z (twist) without changing Orbit.
-Defaults reproduce the old fixed wiring. The inversion defaults still bake in the "inside-out" fix:
-`camera.roll` and `fly.bank` start **on** so first-person roll matches external-pivot orbit.
+Defaults reproduce the old fixed wiring. The immutable host baseline bakes in the "inside-out" fix
+for `camera.roll` and `fly.bank`; the saved user defaults are neutral/off, and the wire value is
+baseline XOR user preference.
 `camera` shares orbit's pan/zoom routes. This **replaced** the old single `invert_camera_roll`
 flag — that key is now ignored if present in an old config.
 
@@ -331,8 +334,8 @@ These were all found via live trackball testing; the fixes are in the code but t
    `applied persp=…->… rotD=… locD=…` diagnostic was added to diagnose exactly this.
 3. **Orbit felt 2× too fast at Sensitivity 1.0.**
    *Root cause:* the add-on rotates the view by exactly the broker delta (measured gain 1.000), and the
-   **dual-sensor device reports ~2× the physical angle.** *Fix:* `ORBIT_SCALE = 0.5` so Sensitivity 1.0
-   is a true 1:1 ball→view orbit. Pan/zoom kept their feel-based scales.
+   **dual-sensor device reports ~2× the physical angle.** *Fix:* the immutable Blender host baseline
+   uses orbit factor `0.5`, so Sensitivity 1.0 is a true 1:1 ball→view orbit.
 4. **Twist-roll felt inverted in fly/walk/camera vs object orbit.**
    *Root cause:* the world-space roll is the *same* sign everywhere, but rolling **inside-out**
    (first-person / about the eye) *feels* opposite to rolling **outside-in** (about an external pivot).
@@ -369,7 +372,7 @@ These were all found via live trackball testing; the fixes are in the code but t
   `_apply_schemes` wiring, regressions). `tests/test_blender_nav_wiring.py` is the Blender-specific one.
 - **Live (only thing not coverable headless):** open Blender, run the daemon, focus a 3D viewport,
   switch to 3D mode, and use the trackball. Use `blender_addin.log` (see §12) and Blender's F3 reload
-  to iterate. Sign/feel calibration (`ORBIT_SCALE` etc.) needs a real trackball.
+  to iterate. Host-baseline sign/feel calibration needs a real trackball.
 
 ---
 
@@ -380,8 +383,8 @@ These were all found via live trackball testing; the fixes are in the code but t
   add-on version (3 places) if the add-on changed. Restart daemon + F3.
 - **Add an invertible axis:** add the key to the right mode in `_DEFAULT_BLENDER_INVERT`, apply it in
   the `_apply` per-mode invert block, add a checkbox to the relevant `_invert_row` in ui.
-- **Change feel/calibration:** edit the baseline constants at the top of the add-on (§5.3). Don't add a
-  second scale in the daemon.
+- **Change suite alignment:** edit Blender's immutable `HOST_BASELINE_PROFILES` entry (§5.3), update
+  the baseline tests/docs, and bump the daemon/add-on contract versions.
 - **Ship a new add-on build:** bump `bl_info["version"]` + `ADDIN_VERSION` + `version.json`; the
   daemon's `auto_update` re-copies on next launch (compares `version.json`).
 

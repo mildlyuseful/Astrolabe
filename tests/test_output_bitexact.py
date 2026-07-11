@@ -112,5 +112,32 @@ def test_global_orientation_composes_with_distinct_per_app_axis_routes(engine, m
     engine.set_active_bindings("rhino")
     engine.handle_packet(_pkt(0.01, 0.02, 0.03))
 
-    assert nav[0][:3] == pytest.approx((0.02, 0.01, 0.03))
-    assert nav[1][:3] == pytest.approx((0.03, 0.02, 0.01))
+    assert nav[0][:3] == pytest.approx((-0.02, -0.01, 0.03))  # Fusion host baseline
+    assert nav[1][:3] == pytest.approx((0.03, 0.02, 0.01))    # Rhino host baseline is neutral orbit
+
+
+def test_lean_host_baseline_composes_with_user_inversion(engine, monkeypatch):
+    engine.cfg.data["apps"]["fusion360"]["bindings"]["invert"]["orbit"] = [True, False, False]
+    engine.set_active_bindings("fusion360")
+    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
+    nav = []
+    engine.nav_sink = lambda *a: nav.append(a)
+    engine.set_mode(OutputEngine.MODE_CUBE)
+
+    engine.handle_packet(_pkt(0.01, 0.02, 0.03))
+
+    # Fusion baseline flips X/Y; the user's X inversion flips the effective X direction back.
+    assert nav[-1][:3] == pytest.approx((0.01, -0.02, 0.03))
+
+
+def test_rich_host_baseline_is_deferred_to_mode_aware_addon(engine, monkeypatch):
+    engine.set_active_bindings("blender")
+    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
+    nav = []
+    engine.nav_sink = lambda *a: nav.append(a)
+    engine.set_mode(OutputEngine.MODE_CUBE)
+
+    engine.handle_packet(_pkt(0.01, 0.02, 0.03))
+
+    # Blender receives raw user-routed deltas; app.py supplies its 0.5 host factors in frame.adv.
+    assert nav[-1][:3] == pytest.approx((0.01, 0.02, 0.03))

@@ -28,7 +28,8 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.7"          # 0.2.7: per-action X/Y/Z source routing.
+ADDIN_VERSION = "0.2.8"          # 0.2.8: immutable host baseline profile.
+                                 # 0.2.7: per-action X/Y/Z source routing.
                                  # selected, orbit/to_cursor use the selection centre instead of the
                                  # designated view/cursor/origin pivot; when False, raycasts ignore
                                  # the selection bbox gate.
@@ -503,6 +504,24 @@ def _apply_action_routing(nav_mode, op, o, p, z, adv):
     return o, p, z
 
 
+def _apply_host_baseline(nav_mode, twist_action, o, p, z, adv):
+    baseline = adv.get("host_baseline") or {}
+    orbit = baseline.get("orbit", [1.0, 1.0, 1.0])
+    pan = baseline.get("pan", [1.0, 1.0])
+    zoom = float(baseline.get("zoom", 1.0))
+    move = float(baseline.get("move", 1.0))
+    if nav_mode == "orbit":
+        twist_factor = zoom if twist_action in ("zoom", "dolly") else float(orbit[2])
+        o = [o[0] * float(orbit[0]), o[1] * float(orbit[1]), o[2] * twist_factor]
+        p = [p[i] * float(pan[i]) for i in range(2)]
+        z *= zoom
+    else:
+        o = [o[i] * float(orbit[i]) for i in range(3)]
+        p = [v * move for v in p]
+        z *= move
+    return o, p, z
+
+
 def _apply_orbit(cam, o, p, z, op, style, zm, twist_action, lock, pan_scales, idle,
                  sel_override=True, pivot_candidates=None):
     """ORBIT mode: orbit (with twist routed by twist_action), pan, or dolly. Exactly one channel is
@@ -603,6 +622,7 @@ def _apply(info, frame, idle):
         _log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s horizon=%s sel_override=%s" % sig)
 
     o, p, z = _apply_action_routing(nav_mode, op, o, p, z, adv)
+    o, p, z = _apply_host_baseline(nav_mode, twist_action, o, p, z, adv)
 
     cam = _read_camera(info)
     if nav_mode == "fly":

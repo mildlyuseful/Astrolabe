@@ -60,6 +60,20 @@ mode-specific action. Those routes are independent: for example, setting **Walk 
 makes twist drive forward without changing Orbit or Fly. Identity/default routes preserve the
 pre-v5 behavior exactly.
 
+### Shipped default profiles and host alignment
+
+Each supported app has two separate layers. An immutable **host baseline** contains the
+developer-owned sign and scale corrections that make the software feel like the rest of the suite.
+The saved per-app profile contains only user choices. Runtime composition is physical orientation,
+then host alignment, then user routing/inversion/gain; resetting user settings cannot erase the
+software correction, and changing a correction does not silently rewrite preferences.
+
+In **Per-App Bindings**, **Default profiles** lists the full supported-app suite and switches the
+profile being edited. **Reset to default profile** restores every navigation field for that app in
+one save while preserving enable/install state, startup choice, and installed add-in version.
+Maintainer details and the baseline table live in
+[`docs/default_profiles.md`](docs/default_profiles.md).
+
 ## 3D-app integrations
 
 The daemon drives CAD apps like a 3Dconnexion SpaceMouse: a local **nav broker** streams
@@ -95,7 +109,8 @@ turns in place. Ray-derived results are held for the gesture.
      live, and the rate follows whichever app is focused.
    - **General → 3D navigation bridge → Default update rate (Hz)** — the global fallback used
      by any app whose per-app rate is **Default** (default 30).
-   - Intrinsic per-axis orientation also lives in the add-in (`ORBIT_SCALE`/`ZOOM_SIGN`).
+   - Fusion's intrinsic signs/scales come from its immutable daemon-owned host baseline; the add-in
+     camera math is neutral. Per-app Source/Invert/Gain remains the user layer.
    - **Control scheme**: the usual **Orbit pivot / Orbit style / Zoom mode** dropdowns. `screen_center`
      raycasts the surface under the screen centre (`findBRepUsingRay`) and holds it per gesture;
      **"cursor (under mouse)" (add-in 0.1.17+) raycasts the surface under the MOUSE CURSOR
@@ -129,10 +144,9 @@ and moves the active view's camera.
    to **active • connected** and the tray shows `Apps: solidworks v…`. Spin the ball to
    orbit; hold **Shift** to pan/zoom.
 3. Camera control uses SolidWorks' **native** view operations, verified live against
-   SolidWorks 2025. Tuning: the same **Per-App Bindings** (gains + Invert axes) as the other
-   apps, plus intrinsic constants at the top of `solidworks_driver.py` (`ORBIT_SIGN`,
-   `PAN_SCALE`/`PAN_SIGN`, `ZOOM_SCALE`/`ZOOM_SIGN`, `WORLD_UP`, `FORCE_REDRAW`) — flip a sign
-   there if an axis feels backwards, or use the per-action Source/Invert controls.
+   SolidWorks 2025. Tuning uses the same **Per-App Bindings** (Source, Invert, and gains) as the
+   other apps. Suite-alignment signs/scales live in the immutable host baseline; camera-model
+   constants such as `WORLD_UP` and `FORCE_REDRAW` remain in `solidworks_driver.py`.
 4. **Control scheme** (the **Orbit pivot / Orbit style / Zoom mode** dropdowns in Per-App
    Bindings, same as the other apps — set per app or leave on **Default** to inherit General →
    3D control scheme). All three are applied, verified live with zero drift of the held point:
@@ -273,11 +287,9 @@ cert/trust details: [`docs/apps/onshape.md`](docs/apps/onshape.md).)
    see [`docs/apps/onshape.md`](docs/apps/onshape.md) §8.14; `to_cursor` falls back to `to_center`.
    There is **no Camera pivot** for Onshape: its view is orthographic, so turn-in-place degenerates
    to sliding the image — the bridge skips `camera` in any chain).
-   - Intrinsic per-axis orientation lives at the top of `onshape_bridge.py`
-     (`ORBIT_SIGN`/`PAN_SIGN`/`PAN_SCALE`/`ZOOM_SIGN`/`ZOOM_SCALE`, and `WORLD_UP` for the turntable
-     azimuth — Onshape's scene up may be Y or Z, so verify turntable and flip `WORLD_UP` if verticals
-     tilt). `AFFINE_TRANSLATION_IN_COLUMN` is the matrix-convention guard (flip it if orbit/pan come
-     out transposed). Expect a one-time sign/scale pass on real hardware, like the other apps.
+   - Onshape's intrinsic direction/feel comes from its immutable daemon-owned host baseline.
+     `WORLD_UP` and `AFFINE_TRANSLATION_IN_COLUMN` remain camera-model constants in
+     `onshape_bridge.py`. Expect a one-time live verification pass on real hardware.
 
 > Requires a way to mint the cert — the Python `cryptography` package (recommended) or `openssl` on
 > PATH. If neither is present, **Enable** explains how to install one. The WSS server itself uses only
@@ -313,10 +325,9 @@ the active 3D view's **Coin (pivy) camera**.
    **"to_cursor (under mouse)"** zooms about it) — hover the point you care about and spin the
    ball; "selection" pivots on the current
    selection's centre. FreeCAD is
-   **Z-up**, so turntable keeps verticals vertical. Intrinsic per-axis orientation/feel lives in the
-   add-on's `tbnav_camera.py` (`ORBIT_SCALE`/`PAN_SIGN`/`PAN_SCALE`/`ZOOM_SCALE`/`ZOOM_SIGN`); the
-   **direction signs are best-guess defaults** — flip any axis that feels backwards with the per-app
-   **Invert** checkboxes (or tune the constants), a quick one-time pass on real hardware.
+   **Z-up**, so turntable keeps verticals vertical. Intrinsic direction/feel lives in FreeCAD's
+   immutable daemon-owned host baseline; use the per-app **Source**, **Invert**, and gain controls
+   for personal changes. The bundled add-on's camera math is neutral.
 
 **Add-on updates** work exactly like Fusion/Blender: the add-on carries a version (`version.json`),
 the daemon **auto-copies a newer bundled version on startup**, and the 3D-Apps row offers a one-click
@@ -351,8 +362,8 @@ SketchUp for Web is not supported (it has no local scripting hook).
    Each mode has independent pitch/yaw/roll-or-bank and movement-direction **Invert** options,
    matching Blender's controls. SketchUp has no 3D-cursor target, so none is shown.
 
-SketchUp is right-handed, Z-up, and stores model coordinates in **inches**. The bundled baseline
-signs are starting defaults; use the per-app Invert checkboxes for the physical sign/feel pass.
+SketchUp is right-handed, Z-up, and stores model coordinates in **inches**. Its bundled immutable
+baseline supplies suite alignment; use the per-app Source/Invert/Gain controls for personal feel.
 Add-on updates are version-gated and take effect on SketchUp's next launch. Camera/fly/walk were
 added in extension `0.2.0`.
 

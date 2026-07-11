@@ -19,7 +19,8 @@ import tkinter as tk
 from . import integrations
 from .autocad_driver import AutoCADPluginLoader
 from .ble import start_ble_thread
-from .config import (Config, effective_scheme, normalize_orbit_pivot_fallbacks,
+from .config import (Config, compose_advanced_with_host_baseline, effective_scheme,
+                     host_baseline_payload, normalize_orbit_pivot_fallbacks,
                      orbit_pivot_candidates)
 from .navbroker import NavBroker
 from .onshape_bridge import OnshapeBridge
@@ -137,8 +138,8 @@ class App:
             # selection_overrides_pivot lives on the app root (all apps) and is folded into adv so
             # every socket add-on can read one place — Fusion/etc. still ignore unknown keys.
             appcfg = self.config.data["apps"].get(key) or {}
-            adv = appcfg.get("advanced")
-            adv = dict(adv or {})
+            adv = compose_advanced_with_host_baseline(key, appcfg.get("advanced"))
+            adv["host_baseline"] = host_baseline_payload(key)
             adv["selection_overrides_pivot"] = bool(
                 appcfg.get("selection_overrides_pivot", True))
             adv["orbit_pivot_fallbacks"] = fallbacks

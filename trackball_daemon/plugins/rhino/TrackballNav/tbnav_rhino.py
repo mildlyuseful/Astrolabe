@@ -20,7 +20,8 @@ from System.Windows.Forms import Cursor
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.12"          # 0.1.12: camera/screen_center canonical pivot names.
+ADDIN_VERSION = "0.1.13"          # 0.1.13: immutable host baseline profile.
+                                  # 0.1.12: camera/screen_center canonical pivot names.
 _DEFAULT_PORT = 47900
 PIVOT_HOLD_IDLE = 0.35
 OBJ_CACHE_SEC = 0.5

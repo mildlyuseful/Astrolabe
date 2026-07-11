@@ -59,10 +59,10 @@ def test_blender_app_has_advanced_block(isolated_config):
 
 def test_blender_bundled_version_markers_stay_in_sync():
     root = Path(__file__).parents[1] / "trackball_daemon/plugins/blender/trackball_nav"
-    assert json.loads((root / "version.json").read_text(encoding="utf-8"))["version"] == "0.1.15"
+    assert json.loads((root / "version.json").read_text(encoding="utf-8"))["version"] == "0.1.16"
     source = (root / "__init__.py").read_text(encoding="utf-8")
-    assert 'ADDIN_VERSION = "0.1.15"' in source
-    assert '"version": (0, 1, 15)' in source
+    assert 'ADDIN_VERSION = "0.1.16"' in source
+    assert '"version": (0, 1, 16)' in source
 
 
 def test_advanced_appears_on_old_config_via_deep_merge(isolated_config):
@@ -124,21 +124,27 @@ def test_blender_focus_sends_advanced(isolated_config):
     app._apply_schemes()
     sent = app.broker.schemes[-1]
     adv = sent["advanced"]
-    # Core Blender advanced plus the app-root selection_overrides_pivot folded in.
+    # Core Blender advanced plus immutable host corrections and app-root settings.
     for k, v in cfg.data["apps"]["blender"]["advanced"].items():
-        assert adv[k] == v
+        if k != "invert":
+            assert adv[k] == v
+    assert cfg.data["apps"]["blender"]["advanced"]["invert"]["camera"]["roll"] is False
+    assert adv["invert"]["camera"]["roll"] is True
+    assert adv["invert"]["fly"]["bank"] is True
+    assert adv["host_baseline"]["orbit"] == [0.5, 0.5, 0.5]
     assert adv["selection_overrides_pivot"] is True
     assert {"orbit_pivot", "orbit_style", "zoom_mode"} <= set(sent)
 
 
 def test_fusion_focus_sends_selection_override_only(isolated_config):
-    # Fusion has no richer advanced block, but selection_overrides_pivot (app root) is folded into
-    # adv so a future Fusion add-in can read it. Fusion today ignores "adv".
+    # Fusion has no richer advanced block. Shared baseline/pivot metadata is still folded into adv;
+    # Fusion ignores unknown adv keys because its correction was already applied in the daemon.
     cfg = Config().load()
     app = _app_with_real_config(cfg, "fusion360")
     app._apply_schemes()
     sent = app.broker.schemes[-1]
     assert sent["advanced"]["selection_overrides_pivot"] is True
+    assert sent["advanced"]["host_baseline"]["orbit"] == [-1.0, -1.0, 1.0]
     assert sent["advanced"]["orbit_pivot_fallbacks"] == [
         "cursor_3d", "camera", "object", "origin"]
     assert sent["advanced"]["orbit_pivot_candidates"] == [

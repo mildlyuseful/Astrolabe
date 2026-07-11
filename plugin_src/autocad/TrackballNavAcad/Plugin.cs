@@ -57,7 +57,8 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.9";   // 0.3.9: cursor pivot is strict too — no
+        public const string PluginVersion = "0.3.10";  // 0.3.10: immutable host baseline profile.
+                                                       // 0.3.9: cursor pivot is strict too — no
                                                        // construction-plane/view-depth synthesis;
                                                        // empty-space hovers miss and continue the
                                                        // configured chain.
@@ -86,11 +87,11 @@ namespace TrackballNav
         const string BrokerHost = "127.0.0.1";
         const int BrokerPort = 47900;
 
-        // --- baseline signs/scales (live-tune; the daemon's per-app bindings scale on top) -----
+        // Host baseline moved to daemon config v6; plugin camera math is deliberately neutral.
         static readonly double[] OrbitSign = { 1.0, 1.0, 1.0 };  // pitch(x), yaw(y), roll(z)
-        const double PanSignX = -1.0, PanSignY = 1.0;  // target moves opposite the scene shift
-        const double PanScale = 0.5;      // pan delta -> fraction of the view height
-        const double ZoomSign = 1.0, ZoomScale = 0.5;
+        const double PanSignX = 1.0, PanSignY = 1.0;
+        const double PanScale = 1.0;
+        const double ZoomSign = 1.0, ZoomScale = 1.0;
         const int TimerMs = 10;           // UI-thread drain cadence (~100 Hz ceiling)
         const int CommitIdleMs = 180;     // gesture considered over after this much frame silence
 

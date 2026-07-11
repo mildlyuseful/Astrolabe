@@ -7,6 +7,8 @@ output engine both read/write this one object.
 import copy
 import json
 import threading
+from dataclasses import dataclass
+from types import MappingProxyType
 
 from .paths import config_path
 
@@ -89,6 +91,84 @@ DEFAULT_ACTION_AXIS_SOURCE = {
 }
 
 
+@dataclass(frozen=True)
+class HostBaseline:
+    """Immutable developer-owned correction applied before user preferences.
+
+    Scale and sign are separate so dominance/deadzone decisions remain based on the unscaled sensor
+    motion, preserving the established gesture classifier. Axis permutations are identity today;
+    the explicit fields make future unconventional host mappings data rather than code changes.
+    """
+    orbit_source: tuple = (0, 1, 2)
+    orbit_sign: tuple = (1.0, 1.0, 1.0)
+    orbit_scale: tuple = (1.0, 1.0, 1.0)
+    pan_source: tuple = (0, 1)
+    pan_sign: tuple = (1.0, 1.0)
+    pan_scale: float = 1.0
+    zoom_source: int = 2
+    zoom_sign: float = 1.0
+    zoom_scale: float = 1.0
+    move_scale: float = 1.0
+    apply_in_daemon: bool = True
+    # Effective inversion = immutable baseline XOR saved user preference.
+    advanced_invert: tuple = ()
+
+
+HOST_BASELINE_PROFILES = MappingProxyType({
+    "blender": HostBaseline(orbit_scale=(0.5, 0.5, 0.5),
+                            pan_sign=(1.0, -1.0), pan_scale=0.5, zoom_scale=0.5,
+                            move_scale=0.5, apply_in_daemon=False,
+                            advanced_invert=(("camera", "roll"), ("fly", "bank"))),
+    "freecad": HostBaseline(pan_sign=(-1.0, 1.0), pan_scale=0.14, zoom_scale=0.25),
+    "sketchup": HostBaseline(orbit_sign=(-1.0, -1.0, 1.0),
+                             pan_sign=(-1.0, -1.0), pan_scale=0.14, zoom_scale=0.25,
+                             move_scale=0.5, apply_in_daemon=False,
+                             advanced_invert=(("camera", "roll"), ("fly", "bank"))),
+    "unreal": HostBaseline(orbit_scale=(2.0, 2.0, 2.0),
+                           pan_sign=(1.0, -1.0), pan_scale=0.14, zoom_scale=0.25,
+                           move_scale=0.5, apply_in_daemon=False),
+    "unity": HostBaseline(orbit_scale=(2.0, 2.0, 2.0),
+                          pan_sign=(1.0, -1.0), pan_scale=0.14, zoom_scale=0.25,
+                          move_scale=0.5, apply_in_daemon=False),
+    "godot": HostBaseline(orbit_scale=(2.0, 2.0, 2.0),
+                          pan_sign=(1.0, -1.0), pan_scale=0.14, zoom_scale=0.25,
+                          move_scale=0.5, apply_in_daemon=False),
+    "rhino": HostBaseline(pan_sign=(-1.0, 1.0), pan_scale=0.14, zoom_scale=0.25),
+    "fusion360": HostBaseline(orbit_sign=(-1.0, -1.0, 1.0),
+                              pan_sign=(-1.0, -1.0), pan_scale=0.14, zoom_scale=0.25),
+    "solidworks": HostBaseline(orbit_sign=(-1.0, -1.0, 1.0),
+                               pan_sign=(1.0, -1.0), pan_scale=0.2, zoom_scale=0.5),
+    "onshape": HostBaseline(orbit_sign=(-1.0, -1.0, 1.0),
+                            pan_sign=(1.0, -1.0), pan_scale=0.14, zoom_scale=0.25),
+    "autocad": HostBaseline(pan_sign=(-1.0, 1.0), pan_scale=0.5, zoom_scale=0.5),
+})
+
+
+def host_baseline(app_key):
+    """Return the immutable baseline for a supported app (neutral for unknown keys)."""
+    return HOST_BASELINE_PROFILES.get(app_key, HostBaseline())
+
+
+def host_baseline_payload(app_key):
+    """JSON-safe factors consumed inside rich mode-aware add-ons."""
+    baseline = host_baseline(app_key)
+    return {
+        "orbit": [baseline.orbit_sign[i] * baseline.orbit_scale[i] for i in range(3)],
+        "pan": [baseline.pan_sign[i] * baseline.pan_scale for i in range(2)],
+        "zoom": baseline.zoom_sign * baseline.zoom_scale,
+        "move": baseline.move_scale,
+    }
+
+
+def compose_advanced_with_host_baseline(app_key, advanced):
+    """Return wire-ready advanced settings: immutable host corrections XOR user preferences."""
+    out = copy.deepcopy(advanced or {})
+    for mode, action in host_baseline(app_key).advanced_invert:
+        group = out.setdefault("invert", {}).setdefault(mode, {})
+        group[action] = not bool(group.get(action, False))
+    return out
+
+
 def normalize_action_axis_sources(value):
     """Deep-normalize rich per-action source indices while preserving the complete schema."""
     value = value if isinstance(value, dict) else {}
@@ -158,8 +238,8 @@ def orbit_pivot_candidates(primary, fallbacks):
 _DEFAULT_BLENDER_INVERT = {
     "orbit":     {"pitch": False, "yaw": False, "twist": False,
                   "pan_x": False, "pan_y": False, "zoom": False},
-    "camera":    {"pitch": False, "yaw": False, "roll": True},
-    "fly":       {"pitch": False, "yaw": False, "bank": True,
+    "camera":    {"pitch": False, "yaw": False, "roll": False},
+    "fly":       {"pitch": False, "yaw": False, "bank": False,
                   "forward": False, "strafe": False, "vertical": False},
     "walk":      {"pitch": False, "yaw": False,
                   "forward": False, "strafe": False, "vertical": False},
@@ -191,8 +271,8 @@ _DEFAULT_BLENDER_ADVANCED = {
 _DEFAULT_SKETCHUP_INVERT = {
     "orbit":     {"pitch": False, "yaw": False, "twist": False,
                   "pan_x": False, "pan_y": False, "zoom": False},
-    "camera":    {"pitch": False, "yaw": False, "roll": True},
-    "fly":       {"pitch": False, "yaw": False, "bank": True,
+    "camera":    {"pitch": False, "yaw": False, "roll": False},
+    "fly":       {"pitch": False, "yaw": False, "bank": False,
                   "forward": False, "strafe": False, "vertical": False},
     "walk":      {"pitch": False, "yaw": False,
                   "forward": False, "strafe": False, "vertical": False},
@@ -318,7 +398,7 @@ def _sketchup_app():
     return a
 
 
-CONFIG_VERSION = 5
+CONFIG_VERSION = 6
 
 DEFAULTS = {
     "version": CONFIG_VERSION,
@@ -370,6 +450,24 @@ DEFAULTS = {
                 "cursor_userscript_warn_dismissed": False},
 }
 
+# Shipped user-layer profiles. Operational/install state is intentionally excluded so resetting a
+# navigation profile never disables an app or forgets an installed add-in version.
+APP_PROFILE_FIELDS = ("rate_hz", "screen_center_pivot_hold_sec",
+                      "selection_overrides_pivot", "bindings", "advanced")
+_DEFAULT_APP_PROFILES = MappingProxyType({
+    key: {field: copy.deepcopy(value) for field, value in app.items()
+          if field in APP_PROFILE_FIELDS}
+    for key, app in DEFAULTS["apps"].items()
+})
+DEFAULT_PROFILE_KEYS = tuple(DEFAULTS["apps"])
+
+
+def default_app_profile(app_key):
+    """A detached full navigation profile suitable for an atomic per-app reset."""
+    if app_key not in _DEFAULT_APP_PROFILES:
+        raise KeyError(app_key)
+    return copy.deepcopy(_DEFAULT_APP_PROFILES[app_key])
+
 
 def _deep_merge(base, override):
     """Overlay disk values onto defaults so new keys appear automatically on upgrade."""
@@ -405,7 +503,7 @@ class Config:
                 self.data = copy.deepcopy(DEFAULTS)
                 return self
             self.data = _deep_merge(DEFAULTS, disk)
-            changed = self._migrate(int(disk.get("version", 1)))
+            changed = self._migrate(int(disk.get("version", 1)), disk)
             orientation = self.data["general"].get("axis_orientation") or {}
             normalized_orientation = {
                 "source": normalize_axis_permutation(orientation.get("source")),
@@ -438,7 +536,7 @@ class Config:
                 self._save_unlocked()
         return self
 
-    def _migrate(self, from_version):
+    def _migrate(self, from_version, disk=None):
         """One-time upgrades for config whose semantics changed. Returns True if changed."""
         changed = False
         if from_version < 2:
@@ -495,8 +593,35 @@ class Config:
             # v5 adds the global physical orientation and rich per-action axis routing. Defaults
             # are identity mappings, so migration is behavior-neutral; load() validates them.
             changed = True
+        if from_version < 6:
+            # v6 moves baked camera-roll/fly-bank corrections out of saved user preferences and
+            # into immutable host baselines. XOR the stored value so every existing effective
+            # direction is preserved. Missing old keys stay at the new neutral user default.
+            disk_apps = (disk or {}).get("apps") or {}
+            for app_key, baseline in HOST_BASELINE_PROFILES.items():
+                disk_invert = (((disk_apps.get(app_key) or {}).get("advanced") or {}).get("invert") or {})
+                user_invert = (((self.data["apps"].get(app_key) or {}).get("advanced") or {})
+                               .get("invert") or {})
+                for mode, action in baseline.advanced_invert:
+                    old_group = disk_invert.get(mode) if isinstance(disk_invert.get(mode), dict) else {}
+                    if action in old_group:
+                        user_invert.setdefault(mode, {})[action] = not bool(old_group[action])
+            changed = True
         self.data["version"] = CONFIG_VERSION
         return changed
+
+    def reset_app_profile(self, app_key):
+        """Atomically reset every navigation field for one app, preserving install/enable state."""
+        profile = default_app_profile(app_key)
+        with self._lock:
+            app = self.data["apps"][app_key]
+            for field in APP_PROFILE_FIELDS:
+                if field in profile:
+                    app[field] = copy.deepcopy(profile[field])
+                else:
+                    app.pop(field, None)
+            self._save_unlocked()
+        self._notify()
 
     def _save_unlocked(self):
         tmp = self.path.with_name(self.path.name + ".tmp")

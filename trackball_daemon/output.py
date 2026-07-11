@@ -10,6 +10,8 @@ import struct
 import sys
 import threading
 
+from .config import host_baseline
+
 # ===========================================================================
 # Windows SendInput (relative pointer move + wheel), pure ctypes -- no dependency
 # ===========================================================================
@@ -166,6 +168,7 @@ class OutputEngine:
         apps = self.cfg.data["apps"]
         app_key = self._bindings_app or self.cfg.data["active_app"]
         app = apps.get(app_key) or apps[self.cfg.data["active_app"]]
+        self.host_baseline = host_baseline(app_key)
         b = app["bindings"]
         o, p, z = b["orbit"], b["pan"], b["zoom"]
         # Fold the user's per-axis invert flags into the cached signs (default off => no-op,
@@ -214,7 +217,22 @@ class OutputEngine:
     def _emit_nav(self, ox, oy, oz, px, py, zoom):
         sink = self.nav_sink
         if sink is not None:
-            sink(ox, oy, oz, px, py, zoom)
+            # Developer-owned host alignment is applied only at the integration boundary, after
+            # the global/body mapping and composably with the saved user mapping. The local debug
+            # cube therefore remains a host-neutral calibration reference.
+            h = self.host_baseline
+            if not h.apply_in_daemon:  # rich add-on applies mode-aware baseline from frame.adv
+                sink(ox, oy, oz, px, py, zoom)
+                return
+            orbit = (ox, oy, oz)
+            movement = (px, py, zoom)
+            aligned_o = tuple(orbit[h.orbit_source[i]] * h.orbit_sign[i] * h.orbit_scale[i]
+                              for i in range(3))
+            aligned_p = tuple(movement[h.pan_source[i]] * h.pan_sign[i] * h.pan_scale
+                              for i in range(2))
+            aligned_z = movement[h.zoom_source] * h.zoom_sign * h.zoom_scale
+            sink(aligned_o[0], aligned_o[1], aligned_o[2],
+                 aligned_p[0], aligned_p[1], aligned_z)
 
     # --- the data path -------------------------------------------------------------
     def handle_packet(self, data):

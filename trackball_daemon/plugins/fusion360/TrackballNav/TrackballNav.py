@@ -31,13 +31,14 @@ _reader_thread = None
 # --- tuning: Fusion's intrinsic axis orientation + baseline sensitivity. These bake in the
 #     known-good defaults; the daemon's Per-App Bindings (gain 1.0 = this baseline) scale
 #     from here, and the Invert checkboxes flip further. -------------------------------------
-ORBIT_SCALE = (-1.0, -1.0, 1.0)  # orbit X/Y inverted (o[0]=right, o[1]=up, o[2]=fwd)
-PAN_SIGN = (-1.0, -1.0)          # pan along (camera-right, camera-up); up-down negated
-PAN_SCALE = 0.14                 # broker pan delta -> fraction of view extents (baseline pan feel)
-ZOOM_SCALE = 0.25                # broker zoom delta -> fraction of view extents (baseline zoom feel)
-ZOOM_SIGN = 1.0                  # twist->zoom direction
+ORBIT_SCALE = (1.0, 1.0, 1.0)    # daemon v6 applies immutable Fusion host baseline
+PAN_SIGN = (1.0, 1.0)
+PAN_SCALE = 1.0
+ZOOM_SCALE = 1.0
+ZOOM_SIGN = 1.0
 
-ADDIN_VERSION = "0.1.18"         # 0.1.18: camera/screen_center canonical pivot names.
+ADDIN_VERSION = "0.1.19"         # 0.1.19: immutable host baseline profile.
+                                 # 0.1.18: camera/screen_center canonical pivot names.
                                  # 0.1.16: read selection from app.userInterface.activeSelections.
                                  # 0.1.15: real selection/origin pivots + selection override.
                                  # 0.1.14: scheme values renamed (pointer->cursor, cursor->selection,

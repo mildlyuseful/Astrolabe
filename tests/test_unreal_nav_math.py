@@ -68,16 +68,15 @@ def test_camera_rotator_roundtrip():
 
 
 # --- orbit baseline is DOUBLED for hardware feel (default felt half on the device) -----------
-def test_orbit_scale_doubled_full_angle():
-    # On real hardware the default orbit felt HALF of what it should be, so the baseline is doubled:
-    # a pure yaw of theta rotates the view by 2*theta. Guards against regressing to 1.0 (the cube's
-    # 1:1) or to Blender's RegionView3D-specific 0.5. Tune back to 1:1 via orbit Sensitivity 0.5.
-    assert cam.ORBIT_SCALE == (2.0, 2.0, 2.0)
+def test_camera_math_is_neutral_and_daemon_profile_carries_doubled_orbit():
+    from trackball_daemon.config import host_baseline_payload
+    assert cam.ORBIT_SCALE == (1.0, 1.0, 1.0)
+    assert host_baseline_payload("unreal")["orbit"] == [2.0, 2.0, 2.0]
     c = _idcam()
     theta = 0.2
     cam.orbit(c, (0.0, theta, 0.0), False, None)      # pure yaw, in place
     ang = math.atan2(c.forward[1], c.forward[0])
-    assert abs(ang - 2.0 * theta) < 1e-9              # doubled
+    assert abs(ang - theta) < 1e-9                    # camera math itself is neutral
 
 
 # --- orbit about a pivot: eye rotates rigidly about P, basis stays orthonormal -----------

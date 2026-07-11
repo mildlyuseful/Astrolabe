@@ -18,24 +18,13 @@ Conventions (VERIFIED live against FreeCAD 1.1 / Coin3D -- see docs/apps/freecad
 """
 import math
 
-# --- baseline sign/scale (the add-on's intrinsic feel). The daemon's Per-App Bindings
-#     (gain 1.0 == this baseline) scale from here and the Invert checkboxes flip further, so
-#     DO NOT also scale/invert in the daemon. SIGNS ARE STARTING GUESSES -- calibrate live with
-#     the trackball (docs/apps/freecad.md "Live calibration"). ----------------------
-ORBIT_SCALE = (1.0, 1.0, 1.0)   # (pitch o[0] about right, yaw o[1] about up, twist o[2] about fwd).
-                                # 1.0 = rotate the view by the FULL broker angle, so Sensitivity 1.0 is
-                                # a true 1:1 ball->view orbit (matches the --debug cube AND the other
-                                # eye+target camera apps: Fusion/SolidWorks/Onshape all use magnitude
-                                # 1.0). NOTE: do NOT copy Blender's 0.5 here -- that halving is specific
-                                # to Blender's RegionView3D and made FreeCAD orbit at half speed.
-PAN_SIGN = (-1.0, 1.0)          # pan along (camera-right, camera-up)
-PAN_SCALE = 0.14                # broker pan delta * on-screen view height -> world units. Matches the
-                                # Fusion add-in's proven baseline (the daemon sends the SAME pan deltas
-                                # to every app), so panning feels like Fusion's; tune via the per-app
-                                # Pan gain. (An earlier 0.0015 here made pan ~100x too small => "pan
-                                # does nothing" -- the daemon DOES emit pan frames on Shift, output.py.)
-ZOOM_SCALE = 0.25               # broker zoom delta -> fraction of view size per frame
-ZOOM_SIGN = 1.0                 # twist -> zoom direction (positive twist zooms IN)
+# Daemon config v6 applies the immutable FreeCAD host baseline before broker output. Pure camera
+# math is neutral so the developer correction cannot be applied twice.
+ORBIT_SCALE = (1.0, 1.0, 1.0)
+PAN_SIGN = (1.0, 1.0)
+PAN_SCALE = 1.0
+ZOOM_SCALE = 1.0
+ZOOM_SIGN = 1.0
 WORLD_UP = (0.0, 0.0, 1.0)      # FreeCAD is Z-up; turntable azimuth axis
 
 

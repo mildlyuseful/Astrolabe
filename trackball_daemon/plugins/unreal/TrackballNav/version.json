@@ -1,4 +1,4 @@
 {
-  "version": "0.2.7",
-  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.7: per-action X/Y/Z source routing."
+  "version": "0.2.8",
+  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.8: immutable host baseline profile."
 }

@@ -95,10 +95,10 @@ needed change), and `_nav_sink`'s else-branch sends every non-SolidWorks/non-Ons
 broker. Unreal is selected when the foreground process is `UnrealEditor.exe`/`UE4Editor.exe` and the
 app is enabled. (Verified by `tests/test_app_routing.py::test_unreal_routes_to_broker`.)
 
-**Contract:** the daemon already scaled o/p/z (per-app sensitivity/gain + the generic invert). The
-add-on only bakes a **baseline sign/scale** (`ORBIT_*`/`PAN_*`/`ZOOM_*` in `tbnav_unreal_camera.py`)
-+ the scheme. Don't re-scale in both places. The add-on reads only `o/p/z/op/os/zm` and **ignores**
-the Blender-only `adv` key (like the Fusion add-in).
+**Contract:** the daemon sends Unreal's immutable correction in `adv.host_baseline`; the add-on
+applies it after mode-specific user action routing. `tbnav_unreal_camera.py` is deliberately neutral
+and `adv` is part of Unreal's supported wire contract. See
+[`../default_profiles.md`](../default_profiles.md).
 
 ---
 
@@ -276,17 +276,13 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
 4. **`get_level_viewport_camera_info()` returns `None`** when there's no level-editor perspective
    viewport (commandlet, or the editor not ready). The pump guards on `if not info: return`. (Headless
    it is *always* None — that's why the live camera move is the one thing tests can't cover.)
-5. **Left-handed + degrees → several sign flips vs the other apps.** The basis/round-trip math is
-   convention-safe (it uses Unreal's own helpers), but the **user-feel signs**
-   (`ORBIT_SIGN`/`PAN_SIGN`/`ZOOM_SIGN`) are **best-guess defaults** — settle each by EYE on the device
-   (Gotcha-adjacent: don't "prove" a sign with self-referential algebra).
-5b. **Orbit baseline is `ORBIT_SCALE = 2.0`, NOT 1.0.** On real hardware the default orbit felt HALF
-   of what it should be, so the baseline was doubled (verified on the device — see the 0.1.0→0.2.0
-   note). There is no hidden `0.5` anywhere in the path (firmware emits true radians; `output.py` emits
-   `recv * sensitivity`; the add-on emits `o * ORBIT_SCALE`), so `1.0` rotates by exactly the broker
-   angle = the `--debug` cube — but the *feel* wanted ~2×. Set orbit **Sensitivity 0.5** to get back
-   to the cube's literal 1:1. (This is the one place Unreal deviates from the §12.12 "eye-camera = 1.0"
-   doctrine, on purpose, by hardware observation.)
+5. **Left-handed + degrees need a host correction.** The basis/round-trip math uses Unreal's own
+   helpers and remains convention-safe; user-feel signs belong in the immutable Unreal profile and
+   should be settled by eye on the device, not inferred from self-referential algebra.
+5b. **The immutable Unreal orbit baseline is `2.0`, not `1.0`.** On real hardware the default orbit
+   felt half of what it should be, so the developer profile doubles it (verified on the device — see
+   the 0.1.0→0.2.0 note). `tbnav_unreal_camera.py` is neutral; the mode-aware add-on consumes the
+   factor from `adv.host_baseline`. Set orbit **Sensitivity 0.5** for the debug cube's literal 1:1.
 5c. **Unreal has NO 3D cursor.** Probed the whole `unreal` namespace + `LevelEditorSubsystem`/
    `EditorActorSubsystem` — there is no queryable Blender-style 3D-cursor / editor-pivot point (every
    `*cursor*` name is the mouse cursor / a UI gizmo). The daemon therefore does not offer the

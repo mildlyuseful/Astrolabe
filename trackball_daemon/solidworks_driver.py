@@ -105,26 +105,22 @@ except Exception:                       # pragma: no cover - exercised only with
 # --- tuning: SolidWorks' intrinsic axis orientation + baseline sensitivity ----------------
 # Mirrors the tuning block at the top of the Fusion add-in. The nav-delta contract feeds
 # (ox,oy,oz) = orbit about (camera right, up, forward) in radians, (px,py) = pan, zoom = zoom;
-# values arrive already scaled by the active app's bindings. Defaults below were refined from
-# on-hardware testing but signs/magnitudes may still want per-feel tweaks.
+# values arrive with the immutable SolidWorks host baseline and user bindings already composed.
 #
 # orbit: rotation is about the CAMERA axes (right/up/forward), transformed into model space per
 # frame via the view's Orientation3 -- so it tracks the current view instead of the global axes.
-# ORBIT_SIGN flips each channel's direction. Defaults mirror the Fusion add-in's ORBIT_SCALE
-# (X/Y inverted) as the best-guess starting point; flip any axis that spins the wrong way.
-ORBIT_SIGN = (-1.0, -1.0, 1.0)    # (ox=pitch about right, oy=yaw about up, oz=roll about forward)
+# Camera math stays neutral so the daemon-owned correction cannot be applied twice.
+ORBIT_SIGN = (1.0, 1.0, 1.0)
 # turntable azimuth axis: SolidWorks is Y-up, so world up is +Y in model space (verified live --
 # at every view the camera-up column is Y-dominant, and yawing about (0,1,0) keeps verticals vertical).
 WORLD_UP = (0.0, 1.0, 0.0)
 # pan: IModelView.TranslateBy moves the view by a vector in METERS along the graphics-area
-# screen X,Y axes -- already screen-relative (do NOT divide by Scale2). PAN_SCALE is the main
-# magnitude knob (raise if pan is too slow, lower if it flies off); PAN_SIGN flips each axis.
-PAN_SIGN = (1.0, -1.0)
-PAN_SCALE = 0.2
+# screen X,Y axes -- already screen-relative (do NOT divide by Scale2).
+PAN_SIGN = (1.0, 1.0)
+PAN_SCALE = 1.0
 # zoom: IModelView.ZoomByFactor zooms about the view CENTER, so the model no longer drifts
-# off-screen the way the old Scale2 approach did. factor > 1 zooms in; ZOOM_SIGN flips that and
-# ZOOM_SCALE sets how aggressive each frame is.
-ZOOM_SCALE = 0.5
+# off-screen the way the old Scale2 approach did. factor > 1 zooms in.
+ZOOM_SCALE = 1.0
 ZOOM_SIGN = 1.0
 # Force a viewport redraw each frame. The native view methods may already repaint when driven
 # from automation; if motion stays visible with this False, leaving it False lifts the refresh

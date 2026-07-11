@@ -15,7 +15,7 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.9";
+        const string AddinVersion = "0.1.10";
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.35f;
         const float ObjCacheSec = 0.5f;
@@ -481,6 +481,7 @@ namespace Astrolabe.TrackballNav
             }
 
             ApplyActionRouting(navMode, op, ref o, ref p, ref z, adv);
+            ApplyHostBaseline(navMode, twistAction, ref o, ref p, ref z, adv);
 
             // SceneView.size is a fit-sphere radius, NOT eye→pivot distance.
             // Real distance is sv.cameraDistance (= size/sin(fov/2) in perspective).
@@ -909,6 +910,31 @@ namespace Astrolabe.TrackballNav
                 p = new Vector2(Routed(movement, oa, ob, "pan_x", 0),
                     Routed(movement, oa, ob, "pan_y", 1));
                 z = Routed(movement, oa, ob, "zoom", 2);
+            }
+        }
+
+        static void ApplyHostBaseline(string navMode, string twistAction, ref Vector3 o, ref Vector2 p,
+            ref float z, System.Collections.Generic.Dictionary<string, object> adv)
+        {
+            var baseline = MiniJson.Obj(adv, "host_baseline") ?? new System.Collections.Generic.Dictionary<string, object>();
+            Vector3 orbit = MiniJson.Vec3(baseline, "orbit");
+            Vector2 pan = MiniJson.Vec2(baseline, "pan");
+            float zoom = MiniJson.Float(baseline, "zoom", 1f);
+            float move = MiniJson.Float(baseline, "move", 1f);
+            if (orbit == Vector3.zero) orbit = Vector3.one;
+            if (pan == Vector2.zero) pan = Vector2.one;
+            if (navMode == "orbit")
+            {
+                float twistFactor = (twistAction == "zoom" || twistAction == "dolly") ? zoom : orbit.z;
+                o = new Vector3(o.x * orbit.x, o.y * orbit.y, o.z * twistFactor);
+                p = new Vector2(p.x * pan.x, p.y * pan.y);
+                z *= zoom;
+            }
+            else
+            {
+                o = Vector3.Scale(o, orbit);
+                p *= move;
+                z *= move;
             }
         }
 

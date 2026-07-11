@@ -1,4 +1,4 @@
 {
-  "version": "0.1.8",
-  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_freecad.py. 0.1.8: canonical camera/screen_center pivot names."
+  "version": "0.1.9",
+  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_freecad.py. 0.1.9: immutable host baseline profile."
 }

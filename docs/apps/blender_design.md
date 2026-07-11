@@ -45,9 +45,9 @@ unified trick (see §4).
 ## 2. Catalog of trackball→Blender control modes (brief §3) and our mapping
 
 Physical DOFs: ball **pitch** (X, `o[0]`), ball **yaw** (Y, `o[1]`), ball **twist** (Z, `o[2]`);
-the Shift modifier (the daemon's `toggle`) switches orbit → pan/zoom. The daemon already scales
-o/p/z by the per-app bindings and gates them mutually exclusive per frame, exactly like Fusion —
-the add-on only bakes in a baseline sign/scale and the scheme.
+the Shift modifier (the daemon's `toggle`) switches orbit → pan/zoom. The daemon scales o/p/z by the
+per-app bindings and gates them mutually exclusive per frame. Blender receives the immutable host
+correction in `adv.host_baseline` and applies it after mode-specific action routing.
 
 | # | Mode | Implemented as | Selected by |
 |---|------|----------------|-------------|
@@ -124,8 +124,8 @@ parts that map, and put **only genuinely Blender-only** options in `apps.blender
   },
   "invert": {                     // per-mode, per-axis direction flips (applied IN THE ADD-ON)
     "orbit":     {"pitch": false, "yaw": false, "twist": false, "pan_x": false, "pan_y": false, "zoom": false},
-    "camera": {"pitch": false, "yaw": false, "roll": true},   // shares orbit's pan/zoom inverts
-    "fly":       {"pitch": false, "yaw": false, "bank": true, "forward": false, "strafe": false, "vertical": false},
+    "camera": {"pitch": false, "yaw": false, "roll": false},  // saved user preference
+    "fly":       {"pitch": false, "yaw": false, "bank": false, "forward": false, "strafe": false, "vertical": false},
     "walk":      {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false}
   }
 }
@@ -133,9 +133,9 @@ parts that map, and put **only genuinely Blender-only** options in `apps.blender
 
 `axis_source` and `invert` are per-mode because the same channel means different things per nav mode.
 The add-on routes each action immediately before dispatch, so Walk Forward can select Z (twist)
-without changing Orbit. Defaults bake in the "inside-out" roll fix (`camera.roll` and
-`fly.bank` start inverted vs external-pivot orbit). This **replaced** the old single
-`invert_camera_roll` flag.
+without changing Orbit. The immutable host baseline bakes in the "inside-out" roll fix; saved
+`camera.roll` and `fly.bank` user defaults remain neutral. This **replaced** the old single
+`invert_camera_roll` flag, and config v6 migrates old saved effective values through XOR composition.
 Dropped from the brief's starting shape because they are reconciled into the generic scheme:
 `orbit_method` (→ `orbit_style`) and `orbit_around` (→ `orbit_pivot` + `camera`).
 
@@ -199,20 +199,18 @@ This keeps the pivot fixed on screen for *every* non-camera pivot, because the e
   `scene.ray_cast(evaluated_depsgraph_get(), origin, dir)` → `location` (held per gesture; recast on
   pan/zoom or after `PIVOT_HOLD_IDLE`)
 
-Baseline signs/scales (`ORBIT_SCALE`, `PAN_SCALE`, …) are tuned live; the daemon's per-app Invert
-checkboxes flip further, exactly like Fusion. **Orbit is calibrated to 1:1**: the add-on rotates the
-view by exactly the broker delta `o` (measured gain 1.000), and the dual-sensor device reports ~2× the
-physical angle, so `ORBIT_SCALE = 0.5` makes the daemon's orbit Sensitivity 1.0 a true 1:1 ball→view
-orbit (v0.1.3). Pan/zoom keep their feel-based scales.
+Baseline signs/scales live in daemon `HOST_BASELINE_PROFILES`; the add-on's camera math is neutral.
+**Orbit is calibrated to 1:1** with a shipped factor of `0.5`: the add-on rotates by the aligned
+broker delta and the dual-sensor device reports ~2× the physical angle. User Invert/Gain composes on
+top without changing the developer-owned correction.
 
 ### Roll sign convention (now per-mode, v0.1.9)
 The camera's *world-space* roll for a given twist is the same sign for every pivot, but rolling
 **inside-out** (first-person: fly/walk, and the `camera` pivot — you roll about the eye / the
 point you're looking at) *feels* opposite to rolling **outside-in** (orbiting an external pivot:
-object / screen-center / cursor / origin). The defaults bake this in: `invert.camera.roll` and
-`invert.fly.bank` start **on**, so first-person roll matches external-pivot orbit out of the box. Both
-(and every other axis) are independently toggleable in the merged Blender bindings UI. (`walk` has no
-bank by design — horizon-locked.)
+object / screen-center / cursor / origin). The host baseline applies that correction while saved
+`invert.camera.roll` and `invert.fly.bank` start **off**. Their effective values still start on, and
+both are independently toggleable in the merged Blender bindings UI. (`walk` has no bank by design.)
 
 ### Per-gesture pivot hold (screen-center)
 Mirrors Fusion's `_gesture`/`_screen_center_pivot`: the screen-centre surface point is raycast

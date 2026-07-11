@@ -80,9 +80,9 @@ Routing is **entirely generic** — `app.py::_APP_PROC_HINTS` already had `"free
 change was needed**; FreeCAD is selected when the foreground process is `freecad.exe` and the app is
 enabled. (Verified by `tests/test_app_routing.py::test_freecad_routes_to_broker`.)
 
-**Contract:** the daemon already scaled o/p/z (per-app sensitivity/gain + the generic invert). The
-add-on only bakes a **baseline sign/scale** (`ORBIT_SCALE`/`PAN_*`/`ZOOM_*` in `tbnav_camera.py`) +
-the scheme. Don't re-scale in both places.
+**Contract:** the daemon composes FreeCAD's immutable host alignment with the saved user mapping
+before broker output. `tbnav_camera.py` is deliberately neutral to prevent double application. See
+[`../default_profiles.md`](../default_profiles.md).
 
 ---
 

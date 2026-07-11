@@ -94,19 +94,21 @@ Official API references: [Camera](https://ruby.sketchup.com/Sketchup/Camera.html
 
 ## 4. Navigation model
 
-The broker has already applied per-app sensitivity/gain and generic invert. `camera.rb` contains
-only SketchUp's baseline orientation/feel:
+The daemon sends SketchUp's immutable correction in `advanced['host_baseline']`; `camera.rb` applies
+it after mode-specific user routing. Its camera constants are deliberately neutral:
 
 ```ruby
-ORBIT_SCALE = [-1.0, -1.0, 1.0] # full-angle eye-camera orbit; signs need hardware feel check
-PAN_SIGN = [-1.0, -1.0]
-PAN_SCALE = 0.14                 # fraction of visible view span
+ORBIT_SCALE = [1.0, 1.0, 1.0]
+PAN_SIGN = [1.0, 1.0]
+PAN_SCALE = 1.0
 ZOOM_SIGN = 1.0
-ZOOM_SCALE = 0.25
-FLY_MOVE = 0.5
-WALK_MOVE = 0.5
+ZOOM_SCALE = 1.0
+FLY_MOVE = 1.0
+WALK_MOVE = 1.0
 WORLD_UP = Geom::Vector3d.new(0, 0, 1)
 ```
+
+The shipped factors are documented in [`../default_profiles.md`](../default_profiles.md).
 
 - **Free orbit:** compose pitch/yaw/twist about the frame-start camera right/up/forward axes with
   `Geom::Transformation.rotation(pivot, axis, radians)`. Transform eye, target, and up, then rebuild

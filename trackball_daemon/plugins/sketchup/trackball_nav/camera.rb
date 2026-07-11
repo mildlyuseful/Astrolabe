@@ -6,15 +6,14 @@
 # thread and applies one already-scaled broker frame to the active view camera.
 module TrackballNav
   module CameraDriver
-    # Baseline orientation/feel only. The daemon has already applied the user's per-app
-    # sensitivity, gain, and generic invert settings.
-    ORBIT_SCALE = [-1.0, -1.0, 1.0].freeze
-    PAN_SIGN = [-1.0, -1.0].freeze
-    PAN_SCALE = 0.14
+    # Host alignment comes from advanced['host_baseline']; camera math is deliberately neutral.
+    ORBIT_SCALE = [1.0, 1.0, 1.0].freeze
+    PAN_SIGN = [1.0, 1.0].freeze
+    PAN_SCALE = 1.0
     ZOOM_SIGN = 1.0
-    ZOOM_SCALE = 0.25
-    FLY_MOVE = 0.5
-    WALK_MOVE = 0.5
+    ZOOM_SCALE = 1.0
+    FLY_MOVE = 1.0
+    WALK_MOVE = 1.0
 
     WORLD_UP = Geom::Vector3d.new(0.0, 0.0, 1.0).freeze
     PIVOT_HOLD_IDLE = 0.35
@@ -65,6 +64,7 @@ module TrackballNav
         idle = now - @gesture_time
         @gesture_time = now
         orbit, pan, zoom = apply_action_routing(nav_mode, pivot_id, orbit, pan, zoom, advanced)
+        orbit, pan, zoom = apply_host_baseline(nav_mode, orbit, pan, zoom, advanced)
         # Source routing can move a shifted input between pan and zoom (for example twist/Z ->
         # Walk Forward), so dispatch must use the routed channels rather than the pre-route flags.
         has_orbit = orbit.any? { |value| value != 0.0 }
@@ -395,6 +395,25 @@ module TrackballNav
           pan = [routed(movement, orbit_source, orbit_config, 'pan_x', 0),
                  routed(movement, orbit_source, orbit_config, 'pan_y', 1)]
           zoom = routed(movement, orbit_source, orbit_config, 'zoom', 2)
+        end
+        [orbit, pan, zoom]
+      end
+
+      def apply_host_baseline(nav_mode, orbit, pan, zoom, advanced)
+        baseline = advanced['host_baseline']
+        baseline = {} unless baseline.is_a?(Hash)
+        orbit_factor = numeric_array(baseline['orbit'], 3)
+        orbit_factor = [1.0, 1.0, 1.0] if orbit_factor.all?(&:zero?)
+        pan_factor = numeric_array(baseline['pan'], 2)
+        pan_factor = [1.0, 1.0] if pan_factor.all?(&:zero?)
+        orbit = Array.new(3) { |i| orbit[i] * orbit_factor[i] }
+        if nav_mode == 'orbit'
+          pan = Array.new(2) { |i| pan[i] * pan_factor[i] }
+          zoom *= numeric(baseline.fetch('zoom', 1.0))
+        else
+          move = numeric(baseline.fetch('move', 1.0))
+          pan = pan.map { |value| value * move }
+          zoom *= move
         end
         [orbit, pan, zoom]
       end

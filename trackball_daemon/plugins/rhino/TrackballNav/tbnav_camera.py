@@ -7,10 +7,10 @@ import math
 
 ORBIT_SCALE = (1.0, 1.0, 1.0)
 ORBIT_SIGN = (1.0, 1.0, 1.0)
-PAN_SIGN = (-1.0, 1.0)
-PAN_SCALE = 0.14
+PAN_SIGN = (1.0, 1.0)
+PAN_SCALE = 1.0
 ZOOM_SIGN = 1.0
-ZOOM_SCALE = 0.25
+ZOOM_SCALE = 1.0
 WORLD_UP = (0.0, 0.0, 1.0)
 DIST_MIN = 1.0e-4
 

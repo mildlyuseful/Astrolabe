@@ -80,17 +80,17 @@ NLPROXY_VERSION = "1.4.8.21486"
 # spacenav-ws bridge sends its own and Onshape accepts it), so we send a clear, honest one.
 WELCOME_IDENT = "NLProxy v%s (Trackball Daemon bridge)" % NLPROXY_VERSION
 
-# --- tuning: baseline sign/scale + scene orientation (mirrors the Fusion add-in / SW driver) ----
+# --- neutral camera math + scene orientation ---------------------------------------------------
 # The nav-delta contract feeds (ox,oy,oz) = orbit about (camera right, up, forward) in radians,
-# (px,py) = pan, zoom = zoom; values ARRIVE ALREADY SCALED by the active app's bindings. These bake
-# in the baseline feel and are expected to need a sign/up-axis pass once live (see notes doc).
-ORBIT_SIGN = (-1.0, -1.0, 1.0)    # (ox=pitch about right, oy=yaw about up, oz=roll about forward)
+# (px,py) = pan, zoom = zoom. OutputEngine already composes the immutable Onshape baseline with
+# user bindings, so this implementation stays neutral.
+ORBIT_SIGN = (1.0, 1.0, 1.0)
 # turntable azimuth axis. Onshape's scene up may be Y or Z -- VERIFY live (only affects turntable:
 # toggle it and watch whether verticals stay vertical). (0,1,0) = Y-up (WebGL convention) as a start.
 WORLD_UP = (0.0, 1.0, 0.0)
-PAN_SIGN = (1.0, -1.0)            # pan along (camera-right, camera-up); up negated like the add-in
-PAN_SCALE = 0.14                  # pan delta -> fraction of the view half-extent (Fusion baseline)
-ZOOM_SCALE = 0.25                 # zoom delta -> fraction (perspective: dolly; ortho: extent scale)
+PAN_SIGN = (1.0, 1.0)
+PAN_SCALE = 1.0
+ZOOM_SCALE = 1.0
 ZOOM_SIGN = 1.0                   # twist -> zoom direction
 
 # view.affine layout. False = the ROW-vector layout real ONSHAPE emits (verified live: the last

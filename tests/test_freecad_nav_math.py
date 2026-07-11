@@ -157,8 +157,8 @@ def test_pan_moves_in_view_plane_scaled_by_size():
 def test_zoom_ortho_scales_height_to_center():
     c = _ortho_cam()
     L0 = cam.look_at(c)
-    cam.zoom(c, 1.0, None)                    # to_center -> pivot = look-at
-    s = 1.0 - cam.ZOOM_SIGN * 1.0 * cam.ZOOM_SCALE
+    cam.zoom(c, 0.25, None)                   # daemon-applied FreeCAD baseline for raw z=1
+    s = 1.0 - cam.ZOOM_SIGN * 0.25 * cam.ZOOM_SCALE
     assert abs(c.height - 20.0 * s) < 1e-6    # height scaled by s
     assert vclose(cam.look_at(c), L0, eps=1e-6)   # look-at unchanged for to_center
     assert c.height < 20.0                    # positive z zooms IN (smaller height)
@@ -171,8 +171,8 @@ def test_zoom_ortho_to_pivot_keeps_pivot_fixed():
     P = (4.0, 0.0, 0.0)
     L0 = cam.look_at(c)
     off0 = cam.v_sub(P, L0)
-    cam.zoom(c, 1.0, P)
-    s = 1.0 - cam.ZOOM_SIGN * 1.0 * cam.ZOOM_SCALE
+    cam.zoom(c, 0.25, P)
+    s = 1.0 - cam.ZOOM_SIGN * 0.25 * cam.ZOOM_SCALE
     off1 = cam.v_sub(P, cam.look_at(c))
     assert vclose(off1, cam.v_scale(off0, s), eps=1e-6)
 
@@ -180,7 +180,7 @@ def test_zoom_ortho_to_pivot_keeps_pivot_fixed():
 def test_zoom_persp_dollies_along_forward():
     c = cam.Camera(position=(0.0, 0.0, 10.0), orientation=(0.0, 0.0, 0.0, 1.0),
                    focal=10.0, height=None, height_angle=math.radians(45.0), is_ortho=False)
-    cam.zoom(c, 1.0, None)
+    cam.zoom(c, 0.25, None)
     # eye dollied along fwd=(0,0,-1): z decreases; focal reduced so look-at stays put
     assert c.position[2] < 10.0
     assert c.focal < 10.0

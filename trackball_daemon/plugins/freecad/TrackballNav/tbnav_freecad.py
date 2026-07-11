@@ -25,7 +25,8 @@ import traceback
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.8"          # 0.1.8: camera/screen_center canonical pivot names.
+ADDIN_VERSION = "0.1.9"          # 0.1.9: immutable host baseline profile.
+                                 # 0.1.8: camera/screen_center canonical pivot names.
                                  # 0.1.5: selection_overrides_pivot is functional.
                                  # 0.1.4: scheme values renamed (pointer->cursor,
                                  # cursor->selection, to_pointer->to_cursor; daemon config v3).

@@ -1,7 +1,7 @@
 @tool
 extends EditorPlugin
 
-const ADDIN_VERSION := "0.1.7"
+const ADDIN_VERSION := "0.1.8"
 const DEFAULT_PORT := 47900
 const PIVOT_HOLD_IDLE := 0.35
 const OBJ_CACHE_SEC := 0.5
@@ -180,6 +180,10 @@ func _apply(frame: Dictionary, idle: float) -> void:
 	o = inv_res[0]
 	p = inv_res[1]
 	z = inv_res[2]
+	var baseline_res := _apply_host_baseline(nav_mode, twist_action, o, p, z, adv)
+	o = baseline_res[0]
+	p = baseline_res[1]
+	z = baseline_res[2]
 
 	var cam := _read_cam(camera)
 	_focus_dist = TrackballNavCamera.clamp_dist(_focus_dist)
@@ -462,6 +466,27 @@ func _apply_action_routing(nav_mode: String, op: String, o: Vector3, p: Vector2,
 		p = Vector2(_routed(movement, orbit_axes, ob, "pan_x", 0),
 			_routed(movement, orbit_axes, ob, "pan_y", 1))
 		z = _routed(movement, orbit_axes, ob, "zoom", 2)
+	return [o, p, z]
+
+
+func _apply_host_baseline(nav_mode: String, twist_action: String, o: Vector3, p: Vector2,
+		z: float, adv: Dictionary) -> Array:
+	var baseline = adv.get("host_baseline", {})
+	if typeof(baseline) != TYPE_DICTIONARY:
+		return [o, p, z]
+	var orbit := _vec3(baseline.get("orbit", [1.0, 1.0, 1.0]))
+	var pan := _vec2(baseline.get("pan", [1.0, 1.0]))
+	var zoom := float(baseline.get("zoom", 1.0))
+	var move := float(baseline.get("move", 1.0))
+	if nav_mode == "orbit":
+		var twist_factor := zoom if twist_action in ["zoom", "dolly"] else orbit.z
+		o = Vector3(o.x * orbit.x, o.y * orbit.y, o.z * twist_factor)
+		p = Vector2(p.x * pan.x, p.y * pan.y)
+		z *= zoom
+	else:
+		o *= orbit
+		p *= move
+		z *= move
 	return [o, p, z]
 
 

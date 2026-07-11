@@ -1,4 +1,4 @@
 {
-  "version": "0.1.7",
-  "_comment": "Kept in sync with plugin.cfg / ADDIN_VERSION. 0.1.7: per-action X/Y/Z source routing."
+  "version": "0.1.8",
+  "_comment": "Kept in sync with plugin.cfg / ADDIN_VERSION. 0.1.8: immutable host baseline profile."
 }

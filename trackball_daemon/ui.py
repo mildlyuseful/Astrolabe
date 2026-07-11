@@ -620,13 +620,46 @@ class SettingsWindow:
                   foreground="#777").pack(side="left", padx=6)
 
         holder = ttk.Frame(outer)            # the scrollable body is rebuilt inside here on app change
-        holder.pack(fill="both", expand=True)
 
         def rebuild(*_):
             for w in holder.winfo_children():
                 w.destroy()
             self._set_and_save(("active_app",), self._edit_app.get())   # selection = active
             self._bindings_fields(self._scrollable(holder), self._edit_app.get())
+
+        def choose_default_profile(key):
+            self._edit_app.set(key)
+            rebuild()
+
+        profile_actions = ttk.Frame(outer)
+        profile_actions.pack(fill="x", padx=10, pady=(0, 4))
+        ttk.Label(profile_actions, text="Shipped profiles:", width=24, anchor="w").pack(side="left")
+        profiles = ttk.Menubutton(profile_actions, text="Default profiles")
+        profile_menu = tk.Menu(profiles, tearoff=False)
+        profiles["menu"] = profile_menu
+        for appdef in integrations.APPS:
+            profile_menu.add_command(label=appdef.name,
+                                     command=lambda key=appdef.key: choose_default_profile(key))
+        profiles.pack(side="left", padx=(8, 0))
+
+        def reset_current_profile():
+            key = self._edit_app.get()
+            name = integrations.APPS_BY_KEY[key].name
+            if not messagebox.askyesno(
+                    "Reset default profile?",
+                    f"Reset every {name} navigation setting to the shipped intuitive default?\n\n"
+                    "Enable/install state and installed add-in version will be preserved.",
+                    parent=self.win):
+                return
+            self.cfg.reset_app_profile(key)
+            for w in holder.winfo_children():
+                w.destroy()
+            self._bindings_fields(self._scrollable(holder), key)
+
+        ttk.Button(profile_actions, text="Reset to default profile",
+                   command=reset_current_profile).pack(side="left", padx=(6, 0))
+
+        holder.pack(fill="both", expand=True)
 
         combo.bind("<<ComboboxSelected>>", rebuild)
         self._bindings_fields(self._scrollable(holder), self._edit_app.get())

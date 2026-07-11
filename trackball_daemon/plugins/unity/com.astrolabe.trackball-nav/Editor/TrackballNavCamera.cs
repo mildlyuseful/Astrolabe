@@ -8,13 +8,13 @@ namespace Astrolabe.TrackballNav
 {
     internal static class TrackballNavCamera
     {
-        public static readonly Vector3 OrbitScale = new Vector3(2f, 2f, 2f);
+        public static readonly Vector3 OrbitScale = Vector3.one; // daemon supplies host baseline
         public static readonly Vector3 OrbitSign = new Vector3(1f, 1f, 1f);
-        public static readonly Vector2 PanSign = new Vector2(1f, -1f);
-        public const float PanScale = 0.14f;
+        public static readonly Vector2 PanSign = Vector2.one;
+        public const float PanScale = 1f;
         public const float ZoomSign = 1f;
-        public const float ZoomScale = 0.25f;
-        public const float MoveScale = 0.5f;
+        public const float ZoomScale = 1f;
+        public const float MoveScale = 1f;
         public static readonly Vector3 WorldUp = Vector3.up;
         public const float DistDefault = 10f;
         public const float DistMin = 0.01f;

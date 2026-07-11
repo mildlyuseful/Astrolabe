@@ -231,7 +231,7 @@ Godot 0.1.7. Other integration versions are unchanged.
 
 Commit: `feat: add global and per-action axis routing`.
 
-## [ ] Step 4 — Baked software alignment and resettable default profiles
+## [x] Step 4 — Baked software alignment and resettable default profiles
 
 Goal: separate developer-owned host corrections from user preferences.
 
@@ -241,6 +241,44 @@ Goal: separate developer-owned host corrections from user preferences.
 - Add a Default Profile menu containing the full supported-app suite.
 - Add per-app “Reset to default profile” controls that restore every relevant field atomically.
 - Test profile composition, reset completeness, and old-config migration.
+
+Completed:
+
+1. Added the frozen `HostBaseline` model and immutable `HOST_BASELINE_PROFILES` registry for all 11
+   supported apps. Developer-owned orbit/pan/zoom/movement factors no longer live as editable or
+   duplicated camera constants in integrations.
+2. Lightweight integrations receive their host alignment at the daemon's nav-output boundary.
+   Blender, SketchUp, Unreal, Unity, and Godot receive `adv.host_baseline` and apply it after their
+   mode-specific action routing, where Orbit/Fly/Walk meaning is known. Their local math constants
+   are neutral, preventing double application. The local debug cube remains host-neutral.
+3. Blender and SketchUp's inside-out `camera.roll` / `fly.bank` corrections moved into the immutable
+   baseline. Saved user defaults are now neutral; wire direction is baseline XOR user preference.
+   Config v6 migrates only explicitly stored v5 values, preserving every existing effective setting.
+4. Added detached shipped user profiles for the full supported suite, a **Default profiles** menu,
+   and per-app **Reset to default profile**. Reset covers rate, pivot hold/override, all bindings,
+   and rich advanced settings in one save/notification while preserving enable/install/startup and
+   installed-version state. Lean-app reset also removes stray rich `advanced` data.
+5. Added `docs/default_profiles.md`, updated the README and affected maintainer docs, synchronized
+   every bundled add-in contract version, and rebuilt the bundled AutoCAD Release DLL/manifest.
+
+Acceptance/verification:
+
+- `pytest -q` — 326 passed.
+- Tests cover registry immutability/full-suite completeness, exact payloads, v5→v6 XOR migration
+  (including absent old keys), detached defaults, complete atomic reset + one notification,
+  preservation of operational state, lean baseline + user inversion composition, rich baseline
+  deferral, and all bundled version markers.
+- `python -m compileall -q trackball_daemon` and `git diff --check` — passed.
+- `dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj --no-restore` — ALL PASS.
+- AutoCAD 2026 Release build succeeded and copied bundled plugin v0.3.10 + regenerated version.json.
+  It retains the existing non-fatal .NET/AutoCAD `WindowsBase` version-conflict warning (0 errors).
+- Ruby, Godot, and Unity command-line compilers are not installed. Their baseline consumers are
+  source-covered but need normal host-GUI live verification, as do direction/feel checks in each app.
+
+Versions: daemon 0.1.64; Blender 0.1.16; FreeCAD 0.1.9; Fusion 0.1.19; SketchUp 0.2.7;
+Unreal 0.2.8; Unity 0.1.10; Godot 0.1.8; Rhino 0.1.13; AutoCAD 0.3.10.
+
+Commit: `feat: add immutable host default profiles`.
 
 ## [ ] Step 5 — Level horizon on fixed-horizon mode entry (issue #2)
 

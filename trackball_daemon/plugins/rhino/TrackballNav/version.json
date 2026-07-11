@@ -1,4 +1,4 @@
 {
-  "version": "0.1.12",
-  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_rhino.py. 0.1.12: canonical camera/screen_center pivot names."
+  "version": "0.1.13",
+  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_rhino.py. 0.1.13: immutable host baseline profile."
 }

@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 15),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 16),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,8 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.15"                   # 0.1.15: per-action X/Y/Z source routing.
+ADDIN_VERSION = "0.1.16"                   # 0.1.16: immutable host baseline profile.
+                                           # 0.1.15: per-action X/Y/Z source routing.
                                            # 0.1.12: selection_overrides_pivot is functional.
                                            # 0.1.10: 3D-cursor pivot value renamed cursor->cursor_3d
                                            # (daemon config v3; "cursor" now means under-the-mouse).
@@ -51,21 +52,16 @@ ADDIN_VERSION = "0.1.15"                   # 0.1.15: per-action X/Y/Z source rou
                                            # passive modal-operator mouse tracker (no on-demand
                                            # mouse getter exists in the bpy API -- verified).
 
-# --- tuning: Blender's intrinsic axis orientation + baseline sensitivity. These bake in the
-#     starting feel; the daemon's Per-App Bindings (gain 1.0 = this baseline) scale from here and
-#     the per-action Source/Invert controls adjust further. SIGNS ARE STARTING GUESSES. -----------
-ORBIT_SCALE = (0.5, 0.5, 0.5)   # (pitch o[0], yaw o[1], twist o[2]) baseline. 0.5 so the daemon's
-                                # orbit Sensitivity 1.0 is a true 1:1 ball->view orbit: the add-on
-                                # rotates the view by exactly `o`, and the dual-sensor device reports
-                                # ~2x the physical angle, so halving here cancels it. Bump Sensitivity
-                                # to taste; the per-app Invert checkboxes still flip sign.
-PAN_SIGN = (1.0, -1.0)          # pan along (world_right, world_up)
-PAN_SCALE = 0.5                 # broker pan delta -> world units (x view_distance if pan_scales_with_distance)
-ZOOM_SCALE = 0.5                # broker zoom delta -> fraction of view_distance per frame
-ZOOM_SIGN = 1.0                 # twist->zoom direction
-DOLLY_SCALE = 0.5               # dolly distance per zoom delta, x view_distance
-FLY_MOVE = 0.5                  # fly strafe/thrust per delta, x view_distance
-WALK_MOVE = 0.5                 # walk move per delta, x view_distance
+# Host correction arrives in ``adv.host_baseline`` from the daemon's immutable profile registry.
+# Camera math stays neutral so corrections cannot be double-applied here and in the daemon.
+ORBIT_SCALE = (1.0, 1.0, 1.0)
+PAN_SIGN = (1.0, 1.0)
+PAN_SCALE = 1.0
+ZOOM_SCALE = 1.0
+ZOOM_SIGN = 1.0
+DOLLY_SCALE = 1.0
+FLY_MOVE = 1.0
+WALK_MOVE = 1.0
 
 DIST_MIN, DIST_MAX = 1e-3, 1e6  # view_distance clamp (Blender's own range is wide)
 PIVOT_HOLD_IDLE = 0.35          # s without frames that ends a gesture -> re-raycast the screen-center pivot
@@ -423,9 +419,9 @@ def _apply_orbit(win, rv, region, o, frame, adv, idle):
         if twist_action == "roll" and not lock:
             roll = twist                           # direction set by the per-mode invert (upstream)
         elif twist_action == "zoom":
-            _zoom(rv, twist)
+            _zoom(rv, twist * float((adv.get("host_baseline") or {}).get("zoom", 1.0)))
         elif twist_action == "dolly":
-            _dolly(rv, twist)
+            _dolly(rv, twist * float((adv.get("host_baseline") or {}).get("zoom", 1.0)))
         # "none" (or roll-while-locked): ignore twist
 
     if pitch or yaw or roll:
@@ -492,6 +488,23 @@ def _apply_action_routing(nav_mode, op, o, p, z, adv):
         p = [_routed(movement, oa, ob, "pan_x", 0),
              _routed(movement, oa, ob, "pan_y", 1)]
         z = _routed(movement, oa, ob, "zoom", 2)
+    return o, p, z
+
+
+def _apply_host_baseline(nav_mode, o, p, z, adv):
+    """Apply immutable daemon-supplied factors after the user's mode-specific routing."""
+    baseline = adv.get("host_baseline") or {}
+    orbit = baseline.get("orbit", [1.0, 1.0, 1.0])
+    pan = baseline.get("pan", [1.0, 1.0])
+    zoom = float(baseline.get("zoom", 1.0))
+    move = float(baseline.get("move", 1.0))
+    o = [o[i] * float(orbit[i]) for i in range(3)]
+    if nav_mode == "orbit":
+        p = [p[i] * float(pan[i]) for i in range(2)]
+        z *= zoom
+    else:
+        p = [v * move for v in p]
+        z *= move
     return o, p, z
 
 
@@ -573,6 +586,7 @@ def _apply(target, frame, idle):
         rv.view_perspective = 'PERSP'
 
     o, p, z = _apply_action_routing(nav_mode, op, o, p, z, adv)
+    o, p, z = _apply_host_baseline(nav_mode, o, p, z, adv)
 
     if nav_mode == "fly":
         _apply_fly(rv, o, p, z, adv)
