@@ -6,8 +6,8 @@ cannot see by reading the code**, and the **full list of future plans / requeste
 options**. Per-component deep dives live in their own docs (linked in §15); this file is the map that
 ties them together and covers the things that span more than one component.
 
-> Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.58**, Fusion
-> add-in **0.1.15**, Blender add-on **0.1.12**, FreeCAD add-on **0.1.5**, SketchUp extension
+> Snapshot at time of writing (versions drift — see §13): daemon `__version__` **0.1.59**, Fusion
+> add-in **0.1.16**, Blender add-on **0.1.12**, FreeCAD add-on **0.1.6**, SketchUp extension
 > **0.2.3**, Unreal add-on **0.2.4**, AutoCAD plugin **0.3.5**,
 > `pyproject` version is dynamic (single-sourced from `__version__`; packaging not yet cut). Dev machine: Windows 11, Blender 5.1.1, SolidWorks
 > 2025, Fusion 360, FreeCAD 1.1.1, SketchUp 2026.2, Unreal Engine 5.8, AutoCAD 2026 installed. The firmware has no
@@ -281,6 +281,9 @@ or Unreal's) is attached to the broker scheme (§12.9).
 all integrations. A non-empty selection replaces every external orbit pivot; `viewpoint` stays a
 true turn-in-place operation. Fusion and AutoCAD also gained real origin/object/selection resolution
 in their primary add-in paths instead of silently collapsing those values to the view target.
+Follow-up 0.1.59 fixed Fusion's API owner (`app.userInterface.activeSelections`) and FreeCAD's
+project bounds by excluding nested local-space feature bounds already represented by their placed
+Part/Body container.
 
 **The shared "view-pivot raycast" idea.** For the `view` orbit pivot, camera apps cast a ray
 down the **screen centre** to the **real surface depth** under the crosshair (like native middle/right-

@@ -37,7 +37,8 @@ PAN_SCALE = 0.14                 # broker pan delta -> fraction of view extents 
 ZOOM_SCALE = 0.25                # broker zoom delta -> fraction of view extents (baseline zoom feel)
 ZOOM_SIGN = 1.0                  # twist->zoom direction
 
-ADDIN_VERSION = "0.1.15"         # reported in the handshake so the daemon shows the LOADED version.
+ADDIN_VERSION = "0.1.16"         # reported in the handshake so the daemon shows the LOADED version.
+                                 # 0.1.16: read selection from app.userInterface.activeSelections.
                                  # 0.1.15: real selection/origin pivots + selection override.
                                  # 0.1.14: scheme values renamed (pointer->cursor, cursor->selection,
                                  # to_pointer->to_cursor) to match the daemon v3 config migration.
@@ -171,12 +172,15 @@ def _object_center(fallback):
 def _selection_center():
     """Aggregate world-space bounding-box centre of Fusion's active selection, or None.
 
-    ``activeSelections`` can contain bodies, occurrences, components, faces, sketches, and proxy
-    objects. Most expose ``boundingBox`` directly; selection wrappers expose the selected object as
-    ``entity``. Unsupported/non-geometric selections are skipped instead of stealing the pivot.
+    ``UserInterface.activeSelections`` can contain bodies, occurrences, components, faces, sketches,
+    and proxy objects. Most expose ``boundingBox`` through the selection's ``entity``; for a
+    non-geometric entity, its documented selection point is used as a degenerate bound.
     """
     try:
-        selections = app.activeSelections
+        ui = getattr(app, "userInterface", None)
+        selections = getattr(ui, "activeSelections", None)
+        if selections is None:
+            return None
         mn = [None, None, None]
         mx = [None, None, None]
         found = False
@@ -184,9 +188,13 @@ def _selection_center():
             item = selections.item(i)
             entity = getattr(item, "entity", item)
             bb = getattr(entity, "boundingBox", None)
-            if bb is None:
-                continue
-            lo, hi = bb.minPoint, bb.maxPoint
+            if bb is not None:
+                lo, hi = bb.minPoint, bb.maxPoint
+            else:
+                point = getattr(item, "point", None)
+                if point is None:
+                    continue
+                lo = hi = point
             for axis, (a, b) in enumerate(((lo.x, hi.x), (lo.y, hi.y), (lo.z, hi.z))):
                 mn[axis] = a if mn[axis] is None else min(mn[axis], a)
                 mx[axis] = b if mx[axis] is None else max(mx[axis], b)

@@ -198,7 +198,11 @@ def _reset(monkeypatch):
 
 
 def _wire(monkeypatch, vp, design, cursor=(800.0, 450.0), scale=1.0):
-    monkeypatch.setattr(tn, "app", types.SimpleNamespace(activeViewport=vp))
+    empty = types.SimpleNamespace(count=0, item=lambda _i: None)
+    monkeypatch.setattr(
+        tn, "app", types.SimpleNamespace(
+            activeViewport=vp,
+            userInterface=types.SimpleNamespace(activeSelections=empty)))
     monkeypatch.setattr(tn, "_active_design", lambda: design)
     monkeypatch.setattr(tn, "_cursor_screen_pos", lambda: cursor)
     monkeypatch.setattr(tn, "_screen_scale", lambda sx, sy: scale)
@@ -384,7 +388,9 @@ def test_selection_override_uses_aggregate_selection_bounds(monkeypatch):
         Selection(((-2.0, 0.0, 4.0), (2.0, 2.0, 6.0))),
         Selection(((8.0, -4.0, 0.0), (10.0, 4.0, 8.0))),
     ])
-    monkeypatch.setattr(tn, "app", types.SimpleNamespace(activeSelections=selected))
+    monkeypatch.setattr(
+        tn, "app", types.SimpleNamespace(
+            userInterface=types.SimpleNamespace(activeSelections=selected)))
     target = _pt(50.0, 50.0, 50.0)
     p = tn._orbit_pivot("origin", object(), target, idle=10.0, sel_override=True)
     assert (p.x, p.y, p.z) == pytest.approx((4.0, 0.0, 4.0))
@@ -397,7 +403,21 @@ def test_designated_selection_works_when_override_is_off(monkeypatch):
         count=1,
         item=lambda _i: types.SimpleNamespace(
             entity=types.SimpleNamespace(boundingBox=FakeBB((2, 4, 6), (6, 8, 10)))))
-    monkeypatch.setattr(tn, "app", types.SimpleNamespace(activeSelections=selected))
+    monkeypatch.setattr(
+        tn, "app", types.SimpleNamespace(
+            userInterface=types.SimpleNamespace(activeSelections=selected)))
     p = tn._orbit_pivot("selection", object(), _pt(50, 50, 50), idle=10.0,
                         sel_override=False)
     assert (p.x, p.y, p.z) == pytest.approx((4.0, 6.0, 8.0))
+
+
+def test_non_geometric_selection_uses_selection_point(monkeypatch):
+    selected = types.SimpleNamespace(
+        count=1,
+        item=lambda _i: types.SimpleNamespace(
+            entity=object(), point=_pt(3.0, 5.0, 7.0)))
+    monkeypatch.setattr(
+        tn, "app", types.SimpleNamespace(
+            userInterface=types.SimpleNamespace(activeSelections=selected)))
+    p = tn._selection_center()
+    assert (p.x, p.y, p.z) == pytest.approx((3.0, 5.0, 7.0))

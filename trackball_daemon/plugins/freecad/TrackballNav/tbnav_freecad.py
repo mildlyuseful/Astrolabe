@@ -25,7 +25,8 @@ import traceback
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.5"          # 0.1.5: selection_overrides_pivot is functional.
+ADDIN_VERSION = "0.1.6"          # 0.1.6: exclude nested local-space shapes from the model bbox.
+                                 # 0.1.5: selection_overrides_pivot is functional.
                                  # 0.1.4: scheme values renamed (pointer->cursor,
                                  # cursor->selection, to_pointer->to_cursor; daemon config v3).
                                  # reported in the hello handshake (shown in the daemon's tray); keep
@@ -196,22 +197,68 @@ def _obj_bbox(obj):
     return None
 
 
+def _is_nested_geo_object(obj):
+    """True when ``obj`` is geometrically owned by a Part/Body container.
+
+    A nested feature's Shape.BoundBox is in the container's local coordinates, while the top-level
+    container exposes the correctly transformed aggregate shape. Including both is what pulled the
+    project bounds toward the origin for placed Parts/Bodies.
+    """
+    try:
+        return obj.getParentGeoFeatureGroup() is not None
+    except Exception:
+        return False
+
+
+def _bbox_limits(obj, world=False):
+    """Return an object's bbox as ``(min_xyz, max_xyz)``.
+
+    Top-level Shape/Mesh bounds already include their placement. For a selected nested feature,
+    apply only its parent-container transform so selection pivots use world coordinates too.
+    """
+    b = _obj_bbox(obj)
+    if b is None:
+        return None
+    try:
+        if not b.isValid():
+            return None
+    except Exception:
+        pass
+    lo = (float(b.XMin), float(b.YMin), float(b.ZMin))
+    hi = (float(b.XMax), float(b.YMax), float(b.ZMax))
+    if not world or not _is_nested_geo_object(obj):
+        return lo, hi
+    try:
+        import FreeCAD as App
+        parent_placement = obj.getGlobalPlacement() * obj.Placement.inverse()
+        points = []
+        for x in (lo[0], hi[0]):
+            for y in (lo[1], hi[1]):
+                for z in (lo[2], hi[2]):
+                    p = parent_placement.multVec(App.Vector(x, y, z))
+                    points.append((float(p.x), float(p.y), float(p.z)))
+        return (tuple(min(p[i] for p in points) for i in range(3)),
+                tuple(max(p[i] for p in points) for i in range(3)))
+    except Exception:
+        return lo, hi
+
+
 def _doc_object_bbox(doc):
     """Aggregate (center, (min,max)) over every object with a bounding box, or (None, None)."""
     mn = [None, None, None]
     mx = [None, None, None]
     found = False
     for obj in getattr(doc, "Objects", []) or []:
-        b = _obj_bbox(obj)
-        if b is None:
+        # App::Part / PartDesign::Body already expose a transformed aggregate Shape. Their child
+        # features expose local-space bounds and must not be unioned a second time.
+        if _is_nested_geo_object(obj):
             continue
-        try:
-            if not b.isValid():
-                continue
-        except Exception:
-            pass
+        limits = _bbox_limits(obj)
+        if limits is None:
+            continue
+        lo3, hi3 = limits
         found = True
-        for i, (lo, hi) in enumerate(((b.XMin, b.XMax), (b.YMin, b.YMax), (b.ZMin, b.ZMax))):
+        for i, (lo, hi) in enumerate(zip(lo3, hi3)):
             mn[i] = lo if mn[i] is None else min(mn[i], lo)
             mx[i] = hi if mx[i] is None else max(mx[i], hi)
     if not found:
@@ -342,10 +389,10 @@ def _selection_center(doc):
         return None
     pts = []
     for obj in sel:
-        b = _obj_bbox(obj)
-        if b is not None:
-            c = b.Center
-            pts.append((c.x, c.y, c.z))
+        limits = _bbox_limits(obj, world=True)
+        if limits is not None:
+            lo, hi = limits
+            pts.append(tuple((lo[i] + hi[i]) * 0.5 for i in range(3)))
     if not pts:
         return None
     n = float(len(pts))

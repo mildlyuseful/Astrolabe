@@ -45,8 +45,12 @@ class FakeShape:
 
 
 class FakeObj:
-    def __init__(self, bb):
+    def __init__(self, bb, parent=None):
         self.Shape = FakeShape(bb)
+        self._parent = parent
+
+    def getParentGeoFeatureGroup(self):
+        return self._parent
 
 
 class FakeDoc:
@@ -91,6 +95,14 @@ CENTER_HIT = (7.0, 8.0, 9.0)
 
 def _view_both_hits():
     return FakeView(size=(800, 600), hits={PTR_PX: _hit(*PTR_HIT), CENTER_PX: _hit(*CENTER_HIT)})
+
+
+def test_document_bbox_ignores_nested_local_space_features():
+    container = FakeObj(FakeBB((100, 200, 300), (110, 220, 330)))
+    child = FakeObj(FakeBB((0, 0, 0), (10, 20, 30)), parent=container)
+    center, bbox = fc._doc_object_bbox(FakeDoc([container, child]))
+    assert center == (105.0, 210.0, 315.0)
+    assert bbox == ((100.0, 200.0, 300.0), (110.0, 220.0, 330.0))
 
 
 @pytest.fixture(autouse=True)
