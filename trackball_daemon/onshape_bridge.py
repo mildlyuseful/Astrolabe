@@ -893,6 +893,8 @@ class OnshapeBridge:
         self._version = ""
         self._in_motion = False
         self._held_pivot = None           # orbit pivot captured at gesture start and held (see _navigate)
+        self._held_zoom_pivot = None      # To Object/To Cursor target, held for one zoom gesture
+        self._held_zoom_resolved = False
         self._nav_logged = False          # debug: log one camera read/write per gesture
         self._force_focus = bool(_SPIN)   # spike/test: drive even if the client reports unfocused
         self._log = get_logger()
@@ -925,6 +927,8 @@ class OnshapeBridge:
                         "sel_override": bool(selection_overrides_pivot),
                         "fallbacks": list(orbit_pivot_fallbacks or [])}
         self._held_pivot = None
+        self._held_zoom_pivot = None
+        self._held_zoom_resolved = False
         # Fixed-horizon transition (issue #2): a free->turntable switch queues one leveling pass,
         # applied by the worker on the next navigation step. Leaving turntable cancels it.
         self._level_horizon = bool(level_horizon_on_entry)
@@ -1031,6 +1035,8 @@ class OnshapeBridge:
             self._conn = None
             self._in_motion = False
             self._held_pivot = None
+            self._held_zoom_pivot = None
+            self._held_zoom_resolved = False
             self._set_connected(False)
 
     def _set_connected(self, connected):
@@ -1124,6 +1130,8 @@ class OnshapeBridge:
                 self._log.info("onshape: horizon leveled on turntable entry")
 
         if ox or oy or oz:
+            self._held_zoom_pivot = None
+            self._held_zoom_resolved = False
             # Orbit about the gesture pivot, captured ONCE at the start of the gesture and held (so
             # the hit-test runs once, not per frame, and the pivot doesn't chase the moving view).
             pivot = self._gesture_pivot(conn, scheme, eye, right, up, back)
@@ -1139,13 +1147,23 @@ class OnshapeBridge:
             eye = self._pan(conn, eye, right, up, px, py)
             changed_affine = True
             self._held_pivot = None         # pan moved the screen centre -> re-hit on the next orbit
+            self._held_zoom_pivot = None
+            self._held_zoom_resolved = False
         elif zoom:
+            if not self._held_zoom_resolved:
+                self._held_zoom_pivot = self._zoom_target(conn, scheme, eye, right, up, back)
+                self._held_zoom_resolved = True
+            zpivot = self._held_zoom_pivot
             if self._perspective(conn):
-                zpivot = self._held_pivot or self._object_center(conn) or eye_in
-                eye = self._zoom_persp(eye, _v_neg(back), zpivot, zoom)
+                reference = zpivot or self._object_center(conn)
+                eye = self._zoom_persp(eye, _v_neg(back), reference, zoom,
+                                       hold_target=zpivot is not None)
                 changed_affine = True
             else:
                 new_extents = self._zoom_ortho(conn, zoom)
+                if new_extents is not None and zpivot is not None:
+                    eye = self._zoom_ortho_eye(eye, right, up, zpivot,
+                                                self._zoom_factor(zoom))
                 # Re-assert the (unchanged) affine alongside the extents change. Onshape treats the
                 # view.affine write as the frame's commit; writing extents alone makes it snap the
                 # view back on the next frame (the zoom "rubber-bands"). This matches the real
@@ -1197,6 +1215,8 @@ class OnshapeBridge:
             return
         self._in_motion = False
         self._held_pivot = None
+        self._held_zoom_pivot = None
+        self._held_zoom_resolved = False
         self._nav_logged = False              # re-arm the per-gesture debug log
         conn.write_best_effort("pivot.visible", False)
         conn.write_best_effort("motion", False)
@@ -1238,12 +1258,26 @@ class OnshapeBridge:
         gy = PAN_SIGN[1] * py * PAN_SCALE * vh
         return _v_add(eye, _v_add(_v_scale(right, gx), _v_scale(up, gy)))
 
-    def _zoom_persp(self, eye, forward, pivot, zoom):
-        """Perspective zoom = dolly the eye along forward, proportional to the pivot distance."""
+    @staticmethod
+    def _zoom_factor(zoom):
+        return max(0.02, 1.0 - ZOOM_SIGN * zoom * ZOOM_SCALE)
+
+    def _zoom_persp(self, eye, forward, pivot, zoom, hold_target=False):
+        """Perspective To Object/To Cursor scales the eye about P; To Center dollies forward."""
+        if hold_target and pivot is not None:
+            return _v_add(pivot, _v_scale(_v_sub(eye, pivot), self._zoom_factor(zoom)))
         dist = _v_len(_v_sub(pivot, eye)) if pivot is not None else 1.0
         if dist < 1e-6:
             dist = 1.0
         return _v_add(eye, _v_scale(forward, ZOOM_SIGN * zoom * ZOOM_SCALE * dist))
+
+    @staticmethod
+    def _zoom_ortho_eye(eye, right, up, pivot, factor):
+        """Shift an orthographic eye so P keeps its screen coordinate as extents scale."""
+        offset = _v_sub(pivot, eye)
+        planar = _v_add(_v_scale(right, _v_dot(offset, right)),
+                        _v_scale(up, _v_dot(offset, up)))
+        return _v_add(eye, _v_scale(planar, 1.0 - factor))
 
     def _zoom_ortho(self, conn, zoom):
         """Orthographic zoom = scale view.extents about the view centre (moving the eye does nothing
@@ -1252,12 +1286,23 @@ class OnshapeBridge:
         ext = conn.read("view.extents")
         if not (isinstance(ext, list) and len(ext) >= 6):
             return None
-        s = 1.0 - ZOOM_SIGN * zoom * ZOOM_SCALE
-        if s < 0.02:
-            s = 0.02
+        s = self._zoom_factor(zoom)
         return [ext[0] * s, ext[1] * s, ext[2], ext[3] * s, ext[4] * s, ext[5]]
 
     # --- scheme geometry ----------------------------------------------------------------------
+    def _zoom_target(self, conn, scheme, eye, right, up, back):
+        """Resolve the advertised zoom target. A miss honestly degrades to To Center."""
+        zm = scheme.get("zm", "to_center")
+        if zm == "to_object":
+            return self._object_center(conn)
+        if zm == "to_cursor":
+            if scheme.get("sel_override", True):
+                selected = self._selection_center(conn)
+                if selected is not None:
+                    return selected
+            return self._hit_cursor(conn, eye, right, up, back)
+        return None
+
     def _pivot(self, conn, scheme, eye, right, up, back):
         op = scheme.get("op", "screen_center")
         # A camera primary keeps its selection-override exemption even though the method

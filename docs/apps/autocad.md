@@ -666,8 +666,8 @@ behaviour). Two halves, both in the plugin (the retired COM transport had no cur
   mid-gesture, so a mouse move would poison the cache with a wrong WCS mapping).
 - **Half B (the pivot):** `NavMath.Apply` grew optional `orbitPivot`/`zoomPivot` args (null = the
   old orbit-about-target exactly): a rigid rotation about P (`tgt' = P + m·(tgt−P)`; the eye
-  follows via `tgt' + dir'·dist`, so P keeps its exact screen position), and parallel `to_cursor`
-  zoom slides the target toward P by `1/factor` (perspective falls back to the plain dolly).
+  follows via `tgt' + dir'·dist`, so P keeps its exact screen position), and `to_object`/`to_cursor`
+  zoom scales the target and eye about P by `1/factor` in both parallel and perspective views.
   Per-gesture hold in `TryApplyGs`: the pivot is captured ONCE at the first orbit frame of a
   gesture from the cache — validated against the drawing extents +10 % of the diagonal — and held;
   a pan/zoom frame invalidates the orbit hold (re-captured at the live cursor on the next orbit

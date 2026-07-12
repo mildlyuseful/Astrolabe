@@ -28,7 +28,8 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.9"          # 0.2.9: level horizon on fixed-horizon mode entry
+ADDIN_VERSION = "0.2.10"         # 0.2.10: real level-bounds Model Center / To Object
+                                 # 0.2.9: level horizon on fixed-horizon mode entry
                                  # (adv.level_horizon_on_entry; issue #2).
                                  # 0.2.8: immutable host baseline profile.
                                  # 0.2.7: per-action X/Y/Z source routing.
@@ -59,6 +60,7 @@ _subsystem = None                # cached UnrealEditorSubsystem (None => use Edi
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
 _zoom_gesture = {"pivot": None}  # "to_cursor" zoom's own per-gesture hold (reset on orbit/pan)
 _obj_cache = {"t": 0.0, "center": None, "bbox": None}
+_scene_cache = {"t": 0.0, "center": None}
 # Fixed-horizon transition tracker (issue #2): None until the first frame, so an add-on that
 # starts up already in a fixed mode never levels -- only a real free->fixed switch does.
 _horizon = {"fixed": None}
@@ -214,6 +216,40 @@ def _selected_actors():
             return unreal.EditorLevelLibrary.get_selected_level_actors()
         except Exception:
             return []
+
+
+def _all_actors():
+    try:
+        return unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
+    except Exception:
+        try:
+            return unreal.EditorLevelLibrary.get_all_level_actors()
+        except Exception:
+            return []
+
+
+def _scene_center():
+    """Center of the aggregate level-actor bounds, excluding actors with no spatial extent."""
+    now = time.time()
+    if _scene_cache["center"] is not None and now - _scene_cache["t"] < OBJ_CACHE_SEC:
+        return _scene_cache["center"]
+    mn = [None, None, None]
+    mx = [None, None, None]
+    for actor in _all_actors() or []:
+        try:
+            origin, extent = actor.get_actor_bounds(False)
+            oe = ((origin.x, extent.x), (origin.y, extent.y), (origin.z, extent.z))
+            if max(abs(v[1]) for v in oe) <= 1e-6:
+                continue
+        except Exception:
+            continue
+        for i, (o, e) in enumerate(oe):
+            lo, hi = o - e, o + e
+            mn[i] = lo if mn[i] is None else min(mn[i], lo)
+            mx[i] = hi if mx[i] is None else max(mx[i], hi)
+    center = None if mn[0] is None else tuple((mn[i] + mx[i]) * 0.5 for i in range(3))
+    _scene_cache.update(t=now, center=center)
+    return center
 
 
 def _selection_center():
@@ -422,7 +458,9 @@ def _orbit_pivot(op, cam, idle, sel_override=True, candidates=None):
             point = _screen_center_pivot(cam, ray_bbox)
         elif method == "cursor":
             point = _cursor_pivot(ray_bbox)
-        elif method in ("object", "selection"):
+        elif method == "object":
+            point = _scene_center()
+        elif method == "selection":
             point = center
         else:
             continue
@@ -437,7 +475,7 @@ def _zoom_toward(zm, idle=0.0, sel_override=True):
     """World point to dolly toward, or None for a straight-forward dolly."""
     center, bbox = _selection_center()
     if zm == "to_object":
-        return center                        # may be None -> dolly straight along forward
+        return _scene_center()                # may be None -> dolly straight along forward
     if zm == "to_cursor":
         if sel_override and center is not None:
             return center

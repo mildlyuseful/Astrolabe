@@ -80,7 +80,8 @@ Per-app settings are rendered from one ordered capability schema in
 `trackball_daemon/binding_schema.py`. New integrations select the shared fields and option sets they
 support; the UI does not contain a separate hand-maintained form for each host. All profiles expose
 Orbit style, Zoom mode, and Twist action. Hosts that can distinguish native camera zoom from dolly
-also expose **Pan-mode zoom**.
+also expose **Pan-mode zoom**. The audited capability matrix and intentionally deferred options are
+documented in [`docs/feature_parity.md`](docs/feature_parity.md).
 
 ### Fixed-horizon mode entry
 
@@ -263,7 +264,7 @@ Architecture, Mechanical) are all `acad.exe` and expose the same automation obje
    - **Orbit style** — `free` or `turntable` (yaw about world-up + pitch about camera-right; AutoCAD
      is **Z-up**). Unlike the old COM path, the plugin sets `VIEWTWIST` directly, so free-roll works.
    - **Zoom mode** — `to_center` (default), `to_object` (zoom about the drawing-extents centre), or
-     `to_cursor` (zoom about the point under the mouse, parallel projection).
+     `to_cursor` (zoom about the point under the mouse in parallel or perspective projection).
 
 > Requires `pywin32` (Windows) for the NETLOAD delivery only. If it's missing the loader disables
 > itself and logs once; the plugin can still be loaded by hand (`NETLOAD` →

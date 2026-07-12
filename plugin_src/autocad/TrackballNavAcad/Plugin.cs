@@ -57,7 +57,8 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.11";  // 0.3.11: level-horizon toggle -- turntable
+        public const string PluginVersion = "0.3.12";  // 0.3.12: To Object/To Cursor zoom pivots
+                                                       // 0.3.11: level-horizon toggle -- turntable
                                                        // entry levels once (default) or keeps tilt
                                                        // (adv.level_horizon_on_entry; issue #2).
                                                        // 0.3.10: immutable host baseline profile.
@@ -162,7 +163,7 @@ namespace TrackballNav
 
         // "cursor"/"to_cursor" per-gesture holds: captured at the first orbit/zoom frame of a
         // gesture from the pointer cache (null = no target under the cursor -> orbit falls
-        // through the configured chain; to_cursor zoom degrades to the plain dolly),
+        // through the configured chain; to_cursor zoom degrades to To Center),
         // then HELD so the pivot never chases a moving target. A pan/zoom frame invalidates the
         // orbit hold (the view moved under the cursor); orbit/pan invalidate the zoom hold; a
         // gesture end (EndGesture) resets both.
@@ -922,8 +923,7 @@ namespace TrackballNav
                         LogOnce("gs-clobber",
                                 new System.Exception("GS view externally reset mid-gesture (self-healed from shadow)"));
                 }
-                // "cursor"/"to_cursor": resolve the held pivots (capture once, hold; see the
-                // field comments). Perspective to_cursor falls back to the plain dolly.
+                // Resolve held orbit/zoom pivots once per gesture (capture once, then hold).
                 bool hasOrbit = d[0] != 0 || d[1] != 0 || d[2] != 0;
                 bool hasPan = d[3] != 0 || d[4] != 0;
                 bool hasZoom = d[5] != 0;
@@ -944,14 +944,19 @@ namespace TrackballNav
                     d[0] = d[1] = d[2] = 0.0;
                     hasOrbit = false;
                 }
-                if (hasZoom && zmv == "to_cursor" && !_cam.Persp && !_heldZoomSet)
+                if (hasZoom && (zmv == "to_object" || zmv == "to_cursor") && !_heldZoomSet)
                 {
-                    _heldZoomPivot = selectionOverrides ? CaptureSelectionCenter(doc) : null;
-                    if (!_heldZoomPivot.HasValue)
-                        _heldZoomPivot = CapturePointerPivot();
+                    if (zmv == "to_object")
+                        _heldZoomPivot = CaptureDrawingCenter();
+                    else
+                    {
+                        _heldZoomPivot = selectionOverrides ? CaptureSelectionCenter(doc) : null;
+                        if (!_heldZoomPivot.HasValue)
+                            _heldZoomPivot = CapturePointerPivot();
+                    }
                     _heldZoomSet = true;
                 }
-                if (hasZoom && zmv == "to_cursor" && !_cam.Persp)
+                if (hasZoom && (zmv == "to_object" || zmv == "to_cursor"))
                     zoomPivot = _heldZoomPivot;
                 _cam = NavMath.Apply(_cam, d, style, OrbitSign, PanSignX, PanSignY,
                                      PanScale, ZoomSign, ZoomScale, orbitPivot, zoomPivot,

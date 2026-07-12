@@ -157,12 +157,16 @@ static class Tests
             CheckClose((c1.Tgt - c0.Tgt).Length, 0.0, 1e-12, "plain zoom: target fixed");
         }
 
-        // --- perspective + zoomPivot: falls back to the plain dolly (documented limitation) ---
+        // --- perspective + zoomPivot: P stays fixed while the camera dollies toward it --------
         {
             var c0 = Cam(persp: true);
             var P = new Point3d(9.0, 1.0, 4.0);
             var c1 = Apply(c0, D(z: 0.8), "free", zoomPivot: P);
-            CheckClose((c1.Tgt - c0.Tgt).Length, 0.0, 1e-12, "persp to_cursor: target fixed (dolly)");
+            double factor = 1.0 + ZoomSign * 0.8 * ZoomScale;
+            CheckClose((P + (c0.Tgt - P) / factor - c1.Tgt).Length, 0.0, 1e-12,
+                       "persp to_cursor: target scales about P");
+            CheckClose((P + (c0.Pos - P) / factor - c1.Pos).Length, 0.0, 1e-12,
+                       "persp to_cursor: eye scales about P");
             Check((c1.Pos - c1.Tgt).Length < 25.0, "persp to_cursor: dollied in");
         }
 

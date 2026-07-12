@@ -36,6 +36,16 @@ def test_rich_profiles_get_shared_zoom_mode_and_capability_specific_fields():
     assert not APP_BINDING_PROFILES["unreal"].zoom_behaviors
 
 
+def test_capabilities_do_not_expose_controls_without_distinct_runtime_behavior():
+    # Only SolidWorks currently consumes the configurable idle/hold value.
+    assert [key for key, profile in APP_BINDING_PROFILES.items()
+            if profile.supports("screen_hold")] == ["solidworks"]
+    # Godot's pan route is dolly-only; Fusion's unshifted twist enters its selected pan route.
+    assert APP_BINDING_PROFILES["godot"].zoom_behaviors == ()
+    assert APP_BINDING_PROFILES["godot"].twist_actions == ("zoom", "none")
+    assert "dolly" not in APP_BINDING_PROFILES["fusion360"].twist_actions
+
+
 def test_orbit_and_zoom_dropdown_labels_follow_one_convention():
     assert [_option_label(v) for v in ("default", "free", "turntable")] == [
         "Default", "Free", "Turntable"]

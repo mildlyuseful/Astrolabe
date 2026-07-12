@@ -54,7 +54,7 @@ BINDING_SECTIONS = (
 _BASE = frozenset({
     "rate", "orbit_sensitivity", "pan_gain", "zoom_gain", "zoom_dominance", "toggle",
     "orbit_style", "orbit_pivot", "twist_action", "level_horizon", "selection_override",
-    "zoom_target", "screen_hold", "action_routing",
+    "zoom_target", "action_routing",
 })
 _RICH = frozenset({"nav_mode", "fly_speed", "walk_speed", "lock_horizon", "pan_scales"})
 
@@ -96,14 +96,14 @@ APP_BINDING_PROFILES = MappingProxyType({
     "godot": _profile(
         "godot", "Godot editor viewport navigation", rich=True, no_roll=True,
         pivots=PIVOTS_CAMERA, orbit_styles=("turntable",),
-        features=(), twist_actions=("zoom", "dolly", "none"),
+        features=(), twist_actions=("zoom", "none"),
         exclude=("lock_horizon", "level_horizon")),
     "freecad": _profile("freecad", "FreeCAD navigation"),
     "fusion360": _profile(
         "fusion360", "Fusion 360 navigation",
-        twist_actions=("roll", "zoom", "dolly", "none"),
+        twist_actions=("roll", "zoom", "none"),
         zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
-    "solidworks": _profile("solidworks", "SOLIDWORKS navigation"),
+    "solidworks": _profile("solidworks", "SOLIDWORKS navigation", features=("screen_hold",)),
     "onshape": _profile("onshape", "Onshape navigation", features=("onshape_userscript",)),
     "autocad": _profile("autocad", "AutoCAD navigation", pivots=PIVOTS_CAMERA),
     "rhino": _profile("rhino", "Rhino navigation", pivots=PIVOTS_CAMERA),

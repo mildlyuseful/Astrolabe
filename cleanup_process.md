@@ -396,6 +396,37 @@ Commit:
 
 - `refactor: unify per-app binding profiles`
 
+### Step 6 parity audit — Settings versus implemented host behavior
+
+- Audited every field and option in `APP_BINDING_PROFILES` against its daemon, driver, or add-on
+  consumer. Added `tests/test_feature_parity.py` so Model Center, To Object, zoom behavior, and
+  capability-only controls cannot silently drift again.
+- Corrected **Model Center / To Object** in Blender, Unreal, Unity, Godot, and Rhino: these now use
+  aggregate project/model bounds instead of aliasing the current selection. SketchUp's selection
+  override now affects To Cursor without replacing To Object, and its existing Pan scales with view
+  distance control now switches between distance-scaled and fixed pan math.
+- Completed advertised zoom-target behavior in Onshape and AutoCAD. To Object uses model/drawing
+  bounds; To Cursor holds a real cursor/selection target; misses fall back to To Center. AutoCAD's
+  parallel and perspective math now preserve the requested target's screen coordinate.
+- Removed false or duplicate controls: configurable Screen Center hold is shown only for
+  SolidWorks; Godot has no Pan-mode Zoom/Dolly selector because only dolly exists; Godot and Fusion
+  no longer show duplicate Twist-action choices that enter the same runtime path.
+- Added `docs/feature_parity.md` with the intentionally deferred capabilities. In particular,
+  Camera orbit remains unexposed for Fusion, FreeCAD, and SolidWorks even though their APIs could
+  support future implementations; manual Zoom/Dolly selection remains hidden in hosts with only
+  one implemented or projection-selected path.
+- Versions: daemon 0.1.69; Blender 0.1.19; SketchUp 0.2.10; Unreal 0.2.10; Unity 0.1.12;
+  Godot 0.1.9; Rhino 0.1.15; AutoCAD 0.3.12. Fusion remains 0.1.21.
+- Verification: `pytest -q` — 369 passed; Blender 5.1 headless navigation math — 30 passed;
+  AutoCAD NavMath console suite — 56 passed; AutoCAD 2026 Release build — succeeded with the same
+  pre-existing WindowsBase warning and no errors; Python compileall and `git diff --check` — passed.
+  Godot, Unity, Unreal, Rhino, SketchUp, and Onshape changes still need their normal in-host smoke
+  tests; no Godot executable or Ruby runtime is installed locally.
+
+Commit:
+
+- `fix: align app settings with runtime capabilities`
+
 ## [ ] Step 7 — Privilege, antivirus, and scary-warning audit
 
 Goal: make installation/runtime security prompts predictable for companion-product users.

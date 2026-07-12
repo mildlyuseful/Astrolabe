@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 18),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 19),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,8 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.18"                   # 0.1.18: shared Zoom mode targets + twist zoom/dolly
+ADDIN_VERSION = "0.1.19"                   # 0.1.19: real scene-bounds Model Center / To Object
+                                           # 0.1.18: shared Zoom mode targets + twist zoom/dolly
                                            # 0.1.17: level horizon on fixed-horizon mode entry
                                            # (adv.level_horizon_on_entry; issue #2).
                                            # 0.1.16: immutable host baseline profile.
@@ -392,6 +393,33 @@ def _selection_median():
         return None
 
 
+def _object_center():
+    """Center of the visible scene geometry's aggregate world-space bounding box, or None."""
+    try:
+        points = []
+        geometry_types = {"MESH", "CURVE", "CURVES", "SURFACE", "META", "FONT", "VOLUME",
+                          "POINTCLOUD", "GREASEPENCIL"}
+        for ob in bpy.context.scene.objects:
+            if ob.type not in geometry_types or ob.hide_viewport:
+                continue
+            try:
+                if not ob.visible_get():
+                    continue
+            except Exception:
+                pass
+            try:
+                points.extend(ob.matrix_world @ Vector(corner) for corner in ob.bound_box)
+            except Exception:
+                continue
+        if not points:
+            return None
+        lo = Vector((min(p.x for p in points), min(p.y for p in points), min(p.z for p in points)))
+        hi = Vector((max(p.x for p in points), max(p.y for p in points), max(p.z for p in points)))
+        return (lo + hi) * 0.5
+    except Exception:
+        return None
+
+
 def _cursor_location():
     try:
         return bpy.context.scene.cursor.location.copy()
@@ -408,7 +436,8 @@ def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True, candidates=N
       screen_center -> first surface under the viewport center (per-gesture HOLD)
       cursor    -> raycast under the MOUSE (per-gesture HOLD; requires the modal mouse tracker's
                    cached position)
-      selection/object -> selection median   cursor_3d -> 3D cursor   origin -> world origin
+      selection -> selection median   object -> scene bounds center
+      cursor_3d -> 3D cursor   origin -> world origin
     When ``sel_override`` is enabled, a non-empty selection wins over every external pivot. The
     camera mode remains a true turn-in-place operation, matching Unity/Godot/Rhino. Unavailable
     methods are skipped; None means the configured chain was exhausted."""
@@ -425,8 +454,10 @@ def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True, candidates=N
             point = _raycast_screen_center(rv, region)
         elif method == "cursor":
             point = _raycast_cursor(rv, region, win)
-        elif method in ("selection", "object"):
+        elif method == "selection":
             point = _selection_median()
+        elif method == "object":
+            point = _object_center()
         elif method == "cursor_3d":
             point = _cursor_location()
         elif method == "origin":
@@ -443,11 +474,7 @@ def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True, candidates=N
 def _zoom_pivot(zm, rv, region, win, adv):
     """Zoom target selected by the shared scheme. Misses return None (To Center)."""
     if zm == "to_object":
-        if bool(adv.get("selection_overrides_pivot", True)):
-            selected = _selection_median()
-            if selected is not None:
-                return selected
-        return _selection_median()
+        return _object_center()
     if zm == "to_cursor":
         return _raycast_cursor(rv, region, win)
     return None

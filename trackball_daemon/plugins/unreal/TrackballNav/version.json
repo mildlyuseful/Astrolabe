@@ -1,4 +1,4 @@
 {
-  "version": "0.2.9",
-  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.9: level horizon on fixed-horizon mode entry (issue #2)."
+  "version": "0.2.10",
+  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.10: real level-bounds Model Center / To Object."
 }

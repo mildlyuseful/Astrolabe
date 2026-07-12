@@ -1,4 +1,4 @@
 {
-  "version": "0.1.8",
-  "_comment": "Kept in sync with plugin.cfg / ADDIN_VERSION. 0.1.8: immutable host baseline profile."
+  "version": "0.1.9",
+  "_comment": "Kept in sync with plugin.cfg / ADDIN_VERSION. 0.1.9: real scene-bounds Model Center / To Object."
 }

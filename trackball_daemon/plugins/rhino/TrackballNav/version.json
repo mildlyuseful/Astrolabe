@@ -1,4 +1,4 @@
 {
-  "version": "0.1.14",
-  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_rhino.py. 0.1.14: level horizon on turntable entry (issue #2)."
+  "version": "0.1.15",
+  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_rhino.py. 0.1.15: real document-bounds Model Center / To Object."
 }

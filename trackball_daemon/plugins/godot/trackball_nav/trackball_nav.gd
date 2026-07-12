@@ -1,7 +1,7 @@
 @tool
 extends EditorPlugin
 
-const ADDIN_VERSION := "0.1.8"
+const ADDIN_VERSION := "0.1.9"
 const DEFAULT_PORT := 47900
 const PIVOT_HOLD_IDLE := 0.35
 const OBJ_CACHE_SEC := 0.5
@@ -274,7 +274,9 @@ func _orbit_pivot(op: String, cam: TrackballNavCamera.Cam, idle: float, sel_over
 			point = _screen_center_pivot(cam)
 		elif method == "cursor":
 			point = _cursor_pivot()
-		elif method in ["object", "selection"]:
+		elif method == "object":
+			point = _scene_center()
+		elif method == "selection":
 			point = center
 		if point != null:
 			_gesture_pivot = point
@@ -286,7 +288,7 @@ func _orbit_pivot(op: String, cam: TrackballNavCamera.Cam, idle: float, sel_over
 func _zoom_toward(zm: String, idle: float, sel_override: bool):
 	var center = _selection_center()
 	if zm == "to_object":
-		return center
+		return _scene_center()
 	if zm == "to_cursor":
 		if sel_override and center != null:
 			return center
@@ -410,6 +412,33 @@ func _selection_center():
 	_obj_center = sum / float(n)
 	_obj_cache_t = now
 	return _obj_center
+
+
+func _scene_center():
+	var root: Node = EditorInterface.get_edited_scene_root()
+	if root == null:
+		return null
+	var have_bounds := false
+	var lo := Vector3.ZERO
+	var hi := Vector3.ZERO
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		for child in node.get_children():
+			stack.append(child)
+		if node is MeshInstance3D:
+			var mesh := node as MeshInstance3D
+			var bounds: AABB = mesh.global_transform * mesh.get_aabb()
+			var bounds_lo := bounds.position
+			var bounds_hi := bounds.position + bounds.size
+			if not have_bounds:
+				lo = bounds_lo
+				hi = bounds_hi
+				have_bounds = true
+			else:
+				lo = Vector3(minf(lo.x, bounds_lo.x), minf(lo.y, bounds_lo.y), minf(lo.z, bounds_lo.z))
+				hi = Vector3(maxf(hi.x, bounds_hi.x), maxf(hi.y, bounds_hi.y), maxf(hi.z, bounds_hi.z))
+	return (lo + hi) * 0.5 if have_bounds else null
 
 
 func _sgn(flag: bool) -> float:

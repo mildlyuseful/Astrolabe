@@ -15,7 +15,8 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.11";  // 0.1.11: level horizon on fixed-horizon mode entry
+        const string AddinVersion = "0.1.12";  // 0.1.12: real scene-bounds Model Center / To Object
+                                               // 0.1.11: level horizon on fixed-horizon mode entry
                                                // (adv.level_horizon_on_entry; issue #2).
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.35f;
@@ -56,6 +57,8 @@ namespace Astrolabe.TrackballNav
         static float _pivotExtentMult = DefaultPivotExtentMult;
         static double _sceneExtentT;
         static float _sceneExtentR = 10f;
+        static Bounds? _sceneBounds;
+        static bool _sceneExtentValid;
 
         static TrackballNav()
         {
@@ -295,7 +298,7 @@ namespace Astrolabe.TrackballNav
         static void RefreshSceneExtentIfNeeded()
         {
             double now = EditorApplication.timeSinceStartup;
-            if (now - _sceneExtentT < SceneExtentCacheSec) return;
+            if (_sceneExtentValid && now - _sceneExtentT < SceneExtentCacheSec) return;
             _sceneExtentT = now;
             Bounds? agg = null;
             try
@@ -319,6 +322,8 @@ namespace Astrolabe.TrackballNav
                 }
             }
             catch { /* ignore */ }
+            _sceneBounds = agg;
+            _sceneExtentValid = true;
             if (agg.HasValue)
                 _sceneExtentR = Mathf.Max(agg.Value.extents.magnitude, 0.1f);
             else
@@ -335,6 +340,12 @@ namespace Astrolabe.TrackballNav
         {
             RefreshSceneExtentIfNeeded();
             return MaxPivotDistanceCached();
+        }
+
+        static Vector3? SceneCenter()
+        {
+            RefreshSceneExtentIfNeeded();
+            return _sceneBounds.HasValue ? _sceneBounds.Value.center : (Vector3?)null;
         }
 
         static bool TryRendererHit(GameObject go, Ray ray, out Vector3 point)
@@ -737,7 +748,8 @@ namespace Astrolabe.TrackballNav
                 Vector3? point = null;
                 if (method == "camera") point = cam.Location;
                 else if (method == "origin") point = Vector3.zero;
-                else if (method == "object" || method == "selection") point = center;
+                else if (method == "object") point = SceneCenter();
+                else if (method == "selection") point = center;
                 else if (method == "screen_center")
                     point = ScreenCenterPivot(cam, selOverride ? bbox : null);
                 else if (method == "cursor")
@@ -759,7 +771,7 @@ namespace Astrolabe.TrackballNav
         static Vector3? ZoomToward(string zm, float idle, bool selOverride, SceneView sv)
         {
             SelectionCenter(out var center, out var bbox);
-            if (zm == "to_object") return center;
+            if (zm == "to_object") return SceneCenter();
             if (zm == "to_cursor")
             {
                 if (selOverride && center.HasValue) return center;

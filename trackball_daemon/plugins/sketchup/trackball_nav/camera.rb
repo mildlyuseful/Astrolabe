@@ -118,7 +118,8 @@ module TrackballNav
                                         advanced['orbit_pivot_candidates'] || [pivot_id])
                          elsif has_pan
                            invalidate_orbit_pivot!
-                           pan_camera(view, camera, pan)
+                           pan_camera(view, camera, pan,
+                                      advanced.fetch('pan_scales_with_distance', true) == true)
                          elsif has_zoom
                            invalidate_orbit_pivot!
                            zoom_camera(model, view, camera, zoom, zoom_mode,
@@ -323,13 +324,13 @@ module TrackballNav
         true
       end
 
-      def pan_camera(view, camera, pan)
+      def pan_camera(view, camera, pan, scale_with_distance = true)
         eye = camera.eye
         target = camera.target
         axes = camera_axes(eye, target, camera.up)
         return false unless axes
 
-        scale = view_span(view, camera, eye, target) * PAN_SCALE
+        scale = (scale_with_distance ? view_span(view, camera, eye, target) : 1.0) * PAN_SCALE
         move = add_vectors(scale_vector(axes[0], PAN_SIGN[0] * pan[0] * scale),
                            scale_vector(axes[1], PAN_SIGN[1] * pan[1] * scale))
         return false if vector_length(move) < EPSILON
@@ -378,7 +379,7 @@ module TrackballNav
       end
 
       def zoom_pivot(model, view, fallback, zoom_mode, selection_overrides)
-        selected = selection_center(model) if selection_overrides && zoom_mode != 'to_center'
+        selected = selection_center(model) if selection_overrides && zoom_mode == 'to_cursor'
         return selected if selected
 
         case zoom_mode

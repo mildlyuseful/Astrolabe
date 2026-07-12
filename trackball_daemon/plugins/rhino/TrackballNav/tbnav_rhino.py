@@ -20,7 +20,8 @@ from System.Windows.Forms import Cursor
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.14"          # 0.1.14: level horizon on turntable entry
+ADDIN_VERSION = "0.1.15"          # 0.1.15: real document-bounds Model Center / To Object
+                                  # 0.1.14: level horizon on turntable entry
                                   # (adv.level_horizon_on_entry; issue #2).
                                   # 0.1.13: immutable host baseline profile.
                                   # 0.1.12: camera/screen_center canonical pivot names.
@@ -41,6 +42,7 @@ _zoom_gesture = {"pivot": None}
 # starts up already in turntable never levels -- only a real free->turntable switch does.
 _horizon = {"fixed": None}
 _obj_cache = {"t": 0.0, "center": None, "bbox": None}
+_scene_cache = {"t": 0.0, "center": None}
 _last_scheme = {"v": None}
 _last_err = {"t": 0.0, "s": ""}
 _rl = {}
@@ -143,6 +145,35 @@ def _selection_center():
         bb = ((mn.X, mn.Y, mn.Z), (mx.X, mx.Y, mx.Z))
     _obj_cache.update(t=now, center=center, bbox=bb)
     return center, bb
+
+
+def _document_center():
+    """Center of all visible document geometry's aggregate bounding box, or None."""
+    now = time.time()
+    if _scene_cache["center"] is not None and now - _scene_cache["t"] < OBJ_CACHE_SEC:
+        return _scene_cache["center"]
+    doc = Rhino.RhinoDoc.ActiveDoc
+    bbox = RG.BoundingBox.Empty
+    if doc is not None:
+        try:
+            objects = doc.Objects.GetObjectList(Rhino.DocObjects.ObjectType.AnyObject) or []
+        except Exception:
+            objects = []
+        for obj in objects:
+            try:
+                if obj.IsDeleted or obj.IsHidden:
+                    continue
+                b = obj.Geometry.GetBoundingBox(True)
+                if b.IsValid:
+                    bbox = RG.BoundingBox.Union(bbox, b) if bbox.IsValid else b
+            except Exception:
+                continue
+    center = None
+    if bbox.IsValid:
+        c = bbox.Center
+        center = (c.X, c.Y, c.Z)
+    _scene_cache.update(t=now, center=center)
+    return center
 
 
 def _in_bbox(p, bbox):
@@ -407,7 +438,9 @@ def _orbit_pivot(op, cam, view, idle, sel_override=True, candidates=None):
             point = _screen_center_pivot(view, ray_bbox)
         elif method == "cursor":
             point = _cursor_pivot(view, ray_bbox)
-        elif method in ("object", "selection"):
+        elif method == "object":
+            point = _document_center()
+        elif method == "selection":
             point = center
         else:
             continue
@@ -421,7 +454,7 @@ def _orbit_pivot(op, cam, view, idle, sel_override=True, candidates=None):
 def _zoom_toward(zm, view, idle=0.0, sel_override=True):
     center, bbox = _selection_center()
     if zm == "to_object":
-        return center
+        return _document_center()
     if zm == "to_cursor":
         if sel_override and center is not None:
             return center

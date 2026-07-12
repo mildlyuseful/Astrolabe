@@ -61,10 +61,9 @@ namespace TrackballNav
         //   orbitPivot -- orbit rigidly about this WORLD point instead of the camera target: the
         //                 target rotates around it too, so the point keeps its screen position
         //                 (the "cursor" scheme -- the point under the mouse stays put).
-        //   zoomPivot  -- parallel zoom keeps this WORLD point's screen position fixed by sliding
-        //                 the target toward it ("to_cursor"). Perspective zoom is a dolly toward
-        //                 the target; holding an off-axis point fixed there would need an
-        //                 off-axis dolly -- not supported, it falls back to the plain dolly.
+        //   zoomPivot  -- zoom keeps this WORLD point's screen position fixed by scaling the
+        //                 target and eye about it ("to_object" / "to_cursor"). This works in
+        //                 both parallel and perspective projections.
         //   levelOnEntry -- one-shot transition flag: rebuild a LEVELED up before applying this
         //                 frame. Ordinary turntable frames pass false and preserve the established
         //                 horizon; this is never a continuous auto-level operation.
@@ -143,14 +142,23 @@ namespace TrackballNav
                 double factor = 1.0 + zoomSign * d[5] * zoomScale;
                 if (factor > 1e-3)
                 {
-                    if (c.Persp) dist /= factor;         // factor > 1 zooms IN
+                    if (c.Persp)
+                    {
+                        if (zoomPivot.HasValue)
+                        {
+                            // Scale the target and eye about P. Reconstructing Pos below from the
+                            // adjusted target and distance preserves the camera basis while P stays
+                            // at the same screen coordinate.
+                            var P = zoomPivot.Value;
+                            tgt = P + (tgt - P) / factor;
+                        }
+                        dist /= factor;                 // factor > 1 zooms IN
+                    }
                     else
                     {
                         fw /= factor; fh /= factor;
                         if (zoomPivot.HasValue)
                         {
-                            // keep P's screen position fixed: its offset from the optical axis
-                            // must shrink by the same 1/factor the field does
                             var P = zoomPivot.Value;
                             tgt = P + (tgt - P) / factor;
                         }

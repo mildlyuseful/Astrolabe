@@ -339,6 +339,40 @@ def test_designated_selection_works_when_override_is_off(bridge):
     assert bridge._pivot(conn, {"op": "selection", "sel_override": False}, *camera) == (1.0, 4.0, 6.0)
 
 
+# --- zoom target parity -----------------------------------------------------------------------
+def test_zoom_to_object_uses_model_bounds_not_selection(bridge):
+    conn = FakeConn(model_ext=[-4.0, -2.0, 0.0, 8.0, 6.0, 10.0],
+                    selection_ext=[100.0, 100.0, 100.0, 110.0, 110.0, 110.0],
+                    selection_empty=False)
+    camera = ((0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    assert bridge._zoom_target(conn, {"zm": "to_object", "sel_override": True}, *camera) == \
+        (2.0, 2.0, 5.0)
+
+
+def test_zoom_to_cursor_honors_selection_override_then_real_hit(bridge, monkeypatch):
+    conn = FakeConn(selection_ext=[2.0, 4.0, 6.0, 6.0, 8.0, 10.0], selection_empty=False)
+    camera = ((0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    monkeypatch.setattr(bridge, "_hit_cursor", lambda *a: (9.0, 9.0, 9.0))
+    assert bridge._zoom_target(conn, {"zm": "to_cursor", "sel_override": True}, *camera) == \
+        (4.0, 6.0, 8.0)
+    assert bridge._zoom_target(conn, {"zm": "to_cursor", "sel_override": False}, *camera) == \
+        (9.0, 9.0, 9.0)
+
+
+def test_zoom_target_math_keeps_requested_point_fixed(bridge):
+    eye, pivot = (0.0, 0.0, 10.0), (4.0, 2.0, 0.0)
+    factor = bridge._zoom_factor(0.25)
+    moved = bridge._zoom_persp(eye, (0.0, 0.0, -1.0), pivot, 0.25, hold_target=True)
+    assert vclose(moved, ob._v_add(pivot, ob._v_scale(ob._v_sub(eye, pivot), factor)))
+
+    ortho = bridge._zoom_ortho_eye(eye, (1, 0, 0), (0, 1, 0), pivot, factor)
+    # The point's view-plane offset shrinks with the extents, so its NDC coordinate is unchanged.
+    old_offset = ob._v_sub(pivot, eye)
+    new_offset = ob._v_sub(pivot, ortho)
+    assert abs(new_offset[0] - old_offset[0] * factor) < 1e-9
+    assert abs(new_offset[1] - old_offset[1] * factor) < 1e-9
+
+
 def test_userscript_mentions_endpoint_and_canvas():
     assert "127.51.68.120:8181/trackball/pointer" in ob._POINTER_USERSCRIPT
     assert 'getElementById("canvas")' in ob._POINTER_USERSCRIPT
