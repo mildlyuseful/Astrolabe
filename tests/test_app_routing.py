@@ -50,6 +50,25 @@ def _bare_app():
     return app
 
 
+def test_sensitive_services_require_setup_and_enabled():
+    app = App.__new__(App)
+    app.config = SimpleNamespace(data={"apps": {
+        "solidworks": {"installed": False, "enabled": True},
+        "onshape": {"installed": True, "enabled": False},
+        "autocad": {"installed": True, "enabled": True},
+    }})
+    app.sw_driver = SimpleNamespace(states=[], set_enabled=lambda v: app.sw_driver.states.append(v))
+    app.onshape_bridge = SimpleNamespace(
+        states=[], set_enabled=lambda v: app.onshape_bridge.states.append(v))
+    app.acad_loader = SimpleNamespace(states=[], set_enabled=lambda v: app.acad_loader.states.append(v))
+
+    app._apply_service_gates()
+
+    assert app.sw_driver.states == [False]
+    assert app.onshape_bridge.states == [False]
+    assert app.acad_loader.states == [True]
+
+
 # --- routing --------------------------------------------------------------------------
 def test_solidworks_routes_to_driver():
     app = _bare_app()

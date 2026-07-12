@@ -446,7 +446,7 @@ Commit:
   Unreal, Unity, Godot, Rhino, SketchUp, FreeCAD, Fusion, Onshape, and SolidWorks changes still need
   their normal in-host smoke tests.
 
-## [ ] Step 7 — Privilege, antivirus, and scary-warning audit
+## [x] Step 7 — Privilege, antivirus, and scary-warning audit
 
 Goal: make installation/runtime security prompts predictable for companion-product users.
 
@@ -457,6 +457,37 @@ Goal: make installation/runtime security prompts predictable for companion-produ
 - Minimize or remove unnecessary elevation and broad trust changes.
 - Add preflight explanations and recovery/manual paths before sensitive operations.
 - Document signing/installer recommendations and verify packaged-build behavior.
+
+Completed:
+
+- Added an app-by-app security and permission summary directly to every 3D Apps card and its
+  copyable Instructions. Unreal, Godot, Rhino, Onshape, and AutoCAD show a concrete confirmation
+  before setup changes files, project configuration, certificate state, or host trust behavior.
+- Fixed a real consent boundary: SOLIDWORKS COM attachment, the Onshape TLS listener/certificate,
+  and AutoCAD COM/TRUSTEDPATHS/NETLOAD are now gated by both successful setup and **Enabled**. A
+  clean install performs none of those actions. The gates update live when settings change.
+- Hardened Onshape's trusted loopback service: only HTTPS Onshape origins (plus its own local status
+  page) may use HTTP/WebSocket endpoints, wildcard reflected CORS was removed, WebSocket keys and
+  request sizes are validated, and disabling Onshape closes its listener/client.
+- Kept AutoCAD's trust change narrow: exact-entry matching prevents a parent or substring path from
+  satisfying/diluting the `%APPDATA%\TrackballDaemon\acad_plugin` TRUSTEDPATHS entry. `SECURELOAD`
+  is never disabled and AutoCAD is never launched.
+- Added `docs/security.md`: complete filesystem/registry/COM/listener/certificate inventory,
+  reversal instructions, expected SmartScreen/Defender/firewall/UAC/CAD warnings, and an alpha
+  release checklist covering Nuitka onedir, Authenticode/timestamping, stable publisher identity,
+  hashes/SBOM, false-positive submission, and per-user `asInvoker` installation.
+- Daemon version: 0.1.71. Host add-ins unchanged; all behavior changes are in daemon-side lifecycle,
+  setup UI, the AutoCAD loader, SOLIDWORKS driver, and Onshape bridge.
+- Packaging audit found and fixed local `__pycache__`/`.pyc` leakage from the broad add-in data
+  glob. `MANIFEST.in` and setuptools exclusions now remove interpreter caches while retaining each
+  host's required add-in marker and the AutoCAD DLL. A clean 0.1.71 source archive build passed.
+- Windows `Get-AuthenticodeSignature` confirms the bundled AutoCAD DLL is currently `NotSigned`;
+  signing it and the future daemon/installer is therefore a real alpha-release requirement, not a
+  hypothetical recommendation.
+- Verification: `pytest -q` — 384 passed; Python compileall and `git diff --check` passed. Nuitka
+  and wheel are not installed on this machine, so the
+  exact signed GUI artifact and its SmartScreen/third-party-AV reputation remain **needs live
+  verification**; source-package data and cache exclusion were verified with setuptools `sdist`.
 
 ## Handoff rules
 

@@ -65,7 +65,20 @@ def plugin_dirs(tmp_path, monkeypatch):
 
 def _attached_loader(monkeypatch, acad):
     monkeypatch.setattr(AutoCADPluginLoader, "_find_running_acad", staticmethod(lambda: acad))
-    return AutoCADPluginLoader()
+    loader = AutoCADPluginLoader()
+    loader.set_enabled(True)
+    return loader
+
+
+def test_disabled_loader_does_not_enumerate_or_mutate(plugin_dirs, monkeypatch):
+    doc = FakeDoc()
+    calls = []
+    monkeypatch.setattr(AutoCADPluginLoader, "_find_running_acad",
+                        staticmethod(lambda: calls.append(True) or FakeAcad(doc)))
+    loader = AutoCADPluginLoader()                       # disabled until successful setup
+    loader._tick()
+    assert calls == []
+    assert doc.sets == [] and doc.commands == []
 
 
 def test_attach_copies_and_netloads_once(plugin_dirs, monkeypatch):
@@ -148,6 +161,13 @@ def test_trustedpaths_not_duplicated(plugin_dirs, monkeypatch):
     _attached_loader(monkeypatch, FakeAcad(doc))._tick()
     assert doc.sets == []
     assert len(doc.commands) == 1
+
+
+def test_trustedpaths_requires_an_exact_entry(plugin_dirs, monkeypatch):
+    _bundled, runtime = plugin_dirs
+    doc = FakeDoc(trusted=str(runtime.parent))               # parent must not count as exact trust
+    _attached_loader(monkeypatch, FakeAcad(doc))._tick()
+    assert doc.sets and doc.trusted.split(";")[-1] == str(runtime)
 
 
 def test_missing_bundled_plugin_is_a_noop(plugin_dirs, monkeypatch):

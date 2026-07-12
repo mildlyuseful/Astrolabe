@@ -265,6 +265,7 @@ class SolidWorksDriver:
         self._lock = threading.Lock()
         self._acc = [0.0] * 6
         self._stop = threading.Event()
+        self._enabled = threading.Event()                    # explicit setup/Enabled gate
         self._period = 1.0 / self._clamp_rate(rate_hz)       # flush/refresh interval
         self._thread = None
         self._connected = False
@@ -394,6 +395,13 @@ class SolidWorksDriver:
     def stop(self):
         self._stop.set()
 
+    def set_enabled(self, enabled):
+        """Gate COM attachment behind the app's explicit Enabled/setup state."""
+        if enabled:
+            self._enabled.set()
+        else:
+            self._enabled.clear()
+
     # --- worker thread (owns COM) --------------------------------------------------------
     def _run(self):
         pythoncom.CoInitialize()
@@ -403,6 +411,12 @@ class SolidWorksDriver:
             while not self._stop.is_set():
                 cycle_start = time.monotonic()
                 period = self._period               # re-read each loop so set_rate() applies live
+                if not self._enabled.is_set():
+                    if self._swApp is not None:
+                        self._handle_drop()
+                    self._drain()
+                    self._sleep_remainder(cycle_start, period)
+                    continue
                 if self._swApp is None:
                     if cycle_start - last_attach >= _RETRY_PERIOD:
                         last_attach = cycle_start

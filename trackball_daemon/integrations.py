@@ -50,6 +50,8 @@ class AppDef:
     setup_instructions: str = ""
     manual_install: str = ""
     health_check: str = ""
+    security_notes: str = ""
+    security_confirmation: str = ""       # non-empty => UI confirms before setup mutates state
 
 
 @dataclass(frozen=True)
@@ -291,6 +293,7 @@ def integration_instructions(appdef: AppDef) -> str:
         f"Install model\n{appdef.install_model}\n\n"
         f"Automatic setup\n{appdef.setup_instructions}\n\n"
         f"Manual setup / restricted permissions\n{appdef.manual_install}\n\n"
+        f"Security and permissions\n{appdef.security_notes}\n\n"
         f"Health check\n{appdef.health_check}"
     )
 
@@ -1361,6 +1364,9 @@ _APP_UX = {
                         "No administrator access is required."),
         health_check=("Restart Blender. The row should show connected while Blender is focused; "
                       "details are in %APPDATA%\\TrackballDaemon\\blender_addin.log."),
+        security_notes=("Copies unsigned Python source only into Blender's current-user folders. "
+                        "The optional startup shim runs that source at Blender launch; the UI asks "
+                        "separately before installing it. No elevation or external listener."),
     ),
     "freecad": dict(
         install_model="User Mod add-on; files are copied only under the current Windows profile.",
@@ -1371,6 +1377,8 @@ _APP_UX = {
                         "then restart FreeCAD. Use %APPDATA%\\FreeCAD\\Mod for older layouts."),
         health_check=("Open a 3D view and focus FreeCAD; the row should show connected. Check "
                       "%APPDATA%\\TrackballDaemon\\freecad_addin.log if it does not."),
+        security_notes=("Copies unsigned Python into FreeCAD's current-user Mod folder, where "
+                        "FreeCAD loads it at startup. No elevation, registry write, or external port."),
     ),
     "sketchup": dict(
         install_model="Per-version Ruby extension in SketchUp's user Plugins folder.",
@@ -1381,6 +1389,8 @@ _APP_UX = {
                         "Plugins, then restart SketchUp. SketchUp for Web is not supported."),
         health_check=("Extension Manager should list Trackball Nav; focus a model and look for "
                       "connected in this row or inspect %APPDATA%\\TrackballDaemon\\sketchup_addin.log."),
+        security_notes=("Copies an unsigned Ruby extension into SketchUp's current-user Plugins "
+                        "folder. SketchUp executes it at startup. No elevation or external listener."),
     ),
     "unreal": dict(
         install_model="Unreal Editor plugin, installed per engine or per project.",
@@ -1392,6 +1402,13 @@ _APP_UX = {
                         "and Python Editor Script Plugin in Edit > Plugins, then restart the editor."),
         health_check=("Focus a perspective level viewport; the row should show connected. Check "
                       "%APPDATA%\\TrackballDaemon\\unreal_addin.log and the Output Log on failure."),
+        security_notes=("Engine-wide setup writes an unsigned Python editor plugin under Program "
+                        "Files and may require UAC/elevation. Per-project installation avoids "
+                        "elevation. The plugin connects only to the loopback nav broker."),
+        security_confirmation=("Unreal engine-wide setup will attempt to copy an unsigned Python "
+                               "editor plugin into each detected Engine/Plugins folder. Windows may "
+                               "request administrator approval; use the documented per-project "
+                               "Plugins folder if you do not want an elevated install."),
     ),
     "unity": dict(
         install_model="UPM Editor package copied into each detected Unity project.",
@@ -1403,6 +1420,9 @@ _APP_UX = {
                         "project, the same package is staged under %APPDATA%\\TrackballDaemon\\unity."),
         health_check=("Open and focus a Scene view; the row should show connected. Check the Unity "
                       "Console and %APPDATA%\\TrackballDaemon\\unity_addin.log."),
+        security_notes=("Copies unsigned C# editor source into each detected project's Packages "
+                        "folder; Unity compiles and executes it in the Editor. No elevation or "
+                        "machine-wide setting change."),
     ),
     "godot": dict(
         install_model="Godot EditorPlugin copied and enabled per project.",
@@ -1415,6 +1435,12 @@ _APP_UX = {
                         "%APPDATA%\\TrackballDaemon\\godot when no project is found."),
         health_check=("Reload the project, focus a 3D editor viewport, and look for connected. "
                       "Check %APPDATA%\\TrackballDaemon\\godot_addin.log on failure."),
+        security_notes=("Copies unsigned GDScript into each detected project and edits that "
+                        "project's project.godot to enable the plugin. No elevation or machine-wide "
+                        "setting change."),
+        security_confirmation=("Godot setup copies editor scripts into every detected project and "
+                               "edits project.godot to enable Trackball Nav. Review or use the "
+                               "manual project-local steps if automatic project edits are unwanted."),
     ),
     "rhino": dict(
         install_model="Rhino 8 user Python scripts plus a per-user startup command.",
@@ -1427,6 +1453,12 @@ _APP_UX = {
                         "commands, then restart Rhino."),
         health_check=("Focus a Rhino viewport and look for connected. Check "
                       "%APPDATA%\\TrackballDaemon\\rhino_addin.log if startup failed."),
+        security_notes=("Copies unsigned Python into Rhino's current-user scripts folder and may "
+                        "edit the current-user Rhino startup-command XML so it runs at launch. No "
+                        "elevation or machine-wide registry write."),
+        security_confirmation=("Rhino setup copies Python scripts and will try to append a command "
+                               "to your per-user Rhino startup configuration. If you decline, use "
+                               "the documented manual command instead."),
     ),
     "fusion360": dict(
         install_model="Fusion user add-in copied to Autodesk's per-user AddIns folder.",
@@ -1438,6 +1470,9 @@ _APP_UX = {
                         "then run it from Utilities > Add-Ins. No administrator access is required."),
         health_check=("Focus an open design and look for connected. Check "
                       "%APPDATA%\\TrackballDaemon\\fusion_addin.log if the add-in does not handshake."),
+        security_notes=("Copies unsigned Python into Fusion's current-user AddIns folder. Fusion "
+                        "does not execute it until you explicitly Run it and select Run on Startup. "
+                        "No elevation or machine-wide setting change."),
     ),
     "solidworks": dict(
         install_model="Direct COM automation; no SolidWorks add-in or host files are installed.",
@@ -1450,6 +1485,9 @@ _APP_UX = {
                         "pywin32 into the daemon's Python environment with: pip install pywin32."),
         health_check=("Open a part or assembly and focus SOLIDWORKS; the row should show connected. "
                       "Driver messages are recorded in %APPDATA%\\TrackballDaemon\\daemon.log."),
+        security_notes=("Uses per-user COM automation against an already-running SOLIDWORKS "
+                        "instance. It does not register a COM server, install a DLL, launch "
+                        "SOLIDWORKS, request elevation, or listen on an external interface."),
     ),
     "onshape": dict(
         install_model="Browser bridge; no Onshape add-in is installed.",
@@ -1461,6 +1499,14 @@ _APP_UX = {
                         "only if Under Cursor orbit is wanted. Administrator access is not required."),
         health_check=("Open and focus an Onshape document; the row should show connected after the "
                       "browser handshake. Check %APPDATA%\\TrackballDaemon\\daemon.log."),
+        security_notes=("Creates a per-user self-signed leaf certificate and binds TLS only to "
+                        "127.51.68.120. Trust-store installation is never automatic. The optional "
+                        "Onshape-only userscript reports canvas-relative pointer coordinates; it "
+                        "does not capture the screen or send model data."),
+        security_confirmation=("Onshape setup creates a self-signed certificate in your APPDATA "
+                               "folder. Trusting it is a separate manual action that produces a "
+                               "normal Windows/browser security warning and can be undone. The "
+                               "local service accepts browser requests only from onshape.com."),
     ),
     "autocad": dict(
         install_model="Per-user .NET plugin staged by the daemon and NETLOADed automatically.",
@@ -1472,6 +1518,13 @@ _APP_UX = {
                         "to TRUSTEDPATHS and run NETLOAD on the DLL. No Program Files write is needed."),
         health_check=("Type TBNAV in AutoCAD or look for connected in this row. Plugin details are "
                       "in %APPDATA%\\TrackballDaemon\\acad_plugin.log."),
+        security_notes=("Stages an unsigned .NET DLL under the current user's APPDATA, adds only "
+                        "that exact folder to AutoCAD TRUSTEDPATHS, and NETLOADs it through COM. "
+                        "It never launches AutoCAD, writes Program Files, or requires elevation."),
+        security_confirmation=("AutoCAD setup enables later automatic loading of an unsigned .NET "
+                               "plugin. When the daemon attaches to a running AutoCAD it adds the "
+                               "single APPDATA plugin folder to TRUSTEDPATHS and issues NETLOAD. "
+                               "Cancel if you prefer the documented manual trust/load steps."),
     ),
 }
 

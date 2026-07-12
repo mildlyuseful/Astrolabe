@@ -51,6 +51,7 @@ import subprocess
 import sys
 import threading
 import time
+from urllib.parse import urlsplit
 
 from .config import orbit_pivot_candidates
 from .paths import user_config_dir
@@ -79,6 +80,22 @@ NLPROXY_VERSION = "1.4.8.21486"
 # WAMP WELCOME server-ident. Free-form (the real proxy sends a 3Dconnexion copyright string; the
 # spacenav-ws bridge sends its own and Onshape accepts it), so we send a clear, honest one.
 WELCOME_IDENT = "NLProxy v%s (Trackball Daemon bridge)" % NLPROXY_VERSION
+_MAX_HTTP_BODY = 16 * 1024
+
+
+def _allowed_web_origin(origin):
+    """Only Onshape pages (or this bridge's own status page) may call the local service."""
+    if not origin:
+        return True                              # direct address-bar/status-page request
+    try:
+        parsed = urlsplit(origin)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme != "https":
+            return False
+        return (host == "onshape.com" or host.endswith(".onshape.com") or
+                host == BRIDGE_HOST)
+    except Exception:
+        return False
 
 # --- neutral camera math + scene orientation ---------------------------------------------------
 # The nav-delta contract feeds (ox,oy,oz) = orbit about (camera right, up, forward) in radians,
@@ -477,14 +494,23 @@ class _OnshapeConn:
             if b":" in ln:
                 k, v = ln.split(b":", 1)
                 headers[k.decode("latin-1").strip().lower()] = v.decode("latin-1").strip()
-        origin = headers.get("origin", "*")
+        origin = headers.get("origin", "")
         path_only = path.split("?", 1)[0]
+
+        # A trusted loopback certificate would otherwise let an arbitrary web page talk to this
+        # local WAMP service. Reject non-Onshape browser origins before CORS or WebSocket upgrade.
+        if not _allowed_web_origin(origin):
+            self._http(403, "origin not allowed", "", ctype="text/plain")
+            return False
 
         # Read any request body (pointer POSTs are tiny JSON).
         try:
             content_len = int(headers.get("content-length", "0") or 0)
         except ValueError:
             content_len = 0
+        if content_len < 0 or content_len > _MAX_HTTP_BODY:
+            self._http(400, "request body too large", origin, ctype="text/plain")
+            return False
         body_in = leftover
         while len(body_in) < content_len:
             try:
@@ -525,6 +551,9 @@ class _OnshapeConn:
             return False
         if "websocket" in headers.get("upgrade", "").lower():
             key = headers.get("sec-websocket-key", "")
+            if not key:
+                self._http(400, "missing websocket key", origin, ctype="text/plain")
+                return False
             resp = ("HTTP/1.1 101 Switching Protocols\r\n"
                     "Upgrade: websocket\r\nConnection: Upgrade\r\n"
                     "Sec-WebSocket-Accept: %s\r\n"
@@ -546,16 +575,18 @@ class _OnshapeConn:
         return False
 
     def _http(self, status, body, origin, ctype="text/plain"):
-        reason = {200: "OK", 204: "No Content", 400: "Bad Request", 404: "Not Found"}.get(status, "OK")
+        reason = {200: "OK", 204: "No Content", 400: "Bad Request", 403: "Forbidden",
+                  404: "Not Found"}.get(status, "OK")
         data = body.encode("utf-8") if isinstance(body, str) else (body or b"")
         # Access-Control-Allow-Private-Network: Chromium's Private Network Access preflight for a
         # public page (cad.onshape.com) talking to loopback. Harmless to Firefox.
-        out = ["HTTP/1.1 %d %s" % (status, reason),
-               "Access-Control-Allow-Origin: %s" % origin,
-               "Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS",
-               "Access-Control-Allow-Headers: *",
-               "Access-Control-Allow-Private-Network: true",
-               "Connection: close"]
+        out = ["HTTP/1.1 %d %s" % (status, reason), "Connection: close"]
+        if origin and _allowed_web_origin(origin):
+            out.extend(["Access-Control-Allow-Origin: %s" % origin,
+                        "Vary: Origin",
+                        "Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS",
+                        "Access-Control-Allow-Headers: Content-Type",
+                        "Access-Control-Allow-Private-Network: true"])
         if ctype is not None:
             out.append("Content-Type: %s" % ctype)
             out.append("Content-Length: %d" % len(data))
@@ -884,6 +915,7 @@ class OnshapeBridge:
         self._lock = threading.Lock()
         self._acc = [0.0] * 6
         self._stop = threading.Event()
+        self._enabled = threading.Event()          # explicit Onshape setup/Enabled gate
         self._period = 1.0 / self._clamp_rate(rate_hz)
         self._server_thread = None
         self._worker_thread = None
@@ -959,14 +991,26 @@ class OnshapeBridge:
     def version(self):
         return self._version
 
+    def set_enabled(self, enabled):
+        """Bind/generate credentials only while the configured integration is enabled."""
+        if enabled:
+            self._enabled.set()
+            return
+        self._enabled.clear()
+        try:
+            if self._srv:
+                self._srv.close()
+        except Exception:
+            pass
+        conn = self._conn
+        if conn is not None:
+            try:
+                conn.sock.close()
+            except Exception:
+                pass
+
     def start(self):
         if self._server_thread is not None:
-            return
-        # Cert generation is safe (only writes our own files); it makes the bridge self-sufficient.
-        # The sensitive step -- trusting the cert -- stays manual/confirmed (see setup_onshape).
-        if not ensure_cert(self._cert_path, self._key_path):
-            self._log.info("onshape: no TLS cert (run Onshape 'Set up', or install cryptography/"
-                           "openssl); bridge disabled")
             return
         self._server_thread = threading.Thread(target=self._run_server, name="onshape-server",
                                                daemon=True)
@@ -991,6 +1035,18 @@ class OnshapeBridge:
 
     # --- server thread ------------------------------------------------------------------------
     def _run_server(self):
+        while not self._stop.is_set():
+            if not self._enabled.wait(0.25):
+                continue
+            if not ensure_cert(self._cert_path, self._key_path):
+                self._log.info("onshape: no TLS cert (run Onshape 'Set up', or install "
+                               "cryptography/openssl); bridge disabled")
+                self._enabled.clear()
+                continue
+            self._serve_enabled()
+            self._stop.wait(0.5)             # avoid a tight retry loop on bind/cert-load failure
+
+    def _serve_enabled(self):
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         try:
             ctx.load_cert_chain(self._cert_path, self._key_path)
@@ -1009,7 +1065,7 @@ class OnshapeBridge:
                            self._host, self._port, exc)
             return
         self._log.info("onshape: NL-Proxy bridge listening on https://%s:%d", self._host, self._port)
-        while not self._stop.is_set():
+        while not self._stop.is_set() and self._enabled.is_set():
             try:
                 raw, _ = srv.accept()
             except socket.timeout:
@@ -1017,8 +1073,20 @@ class OnshapeBridge:
             except OSError:
                 break
             threading.Thread(target=self._handle_raw, args=(raw, ctx), daemon=True).start()
+        try:
+            srv.close()
+        except Exception:
+            pass
+        if self._srv is srv:
+            self._srv = None
 
     def _handle_raw(self, raw, ctx):
+        if not self._enabled.is_set():
+            try:
+                raw.close()
+            except Exception:
+                pass
+            return
         try:
             raw.settimeout(10.0)
             tls = ctx.wrap_socket(raw, server_side=True)

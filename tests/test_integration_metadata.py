@@ -13,11 +13,18 @@ def test_every_app_has_complete_copyable_setup_metadata():
         assert app.setup_instructions, app.key
         assert app.manual_install, app.key
         assert app.health_check, app.key
+        assert app.security_notes, app.key
         text = integrations.integration_instructions(app)
         assert "Install model\n" in text
         assert "Automatic setup\n" in text
         assert "Manual setup / restricted permissions\n" in text
+        assert "Security and permissions\n" in text
         assert "Health check\n" in text
+
+
+def test_sensitive_setups_have_explicit_preflight_confirmations():
+    sensitive = {"unreal", "godot", "rhino", "onshape", "autocad"}
+    assert sensitive <= {app.key for app in integrations.APPS if app.security_confirmation}
 
 
 def test_known_supported_unverified_and_unsupported_versions_are_distinct():
@@ -81,6 +88,8 @@ def test_apps_panel_has_expandable_instructions_and_no_noop_startup_control():
         encoding="utf-8")
     apps_panel = source[source.index("def _build_apps_tab"):source.index("# --- tab b:")]
     assert "Copy instructions" in apps_panel
+    assert "Security:" in apps_panel
+    assert "before setup" in apps_panel
     assert "Instructions ▾" in apps_panel
     assert "Start automatically" not in apps_panel
     assert "Re-check" not in apps_panel

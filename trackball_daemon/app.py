@@ -106,8 +106,23 @@ class App:
 
     def on_config_changed(self):
         self.engine.apply_config()
+        self._apply_service_gates()
         self._apply_rates()
         self._apply_schemes()
+
+    def _service_allowed(self, key):
+        """Sensitive in-process services require both successful setup and Enabled=true."""
+        cfg = self.config.data.get("apps", {}).get(key) or {}
+        return bool(cfg.get("installed") and cfg.get("enabled"))
+
+    def _apply_service_gates(self):
+        """Keep host attachment/listener side effects behind explicit per-app setup consent."""
+        if self.sw_driver is not None:
+            self.sw_driver.set_enabled(self._service_allowed("solidworks"))
+        if self.onshape_bridge is not None:
+            self.onshape_bridge.set_enabled(self._service_allowed("onshape"))
+        if self.acad_loader is not None:
+            self.acad_loader.set_enabled(self._service_allowed("autocad"))
 
     def _effective_scheme(self, key):
         g = self.config.data["general"].get("scheme", {})
@@ -305,9 +320,13 @@ class App:
         except OSError:
             pass
         self.broker.start()
-        self.sw_driver.start()                     # attaches to SolidWorks if/when it's running
-        self.onshape_bridge.start()                # serves the NL-Proxy endpoint for Onshape
-        self.acad_loader.start()                   # NETLOADs the AutoCAD plugin if/when it's running
+        # Workers may exist while disabled, but their gates prevent COM enumeration, certificate
+        # creation, socket binding, TRUSTEDPATHS edits, and NETLOAD until setup has succeeded and
+        # Enabled is checked. Config changes update these gates live.
+        self._apply_service_gates()
+        self.sw_driver.start()
+        self.onshape_bridge.start()
+        self.acad_loader.start()
 
         # One-click-free add-in refresh: re-copy any installed add-in the daemon now ships a
         # newer version of (e.g. this release's viewport-refresh fix). Takes effect on the

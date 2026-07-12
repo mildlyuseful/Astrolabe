@@ -66,6 +66,14 @@ def _runtime_plugin_dir():
     return user_config_dir() / "acad_plugin"
 
 
+def _trusted_path_present(current, candidate):
+    """Exact, case-insensitive TRUSTEDPATHS entry check (never trust a parent by substring)."""
+    wanted = str(Path(candidate)).rstrip("\\/").casefold()
+    entries = [part.strip().strip('"').rstrip("\\/").casefold()
+               for part in str(current or "").split(";") if part.strip()]
+    return wanted in entries
+
+
 class AutoCADPluginLoader:
     """Background NETLOAD delivery for the AutoCAD plugin. Public surface: start(), stop().
     No nav, no status entry in the connected-apps list -- "autocad" appears there only when
@@ -79,6 +87,7 @@ class AutoCADPluginLoader:
         # COM handle -- created and used ONLY on the worker thread.
         self._acad = None
         self._netload_done = False                            # NETLOAD attempted this session
+        self._enabled = threading.Event()                     # setup/Enabled gate; off by default
 
     # --- lifecycle -----------------------------------------------------------------------
     def start(self):
@@ -92,6 +101,13 @@ class AutoCADPluginLoader:
 
     def stop(self):
         self._stop.set()
+
+    def set_enabled(self, enabled):
+        """Allow COM attachment/NETLOAD only after the user enabled this integration."""
+        if enabled:
+            self._enabled.set()
+        else:
+            self._enabled.clear()
 
     # --- worker thread (owns COM) ----------------------------------------------------------
     def _run(self):
@@ -112,6 +128,10 @@ class AutoCADPluginLoader:
 
     def _tick(self):
         """One poll: attach if detached; probe liveness; NETLOAD once a document is open."""
+        if not self._enabled.is_set():
+            self._acad = None
+            self._netload_done = False
+            return
         if self._acad is None:
             acad = self._find_running_acad()
             if acad is None:
@@ -187,7 +207,7 @@ class AutoCADPluginLoader:
                 return
             try:                              # one-time trust so SECURELOAD loads silently
                 cur = str(doc.GetVariable("TRUSTEDPATHS") or "")
-                if str(dst_dir).lower() not in cur.lower():
+                if not _trusted_path_present(cur, dst_dir):
                     doc.SetVariable("TRUSTEDPATHS", (cur + ";" if cur else "") + str(dst_dir))
             except Exception:
                 pass

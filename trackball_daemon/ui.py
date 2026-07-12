@@ -589,6 +589,8 @@ class SettingsWindow:
                   justify="left").pack(anchor="w", padx=8, pady=(3, 0))
         ttk.Label(card, text=f"Install model: {appdef.install_model}", foreground="#555",
                   wraplength=590, justify="left").pack(anchor="w", padx=8, pady=(2, 0))
+        ttk.Label(card, text=f"Security: {appdef.security_notes}", foreground="#7a4e00",
+                  wraplength=590, justify="left").pack(anchor="w", padx=8, pady=(2, 0))
         setup_text = "one-time setup required" if appdef.setup_required else "no host setup required"
         ttk.Label(card, text=f"Setup requirement: {setup_text}", foreground="#555").pack(
             anchor="w", padx=8, pady=(2, 0))
@@ -703,6 +705,13 @@ class SettingsWindow:
         dlg.wait_window()
 
     def _do_install(self, appdef, enabled_var, status_label, holder):
+        if appdef.security_confirmation:
+            proceed = messagebox.askokcancel(
+                f"{appdef.name} — before setup",
+                appdef.security_confirmation + "\n\nContinue?",
+                parent=self.win if self.win is not None else self.root)
+            if not proceed:
+                return
         if appdef.key == "blender":
             result = self._install_blender_interactive()
         else:

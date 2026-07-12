@@ -85,6 +85,11 @@ and SketchUp in that group. Every app exposes **Pivot hold** for its held Screen
 gesture. The audited capability matrix and intentionally deferred options are
 documented in [`docs/feature_parity.md`](docs/feature_parity.md).
 
+Security-sensitive setup is explicit and per app. The daemon does not need a public firewall rule
+or automatic certificate trust; unsigned development builds can still trigger SmartScreen,
+AutoCAD/SketchUp trust prompts, or antivirus heuristics. The complete behavior inventory, reversal
+steps, and signing/installer checklist are in [`docs/security.md`](docs/security.md).
+
 ### Fixed-horizon mode entry
 
 **General → 3D control scheme → Level horizon when entering Turntable/Walk** controls what

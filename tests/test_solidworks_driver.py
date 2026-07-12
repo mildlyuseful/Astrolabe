@@ -691,6 +691,7 @@ def test_worker_thread_flushes_and_zeros(monkeypatch):
 
     monkeypatch.setattr(drv, "_attach", fake_attach)
     drv.submit(0.2, 0.0, 0.0, 0.0, 0.0, 0.0)
+    drv.set_enabled(True)
     drv.start()
     try:
         deadline = time.time() + 3.0
