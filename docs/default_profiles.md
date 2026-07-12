@@ -14,7 +14,7 @@ one appears in the normal settings UI:
 
 The removed **Shipped profiles** menu had no separate profile operation: it selected the same app as
 the adjacent **Editing app** dropdown. It was redundant and has been removed. The remaining
-**Reset user overrides** button resets the app selected by **Editing app**.
+**Reset to defaults** button resets the app selected by **Editing app**.
 
 ## Composition contract
 
@@ -72,7 +72,7 @@ that skip directly to v7 retain their established user preferences after histori
    bump for a data-only factor change because the daemon supplies the factors at runtime.
 6. Keep the normal UI neutral while validating. If you temporarily use a user checkbox or gain to
    discover a correction, transfer that correction into `host_profiles.json`, restart, then click
-   **Reset user overrides** for that app before judging the result.
+   **Reset to defaults** for that app before judging the result.
 7. Run `pytest -q tests/test_default_profiles.py tests/test_output_bitexact.py`, then the full
    `pytest -q`. Invalid signs, non-positive scales, malformed action paths, or missing app profiles
    fail fast at daemon import/startup.

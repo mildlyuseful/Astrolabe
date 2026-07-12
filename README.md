@@ -60,7 +60,7 @@ mode-specific action. Those routes are independent: for example, setting **Walk 
 makes twist drive forward without changing Orbit or Fly. Identity/default routes preserve the
 pre-v5 behavior exactly.
 
-### User overrides and developer host alignment
+### User profiles and developer host alignment
 
 Each supported app has two separate layers. An immutable **host baseline** contains the
 developer-owned sign and scale corrections that make the software feel like the rest of the suite.
@@ -68,13 +68,19 @@ The saved per-app profile contains only user choices. Runtime composition is phy
 then host alignment, then user routing/inversion/gain; resetting user settings cannot erase the
 software correction, and changing a correction does not silently rewrite preferences.
 
-The normal **Per-App Bindings** UI contains only user overrides and starts neutral: gains at their
-defaults and inversion boxes unchecked. **Reset user overrides** restores every navigation field
-for the selected app in one save while preserving enable/install state, startup choice, and
-installed add-in version. Host alignment is intentionally absent from this UI; developers edit the
+The normal **Per-App Bindings** UI contains only user settings and starts neutral: gains at their
+defaults and inversion boxes unchecked. **Reset to defaults** restores every navigation field
+for the selected app in one save while preserving enable/install state and installed add-in
+version. Host alignment is intentionally absent from this UI; developers edit the
 separate packaged `trackball_daemon/host_profiles.json` file.
 Maintainer details and the baseline table live in
 [`docs/default_profiles.md`](docs/default_profiles.md).
+
+Per-app settings are rendered from one ordered capability schema in
+`trackball_daemon/binding_schema.py`. New integrations select the shared fields and option sets they
+support; the UI does not contain a separate hand-maintained form for each host. All profiles expose
+Orbit style, Zoom mode, and Twist action. Hosts that can distinguish native camera zoom from dolly
+also expose **Pan-mode zoom**.
 
 ### Fixed-horizon mode entry
 
@@ -85,7 +91,7 @@ eye, target, view distance, and active orbit point stay fixed. Normal frames in 
 mode preserve the resulting horizon; they do not repeatedly force a new camera orientation.
 
 Each applicable app has the same checkbox in **Per-App Bindings**. Until changed there it follows
-the General default; changing it creates an app-specific override, and **Reset user overrides**
+the General default; changing it creates an app-specific override, and **Reset to defaults**
 makes the app follow General again. Turn the option off to retain the current tilt when entering
 the mode. Godot does not expose free roll, so it does not show the no-op per-app checkbox.
 

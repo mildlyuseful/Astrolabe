@@ -54,16 +54,27 @@ def test_blender_app_has_advanced_block(isolated_config):
     assert set(blender["advanced"]) == set(_DEFAULT_BLENDER_ADVANCED)
     # Blender's native default pivot is "camera" (orbit about view_location)
     assert blender["bindings"]["scheme"]["orbit_pivot"] == "camera"
-    # other apps stay lean -- no advanced block leaking in
-    assert "advanced" not in cfg.data["apps"]["fusion360"]
+    # Every app now has the shared Twist action; Fusion additionally supports zoom vs dolly.
+    assert cfg.data["apps"]["fusion360"]["advanced"] == {
+        "twist_action": "roll", "zoom_style": "zoom"}
 
 
 def test_blender_bundled_version_markers_stay_in_sync():
     root = Path(__file__).parents[1] / "trackball_daemon/plugins/blender/trackball_nav"
-    assert json.loads((root / "version.json").read_text(encoding="utf-8"))["version"] == "0.1.17"
+    assert json.loads((root / "version.json").read_text(encoding="utf-8"))["version"] == "0.1.18"
     source = (root / "__init__.py").read_text(encoding="utf-8")
-    assert 'ADDIN_VERSION = "0.1.17"' in source
-    assert '"version": (0, 1, 17)' in source
+    assert 'ADDIN_VERSION = "0.1.18"' in source
+    assert '"version": (0, 1, 18)' in source
+
+
+def test_blender_addon_consumes_shared_zoom_target_and_behavior():
+    source = (Path(__file__).parents[1] /
+              "trackball_daemon/plugins/blender/trackball_nav/__init__.py").read_text(
+                  encoding="utf-8")
+    assert "def _zoom_pivot(" in source
+    assert 'frame.get("zm", "to_center")' in source
+    assert 'adv.get("zoom_style", "zoom")' in source
+    assert "_dolly(rv, z, pivot)" in source
 
 
 def test_advanced_appears_on_old_config_via_deep_merge(isolated_config):
@@ -230,10 +241,12 @@ def test_every_rich_integration_consumes_per_action_axis_sources():
 
 def test_ui_exposes_global_and_per_action_axis_routing():
     source = (Path(__file__).parents[1] / "trackball_daemon/ui.py").read_text(encoding="utf-8")
+    schema = (Path(__file__).parents[1] / "trackball_daemon/binding_schema.py").read_text(
+        encoding="utf-8")
     assert "Physical trackball orientation" in source
     assert "Changing a source swaps axes instead of duplicating one" in source
-    assert "Action axes & directions" in source
-    assert "Walk Fwd ← Z makes twist drive forward" in source
+    assert "Action axes & directions" in schema
+    assert '"action_routing"' in schema
 
 
 def test_pivot_ui_uses_one_canonical_case_sensitive_vocabulary():

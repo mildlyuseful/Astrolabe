@@ -58,7 +58,8 @@ socket-reader + main-thread-marshal shape — but much larger because Blender do
 | `trackball_daemon/app.py` | `App._apply_schemes` pushes the control scheme + Blender's `advanced` block to the broker; `_nav_sink` routes the focused app's frames. |
 | `trackball_daemon/config.py` | `_DEFAULT_BLENDER_ADVANCED`, `_DEFAULT_BLENDER_INVERT`, `_blender_app()`. The single source of truth. |
 | `trackball_daemon/integrations.py` | `install_blender` (multi-version copy + startup shim), the `_ADDINS["blender"]` registry entry, version readers, `auto_update`. |
-| `trackball_daemon/ui.py` | The Tkinter UI. The **merged** Blender section lives under *Per-App Bindings → blender* (`_blender_bindings_fields`), and the bindings tab is scrollable. |
+| `trackball_daemon/binding_schema.py` | The ordered per-app settings contract. Blender enables its supported shared and rich-action fields here. |
+| `trackball_daemon/ui.py` | The Tkinter UI. One declarative renderer builds every host section under *Per-App Bindings*; the tab is scrollable. |
 | `tools/blender_nav_*.py` | Headless test scripts (math / integration / socket probes). Not part of the shipped package. |
 | `docs/apps/blender_design.md` | Design rationale: full mode catalog, scheme reconciliation, verified Blender-API facts. |
 
@@ -233,7 +234,7 @@ from inside Blender, independent of broker/`nav_mode`-delivery timing.
   `toggle` ("shift"/"none"), and `scheme` (`orbit_pivot`/`orbit_style`/`zoom_mode`). Blender defaults
   `scheme.orbit_pivot` to `"camera"`. `bindings.invert` exists but is unused for Blender (see §5.4).
 - `advanced.*` — Blender-only: `nav_mode`, `lock_horizon`, `twist_action`, `zoom_style`,
-  `zoom_to_mouse`, `lock_camera_to_view`, `pan_scales_with_distance`, `fly_speed`, `walk_speed`, and
+  shared `bindings.scheme.zoom_mode`, `lock_camera_to_view`, `pan_scales_with_distance`, `fly_speed`, `walk_speed`, and
   the per-mode `axis_source` and `invert` blocks.
 - `rate_hz`, `screen_center_pivot_hold_sec` — per-app rate and the screen-center hold.
 
@@ -379,7 +380,7 @@ These were all found via live trackball testing; the fixes are in the code but t
 ## 11. How to make common changes
 
 - **Add a Blender option:** add it to `_DEFAULT_BLENDER_ADVANCED` (config), read it from `adv` in the
-  add-on, expose it in `_blender_bindings_fields` (ui). Deep-merge means no version migration. Bump the
+  add-on, expose it through Blender's capability profile in `binding_schema.py`. Deep-merge means no version migration. Bump the
   add-on version (3 places) if the add-on changed. Restart daemon + F3.
 - **Add an invertible axis:** add the key to the right mode in `_DEFAULT_BLENDER_INVERT`, apply it in
   the `_apply` per-mode invert block, add a checkbox to the relevant `_invert_row` in ui.

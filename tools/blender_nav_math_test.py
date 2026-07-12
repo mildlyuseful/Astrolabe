@@ -116,14 +116,15 @@ check("pan.vertical_uses_up_and_sign", vclose(rv.view_location, (0, tn.PAN_SIGN[
 # --- zoom / dolly ---------------------------------------------------------------------
 rv = RV(dist=6.0)
 tn._zoom(rv, 1.0)                                 # factor = 1 - 1*ZOOM_SIGN*ZOOM_SCALE
-check("zoom.in_reduces_distance", abs(rv.view_distance - 6.0 * (1.0 - tn.ZOOM_SIGN * tn.ZOOM_SCALE)) < 1e-6)
+factor = max(0.05, min(20.0, 1.0 - tn.ZOOM_SIGN * tn.ZOOM_SCALE))
+check("zoom.in_reduces_distance", abs(rv.view_distance - 6.0 * factor) < 1e-6)
 rv = RV(dist=6.0)
 tn._zoom(rv, -1.0)
 check("zoom.out_increases_distance", rv.view_distance > 6.0)
 # zoom toward a pivot moves view_location toward it by `factor`
 rv = RV(loc=(0, 0, 0), dist=6.0)
 Pz = Vector((10, 0, 0))
-factor = 1.0 - tn.ZOOM_SIGN * 1.0 * tn.ZOOM_SCALE
+factor = max(0.05, min(20.0, 1.0 - tn.ZOOM_SIGN * tn.ZOOM_SCALE))
 tn._zoom(rv, 1.0, Pz)
 check("zoom.to_pivot_shifts_location", vclose(rv.view_location, Pz + (Vector((0, 0, 0)) - Pz) * factor))
 rv = RV(dist=6.0)

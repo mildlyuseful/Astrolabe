@@ -56,8 +56,9 @@ def test_host_profile_loader_rejects_incomplete_or_invalid_developer_data(tmp_pa
 
 def test_normal_ui_is_user_only_and_shipped_profile_alias_is_removed():
     source = (Path(__file__).parents[1] / "trackball_daemon" / "ui.py").read_text(encoding="utf-8")
-    assert "Reset user overrides" in source
-    assert "Host alignment is developer-owned and hidden here." in source
+    assert "Reset to defaults" in source
+    assert "Host alignment" not in source
+    assert "developer-owned" not in source
     assert "Shipped profiles:" not in source
     assert "choose_default_profile" not in source
 
@@ -98,10 +99,10 @@ def test_level_horizon_default_override_and_reset_semantics(isolated_config):
 
 def test_bundled_profile_contract_versions_cover_every_installed_addin():
     assert {key: integrations.bundled_addin_version(key) for key in integrations.ADDIN_KEYS} == {
-        "fusion360": "0.1.20",
-        "blender": "0.1.17",
+        "fusion360": "0.1.21",
+        "blender": "0.1.18",
         "freecad": "0.1.10",
-        "sketchup": "0.2.8",
+        "sketchup": "0.2.9",
         "unreal": "0.2.9",
         "unity": "0.1.11",
         "godot": "0.1.8",
@@ -141,7 +142,8 @@ def test_reset_removes_non_profile_advanced_data_and_profiles_are_detached(isola
     cfg = Config().load()
     cfg.data["apps"]["fusion360"]["advanced"] = {"unexpected": True}
     cfg.reset_app_profile("fusion360")
-    assert "advanced" not in cfg.data["apps"]["fusion360"]
+    assert cfg.data["apps"]["fusion360"]["advanced"] == {
+        "twist_action": "roll", "zoom_style": "zoom"}
 
     first = default_app_profile("fusion360")
     first["bindings"]["orbit"]["sensitivity"] = 999

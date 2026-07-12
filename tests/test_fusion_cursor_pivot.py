@@ -371,6 +371,22 @@ def test_zoom_pivot_to_center_unchanged():
     assert tn._zoom_pivot("to_center", object(), tgt, idle=0.0) is tgt
 
 
+def test_pan_mode_native_zoom_and_dolly_are_distinct():
+    eye = (0.0, -10.0, 2.0)
+    target = (0.0, 0.0, 2.0)
+    pivot = (4.0, 0.0, 2.0)
+
+    zoom_eye, zoom_target, scale_extents = tn._zoom_geometry(
+        eye, target, pivot, 0.5, "zoom")
+    dolly_eye, dolly_target, dolly_scales = tn._zoom_geometry(
+        eye, target, pivot, 0.5, "dolly")
+
+    assert scale_extents is True and dolly_scales is False
+    assert zoom_target != target                 # native zoom shifts framing toward the pivot
+    assert dolly_target == target                # dolly moves only the eye
+    assert zoom_eye != dolly_eye
+
+
 def test_selection_override_uses_aggregate_selection_bounds(monkeypatch):
     class Selection:
         def __init__(self, bounds):

@@ -146,3 +146,33 @@ def test_rich_host_baseline_is_deferred_to_mode_aware_addon(engine, monkeypatch)
 
     # Rich integrations receive raw user-routed deltas; app.py supplies current host factors in adv.
     assert nav[-1][:3] == pytest.approx((0.01, 0.02, 0.03))
+
+
+def test_ordinary_profile_twist_action_routes_before_host_alignment(engine, monkeypatch):
+    engine.cfg.data["apps"]["fusion360"]["advanced"]["twist_action"] = "zoom"
+    engine.set_active_bindings("fusion360")
+    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
+    nav = []
+    engine.nav_sink = lambda *args: nav.append(args)
+    engine.set_mode(OutputEngine.MODE_CUBE)
+
+    engine.handle_packet(_pkt(0.01, 0.02, 0.03))
+
+    baseline = host_baseline_payload("fusion360")
+    assert nav[-1][:3] == pytest.approx(
+        (0.01 * baseline["orbit"][0], 0.02 * baseline["orbit"][1], 0.0))
+    assert nav[-1][5] == pytest.approx(0.03 * baseline["zoom"])
+
+
+def test_ordinary_profile_twist_none_drops_twist(engine, monkeypatch):
+    engine.cfg.data["apps"]["rhino"]["advanced"]["twist_action"] = "none"
+    engine.set_active_bindings("rhino")
+    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
+    nav = []
+    engine.nav_sink = lambda *args: nav.append(args)
+    engine.set_mode(OutputEngine.MODE_CUBE)
+
+    engine.handle_packet(_pkt(0.01, 0.02, 0.03))
+
+    assert nav[-1][2] == 0.0
+    assert nav[-1][5] == 0.0

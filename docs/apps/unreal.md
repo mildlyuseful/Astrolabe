@@ -190,9 +190,10 @@ broker frame — see §5.1), interpreted for the editor's free-fly camera. `conf
 - **`advanced.pan_scales_with_distance`**: pan scaled by the focus distance (zoom-stable) vs a fixed
   reference distance.
 
-Dropped vs Blender (not applicable to Unreal): `zoom_style` (zoom IS a dolly), `zoom_to_mouse` (use
-`zoom_mode`), `lock_camera_to_view` (no editor-camera-view equivalent), and the in-editor Alt+`
-mode-cycle shortcut (no equivalent editor input hook wired — use the daemon dropdown).
+Dropped vs Blender (not applicable to Unreal): `zoom_style` (zoom IS a dolly),
+`lock_camera_to_view` (no editor-camera-view equivalent), and the in-editor Alt+` mode-cycle
+shortcut (no equivalent editor input hook wired — use the daemon dropdown). Zoom targeting uses
+the shared `bindings.scheme.zoom_mode` field.
 
 ### 5.1 How the advanced block reaches the add-on
 `App._apply_schemes` attaches the **focused broker app's** `advanced` block as the frame's additive

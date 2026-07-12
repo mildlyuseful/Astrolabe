@@ -11,6 +11,7 @@ import sys
 import threading
 
 from .config import host_baseline
+from .binding_schema import binding_profile
 
 # ===========================================================================
 # Windows SendInput (relative pointer move + wheel), pure ctypes -- no dependency
@@ -168,6 +169,9 @@ class OutputEngine:
         apps = self.cfg.data["apps"]
         app_key = self._bindings_app or self.cfg.data["active_app"]
         app = apps.get(app_key) or apps[self.cfg.data["active_app"]]
+        self.app_key = app_key
+        self.binding_profile = binding_profile(app_key)
+        self.twist_action = str((app.get("advanced") or {}).get("twist_action", "roll"))
         self.host_baseline = host_baseline(app_key)
         b = app["bindings"]
         o, p, z = b["orbit"], b["pan"], b["zoom"]
@@ -217,6 +221,16 @@ class OutputEngine:
     def _emit_nav(self, ox, oy, oz, px, py, zoom):
         sink = self.nav_sink
         if sink is not None:
+            # Ordinary integrations do not have mode-aware routing inside their host add-on. Apply
+            # the global Twist action here, before host alignment, so Turntable can use twist for
+            # zoom (or ignore it) just like the rich integrations. Rich profiles consume the same
+            # setting after their per-mode action routing and must not be transformed twice.
+            if not self.binding_profile.rich_actions and oz:
+                if self.twist_action in ("zoom", "dolly"):
+                    zoom += oz
+                    oz = 0.0
+                elif self.twist_action == "none":
+                    oz = 0.0
             # Developer-owned host alignment is applied only at the integration boundary, after
             # the global/body mapping and composably with the saved user mapping. The local debug
             # cube therefore remains a host-neutral calibration reference.

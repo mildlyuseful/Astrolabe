@@ -89,6 +89,19 @@ def test_removed_per_app_startup_placeholder_is_cleaned_from_current_config(isol
     assert "start_automatically" not in json.loads(path.read_text(encoding="utf-8"))["apps"]["blender"]
 
 
+def test_blender_zoom_to_mouse_is_replaced_by_shared_zoom_mode(isolated_config):
+    d = isolated_config / "TrackballDaemon"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / "config.json"
+    path.write_text(json.dumps({
+        "version": CONFIG_VERSION,
+        "apps": {"blender": {"advanced": {"zoom_to_mouse": True}}},
+    }), encoding="utf-8")
+    cfg = Config().load()
+    assert "zoom_to_mouse" not in cfg.data["apps"]["blender"]["advanced"]
+    assert cfg.data["apps"]["blender"]["bindings"]["scheme"]["zoom_mode"] == "default"
+
+
 def test_fallback_chain_is_added_to_existing_config(isolated_config):
     _write_v2(isolated_config,
               {"orbit_pivot": "view", "orbit_style": "free", "zoom_mode": "to_center"}, {})

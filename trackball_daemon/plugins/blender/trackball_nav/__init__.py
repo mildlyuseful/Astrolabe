@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 17),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 18),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,8 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.17"                   # 0.1.17: level horizon on fixed-horizon mode entry
+ADDIN_VERSION = "0.1.18"                   # 0.1.18: shared Zoom mode targets + twist zoom/dolly
+                                           # 0.1.17: level horizon on fixed-horizon mode entry
                                            # (adv.level_horizon_on_entry; issue #2).
                                            # 0.1.16: immutable host baseline profile.
                                            # 0.1.15: per-action X/Y/Z source routing.
@@ -237,10 +238,15 @@ def _zoom(rv, z, pivot=None):
     rv.view_distance = max(DIST_MIN, min(DIST_MAX, rv.view_distance * factor))
 
 
-def _dolly(rv, z):
-    """Translate the eye along the view forward axis (a 'move through space' feel; perspective)."""
+def _dolly(rv, z, pivot=None):
+    """Translate the camera toward `pivot`, or straight forward when it is unavailable."""
     _right, _up, fwd, _back = _view_axes(rv)
-    rv.view_location = rv.view_location + fwd * (DOLLY_SCALE * z * rv.view_distance)
+    direction = fwd
+    if pivot is not None:
+        toward = pivot - _eye(rv)
+        if toward.length > 1e-9:
+            direction = toward.normalized()
+    rv.view_location = rv.view_location + direction * (DOLLY_SCALE * z * rv.view_distance)
 
 
 def _roll(rv, roll):
@@ -434,6 +440,19 @@ def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True, candidates=N
     return None
 
 
+def _zoom_pivot(zm, rv, region, win, adv):
+    """Zoom target selected by the shared scheme. Misses return None (To Center)."""
+    if zm == "to_object":
+        if bool(adv.get("selection_overrides_pivot", True)):
+            selected = _selection_median()
+            if selected is not None:
+                return selected
+        return _selection_median()
+    if zm == "to_cursor":
+        return _raycast_cursor(rv, region, win)
+    return None
+
+
 def _sync_camera_to_view(rv, scene):
     """Drive the scene camera object from the view (camera at the eye, view's orientation). Blender
     ignores rv3d rotation while *in* CAMERA view, so we write the camera directly."""
@@ -451,6 +470,7 @@ def _apply_orbit(win, rv, region, o, frame, adv, idle):
     lock = bool(adv.get("lock_horizon", False))
     twist_action = adv.get("twist_action", "roll")
     op = frame.get("op", "camera")
+    zm = frame.get("zm", "to_center")
     pitch = o[0] * ORBIT_SCALE[0]
     yaw = o[1] * ORBIT_SCALE[1]
     twist = o[2] * ORBIT_SCALE[2]
@@ -460,9 +480,11 @@ def _apply_orbit(win, rv, region, o, frame, adv, idle):
         if twist_action == "roll" and not lock:
             roll = twist                           # direction set by the per-mode invert (upstream)
         elif twist_action == "zoom":
-            _zoom(rv, twist * float((adv.get("host_baseline") or {}).get("zoom", 1.0)))
+            _zoom(rv, twist * float((adv.get("host_baseline") or {}).get("zoom", 1.0)),
+                  _zoom_pivot(zm, rv, region, win, adv))
         elif twist_action == "dolly":
-            _dolly(rv, twist * float((adv.get("host_baseline") or {}).get("zoom", 1.0)))
+            _dolly(rv, twist * float((adv.get("host_baseline") or {}).get("zoom", 1.0)),
+                   _zoom_pivot(zm, rv, region, win, adv))
         # "none" (or roll-while-locked): ignore twist
 
     if pitch or yaw or roll:
@@ -645,12 +667,10 @@ def _apply(target, frame, idle):
             _pan(rv, p[0], p[1], bool(adv.get("pan_scales_with_distance", True)))
             _gesture["invalid"] = True              # view moved -> recast screen-center next orbit
         elif z:
+            pivot = _zoom_pivot(zm, rv, region, _win, adv)
             if adv.get("zoom_style", "zoom") == "dolly":
-                _dolly(rv, z)
+                _dolly(rv, z, pivot)
             else:
-                pivot = None
-                if adv.get("zoom_to_mouse", False):
-                    pivot = _raycast_screen_center(rv, region)    # best-effort: screen-centre surface
                 _zoom(rv, z, pivot)
             _gesture["invalid"] = True
 

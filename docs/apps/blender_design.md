@@ -84,7 +84,7 @@ parts that map, and put **only genuinely Blender-only** options in `apps.blender
 |-----------------|---------------------------|-------|
 | Orbit method (Trackball/Turntable) | generic `orbit_style` (`free`/`turntable`) | relabelled "Orbit method" in the Blender UI |
 | Orbit pivot | generic `orbit_pivot` | uses the shared canonical pivot identifiers |
-| Zoom to | generic — *not used by Blender*; Blender uses `advanced.zoom_to_mouse` | Blender's native pref is literally a "Zoom to Mouse" checkbox |
+| Zoom mode | shared `bindings.scheme.zoom_mode` | Default / To Center / To Object / To Cursor |
 
 `orbit_pivot` value → Blender pivot:
 
@@ -111,7 +111,6 @@ parts that map, and put **only genuinely Blender-only** options in `apps.blender
   "lock_horizon": false,          // keep the horizon level even in trackball (NDOF "Lock Horizon")
   "twist_action": "roll",         // roll | zoom | dolly | none  (un-shifted twist in ORBIT mode)
   "zoom_style": "zoom",           // zoom (view_distance) | dolly (translate the eye)
-  "zoom_to_mouse": false,         // zoom toward the screen-centre surface (see §6 limitation)
   "lock_camera_to_view": false,   // in CAMERA view, drive scene.camera from the trackball
   "pan_scales_with_distance": true,
   "fly_speed": 1.0,
@@ -191,7 +190,7 @@ This keeps the pivot fixed on screen for *every* non-camera pivot, because the e
 * **Roll** is just the `Q(world_fwd, roll)` term (pivot = view_location)
 * **Pan** `view_location += world_right*dx + world_up*dy`, `dx,dy ∝ view_distance` if
   `pan_scales_with_distance`
-* **Zoom** `view_distance = clamp(view_distance * (1 - sign·z·scale))`; `zoom_to_mouse` also shifts
+* **Zoom** `view_distance = clamp(view_distance * (1 - sign·z·scale))`; shared Zoom mode also shifts
   `view_location = P + (view_location-P)*factor`
 * **Dolly** `view_location += world_fwd * (scale·z·view_distance)`
 * **Selection median** mean of `selected_objects[i].matrix_world.translation`

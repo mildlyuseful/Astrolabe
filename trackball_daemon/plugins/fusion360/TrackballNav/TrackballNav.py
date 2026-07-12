@@ -37,7 +37,8 @@ PAN_SCALE = 1.0
 ZOOM_SCALE = 1.0
 ZOOM_SIGN = 1.0
 
-ADDIN_VERSION = "0.1.20"         # 0.1.20: level horizon on turntable entry
+ADDIN_VERSION = "0.1.21"         # 0.1.21: native zoom vs camera dolly selection
+                                 # 0.1.20: level horizon on turntable entry
                                  # (adv.level_horizon_on_entry; issue #2).
                                  # 0.1.19: immutable host baseline profile.
                                  # 0.1.18: camera/screen_center canonical pivot names.
@@ -491,6 +492,17 @@ def _zoom_pivot(zm, cam, tgt, idle, sel_override=True):
     return tgt
 
 
+def _zoom_geometry(eye, target, pivot, factor, style):
+    """Pure point math for pan-mode zoom. Inputs/outputs are XYZ tuples for headless tests."""
+    if style == "dolly":
+        new_eye = tuple(pivot[i] + (eye[i] - pivot[i]) * factor for i in range(3))
+        return new_eye, tuple(target), False
+    new_target = tuple(pivot[i] + (target[i] - pivot[i]) * factor for i in range(3))
+    delta = tuple(new_target[i] - target[i] for i in range(3))
+    new_eye = tuple(eye[i] + delta[i] for i in range(3))
+    return new_eye, new_target, True
+
+
 def _apply(frame):
     """Apply one nav frame to the active viewport camera. Runs on the Fusion main thread.
     Exactly one of orbit / pan / zoom is non-zero per frame (the daemon gates them)."""
@@ -605,20 +617,31 @@ def _apply(frame):
             cam.eye = new_eye
 
         elif z:
-            # ---- ZOOM: scale view extents, keeping the pivot point P fixed on screen ----
+            # ---- PAN-MODE ZOOM: native view-extents zoom or camera dolly ----------------
             _gesture["pivot"] = None          # view moved -> the next orbit re-raycasts its pivot
             s = 1.0 - ZOOM_SIGN * z * ZOOM_SCALE
             if s < 0.01:
                 s = 0.01
             P = _zoom_pivot(zm, cam, tgt, idle, sel_override=sel_override)
-            ntgt = adsk.core.Point3D.create(P.x + (tgt.x - P.x) * s,
-                                            P.y + (tgt.y - P.y) * s,
-                                            P.z + (tgt.z - P.z) * s)
-            d = adsk.core.Vector3D.create(ntgt.x - tgt.x, ntgt.y - tgt.y, ntgt.z - tgt.z)
-            new_eye = eye.copy(); new_eye.translateBy(d)
-            cam.target = ntgt
-            cam.eye = new_eye
-            cam.viewExtents = max(1e-4, cam.viewExtents * s)
+            zoom_style = str(adv.get("zoom_style", "zoom"))
+            eye_xyz, target_xyz, scale_extents = _zoom_geometry(
+                (eye.x, eye.y, eye.z), (tgt.x, tgt.y, tgt.z), (P.x, P.y, P.z), s, zoom_style)
+            if zoom_style == "dolly":
+                # Move only the eye toward the chosen point. Target and viewExtents stay fixed, so
+                # this changes camera position rather than magnification.
+                new_eye = adsk.core.Point3D.create(*eye_xyz)
+                dist = ((new_eye.x - tgt.x) ** 2 + (new_eye.y - tgt.y) ** 2 +
+                        (new_eye.z - tgt.z) ** 2) ** 0.5
+                if dist > 1e-4:
+                    cam.eye = new_eye
+            else:
+                # Native zoom: scale view extents and shift eye+target so P stays fixed on screen.
+                ntgt = adsk.core.Point3D.create(*target_xyz)
+                new_eye = adsk.core.Point3D.create(*eye_xyz)
+                cam.target = ntgt
+                cam.eye = new_eye
+                if scale_extents:
+                    cam.viewExtents = max(1e-4, cam.viewExtents * s)
 
         cam.isSmoothTransition = False
         vp.camera = cam

@@ -307,13 +307,19 @@ _DEFAULT_BLENDER_ADVANCED = {
     "lock_horizon": False,          # keep the horizon level even in trackball (NDOF "Lock Horizon")
     "twist_action": "roll",         # roll | zoom | dolly | none   (un-shifted twist in ORBIT mode)
     "zoom_style": "zoom",           # zoom (view_distance) | dolly (translate the eye)
-    "zoom_to_mouse": False,         # zoom toward the screen-centre surface (see notes for the limit)
     "lock_camera_to_view": False,   # in CAMERA view, drive scene.camera from the trackball
     "pan_scales_with_distance": True,
     "fly_speed": 1.0,
     "walk_speed": 1.0,
     "invert": _DEFAULT_BLENDER_INVERT,   # per-mode direction flips (applied in the add-on)
     "axis_source": DEFAULT_ACTION_AXIS_SOURCE,
+}
+
+
+# Every integration exposes Twist action. Rich integrations consume it after their mode-specific
+# routing; ordinary integrations are routed by OutputEngine before host alignment.
+_DEFAULT_COMMON_ADVANCED = {
+    "twist_action": "roll",         # roll | zoom | dolly | none
 }
 
 
@@ -333,6 +339,8 @@ _DEFAULT_SKETCHUP_INVERT = {
 _DEFAULT_SKETCHUP_ADVANCED = {
     "nav_mode": "orbit",            # orbit | fly | walk
     "lock_horizon": False,           # keep external-pivot free orbit level
+    "twist_action": "roll",
+    "zoom_style": "dolly",          # shifted zoom channel: native zoom | camera dolly
     "fly_speed": 1.0,
     "walk_speed": 1.0,
     "invert": _DEFAULT_SKETCHUP_INVERT,
@@ -342,7 +350,7 @@ _DEFAULT_SKETCHUP_ADVANCED = {
 
 # --- Unreal: per-mode action routes + the "advanced" nav options, mirroring Blender's richer set
 #     but adapted to the editor's free-fly eye+rotator camera. Dropped vs Blender: zoom_style (Unreal
-#     zoom IS a dolly -- no view-distance), zoom_to_mouse (use zoom_mode), lock_camera_to_view (no
+#     zoom IS a dolly -- no view-distance) and lock_camera_to_view (no
 #     editor-camera-view equivalent). Applied IN THE ADD-ON per mode (same reason as Blender, §12.9).
 #     Signs default off (best-guess, live-tune) -- unlike Blender, no baked-in roll/bank inverts. ----
 _DEFAULT_UNREAL_INVERT = {
@@ -417,6 +425,7 @@ def _app(enabled=False):
         # it is deep-merged onto existing configs without a CONFIG_VERSION bump.
         "selection_overrides_pivot": True,
         "bindings": copy.deepcopy(_DEFAULT_3D_BINDINGS),
+        "advanced": copy.deepcopy(_DEFAULT_COMMON_ADVANCED),
     }
 
 
@@ -426,6 +435,13 @@ def _blender_app():
     a = _app()
     a["bindings"]["scheme"]["orbit_pivot"] = "camera"
     a["advanced"] = copy.deepcopy(_DEFAULT_BLENDER_ADVANCED)
+    return a
+
+
+def _fusion_app():
+    """Fusion supports both view-extents zoom and camera dolly."""
+    a = _app()
+    a["advanced"]["zoom_style"] = "zoom"
     return a
 
 
@@ -498,7 +514,7 @@ DEFAULTS = {
         "unity":      _unity_app(),
         "godot":      _godot_app(),
         "rhino":      _app(),
-        "fusion360":  _app(),
+        "fusion360":  _fusion_app(),
         "solidworks": _app(),
         "onshape":    _app(),
         "autocad":    _app(),
@@ -596,6 +612,10 @@ class Config:
                     changed = True
                 advanced = app.get("advanced")
                 if isinstance(advanced, dict):
+                    # Superseded by the shared bindings.scheme.zoom_mode dropdown.
+                    if "zoom_to_mouse" in advanced:
+                        advanced.pop("zoom_to_mouse", None)
+                        changed = True
                     sources = normalize_action_axis_sources(advanced.get("axis_source"))
                     if advanced.get("axis_source") != sources:
                         advanced["axis_source"] = sources

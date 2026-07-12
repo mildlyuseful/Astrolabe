@@ -327,7 +327,7 @@ Commit:
 
 - `feat: level horizon on fixed-mode entry`
 
-## [~] Step 6 — De-generalize the 3D Apps panel
+## [x] Step 6 — De-generalize the 3D Apps panel
 
 Goal: give each integration honest setup and compatibility UX.
 
@@ -368,12 +368,33 @@ Completed:
 
 Versions: daemon 0.1.67. Host add-ins unchanged (this step changes daemon metadata/UI only).
 
-Pending commit:
+Commit:
 
 - `feat: de-generalize 3d app setup panel`
-- Implementation and verification are complete, but staging/commit was blocked by the Codex
-  usage/approval limit. Changes remain unstaged in the working tree; do not start Step 7 before
-  committing this checkpoint.
+
+### Step 6 follow-up — Declarative per-app binding profiles
+
+- Replaced the separate app-specific settings renderers with one ordered binding schema. Each app
+  now declares only its capabilities and option sets, so adding a shared setting does not require
+  copying it into every app renderer.
+- Unified the setting order and dropdown presentation. Orbit style is **Default / Free /
+  Turntable**; Zoom mode is **Default / To Center / To Object / To Cursor** where supported; and
+  the first word of every dropdown option is capitalized without changing its stored value.
+- Added Twist action to every app profile. Ordinary integrations route it in the daemon; rich
+  integrations apply it after their mode-specific routing. Turntable twist can therefore roll,
+  zoom, dolly, or do nothing according to host capability.
+- Added the shared Zoom mode to every rich profile and a separate Pan-mode zoom **Zoom / Dolly**
+  control for Blender, Fusion, and SketchUp, where the host supports both behaviors.
+- Made General settings scrollable and replaced persistent explanatory copy with hover tooltips.
+  Removed host-alignment and other developer-facing language from the normal settings UI.
+- Bumped daemon to 0.1.68, Blender to 0.1.18, Fusion to 0.1.21, and SketchUp to 0.2.9.
+- Verification: `pytest -q` — 361 passed; `python -m compileall -q trackball_daemon tests` — passed;
+  Blender 5.1 headless navigation math — 30 checks passed. Ruby is unavailable on this machine, so
+  SketchUp behavior still needs its normal in-host smoke test.
+
+Commit:
+
+- `refactor: unify per-app binding profiles`
 
 ## [ ] Step 7 — Privilege, antivirus, and scary-warning audit
 
