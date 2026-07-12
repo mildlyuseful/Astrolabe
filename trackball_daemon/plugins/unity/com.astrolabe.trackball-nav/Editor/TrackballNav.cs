@@ -15,7 +15,8 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.10";
+        const string AddinVersion = "0.1.11";  // 0.1.11: level horizon on fixed-horizon mode entry
+                                               // (adv.level_horizon_on_entry; issue #2).
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.35f;
         const float ObjCacheSec = 0.5f;
@@ -39,6 +40,9 @@ namespace Astrolabe.TrackballNav
         static Vector3? _objCenter;
         static Bounds? _objBbox;
         static string _lastScheme;
+        // Fixed-horizon transition tracker (issue #2): null until the first frame, so a session
+        // that starts already in a fixed mode never levels -- only a real free->fixed switch does.
+        static bool? _horizonFixed;
         static Vector2 _sceneMouseGui;   // last Scene GUI mouse (top-left origin)
         static bool _hasSceneMouse;
         static Ray _cursorRay;           // world ray under the mouse (from GUIPointToWorldRay)
@@ -495,6 +499,20 @@ namespace Astrolabe.TrackballNav
             var cam = TrackballNavCamera.FromSceneView(sv.pivot, sv.rotation, eyeDist);
             _focusDist = eyeDist;
 
+            // Level ONCE when the effective mode transitions into a fixed-horizon mode (turntable
+            // orbit, lock-horizon, or walk) and the daemon's toggle is on (issue #2). Transitions
+            // only: ordinary fixed-mode frames never re-level.
+            bool fixedHorizon = navMode == "walk" ||
+                (navMode == "orbit" && (style == "turntable" || lockHorizon));
+            bool leveled = false;
+            if (fixedHorizon && _horizonFixed == false &&
+                MiniJson.Bool(adv, "level_horizon_on_entry", true))
+            {
+                leveled = TrackballNavCamera.LevelHorizon(ref cam);
+                if (leveled) Log($"horizon: leveled on fixed-horizon mode entry (nav={navMode} style={style})");
+            }
+            _horizonFixed = fixedHorizon;
+
             bool changed;
             if (navMode == "fly")
                 changed = ApplyFly(ref cam, o, p, z, flySpeed);
@@ -504,7 +522,7 @@ namespace Astrolabe.TrackballNav
                 changed = ApplyOrbit(ref cam, o, p, z, op, style, zm, twistAction, lockHorizon,
                     panScales, idle, selOverride, pivotCandidates, sv);
 
-            if (!changed) return;
+            if (!changed && !leveled) return;
             TrackballNavCamera.ToSceneView(cam, _focusDist, out var pivot, out var rot, out _);
             WriteSceneView(sv, pivot, rot, _focusDist);
             sv.Repaint();

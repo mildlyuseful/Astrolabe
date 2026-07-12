@@ -191,6 +191,16 @@ def _v_normalize(a):
     return (a[0] / n, a[1] / n, a[2] / n) if n > 1e-12 else (0.0, 0.0, 1.0)
 
 
+def _level_horizon_basis(back, world_up=WORLD_UP):
+    """Return leveled (right, up) for an unchanged camera-back vector, or None at the
+    straight-up/down singularity. Pure helper shared by runtime and headless tests."""
+    right = _v_cross(world_up, back)
+    if _v_len(right) < 1e-6:
+        return None
+    right = _v_normalize(right)
+    return right, _v_normalize(_v_cross(back, right))
+
+
 def _rodrigues(u, theta, p):
     """Rotate vector p about UNIT axis u by theta (radians) -- Rodrigues' formula. Same helper the
     SolidWorks driver uses; here it rotates the camera basis + the eye-about-pivot offset."""
@@ -890,6 +900,12 @@ class OnshapeBridge:
         # Control scheme (orbit pivot / orbit style / zoom mode); a dict ref-swap is atomic, so the
         # worker reads it lock-free each flush (same pattern as the broker / SW driver).
         self._scheme = {"op": "screen_center", "os": "free", "zm": "to_center"}
+        # Level-horizon-on-entry (issue #2). _horizon_fixed is None until the first set_scheme so
+        # a daemon that STARTS in turntable never levels -- only a real free->turntable switch
+        # queues _level_pending, which the worker applies on the next navigation step.
+        self._level_horizon = True
+        self._horizon_fixed = None
+        self._level_pending = False
 
     @staticmethod
     def _clamp_rate(hz):
@@ -904,11 +920,20 @@ class OnshapeBridge:
         self._period = 1.0 / self._clamp_rate(hz)
 
     def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True,
-                   orbit_pivot_fallbacks=None):
+                   orbit_pivot_fallbacks=None, level_horizon_on_entry=True):
         self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode,
                         "sel_override": bool(selection_overrides_pivot),
                         "fallbacks": list(orbit_pivot_fallbacks or [])}
         self._held_pivot = None
+        # Fixed-horizon transition (issue #2): a free->turntable switch queues one leveling pass,
+        # applied by the worker on the next navigation step. Leaving turntable cancels it.
+        self._level_horizon = bool(level_horizon_on_entry)
+        fixed = (orbit_style == "turntable")
+        if fixed and self._horizon_fixed is False and self._level_horizon:
+            self._level_pending = True
+        elif not fixed or not self._level_horizon:
+            self._level_pending = False
+        self._horizon_fixed = fixed
 
     def submit(self, ox, oy, oz, px, py, zoom):
         with self._lock:
@@ -1085,14 +1110,31 @@ class OnshapeBridge:
         changed_affine = False
         new_extents = None
 
+        # Level ONCE on turntable entry (queued by set_scheme; issue #2): rebuild right/up so
+        # camera-right is horizontal while back (the view direction) and the eye stay put -- the
+        # screen centre and zoom are untouched, only the roll goes. Skipped in the degenerate
+        # straight-along-WORLD_UP view. Uses the same WORLD_UP as the turntable itself (Y-up
+        # guess -- needs the same live verification; see the WORLD_UP note above).
+        if self._level_pending:
+            self._level_pending = False
+            leveled = _level_horizon_basis(back)
+            if leveled is not None:
+                right, up = leveled
+                changed_affine = True
+                self._log.info("onshape: horizon leveled on turntable entry")
+
         if ox or oy or oz:
             # Orbit about the gesture pivot, captured ONCE at the start of the gesture and held (so
             # the hit-test runs once, not per frame, and the pivot doesn't chase the moving view).
             pivot = self._gesture_pivot(conn, scheme, eye, right, up, back)
             if pivot is None:
-                return
-            eye, right, up, back = self._orbit(ox, oy, oz, eye, right, up, back, pivot, scheme)
-            changed_affine = True
+                if changed_affine:              # still deliver the entry-leveling write below
+                    ox = oy = oz = 0.0
+                else:
+                    return
+            else:
+                eye, right, up, back = self._orbit(ox, oy, oz, eye, right, up, back, pivot, scheme)
+                changed_affine = True
         elif px or py:
             eye = self._pan(conn, eye, right, up, px, py)
             changed_affine = True

@@ -19,9 +19,9 @@ import tkinter as tk
 from . import integrations
 from .autocad_driver import AutoCADPluginLoader
 from .ble import start_ble_thread
-from .config import (Config, compose_advanced_with_host_baseline, effective_scheme,
-                     host_baseline_payload, normalize_orbit_pivot_fallbacks,
-                     orbit_pivot_candidates)
+from .config import (Config, compose_advanced_with_host_baseline, effective_level_horizon,
+                     effective_scheme, host_baseline_payload,
+                     normalize_orbit_pivot_fallbacks, orbit_pivot_candidates)
 from .navbroker import NavBroker
 from .onshape_bridge import OnshapeBridge
 from .output import OutputEngine
@@ -142,6 +142,8 @@ class App:
             adv["host_baseline"] = host_baseline_payload(key)
             adv["selection_overrides_pivot"] = bool(
                 appcfg.get("selection_overrides_pivot", True))
+            adv["level_horizon_on_entry"] = effective_level_horizon(
+                self.config.data["general"], appcfg)
             adv["orbit_pivot_fallbacks"] = fallbacks
             adv["orbit_pivot_candidates"] = orbit_pivot_candidates(
                 scheme["orbit_pivot"], fallbacks)
@@ -159,14 +161,18 @@ class App:
             self.sw_driver.set_scheme(
                 **self._effective_scheme("solidworks"),
                 selection_overrides_pivot=bool(swcfg.get("selection_overrides_pivot", True)),
-                orbit_pivot_fallbacks=fallbacks)
+                orbit_pivot_fallbacks=fallbacks,
+                level_horizon_on_entry=effective_level_horizon(
+                    self.config.data["general"], swcfg))
             self.sw_driver.set_pivot_hold(swcfg.get("screen_center_pivot_hold_sec", 0.5))
         if self.onshape_bridge is not None:
             oncfg = self.config.data["apps"].get("onshape") or {}
             self.onshape_bridge.set_scheme(
                 **self._effective_scheme("onshape"),
                 selection_overrides_pivot=bool(oncfg.get("selection_overrides_pivot", True)),
-                orbit_pivot_fallbacks=fallbacks)
+                orbit_pivot_fallbacks=fallbacks,
+                level_horizon_on_entry=effective_level_horizon(
+                    self.config.data["general"], oncfg))
 
     def _app_rate(self, key):
         """Effective viewport/flush rate (Hz) for app `key`: its per-app override, or the global

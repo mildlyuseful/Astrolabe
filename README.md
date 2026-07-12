@@ -76,6 +76,19 @@ separate packaged `trackball_daemon/host_profiles.json` file.
 Maintainer details and the baseline table live in
 [`docs/default_profiles.md`](docs/default_profiles.md).
 
+### Fixed-horizon mode entry
+
+**General → 3D control scheme → Level horizon when entering Turntable/Walk** controls what
+happens when navigation changes from a free-roll mode into **Turntable**, **Lock horizon**, or
+**Walk**. It is enabled by default: the camera's existing roll is removed once on entry while its
+eye, target, view distance, and active orbit point stay fixed. Normal frames in the fixed-horizon
+mode preserve the resulting horizon; they do not repeatedly force a new camera orientation.
+
+Each applicable app has the same checkbox in **Per-App Bindings**. Until changed there it follows
+the General default; changing it creates an app-specific override, and **Reset user overrides**
+makes the app follow General again. Turn the option off to retain the current tilt when entering
+the mode. Godot does not expose free roll, so it does not show the no-op per-app checkbox.
+
 ## 3D-app integrations
 
 The daemon drives CAD apps like a 3Dconnexion SpaceMouse: a local **nav broker** streams

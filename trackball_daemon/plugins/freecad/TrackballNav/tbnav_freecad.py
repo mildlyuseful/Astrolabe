@@ -25,7 +25,9 @@ import traceback
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.9"          # 0.1.9: immutable host baseline profile.
+ADDIN_VERSION = "0.1.10"         # 0.1.10: level horizon on turntable entry
+                                 # (adv.level_horizon_on_entry; issue #2).
+                                 # 0.1.9: immutable host baseline profile.
                                  # 0.1.8: camera/screen_center canonical pivot names.
                                  # 0.1.5: selection_overrides_pivot is functional.
                                  # 0.1.4: scheme values renamed (pointer->cursor,
@@ -64,6 +66,9 @@ _host = "?"
 # idle gap.
 _gesture = {"t": 0.0, "pivot": None}
 _zoom_gesture = {"pivot": None}   # "to_cursor" zoom's own per-gesture hold (reset on orbit/pan)
+# Fixed-horizon transition tracker (issue #2): None until the first frame, so an add-on that
+# starts up already in turntable never levels -- only a real free->turntable switch does.
+_horizon = {"fixed": None}
 _obj_cache = {"t": 0.0, "center": None, "bbox": None}
 _last_scheme = {"v": None}
 
@@ -473,12 +478,24 @@ def _apply(view, frame, idle):
     camera, node = _read_camera(view)
 
     changed = False
+    # Level ONCE when the style transitions free->turntable (issue #2): remove existing roll
+    # instead of locking the tilted horizon. Transitions only -- prev None (fresh add-on) never
+    # levels, and ordinary turntable frames never re-level.
+    fixed = (style == "turntable")
+    prev = _horizon["fixed"]
+    _horizon["fixed"] = fixed
+    if fixed and prev is False and bool(adv.get("level_horizon_on_entry", True)):
+        if cammath.level_horizon(camera):
+            _log("horizon: leveled on turntable entry")
+            changed = True
     if o[0] or o[1] or o[2]:
         _log_rl("rx_orbit", "rx orbit o=(%.4f,%.4f,%.4f) op=%s os=%s" % (o[0], o[1], o[2], op, style))
         _zoom_gesture["pivot"] = None            # view rotates -> next zoom re-raycasts its pivot
         pivot = _orbit_pivot(op, view, doc, camera, idle, sel_override=sel_override,
                              candidates=pivot_candidates)
         if pivot is None:
+            if changed:                      # deliver the entry-leveling even though the
+                _write_camera(view, node, camera)   # pivot chain produced no orbit frame
             return
         cammath.orbit(camera, o, style == "turntable", pivot)
         changed = True

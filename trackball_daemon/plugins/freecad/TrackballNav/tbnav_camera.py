@@ -56,6 +56,12 @@ def v_normalize(a):
     return (a[0] / n, a[1] / n, a[2] / n) if n > 1e-12 else (0.0, 0.0, 0.0)
 
 
+def v_cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0])
+
+
 # ---------------------------------------------------------------------------------------
 # quaternion helpers (x, y, z, w) -- Hamilton product, matching Coin's SbRotation
 # ---------------------------------------------------------------------------------------
@@ -95,6 +101,26 @@ def q_axis_angle(axis, angle):
         return (0.0, 0.0, 0.0, 1.0)
     s = math.sin(angle * 0.5) / n
     return (axis[0] * s, axis[1] * s, axis[2] * s, math.cos(angle * 0.5))
+
+
+def q_from_axes(right, up, back):
+    """Camera-local -> world quaternion (x,y,z,w) from an orthonormal basis: world directions of
+    the camera's local +X (right), +Y (up), +Z (back). Shepperd's method on the column matrix."""
+    m00, m01, m02 = right[0], up[0], back[0]
+    m10, m11, m12 = right[1], up[1], back[1]
+    m20, m21, m22 = right[2], up[2], back[2]
+    t = m00 + m11 + m22
+    if t > 0.0:
+        s = math.sqrt(t + 1.0) * 2.0
+        return q_normalize(((m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25 * s))
+    if m00 >= m11 and m00 >= m22:
+        s = math.sqrt(1.0 + m00 - m11 - m22) * 2.0
+        return q_normalize((0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s))
+    if m11 >= m22:
+        s = math.sqrt(1.0 + m11 - m00 - m22) * 2.0
+        return q_normalize(((m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s))
+    s = math.sqrt(1.0 + m22 - m00 - m11) * 2.0
+    return q_normalize(((m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s))
 
 
 # ---------------------------------------------------------------------------------------
@@ -180,6 +206,22 @@ def apply_world_rotation(cam, R, pivot):
 def orbit(cam, o, turntable, pivot):
     """Apply an orbit step: rotate about `pivot` (None -> about the eye / look-around)."""
     apply_world_rotation(cam, orbit_R(cam, o[0], o[1], o[2], turntable), pivot)
+
+
+def level_horizon(cam):
+    """Remove existing roll: rebuild the orientation so camera-right is horizontal (perpendicular
+    to WORLD_UP) while the view direction is unchanged. position and focalDistance are untouched,
+    so the eye AND the look-at stay put -- only the roll goes (issue #2: level on fixed-horizon
+    mode entry). Returns False in the degenerate straight-up/straight-down view, where roll is
+    indistinguishable from yaw and leveling is undefined (turntable has the same singularity)."""
+    _r, _u, fwd, _b = axes(cam)
+    right = v_cross(fwd, WORLD_UP)
+    if v_len(right) < 1e-6:
+        return False
+    right = v_normalize(right)
+    up = v_cross(right, fwd)
+    cam.orientation = list(q_from_axes(right, up, v_scale(fwd, -1.0)))
+    return True
 
 
 def pan(cam, px, py):

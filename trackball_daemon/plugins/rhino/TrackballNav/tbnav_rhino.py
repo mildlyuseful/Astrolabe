@@ -20,7 +20,9 @@ from System.Windows.Forms import Cursor
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.13"          # 0.1.13: immutable host baseline profile.
+ADDIN_VERSION = "0.1.14"          # 0.1.14: level horizon on turntable entry
+                                  # (adv.level_horizon_on_entry; issue #2).
+                                  # 0.1.13: immutable host baseline profile.
                                   # 0.1.12: camera/screen_center canonical pivot names.
 _DEFAULT_PORT = 47900
 PIVOT_HOLD_IDLE = 0.35
@@ -35,6 +37,9 @@ _idle_hooked = False
 _host = "?"
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
 _zoom_gesture = {"pivot": None}
+# Fixed-horizon transition tracker (issue #2): None until the first frame, so an add-on that
+# starts up already in turntable never levels -- only a real free->turntable switch does.
+_horizon = {"fixed": None}
 _obj_cache = {"t": 0.0, "center": None, "bbox": None}
 _last_scheme = {"v": None}
 _last_err = {"t": 0.0, "s": ""}
@@ -449,10 +454,22 @@ def _apply(view, frame, idle):
     changed = False
     turntable = style == "turntable"
 
+    # Level ONCE when the style transitions free->turntable (issue #2): remove existing roll
+    # instead of locking the tilted horizon. eye/target stay put, so distance and the active
+    # orbit point are preserved. Transitions only; ordinary turntable frames never re-level.
+    prev = _horizon["fixed"]
+    _horizon["fixed"] = turntable
+    if turntable and prev is False and bool(adv.get("level_horizon_on_entry", True)):
+        if cammath.level_horizon(cam):
+            _log("horizon: leveled on turntable entry")
+            changed = True
+
     if o[0] or o[1] or o[2]:
         pivot = _orbit_pivot(op, cam, view, idle, sel_override=sel_override,
                              candidates=pivot_candidates)
         if pivot is None:
+            if changed:                      # deliver the entry-leveling even though the
+                _write_camera(view, cam)     # pivot chain produced no orbit frame
             return
         if pivot is not None:
             dist = max(cammath.DIST_MIN, cammath.v_len(cammath.v_sub(tuple(cam.eye), pivot)))

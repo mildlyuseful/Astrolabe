@@ -88,13 +88,17 @@ def test_autocad_in_default_config(isolated_config):
     assert ac["bindings"]["scheme"]["orbit_pivot"] == "default"   # shared _app() shape
 
 
-def test_autocad_plugin_consumes_selection_override_and_all_generic_pivots():
+def test_autocad_plugin_consumes_advanced_settings_and_all_generic_pivots():
     source = (Path(__file__).parents[1] / "plugin_src" / "autocad" /
               "TrackballNavAcad" / "Plugin.cs").read_text(encoding="utf-8")
     assert 'TryGetProperty("selection_overrides_pivot"' in source
+    assert 'TryGetProperty("level_horizon_on_entry"' in source
     assert "CaptureSelectionCenter(doc)" in source
     assert 'case "origin": point = Point3d.Origin;' in source
     assert 'case "object":' in source and "CaptureDrawingCenter()" in source
+    frame_parser = source[source.index("void HandleFrame"):source.index("// --- UI-thread timer")]
+    assert "_horizonFixed = fixedHorizon" in frame_parser
+    assert "_levelPending = true" in frame_parser
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")

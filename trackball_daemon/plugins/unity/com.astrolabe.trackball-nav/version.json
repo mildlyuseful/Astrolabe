@@ -1,4 +1,4 @@
 {
-  "version": "0.1.10",
-  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.10: immutable host baseline profile."
+  "version": "0.1.11",
+  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.11: level horizon on fixed-horizon mode entry (issue #2)."
 }

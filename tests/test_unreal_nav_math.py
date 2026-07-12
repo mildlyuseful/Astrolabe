@@ -67,11 +67,9 @@ def test_camera_rotator_roundtrip():
     assert vclose(c.forward, f2) and vclose(c.up, u2)
 
 
-# --- orbit baseline is DOUBLED for hardware feel (default felt half on the device) -----------
-def test_camera_math_is_neutral_and_daemon_profile_carries_doubled_orbit():
-    from trackball_daemon.config import host_baseline_payload
+# --- integration camera math stays neutral; developer tuning lives outside this module ----------
+def test_camera_math_is_neutral():
     assert cam.ORBIT_SCALE == (1.0, 1.0, 1.0)
-    assert host_baseline_payload("unreal")["orbit"] == [2.0, 2.0, 2.0]
     c = _idcam()
     theta = 0.2
     cam.orbit(c, (0.0, theta, 0.0), False, None)      # pure yaw, in place
@@ -111,6 +109,27 @@ def test_orbit_single_axis_roundtrip():
     cam.orbit(c, (0.0, 0.35, 0.0), False, None)
     cam.orbit(c, (0.0, -0.35, 0.0), False, None)
     assert vclose(c.forward, fwd0, 1e-9) and vclose(c.up, up0, 1e-9)
+
+
+def test_level_horizon_removes_only_roll_and_is_idempotent():
+    c = cam.Camera.from_rotator((2.0, 3.0, 4.0), 25.0, -35.0, 48.0)
+    location0, forward0 = tuple(c.location), c.forward
+
+    assert cam.level_horizon(c) is True
+    right1, up1 = c.right, c.up
+    assert tuple(c.location) == location0 and vclose(c.forward, forward0)
+    assert abs(cam.v_dot(c.right, cam.WORLD_UP)) < 1e-9
+    assert cam.v_dot(c.up, cam.WORLD_UP) > 0.0
+
+    assert cam.level_horizon(c) is True
+    assert vclose(c.right, right1, 1e-9) and vclose(c.up, up1, 1e-9)
+
+
+def test_level_horizon_skips_world_up_singularity():
+    c = cam.Camera((1, 2, 3), (0, 0, 1), (1, 0, 0), (0, 1, 0))
+    basis0 = (c.forward, c.right, c.up)
+    assert cam.level_horizon(c) is False
+    assert (c.forward, c.right, c.up) == basis0
 
 
 # --- turntable keeps the horizon level + drops twist; free orbit tilts it ----------------

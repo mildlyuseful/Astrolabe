@@ -389,6 +389,17 @@ def effective_scheme(general_scheme, app_scheme):
     return out
 
 
+def effective_level_horizon(general_cfg, app_cfg):
+    """Level-horizon-on-entry for one app: the per-app checkbox once the user has touched it,
+    otherwise the General default. The per-app key is deliberately ABSENT from the shipped app
+    shape so an untouched app keeps following the General checkbox; a per-app reset removes the
+    override again (see APP_PROFILE_FIELDS)."""
+    v = (app_cfg or {}).get("level_horizon_on_entry")
+    if isinstance(v, bool):
+        return v
+    return bool((general_cfg or {}).get("level_horizon_on_entry", True))
+
+
 def _app(enabled=False):
     return {
         "enabled": enabled,
@@ -473,6 +484,12 @@ DEFAULTS = {
         # If the selected pivot cannot resolve, every integration restarts here (it does not begin
         # after the failed method). Unsupported methods are skipped by that integration.
         "orbit_pivot_fallbacks": list(DEFAULT_ORBIT_PIVOT_FALLBACKS),
+        # On switching INTO a fixed-horizon mode (Turntable orbit style, Lock Horizon, Walk),
+        # remove any existing roll instead of locking the tilted horizon (issue #2). False keeps
+        # the old lock-current-tilt behavior. Per-app override: apps.<key>.level_horizon_on_entry
+        # (absent = follow this default; see effective_level_horizon). Deep-merged additively --
+        # no CONFIG_VERSION bump.
+        "level_horizon_on_entry": True,
     },
     "apps": {
         "blender":    _blender_app(),
@@ -504,8 +521,11 @@ DEFAULTS = {
 
 # Shipped user-layer profiles. Operational/install state is intentionally excluded so resetting a
 # navigation profile never disables an app or forgets an installed add-in version.
+# level_horizon_on_entry is listed but absent from every shipped profile, so a reset REMOVES the
+# per-app override and the app follows the General checkbox again.
 APP_PROFILE_FIELDS = ("rate_hz", "screen_center_pivot_hold_sec",
-                      "selection_overrides_pivot", "bindings", "advanced")
+                      "selection_overrides_pivot", "level_horizon_on_entry",
+                      "bindings", "advanced")
 _DEFAULT_APP_PROFILES = MappingProxyType({
     key: {field: copy.deepcopy(value) for field, value in app.items()
           if field in APP_PROFILE_FIELDS}

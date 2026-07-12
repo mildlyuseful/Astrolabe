@@ -88,6 +88,21 @@ def _rotate_vec(v, axis, angle):
     return list(rotate_about_axis(tuple(v), axis, angle))
 
 
+def level_horizon(cam):
+    """Remove existing roll: rebuild `up` so camera-right is horizontal (perpendicular to
+    WORLD_UP) while the view direction is unchanged. eye and target are untouched, so the
+    eye-target distance and the active orbit point are preserved -- only the roll goes
+    (issue #2: level on fixed-horizon mode entry). Returns False in the degenerate
+    straight-up/straight-down view, where roll is indistinguishable from yaw."""
+    fwd = cam.forward()
+    right = v_cross(fwd, WORLD_UP)
+    if v_len(right) < 1e-6:
+        return False
+    right = v_normalize(right)
+    cam.up = list(v_cross(right, fwd))
+    return True
+
+
 def orbit(cam, o, turntable, pivot):
     """Orbit eye (and optionally target for camera) about pivot. pivot None => turn in place
     about the eye (target orbits with the look direction)."""

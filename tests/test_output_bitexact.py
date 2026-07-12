@@ -10,7 +10,7 @@ import struct
 import pytest
 
 from trackball_daemon import output as output_mod
-from trackball_daemon.config import Config
+from trackball_daemon.config import Config, host_baseline_payload
 from trackball_daemon.output import OutputEngine
 
 
@@ -112,8 +112,12 @@ def test_global_orientation_composes_with_distinct_per_app_axis_routes(engine, m
     engine.set_active_bindings("rhino")
     engine.handle_packet(_pkt(0.01, 0.02, 0.03))
 
-    assert nav[0][:3] == pytest.approx((-0.02, -0.01, 0.03))  # Fusion host baseline
-    assert nav[1][:3] == pytest.approx((0.03, 0.02, 0.01))    # Rhino host baseline is neutral orbit
+    fusion = host_baseline_payload("fusion360")["orbit"]
+    rhino = host_baseline_payload("rhino")["orbit"]
+    assert nav[0][:3] == pytest.approx(
+        (0.02 * fusion[0], 0.01 * fusion[1], 0.03 * fusion[2]))
+    assert nav[1][:3] == pytest.approx(
+        (0.03 * rhino[0], 0.02 * rhino[1], 0.01 * rhino[2]))
 
 
 def test_lean_host_baseline_composes_with_user_inversion(engine, monkeypatch):
@@ -126,8 +130,9 @@ def test_lean_host_baseline_composes_with_user_inversion(engine, monkeypatch):
 
     engine.handle_packet(_pkt(0.01, 0.02, 0.03))
 
-    # Fusion baseline flips X/Y; the user's X inversion flips the effective X direction back.
-    assert nav[-1][:3] == pytest.approx((0.01, -0.02, 0.03))
+    baseline = host_baseline_payload("fusion360")["orbit"]
+    assert nav[-1][:3] == pytest.approx(
+        (-0.01 * baseline[0], 0.02 * baseline[1], 0.03 * baseline[2]))
 
 
 def test_rich_host_baseline_is_deferred_to_mode_aware_addon(engine, monkeypatch):
@@ -139,5 +144,5 @@ def test_rich_host_baseline_is_deferred_to_mode_aware_addon(engine, monkeypatch)
 
     engine.handle_packet(_pkt(0.01, 0.02, 0.03))
 
-    # Blender receives raw user-routed deltas; app.py supplies its 0.5 host factors in frame.adv.
+    # Rich integrations receive raw user-routed deltas; app.py supplies current host factors in adv.
     assert nav[-1][:3] == pytest.approx((0.01, 0.02, 0.03))

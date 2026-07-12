@@ -52,9 +52,10 @@ static class Tests
         new[] { ox, oy, oz, px, py, z };
 
     static CamState Apply(CamState c, double[] d, string style,
-                          Point3d? orbitPivot = null, Point3d? zoomPivot = null) =>
+                          Point3d? orbitPivot = null, Point3d? zoomPivot = null,
+                          bool levelOnEntry = false) =>
         NavMath.Apply(c, d, style, Sign, PanSignX, PanSignY, PanScale, ZoomSign, ZoomScale,
-                      orbitPivot, zoomPivot);
+                      orbitPivot, zoomPivot, levelOnEntry);
 
     static void OrbitAboutPivotRigid(string style)
     {
@@ -89,6 +90,29 @@ static class Tests
 
     static void Main()
     {
+        // --- level-horizon is a one-shot transition operation, not an ordinary frame rule ------
+        {
+            var rolled = Cam();
+            var back = (rolled.Pos - rolled.Tgt).GetNormal();
+            rolled.Up = rolled.Up.TransformBy(
+                Matrix3d.Rotation(0.65, back, Point3d.Origin)).GetNormal();
+            var leveled = Apply(rolled, D(), "turntable", levelOnEntry: true);
+            CheckClose((leveled.Pos - rolled.Pos).Length, 0.0, 1e-12,
+                       "level entry: eye preserved");
+            CheckClose((leveled.Tgt - rolled.Tgt).Length, 0.0, 1e-12,
+                       "level entry: target preserved");
+            CheckClose(Basis(leveled).right.DotProduct(NavMath.WorldUp), 0.0, 1e-9,
+                       "level entry: horizon horizontal");
+            Check(leveled.Up.DotProduct(NavMath.WorldUp) > 0.0,
+                  "level entry: up remains world-up-positive");
+            var twice = Apply(leveled, D(), "turntable", levelOnEntry: true);
+            CheckClose((twice.Up - leveled.Up).Length, 0.0, 1e-12,
+                       "level entry: idempotent");
+            var preserved = Apply(rolled, D(), "turntable", levelOnEntry: false);
+            CheckClose((preserved.Up - rolled.Up).Length, 0.0, 1e-12,
+                       "level toggle off: current tilt preserved");
+        }
+
         // --- null pivot == the pre-0.3.0 behaviour: the target never moves on orbit ----------
         {
             var c0 = Cam();

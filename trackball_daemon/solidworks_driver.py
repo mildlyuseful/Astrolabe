@@ -225,6 +225,25 @@ def _rodrigues(u, theta, p):
             pz * c + cz * s + uz * k)
 
 
+def _level_horizon_command(right, back, world_up=WORLD_UP):
+    """SolidWorks RotateAboutAxis command that takes camera-right to the leveled horizontal.
+    Returns None when already level or at the straight-up/down singularity."""
+    leveled_right = (world_up[1] * back[2] - world_up[2] * back[1],
+                     world_up[2] * back[0] - world_up[0] * back[2],
+                     world_up[0] * back[1] - world_up[1] * back[0])
+    n = math.sqrt(sum(v * v for v in leveled_right))
+    if n < 1e-6:
+        return None
+    leveled_right = tuple(v / n for v in leveled_right)
+    cross = (right[1] * leveled_right[2] - right[2] * leveled_right[1],
+             right[2] * leveled_right[0] - right[0] * leveled_right[2],
+             right[0] * leveled_right[1] - right[1] * leveled_right[0])
+    sin_phi = sum(cross[i] * back[i] for i in range(3))
+    cos_phi = sum(leveled_right[i] * right[i] for i in range(3))
+    phi = math.atan2(sin_phi, cos_phi)
+    return None if abs(phi) < 1e-9 else -phi
+
+
 def _safe_box(model, method, arg):
     """model bounding box via `method`(arg), or None. Both GetPartBox (parts) and GetBox
     (assemblies) need _FlagAsMethod under late-bound dispatch. Never raises."""
@@ -285,6 +304,12 @@ class SolidWorksDriver:
         self._pivot_hold_sec = DEFAULT_PIVOT_HOLD
         self._last_activity_t = 0.0                           # monotonic time of the last orbit/pan/zoom
         self._rl = {}                                         # rate-limited info-log timestamps
+        # Level-horizon-on-entry (issue #2). _horizon_fixed is None until the first set_scheme so a
+        # daemon that STARTS in turntable never levels -- only a real free->turntable switch queues
+        # _level_pending, which the worker applies on the next flush (COM stays worker-thread-only).
+        self._level_horizon = True
+        self._horizon_fixed = None
+        self._level_pending = False
 
     @staticmethod
     def _clamp_rate(hz):
@@ -299,7 +324,7 @@ class SolidWorksDriver:
         self._period = 1.0 / self._clamp_rate(hz)
 
     def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True,
-                   orbit_pivot_fallbacks=None):
+                   orbit_pivot_fallbacks=None, level_horizon_on_entry=True):
         """Set the control scheme applied on the next flush. Parallels NavBroker.set_scheme so
         app._apply_schemes() drives SolidWorks the same way it drives the socket add-ons.
           orbit_pivot: camera | screen_center | cursor | selection | object | origin
@@ -318,6 +343,15 @@ class SolidWorksDriver:
                         "sel_override": bool(selection_overrides_pivot)}
         if orbit_pivot_fallbacks is not None:
             self._scheme["fallbacks"] = list(orbit_pivot_fallbacks)
+        # Fixed-horizon transition (issue #2): a free->turntable switch queues one leveling pass,
+        # applied by the worker on the next flush. Leaving turntable cancels a queued pass.
+        self._level_horizon = bool(level_horizon_on_entry)
+        fixed = (orbit_style == "turntable")
+        if fixed and self._horizon_fixed is False and self._level_horizon:
+            self._level_pending = True
+        elif not fixed or not self._level_horizon:
+            self._level_pending = False
+        self._horizon_fixed = fixed
         self._selection_cache = (None, 0.0, None)
         self._orbit_pivot = None             # drop any held pivot so a pivot switch takes effect now
         self._orbit_pivot_resolved = False
@@ -533,6 +567,12 @@ class SolidWorksDriver:
         # This both kills the jitter AND cuts ~1 repaint/frame (measured ~185->116 ms on a heavy part).
         frozen = self._set_graphics_update(view, False)
         try:
+            if self._level_pending:
+                self._level_pending = False
+                try:
+                    self._apply_level_horizon(view)
+                except Exception as exc:
+                    self._warn_once("level_horizon", exc)
             if ox or oy or oz:
                 try:
                     self._apply_orbit(view, ox, oy, oz, scheme, model, idle)
@@ -613,6 +653,41 @@ class SolidWorksDriver:
             return ext, selmgr
         except Exception:
             return None, None
+
+    def _apply_level_horizon(self, view):
+        """Remove existing roll on turntable entry (issue #2): rotate the view about the camera
+        forward axis (Orientation3 column 2) until camera-right is horizontal (perpendicular to
+        WORLD_UP), then pan so the screen-centre point keeps its exact screen position -- the same
+        RotateAboutAxis + dT compensation the orbit path uses. Scale2 (zoom) and the view depth
+        are untouched. Skipped in the degenerate straight-up/straight-down view, where roll is
+        indistinguishable from yaw (same singularity as turntable itself)."""
+        ad = view.Orientation3.ArrayData
+        c0 = (ad[0], ad[3], ad[6])                  # camera right (model space)
+        c1 = (ad[1], ad[4], ad[7])                  # camera up
+        c2 = (ad[2], ad[5], ad[8])                  # camera forward (out of screen)
+        command = _level_horizon_command(c0, c2)
+        if command is None:
+            return
+        phi = -command                              # geometric c0 -> leveled-right rotation
+        # RotateAboutAxis(angle) leaves the new columns at _rodrigues(axis, -angle, col) (see
+        # _apply_orbit), so commanding -phi lands c0 exactly on lr.
+        view.RotateAboutAxis(command, 0.0, 0.0, 0.0, c2[0], c2[1], c2[2])
+        self._info_rl("level", "solidworks: horizon leveled on turntable entry (roll %.4f rad)" % phi)
+        if self._mathUtil is None or self._trans is None or not self._scale:
+            return
+        # Hold the screen-centre point p = a*c0 + b*c1 (its c2 depth component is invariant under
+        # a roll about c2, so any depth gives the same dT).
+        s, t = self._scale, self._trans
+        a = -t[0] / s
+        b = -t[1] / s
+        p = (a * c0[0] + b * c1[0], a * c0[1] + b * c1[1], a * c0[2] + b * c1[2])
+        n0 = _rodrigues(c2, phi, c0)                # predicted post-rotation columns (== lr)
+        n1 = _rodrigues(c2, phi, c1)
+        dtx = s * ((c0[0] - n0[0]) * p[0] + (c0[1] - n0[1]) * p[1] + (c0[2] - n0[2]) * p[2])
+        dty = s * ((c1[0] - n1[0]) * p[0] + (c1[1] - n1[1]) * p[1] + (c1[2] - n1[2]) * p[2])
+        new_t = (t[0] + dtx, t[1] + dty, t[2])
+        view.Translation3 = self._mkvec(*new_t)
+        self._trans = list(new_t)
 
     def _apply_orbit(self, view, ox, oy, oz, scheme, model, idle):
         """Orbit by ONE RotateAboutAxis. SolidWorks ignores its point arg and pivots about the model

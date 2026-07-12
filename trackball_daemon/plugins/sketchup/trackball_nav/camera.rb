@@ -26,6 +26,8 @@ module TrackballNav
     @gesture_pivot = nil
     @object_cache = { model_id: nil, time: 0.0, point: nil }
     @last_scheme = nil
+    # nil until the first frame: only a real free->fixed transition can trigger leveling.
+    @horizon_fixed = nil
     # Under-mouse 'cursor' pivot: the last viewport pixel [x, y] (logical, view-relative), and an
     # optional refresh callable the live cursor tracker (cursor.rb) installs. camera.rb stays pure
     # (no Win32) so it is testable via tools/sketchup_nav_selftest.rb -- the tracker pushes the
@@ -71,6 +73,20 @@ module TrackballNav
         has_pan = pan.any? { |value| value != 0.0 }
         has_zoom = zoom != 0.0
 
+        # Level once on a real transition into Turntable/Lock Horizon/Walk. Ordinary fixed-mode
+        # frames propagate the established up vector and never re-level it.
+        level_horizon = advanced.fetch('level_horizon_on_entry', true) == true
+        fixed_horizon = nav_mode == 'walk' ||
+                        (nav_mode == 'orbit' &&
+                         (style == 'turntable' || advanced['lock_horizon'] == true))
+        leveled = false
+        if fixed_horizon && @horizon_fixed == false && level_horizon
+          leveled = level_camera_horizon(camera)
+          TrackballNav.log('horizon: leveled on fixed-horizon mode entry') if
+            leveled && TrackballNav.respond_to?(:log)
+        end
+        @horizon_fixed = fixed_horizon
+
         changed = case nav_mode
                   when 'fly'
                     invalidate_orbit_pivot! if has_pan || has_zoom
@@ -92,8 +108,8 @@ module TrackballNav
                       zoom_camera(model, camera, zoom, zoom_mode)
                     end
                   end
-        view.invalidate if changed
-        changed
+        view.invalidate if changed || leveled
+        changed || leveled
       rescue StandardError => error
         TrackballNav.log_error('camera apply', error) if TrackballNav.respond_to?(:log_error)
         false
@@ -168,6 +184,18 @@ module TrackballNav
 
       private
 
+      def level_camera_horizon(camera)
+        eye = camera.eye
+        target = camera.target
+        current = camera_axes(eye, target, camera.up)
+        leveled = camera_axes(eye, target, camera.up, horizon: true)
+        return false unless current && leveled
+        return false if vector_length(current[1] - leveled[1]) < EPSILON
+
+        camera.set(eye, target, leveled[1])
+        true
+      end
+
       def orbit_camera(model, view, camera, orbit, pivot_id, style, idle, lock_horizon = false,
                        selection_overrides = true, candidates = nil)
         eye = camera.eye
@@ -187,7 +215,7 @@ module TrackballNav
           current_axes = camera_axes(eye, target, up)
           return false unless current_axes
           eye, target, up = rotate_state(eye, target, up, pivot, current_axes[0], pitch) if pitch != 0.0
-          final_axes = camera_axes(eye, target, up, horizon: true)
+          final_axes = camera_axes(eye, target, up)
         else
           pitch = orbit[0] * ORBIT_SCALE[0]
           yaw = orbit[1] * ORBIT_SCALE[1]
@@ -235,7 +263,7 @@ module TrackballNav
           current_axes = camera_axes(eye, target, up)
           return false unless current_axes
           eye, target, up = rotate_state(eye, target, up, eye, current_axes[0], pitch) if pitch != 0.0
-          final_axes = camera_axes(eye, target, up, horizon: true)
+          final_axes = camera_axes(eye, target, up)
         else
           eye, target, up = rotate_state(eye, target, up, eye, axes[0], pitch) if pitch != 0.0
           eye, target, up = rotate_state(eye, target, up, eye, axes[1], yaw) if yaw != 0.0

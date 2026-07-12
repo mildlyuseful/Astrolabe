@@ -9,8 +9,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from . import integrations
-from .config import (ORBIT_PIVOT_METHODS, normalize_axis_permutation,
-                     normalize_orbit_pivot_fallbacks, swap_axis_source)
+from .config import (ORBIT_PIVOT_METHODS, effective_level_horizon,
+                     normalize_axis_permutation, normalize_orbit_pivot_fallbacks,
+                     swap_axis_source)
 
 _PAD = {"padx": 8, "pady": 4}
 _PIVOT_LABELS = {
@@ -270,6 +271,23 @@ class SettingsWindow:
         ttk.Checkbutton(parent, text=label, variable=var,
                         command=lambda: self._set_and_save(keys, bool(var.get()))).pack(
             anchor="w", padx=12, pady=2)
+        return var
+
+    def _level_horizon_row(self, parent, app_key):
+        """Per-app 'level horizon on fixed-horizon mode entry' checkbox. Shows the EFFECTIVE value
+        (per-app override if the user ever touched it, else the General default); the first toggle
+        writes an explicit per-app override. 'Reset user overrides' removes the override so the app
+        follows the General checkbox again."""
+        var = tk.BooleanVar(value=effective_level_horizon(
+            self.cfg.data["general"], self.cfg.data["apps"].get(app_key)))
+        ttk.Checkbutton(parent, text="Level horizon when entering Turntable/Walk", variable=var,
+                        command=lambda: self._set_and_save(
+                            ("apps", app_key, "level_horizon_on_entry"), bool(var.get()))).pack(
+            anchor="w", padx=12, pady=2)
+        ttk.Label(parent, text="On: switching into a fixed-horizon mode (Turntable / Lock horizon "
+                               "/ Walk) removes any existing roll. Off: the current tilt is locked "
+                               "as-is. Until toggled here, follows the General default.",
+                  foreground="#888", wraplength=560).pack(anchor="w", padx=10, pady=(0, 4))
         return var
 
     def _mapped_combo_row(self, parent, label, keys, options, hint="", on_change=None):
@@ -740,6 +758,7 @@ class SettingsWindow:
                                           if app_key == "onshape" else None))
         self._combo_row(parent, "Orbit style", base + ("scheme", "orbit_style"),
                         values=["default", "free", "turntable"])
+        self._level_horizon_row(parent, app_key)
         self._mapped_combo_row(parent, "Zoom mode", base + ("scheme", "zoom_mode"),
                                [("default", "default"), ("to_center", "to_center"),
                                 ("to_object", "to_object"), ("to_cursor (under mouse)", "to_cursor")])
@@ -844,6 +863,7 @@ class SettingsWindow:
         self._combo_row(s2, "Twist action", adv + ("twist_action",),
                         values=["roll", "zoom", "dolly", "none"])
         self._bool_row(s2, "Lock horizon (keep level even in trackball)", adv + ("lock_horizon",))
+        self._level_horizon_row(s2, "blender")
         self._bool_row(s2, "Selection overrides orbit center",
                        ("apps", "blender", "selection_overrides_pivot"))
         ttk.Label(s2, text="When on and something is selected, orbit uses the selection centre "
@@ -923,6 +943,7 @@ class SettingsWindow:
                                 ("Model Center", "object"),
                                 ("World Origin", "origin")])
         self._bool_row(s2, "Lock horizon (keep level in free orbit)", adv + ("lock_horizon",))
+        self._level_horizon_row(s2, "sketchup")
         self._bool_row(s2, "Selection overrides orbit center",
                        ("apps", "sketchup", "selection_overrides_pivot"))
         ttk.Label(s2, text="When on and something is selected, orbit uses the selection bounds "
@@ -1002,6 +1023,7 @@ class SettingsWindow:
         self._combo_row(s2, "Twist action", adv + ("twist_action",),
                         values=["roll", "zoom", "dolly", "none"])
         self._bool_row(s2, "Lock horizon (keep level even in free orbit)", adv + ("lock_horizon",))
+        self._level_horizon_row(s2, "unreal")
         self._bool_row(s2, "Selection overrides orbit center",
                        ("apps", "unreal", "selection_overrides_pivot"))
         ttk.Label(s2, text="Unreal has no 3D cursor, so no 3D-cursor option is shown. "
@@ -1088,6 +1110,8 @@ class SettingsWindow:
             self._combo_row(s2, "Twist action", adv + ("twist_action",),
                             values=["roll", "zoom", "dolly", "none"])
             self._bool_row(s2, "Lock horizon (keep level even in free orbit)", adv + ("lock_horizon",))
+            if app_key != "godot":                 # Godot cannot roll, so this would be a no-op
+                self._level_horizon_row(s2, app_key)
         self._mapped_combo_row(s2, "Orbit pivot", base + ("scheme", "orbit_pivot"),
                                [("Default (General)", "default"), ("Camera", "camera"),
                                 ("Screen Center", "screen_center"),
@@ -1194,6 +1218,12 @@ class SettingsWindow:
                                 ("World Origin", "origin")])
         self._combo_row(secS, "Orbit style", ("general", "scheme", "orbit_style"),
                         values=["free", "turntable"])
+        self._bool_row(secS, "Level horizon when entering Turntable/Walk",
+                       ("general", "level_horizon_on_entry"))
+        ttk.Label(secS, text="On: switching into a fixed-horizon mode (Turntable / Lock horizon / "
+                             "Walk) removes any existing roll instead of locking the tilted "
+                             "horizon. Per-app checkboxes override this default.",
+                  foreground="#888", wraplength=600).pack(anchor="w", padx=10, pady=(0, 4))
         self._mapped_combo_row(secS, "Zoom mode", ("general", "scheme", "zoom_mode"),
                                [("to_center", "to_center"), ("to_object", "to_object"),
                                 ("to_cursor (under mouse)", "to_cursor")])

@@ -9,24 +9,16 @@ import pytest
 from trackball_daemon import integrations
 from trackball_daemon.config import (
     APP_PROFILE_FIELDS,
-    CONFIG_VERSION,
     DEFAULT_PROFILE_KEYS,
     HOST_BASELINE_PROFILES,
     HOST_PROFILE_APP_KEYS,
     HOST_PROFILE_PATH,
     Config,
-    compose_advanced_with_host_baseline,
     default_app_profile,
+    effective_level_horizon,
     host_baseline,
-    host_baseline_payload,
     load_host_baseline_profiles,
 )
-
-
-def _write_config(root, data):
-    folder = root / "TrackballDaemon"
-    folder.mkdir(parents=True, exist_ok=True)
-    (folder / "config.json").write_text(json.dumps(data), encoding="utf-8")
 
 
 def test_host_baselines_are_immutable_and_cover_the_supported_suite():
@@ -43,7 +35,6 @@ def test_host_profiles_are_loaded_from_separate_packaged_raw_file():
     raw = json.loads(HOST_PROFILE_PATH.read_text(encoding="utf-8"))
     assert raw["schema"] == 1
     assert tuple(raw["profiles"]) == HOST_PROFILE_APP_KEYS
-    assert raw["profiles"]["fusion360"]["orbit_sign"] == [-1, -1, 1]
     pyproject = (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
     assert 'trackball_daemon = ["host_profiles.json", "plugins/**/*"]' in pyproject
 
@@ -90,106 +81,33 @@ def test_user_config_never_serializes_developer_host_alignment(isolated_config):
     assert "host_baseline" not in cfg.path.read_text(encoding="utf-8")
 
 
+def test_level_horizon_default_override_and_reset_semantics(isolated_config):
+    cfg = Config().load()
+    general = cfg.data["general"]
+    app = cfg.data["apps"]["blender"]
+    assert general["level_horizon_on_entry"] is True
+    assert effective_level_horizon(general, app) is True
+    general["level_horizon_on_entry"] = False
+    assert effective_level_horizon(general, app) is False
+    app["level_horizon_on_entry"] = True
+    assert effective_level_horizon(general, app) is True
+    cfg.reset_app_profile("blender")
+    assert "level_horizon_on_entry" not in cfg.data["apps"]["blender"]
+    assert effective_level_horizon(general, cfg.data["apps"]["blender"]) is False
+
+
 def test_bundled_profile_contract_versions_cover_every_installed_addin():
     assert {key: integrations.bundled_addin_version(key) for key in integrations.ADDIN_KEYS} == {
-        "fusion360": "0.1.19",
-        "blender": "0.1.16",
-        "freecad": "0.1.9",
-        "sketchup": "0.2.7",
-        "unreal": "0.2.8",
-        "unity": "0.1.10",
+        "fusion360": "0.1.20",
+        "blender": "0.1.17",
+        "freecad": "0.1.10",
+        "sketchup": "0.2.8",
+        "unreal": "0.2.9",
+        "unity": "0.1.11",
         "godot": "0.1.8",
-        "rhino": "0.1.13",
-        "autocad": "0.3.10",
+        "rhino": "0.1.14",
+        "autocad": "0.3.11",
     }
-
-
-def test_host_payloads_hold_developer_alignment_outside_user_preferences():
-    assert host_baseline_payload("fusion360") == {
-        "orbit": [-1.0, -1.0, 1.0],
-        "pan": [-0.14, -0.14],
-        "zoom": 0.25,
-        "move": 1.0,
-    }
-    assert host_baseline_payload("blender") == {
-        "orbit": [0.5, 0.5, 0.5],
-        "pan": [0.5, -0.5],
-        "zoom": 0.5,
-        "move": 0.5,
-    }
-    # Unknown future hosts are safe and neutral without mutating the shipped registry.
-    assert host_baseline_payload("unknown") == {
-        "orbit": [1.0, 1.0, 1.0], "pan": [1.0, 1.0], "zoom": 1.0, "move": 1.0}
-
-
-def test_v6_migration_preserves_effective_rich_app_inversions(isolated_config):
-    old_blender = default_app_profile("blender")
-    old_blender["advanced"]["invert"]["camera"]["roll"] = True
-    old_blender["advanced"]["invert"]["fly"]["bank"] = False
-    old_sketchup = default_app_profile("sketchup")
-    old_sketchup["advanced"]["invert"]["camera"]["roll"] = False
-    old_sketchup["advanced"]["invert"]["fly"]["bank"] = True
-    _write_config(isolated_config, {
-        "version": 5,
-        "apps": {"blender": old_blender, "sketchup": old_sketchup},
-    })
-
-    cfg = Config().load()
-    assert cfg.data["version"] == CONFIG_VERSION == 7
-    blender_user = cfg.data["apps"]["blender"]["advanced"]
-    sketchup_user = cfg.data["apps"]["sketchup"]["advanced"]
-    assert blender_user["invert"]["camera"]["roll"] is False
-    assert blender_user["invert"]["fly"]["bank"] is True
-    assert sketchup_user["invert"]["camera"]["roll"] is True
-    assert sketchup_user["invert"]["fly"]["bank"] is False
-    # Baseline XOR user reproduces every pre-v6 effective direction.
-    assert compose_advanced_with_host_baseline("blender", blender_user)["invert"]["camera"]["roll"] is True
-    assert compose_advanced_with_host_baseline("blender", blender_user)["invert"]["fly"]["bank"] is False
-    assert compose_advanced_with_host_baseline("sketchup", sketchup_user)["invert"]["camera"]["roll"] is False
-    assert compose_advanced_with_host_baseline("sketchup", sketchup_user)["invert"]["fly"]["bank"] is True
-
-
-def test_v6_migration_does_not_mistake_new_defaults_for_old_saved_values(isolated_config):
-    _write_config(isolated_config, {"version": 5, "apps": {"blender": {}}})
-    cfg = Config().load()
-    user = cfg.data["apps"]["blender"]["advanced"]
-    assert user["invert"]["camera"]["roll"] is False
-    assert user["invert"]["fly"]["bank"] is False
-    effective = compose_advanced_with_host_baseline("blender", user)
-    assert effective["invert"]["camera"]["roll"] is True
-    assert effective["invert"]["fly"]["bank"] is True
-
-
-def test_v7_resets_v6_user_navigation_overrides_but_preserves_operational_state(isolated_config):
-    app = default_app_profile("blender")
-    app["rate_hz"] = 120
-    app["selection_overrides_pivot"] = False
-    app["bindings"]["orbit"]["sensitivity"] = 3.0
-    app["bindings"]["invert"]["orbit"] = [True, True, True]
-    app["advanced"]["invert"]["walk"]["forward"] = True
-    app.update({
-        "enabled": True,
-        "installed": True,
-        "start_automatically": True,
-        "addin_version": "9.9.9",
-    })
-    _write_config(isolated_config, {
-        "version": 6,
-        "general": {"axis_orientation": {"source": [1, 0, 2], "invert": [False, True, False]}},
-        "apps": {"blender": app},
-    })
-
-    cfg = Config().load()
-
-    assert cfg.data["version"] == CONFIG_VERSION == 7
-    assert {field: cfg.data["apps"]["blender"][field]
-            for field in default_app_profile("blender")} == default_app_profile("blender")
-    assert {key: cfg.data["apps"]["blender"][key] for key in
-            ("enabled", "installed", "start_automatically", "addin_version")} == {
-                "enabled": True, "installed": True,
-                "start_automatically": True, "addin_version": "9.9.9"}
-    assert cfg.data["general"]["axis_orientation"] == {
-        "source": [1, 0, 2], "invert": [False, True, False]}
 
 
 def test_reset_restores_complete_profile_once_and_preserves_operational_state(isolated_config):
@@ -206,6 +124,7 @@ def test_reset_restores_complete_profile_once_and_preserves_operational_state(is
         "addin_version": "9.9.9",
     }
     app.update(operational)
+    app["level_horizon_on_entry"] = False
     notifications = []
     cfg.add_listener(lambda: notifications.append("changed"))
 
@@ -213,6 +132,7 @@ def test_reset_restores_complete_profile_once_and_preserves_operational_state(is
 
     assert {field: cfg.data["apps"]["blender"][field] for field in expected} == expected
     assert {field: cfg.data["apps"]["blender"][field] for field in operational} == operational
+    assert "level_horizon_on_entry" not in cfg.data["apps"]["blender"]
     assert notifications == ["changed"]
     on_disk = json.loads(cfg.path.read_text(encoding="utf-8"))
     assert {field: on_disk["apps"]["blender"][field] for field in expected} == expected

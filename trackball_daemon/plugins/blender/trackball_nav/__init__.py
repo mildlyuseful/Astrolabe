@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 16),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 17),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,9 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.16"                   # 0.1.16: immutable host baseline profile.
+ADDIN_VERSION = "0.1.17"                   # 0.1.17: level horizon on fixed-horizon mode entry
+                                           # (adv.level_horizon_on_entry; issue #2).
+                                           # 0.1.16: immutable host baseline profile.
                                            # 0.1.15: per-action X/Y/Z source routing.
                                            # 0.1.12: selection_overrides_pivot is functional.
                                            # 0.1.10: 3D-cursor pivot value renamed cursor->cursor_3d
@@ -78,6 +80,9 @@ _TIMER_INTERVAL = 1.0 / 90.0    # main-thread poll rate (cheap queue drain)
 # HOLD it (so the point under the crosshair stays put during orbit). Invalidated on pan/zoom/idle.
 # The under-mouse "cursor" pivot shares this hold slot (only one pivot is active at a time).
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
+# Fixed-horizon transition tracker (issue #2): None until the first frame (an add-on that starts
+# up already in a fixed mode must NOT level -- only a real free->fixed switch does).
+_horizon = {"fixed": None}
 # Under-mouse "cursor" pivot: Blender has NO on-demand mouse getter (verified 2026-07-06 -- no
 # mouse/cursor/pointer property on Window/Screen/Area/Region/RegionView3D/Context; Event.mouse_* only
 # exists INSIDE a modal operator/event handler; Window has cursor SETTERS only). So a passive,
@@ -167,6 +172,42 @@ def _orbit_R(rv, pitch, yaw, roll, turntable):
     if turntable:
         return Quaternion(Vector((0.0, 0.0, 1.0)), yaw) @ Quaternion(right, pitch)
     return Quaternion(fwd, roll) @ Quaternion(up, yaw) @ Quaternion(right, pitch)
+
+
+def _level_horizon(rv):
+    """Remove existing roll: rebuild view_rotation so camera-right is horizontal (perpendicular to
+    world Z) while the view direction is unchanged. view_location (the orbit point) and
+    view_distance are untouched, so the eye stays put too -- only the roll goes. Returns False in
+    the degenerate straight-up/straight-down view, where 'roll' is indistinguishable from yaw and
+    leveling is undefined (native turntable has the same singularity)."""
+    _right, _up, fwd, _back = _view_axes(rv)
+    right = fwd.cross(Vector((0.0, 0.0, 1.0)))
+    if right.length < 1e-6:
+        return False
+    right.normalize()
+    up = right.cross(fwd)
+    # Column basis (X=right, Y=up, Z=back): rows below are (right_i, up_i, back_i).
+    rv.view_rotation = Matrix((
+        (right.x, up.x, -fwd.x),
+        (right.y, up.y, -fwd.y),
+        (right.z, up.z, -fwd.z),
+    )).to_quaternion()
+    return True
+
+
+def _maybe_level_horizon(rv, nav_mode, style, adv):
+    """Level ONCE when the effective mode transitions into a fixed-horizon mode (turntable orbit,
+    lock-horizon, or walk) and the daemon's level_horizon_on_entry toggle is on. Transitions only:
+    ordinary fixed-mode frames never re-level, so a horizon tilted by other means stays locked --
+    the same contract as every other host (see docs)."""
+    fixed = (nav_mode == "walk") or (
+        nav_mode == "orbit" and (style == "turntable" or bool(adv.get("lock_horizon", False))))
+    prev = _horizon["fixed"]
+    _horizon["fixed"] = fixed
+    if fixed and prev is False and bool(adv.get("level_horizon_on_entry", True)):
+        if _level_horizon(rv):
+            _log("horizon: leveled on fixed-horizon mode entry (nav=%s style=%s)"
+                 % (nav_mode, style))
 
 
 def _apply_world_rotation(rv, R, pivot):
@@ -558,6 +599,7 @@ def _apply(target, frame, idle):
         _daemon_nav["v"] = daemon_nav
         _mode_override["v"] = None
     nav_mode = _mode_override["v"] or daemon_nav
+    _maybe_level_horizon(rv, nav_mode, style, adv)
 
     sig = (nav_mode, op, style, zm, adv.get("twist_action"), adv.get("zoom_style"),
            adv.get("lock_horizon"), adv.get("lock_camera_to_view"))
@@ -846,6 +888,7 @@ def register():
     except queue.Empty:
         pass
     _gesture.update({"t": 0.0, "pivot": None, "invalid": True})
+    _horizon["fixed"] = None
     _mode_override["v"] = None
     _daemon_nav["v"] = None
     _cursor.update({"win": None, "x": 0.0, "y": 0.0, "t": 0.0, "ok": False})

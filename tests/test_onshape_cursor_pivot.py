@@ -89,6 +89,41 @@ def vclose(u, v, eps=1e-9):
     return all(abs(u[i] - v[i]) <= eps for i in range(3))
 
 
+def test_level_horizon_basis_preserves_view_direction_and_is_idempotent():
+    back = ob._v_normalize((0.4, -0.2, 0.8))
+    leveled = ob._level_horizon_basis(back)
+    assert leveled is not None
+    right, up = leveled
+    assert abs(ob._v_dot(right, ob.WORLD_UP)) < 1e-9
+    assert ob._v_dot(up, ob.WORLD_UP) > 0.0
+    assert abs(ob._v_dot(right, back)) < 1e-9
+    assert abs(ob._v_dot(up, back)) < 1e-9
+    again = ob._level_horizon_basis(back)
+    assert vclose(again[0], right) and vclose(again[1], up)
+
+
+def test_level_horizon_basis_skips_world_up_singularity():
+    assert ob._level_horizon_basis(ob.WORLD_UP) is None
+
+
+def test_level_horizon_transition_queues_once_and_toggle_can_preserve_tilt(bridge):
+    bridge.set_scheme("object", "free", "to_center")
+    assert bridge._level_pending is False
+    bridge.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=True)
+    assert bridge._level_pending is True
+    bridge.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=False)
+    assert bridge._level_pending is False
+    bridge.set_scheme("object", "free", "to_center")
+    bridge.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=True)
+    assert bridge._level_pending is True
+    bridge._level_pending = False
+    bridge.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=True)
+    assert bridge._level_pending is False
+    bridge.set_scheme("object", "free", "to_center")
+    bridge.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=False)
+    assert bridge._level_pending is False
+
+
 # --- _pixel_ray -------------------------------------------------------------------------------
 def test_pixel_ray_centre_matches_screen_centre():
     eye, right, up, back = (0.0, 0.0, 50.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)

@@ -255,6 +255,36 @@ def test_set_rate_updates_period():
     assert drv._period == pytest.approx(1.0)
 
 
+def test_level_horizon_command_is_idempotent_math():
+    roll = 0.6
+    right = (math.cos(roll), math.sin(roll), 0.0)
+    back = (0.0, 0.0, 1.0)
+    command = solidworks_driver._level_horizon_command(right, back)
+    assert command == pytest.approx(roll)
+    leveled = solidworks_driver._rodrigues(back, -command, right)
+    assert leveled == pytest.approx((1.0, 0.0, 0.0))
+    assert solidworks_driver._level_horizon_command(leveled, back) is None
+
+
+def test_level_horizon_transition_queues_once_and_toggle_can_preserve_tilt():
+    drv = SolidWorksDriver()
+    drv.set_scheme("object", "free", "to_center")
+    assert drv._level_pending is False
+    drv.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=True)
+    assert drv._level_pending is True
+    drv.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=False)
+    assert drv._level_pending is False
+    drv.set_scheme("object", "free", "to_center")
+    drv.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=True)
+    assert drv._level_pending is True
+    drv._level_pending = False
+    drv.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=True)
+    assert drv._level_pending is False
+    drv.set_scheme("object", "free", "to_center")
+    drv.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=False)
+    assert drv._level_pending is False
+
+
 # --- flush: orbit / pan / zoom / redraw -----------------------------------------------
 def test_flush_orbit_is_one_camera_relative_call():
     drv = SolidWorksDriver()

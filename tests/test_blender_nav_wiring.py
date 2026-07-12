@@ -9,7 +9,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from trackball_daemon.app import App
-from trackball_daemon.config import Config, _DEFAULT_BLENDER_ADVANCED, _DEFAULT_SKETCHUP_ADVANCED
+from trackball_daemon.config import (Config, _DEFAULT_BLENDER_ADVANCED, _DEFAULT_SKETCHUP_ADVANCED,
+                                     compose_advanced_with_host_baseline, host_baseline_payload)
 from trackball_daemon.navbroker import NavBroker
 from trackball_daemon.ui import _PIVOT_LABELS
 
@@ -59,10 +60,10 @@ def test_blender_app_has_advanced_block(isolated_config):
 
 def test_blender_bundled_version_markers_stay_in_sync():
     root = Path(__file__).parents[1] / "trackball_daemon/plugins/blender/trackball_nav"
-    assert json.loads((root / "version.json").read_text(encoding="utf-8"))["version"] == "0.1.16"
+    assert json.loads((root / "version.json").read_text(encoding="utf-8"))["version"] == "0.1.17"
     source = (root / "__init__.py").read_text(encoding="utf-8")
-    assert 'ADDIN_VERSION = "0.1.16"' in source
-    assert '"version": (0, 1, 16)' in source
+    assert 'ADDIN_VERSION = "0.1.17"' in source
+    assert '"version": (0, 1, 17)' in source
 
 
 def test_advanced_appears_on_old_config_via_deep_merge(isolated_config):
@@ -128,11 +129,12 @@ def test_blender_focus_sends_advanced(isolated_config):
     for k, v in cfg.data["apps"]["blender"]["advanced"].items():
         if k != "invert":
             assert adv[k] == v
-    assert cfg.data["apps"]["blender"]["advanced"]["invert"]["camera"]["roll"] is False
-    assert adv["invert"]["camera"]["roll"] is True
-    assert adv["invert"]["fly"]["bank"] is True
-    assert adv["host_baseline"]["orbit"] == [0.5, 0.5, 0.5]
+    expected = compose_advanced_with_host_baseline(
+        "blender", cfg.data["apps"]["blender"]["advanced"])
+    assert adv["invert"] == expected["invert"]
+    assert adv["host_baseline"] == host_baseline_payload("blender")
     assert adv["selection_overrides_pivot"] is True
+    assert adv["level_horizon_on_entry"] is True
     assert {"orbit_pivot", "orbit_style", "zoom_mode"} <= set(sent)
 
 
@@ -144,7 +146,8 @@ def test_fusion_focus_sends_selection_override_only(isolated_config):
     app._apply_schemes()
     sent = app.broker.schemes[-1]
     assert sent["advanced"]["selection_overrides_pivot"] is True
-    assert sent["advanced"]["host_baseline"]["orbit"] == [-1.0, -1.0, 1.0]
+    assert sent["advanced"]["level_horizon_on_entry"] is True
+    assert sent["advanced"]["host_baseline"] == host_baseline_payload("fusion360")
     assert sent["advanced"]["orbit_pivot_fallbacks"] == [
         "cursor_3d", "camera", "object", "origin"]
     assert sent["advanced"]["orbit_pivot_candidates"] == [
@@ -164,6 +167,14 @@ def test_unreal_focus_sends_its_advanced(isolated_config):
     assert adv["selection_overrides_pivot"] is True
     assert adv["nav_mode"] == cfg.data["apps"]["unreal"]["advanced"]["nav_mode"]
     assert adv is not cfg.data["apps"]["blender"]["advanced"]
+
+
+def test_per_app_level_horizon_override_is_sent(isolated_config):
+    cfg = Config().load()
+    cfg.data["apps"]["blender"]["level_horizon_on_entry"] = False
+    app = _app_with_real_config(cfg, "blender")
+    app._apply_schemes()
+    assert app.broker.schemes[-1]["advanced"]["level_horizon_on_entry"] is False
 
 
 def test_sketchup_focus_sends_its_advanced(isolated_config):

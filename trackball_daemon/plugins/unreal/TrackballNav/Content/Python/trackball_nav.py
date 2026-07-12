@@ -28,7 +28,9 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.8"          # 0.2.8: immutable host baseline profile.
+ADDIN_VERSION = "0.2.9"          # 0.2.9: level horizon on fixed-horizon mode entry
+                                 # (adv.level_horizon_on_entry; issue #2).
+                                 # 0.2.8: immutable host baseline profile.
                                  # 0.2.7: per-action X/Y/Z source routing.
                                  # selected, orbit/to_cursor use the selection centre instead of the
                                  # designated view/cursor/origin pivot; when False, raycasts ignore
@@ -57,6 +59,9 @@ _subsystem = None                # cached UnrealEditorSubsystem (None => use Edi
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
 _zoom_gesture = {"pivot": None}  # "to_cursor" zoom's own per-gesture hold (reset on orbit/pan)
 _obj_cache = {"t": 0.0, "center": None, "bbox": None}
+# Fixed-horizon transition tracker (issue #2): None until the first frame, so an add-on that
+# starts up already in a fixed mode never levels -- only a real free->fixed switch does.
+_horizon = {"fixed": None}
 _focus = {"dist": cammath.DIST_DEFAULT}   # eye->focus distance (cm), scales pan/zoom; updated on orbit
 _last_scheme = {"v": None}
 _georef_logged = {"missing": False}      # one-shot warn if GeoReferencing Python type is absent
@@ -625,6 +630,21 @@ def _apply(info, frame, idle):
     o, p, z = _apply_host_baseline(nav_mode, twist_action, o, p, z, adv)
 
     cam = _read_camera(info)
+
+    # Level ONCE when the effective mode transitions into a fixed-horizon mode (turntable orbit,
+    # lock-horizon, or walk) and the daemon's toggle is on (issue #2). Transitions only -- prev
+    # None (fresh session) never levels, and ordinary fixed-mode frames never re-level.
+    fixed = (nav_mode == "walk") or (
+        nav_mode == "orbit" and (style == "turntable" or lock))
+    prev = _horizon["fixed"]
+    _horizon["fixed"] = fixed
+    leveled = False
+    if fixed and prev is False and bool(adv.get("level_horizon_on_entry", True)):
+        leveled = cammath.level_horizon(cam)
+        if leveled:
+            _log("horizon: leveled on fixed-horizon mode entry (nav=%s style=%s)"
+                 % (nav_mode, style))
+
     if nav_mode == "fly":
         changed = _apply_fly(cam, o, p, z, adv)
     elif nav_mode == "walk":
@@ -634,7 +654,7 @@ def _apply(info, frame, idle):
                                sel_override=sel_override,
                                pivot_candidates=adv.get("orbit_pivot_candidates") or [op])
 
-    if changed:
+    if changed or leveled:
         _write_camera(cam)
         _log_rl("applied", "applied nav=%s op=%s pos=(%.1f,%.1f,%.1f) dist=%.0f"
                 % (nav_mode, op, cam.location[0], cam.location[1], cam.location[2], _focus["dist"]))

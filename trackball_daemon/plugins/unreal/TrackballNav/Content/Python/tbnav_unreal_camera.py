@@ -226,6 +226,22 @@ def horizontal(v):
     return (h[0] / n, h[1] / n, h[2] / n) if n > 1e-9 else (0.0, 0.0, 0.0)
 
 
+def level_horizon(cam):
+    """Remove existing roll: rebuild right/up so camera-right is horizontal (perpendicular to
+    WORLD_UP) while forward is unchanged. The eye stays put, so the tracked focus distance and
+    the synthesised orbit point (location + forward*dist) are preserved -- only the roll goes
+    (issue #2: level on fixed-horizon mode entry). Returns False in the degenerate
+    straight-up/straight-down view, where roll is indistinguishable from yaw (the same
+    singularity basis_to_rotator resolves by reporting roll 0)."""
+    right = v_cross(WORLD_UP, cam.forward)       # Unreal: right = up x forward (verified)
+    if v_len(right) < 1e-6:
+        return False
+    right = v_normalize(right)
+    cam.right = right
+    cam.up = v_cross(cam.forward, right)
+    return True
+
+
 def look(cam, o, horizon_lock):
     """First-person look (fly/walk): rotate the camera in place about the EYE. ``horizon_lock`` False
     (fly) is a free look that BANKS on twist; True (walk) keeps the horizon level and drops twist

@@ -113,6 +113,35 @@ def test_orbit_roundtrip_identity():
             all(abs(c.orientation[i] + ori0[i]) < 1e-5 for i in range(4)))
 
 
+def test_level_horizon_removes_only_roll_and_is_idempotent():
+    c = _ortho_cam()
+    tilted = cam.q_axis_angle((1.0, 0.0, 0.0), 0.55)
+    fwd = cam.q_rotate(tilted, (0.0, 0.0, -1.0))
+    rolled = cam.q_axis_angle(fwd, 0.7)
+    c.orientation = list(cam.q_mul(rolled, tilted))
+    eye0, focal0 = tuple(c.position), c.focal
+    fwd0 = cam.axes(c)[2]
+
+    assert cam.level_horizon(c) is True
+    right, up, fwd1, _back = cam.axes(c)
+    assert vclose(fwd1, fwd0)
+    assert tuple(c.position) == eye0 and c.focal == focal0
+    assert abs(cam.v_dot(right, cam.WORLD_UP)) < 1e-9
+    assert cam.v_dot(up, cam.WORLD_UP) > 0.0
+
+    axes1 = cam.axes(c)
+    assert cam.level_horizon(c) is True
+    for before, after in zip(axes1, cam.axes(c)):
+        assert vclose(before, after, eps=1e-9)
+
+
+def test_level_horizon_skips_world_up_singularity():
+    c = _ortho_cam()  # looks straight down world Z
+    orientation0 = list(c.orientation)
+    assert cam.level_horizon(c) is False
+    assert c.orientation == orientation0
+
+
 # --- turntable keeps the horizon level; free orbit tilts it -----------------------------
 def test_turntable_horizon_locked():
     c = _ortho_cam()

@@ -65,10 +65,14 @@ namespace TrackballNav
         //                 the target toward it ("to_cursor"). Perspective zoom is a dolly toward
         //                 the target; holding an off-axis point fixed there would need an
         //                 off-axis dolly -- not supported, it falls back to the plain dolly.
+        //   levelOnEntry -- one-shot transition flag: rebuild a LEVELED up before applying this
+        //                 frame. Ordinary turntable frames pass false and preserve the established
+        //                 horizon; this is never a continuous auto-level operation.
         public static CamState Apply(CamState c, double[] d, string style,
                                      double[] orbitSign, double panSignX, double panSignY,
                                      double panScale, double zoomSign, double zoomScale,
-                                     Point3d? orbitPivot = null, Point3d? zoomPivot = null)
+                                     Point3d? orbitPivot = null, Point3d? zoomPivot = null,
+                                     bool levelOnEntry = false)
         {
             var dir = c.Pos - c.Tgt;                     // target -> camera (out of the screen)
             double dist = dir.Length;
@@ -78,6 +82,15 @@ namespace TrackballNav
             var right = up.CrossProduct(dir);            // screen-right (right-handed basis)
             right = right.Length < 1e-9 ? Vector3d.XAxis : right.GetNormal();
             var tgt = c.Tgt;
+            if (style == "turntable" && levelOnEntry)
+            {
+                var lvlRight = WorldUp.CrossProduct(dir);
+                if (lvlRight.Length > 1e-9)
+                {
+                    right = lvlRight.GetNormal();
+                    up = dir.CrossProduct(right).GetNormal();
+                }
+            }
 
             // --- orbit about the target (or, when orbitPivot is given, about that point) -------
             double vx = orbitSign[0] * d[0], vy = orbitSign[1] * d[1], vz = orbitSign[2] * d[2];
@@ -90,11 +103,7 @@ namespace TrackballNav
                     m = Matrix3d.Rotation(vy, WorldUp, Point3d.Origin)
                       * Matrix3d.Rotation(vx, right, Point3d.Origin);
                     dir = dir.TransformBy(m).GetNormal();
-                    var lvlRight = WorldUp.CrossProduct(dir);
-                    if (lvlRight.Length > 1e-9)          // keep the horizon level
-                        up = dir.CrossProduct(lvlRight.GetNormal()).GetNormal();
-                    else
-                        up = up.TransformBy(m).GetNormal();   // straight top/bottom: follow
+                    up = up.TransformBy(m).GetNormal();       // preserve established horizon
                 }
                 else                                     // free: composed camera-space axis;
                 {                                        // the -dir component IS the roll

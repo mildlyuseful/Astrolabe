@@ -43,6 +43,31 @@ def test_turntable_yaw_about_world_z():
     assert abs(c.eye[0]) < 1e-6 and abs(c.eye[1] - 10.0) < 1e-6
 
 
+def test_level_horizon_removes_only_roll_and_is_idempotent():
+    c = _cam(eye=(8, -4, 6), target=(0, 0, 0), up=(0, 0, 1))
+    fwd0 = c.forward()
+    c.up = list(cam.rotate_about_axis(tuple(c.up), fwd0, 0.65))
+    eye0, target0, dist0 = tuple(c.eye), tuple(c.target), c.distance()
+
+    assert cam.level_horizon(c) is True
+    right1, up1 = c.right(), tuple(c.up)
+    assert vclose(c.forward(), fwd0)
+    assert tuple(c.eye) == eye0 and tuple(c.target) == target0
+    assert abs(c.distance() - dist0) < 1e-12
+    assert abs(cam.v_dot(right1, cam.WORLD_UP)) < 1e-9
+    assert cam.v_dot(up1, cam.WORLD_UP) > 0.0
+
+    assert cam.level_horizon(c) is True
+    assert vclose(c.right(), right1, eps=1e-9) and vclose(tuple(c.up), up1, eps=1e-9)
+
+
+def test_level_horizon_skips_world_up_singularity():
+    c = _cam(eye=(0, 0, 10), target=(0, 0, 0), up=(0, 1, 0))
+    up0 = list(c.up)
+    assert cam.level_horizon(c) is False
+    assert c.up == up0
+
+
 def test_pan_moves_eye_and_target():
     c = _cam()
     eye0, tgt0 = tuple(c.eye), tuple(c.target)

@@ -181,7 +181,8 @@ def test_focus_applies_solidworks_scheme():
     assert app.sw_driver.schemes[-1] == {
         "orbit_pivot": "object", "orbit_style": "free", "zoom_mode": "to_object",
         "selection_overrides_pivot": True,
-        "orbit_pivot_fallbacks": ["cursor_3d", "camera", "object", "origin"]}
+        "orbit_pivot_fallbacks": ["cursor_3d", "camera", "object", "origin"],
+        "level_horizon_on_entry": True}
     assert app.sw_driver.holds[-1] == 0.75       # per-app screen-center-pivot hold pushed to the driver
 
 
@@ -196,6 +197,7 @@ def test_focus_applies_autocad_rate_and_scheme():
     assert app.broker.schemes[-1]["orbit_pivot"] == "origin"
     assert app.broker.schemes[-1]["orbit_style"] == "turntable"
     assert app.broker.schemes[-1]["zoom_mode"] == "to_center"
+    assert app.broker.schemes[-1]["advanced"]["level_horizon_on_entry"] is True
 
 
 # --- merged connection state ----------------------------------------------------------

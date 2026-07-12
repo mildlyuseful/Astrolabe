@@ -285,15 +285,47 @@ Commits:
 - `feat: add immutable host default profiles`
 - `fix: separate host profiles from user overrides`
 
-## [ ] Step 5 — Level horizon on fixed-horizon mode entry (issue #2)
+## [x] Step 5 — Level horizon on fixed-horizon mode entry (issue #2)
 
 Goal: when switching into Turntable or Walk, remove existing roll immediately rather than locking the
 current tilted horizon.
+
+Implemented with a default-on General checkbox and an optional per-app override. Resetting an app's
+user overrides removes its explicit value so it follows General again. With the option enabled, a
+real free-to-fixed transition removes roll once; with it disabled, the existing tilt is preserved.
+The first received frame establishes state and does not create a false transition.
 
 - Detect transitions, not ordinary frames.
 - Implement host-correct world-up leveling for every app with the mode.
 - Preserve eye/target distance and the active orbit point while removing roll.
 - Add transition and idempotence tests; live-verify the hosts available on the dev machine.
+
+Completed:
+
+- Added transition-only leveling to Blender, Fusion 360, FreeCAD, SketchUp, Unreal, Unity, Rhino,
+  AutoCAD, SolidWorks, and Onshape. Turntable, explicit Lock horizon, and Walk count as fixed-horizon
+  states where the host supports them. Godot is unchanged because its editor camera cannot roll.
+- Leveling preserves the view direction, eye/target positions, distance, and orbit pivot. A
+  world-up singularity is skipped instead of choosing an arbitrary horizon.
+- Added General and per-app UI/config plumbing, inheritance/reset tests, broker routing coverage,
+  host-neutral math tests, transition/idempotence tests, and AutoCAD's native math cases.
+- Removed the temporary Step 4 calibration-value preservation tests now that host-profile transfer
+  is complete. Tests derive any required host factors from `host_profiles.json`, so developer tuning
+  no longer invalidates unrelated behavior tests. The developer's Blender baseline edit is kept.
+- `pytest -q` — 341 passed.
+- `python -m compileall -q trackball_daemon` and `git diff --check` — passed.
+- `dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj --no-restore` — ALL PASS.
+- AutoCAD 2026 Release build succeeded and copied bundled plugin v0.3.11 + regenerated
+  `version.json`; it retains the existing non-fatal `WindowsBase` version-conflict warning.
+- Host-GUI behavior still needs live verification in each integration. Ruby, Godot, and Unity
+  command-line compilers are not installed, so their source changes were not compiled independently.
+
+Versions: daemon 0.1.66; Blender 0.1.17; FreeCAD 0.1.10; Fusion 0.1.20; SketchUp 0.2.8;
+Unreal 0.2.9; Unity 0.1.11; Godot 0.1.8 (unchanged); Rhino 0.1.14; AutoCAD 0.3.11.
+
+Commit:
+
+- `feat: level horizon on fixed-mode entry`
 
 ## [ ] Step 6 — De-generalize the 3D Apps panel
 

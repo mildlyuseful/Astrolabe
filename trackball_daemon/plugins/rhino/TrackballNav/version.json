@@ -1,4 +1,4 @@
 {
-  "version": "0.1.13",
-  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_rhino.py. 0.1.13: immutable host baseline profile."
+  "version": "0.1.14",
+  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_rhino.py. 0.1.14: level horizon on turntable entry (issue #2)."
 }

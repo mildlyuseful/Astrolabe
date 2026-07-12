@@ -37,7 +37,9 @@ PAN_SCALE = 1.0
 ZOOM_SCALE = 1.0
 ZOOM_SIGN = 1.0
 
-ADDIN_VERSION = "0.1.19"         # 0.1.19: immutable host baseline profile.
+ADDIN_VERSION = "0.1.20"         # 0.1.20: level horizon on turntable entry
+                                 # (adv.level_horizon_on_entry; issue #2).
+                                 # 0.1.19: immutable host baseline profile.
                                  # 0.1.18: camera/screen_center canonical pivot names.
                                  # 0.1.16: read selection from app.userInterface.activeSelections.
                                  # 0.1.15: real selection/origin pivots + selection override.
@@ -104,6 +106,9 @@ _obj_cache = {"t": 0.0, "p": None}      # cached object bounding-box center (rec
 # per gesture and HELD; re-cast only after the view moves (pan/zoom) or the gesture ends (idle).
 _gesture = {"t": 0.0, "pivot": None}    # last-frame time + held orbit pivot (Point3D | None)
 _zoom_gesture = {"pivot": None}          # "to_cursor" zoom's own held pivot (reset on orbit/pan)
+# Fixed-horizon transition tracker (issue #2): None until the first frame, so an add-in that
+# starts up already in turntable never levels -- only a real free->turntable switch does.
+_horizon = {"fixed": None}
 PIVOT_HOLD_IDLE = 0.35                   # s without frames that ends a gesture -> re-raycast next orbit
 APERTURE_FRACS = (0.03, 0.10, 0.30)      # ray thickness tried, as a fraction of the view half-height
 RAY_PUSHBACK = 8.0                       # start the ray this many half-heights behind screen-centre
@@ -521,6 +526,27 @@ def _apply(frame):
         true_up = right.crossProduct(fwd)
         true_up.normalize()
 
+        # Level ONCE when the style transitions free->turntable (issue #2): rebuild upVector so
+        # camera-right is horizontal while eye/target (and so the view direction, distance, and
+        # any held orbit point) stay put. Transitions only -- prev None (fresh add-in) never
+        # levels, and ordinary turntable frames never re-level. Skipped in the degenerate
+        # straight-up/straight-down view, where roll is indistinguishable from yaw.
+        fixed = (style == "turntable")
+        prev = _horizon["fixed"]
+        _horizon["fixed"] = fixed
+        leveled = False
+        if fixed and prev is False and bool(adv.get("level_horizon_on_entry", True)):
+            wup = adsk.core.Vector3D.create(*_WORLD_UP)
+            lvl_right = fwd.crossProduct(wup)
+            if lvl_right.length > 1e-6:
+                lvl_right.normalize()
+                lvl_up = lvl_right.crossProduct(fwd)
+                lvl_up.normalize()
+                cam.upVector = lvl_up
+                up, right, true_up = lvl_up, lvl_right, lvl_up
+                leveled = True
+                _log("horizon: leveled on turntable entry")
+
         now = time.time()
         idle = now - _gesture["t"]            # frames only arrive during motion, so a gap = gesture end
         _gesture["t"] = now
@@ -531,6 +557,10 @@ def _apply(frame):
             pivot = _orbit_pivot(op, cam, tgt, idle, sel_override=sel_override,
                                  candidates=pivot_candidates)
             if pivot is None:
+                if leveled:                   # deliver the entry-leveling even though the
+                    cam.isSmoothTransition = False   # pivot chain produced no orbit frame
+                    vp.camera = cam
+                    vp.refresh()
                 return
             dpt = ((pivot.x - tgt.x) ** 2 + (pivot.y - tgt.y) ** 2 + (pivot.z - tgt.z) ** 2) ** 0.5
             _log_rl("pivot", "orbit pivot=%s |P-T|=%.3f P=(%.2f,%.2f,%.2f) target=(%.2f,%.2f,%.2f)"

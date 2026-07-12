@@ -57,7 +57,10 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.10";  // 0.3.10: immutable host baseline profile.
+        public const string PluginVersion = "0.3.11";  // 0.3.11: level-horizon toggle -- turntable
+                                                       // entry levels once (default) or keeps tilt
+                                                       // (adv.level_horizon_on_entry; issue #2).
+                                                       // 0.3.10: immutable host baseline profile.
                                                        // 0.3.9: cursor pivot is strict too — no
                                                        // construction-plane/view-depth synthesis;
                                                        // empty-space hovers miss and continue the
@@ -99,6 +102,10 @@ namespace TrackballNav
         readonly double[] _acc = new double[6];
         string _opPivot = "screen_center", _oStyle = "free", _zMode = "to_center";
         bool _selectionOverrides = true;
+        bool _levelHorizon = true;        // level once when entering turntable (adv.level_horizon_on_entry;
+                                          // false = the current tilt rides along instead)
+        bool? _horizonFixed = null;       // first frame establishes state; it is not a transition
+        bool _levelPending = false;       // consumed once by the next UI-thread navigation tick
         List<string> _pivotCandidates = new List<string> { "screen_center" };
         volatile bool _stop;
         volatile bool _connected;
@@ -411,6 +418,9 @@ namespace TrackballNav
                             if (adv.TryGetProperty("selection_overrides_pivot", out var sel) &&
                                 (sel.ValueKind == JsonValueKind.True || sel.ValueKind == JsonValueKind.False))
                                 _selectionOverrides = sel.GetBoolean();
+                            if (adv.TryGetProperty("level_horizon_on_entry", out var lvl) &&
+                                (lvl.ValueKind == JsonValueKind.True || lvl.ValueKind == JsonValueKind.False))
+                                _levelHorizon = lvl.GetBoolean();
                             if (adv.TryGetProperty("orbit_pivot_candidates", out var chain) &&
                                 chain.ValueKind == JsonValueKind.Array)
                             {
@@ -420,6 +430,12 @@ namespace TrackballNav
                                 if (parsed.Count > 0) _pivotCandidates = parsed;
                             }
                         }
+                        bool fixedHorizon = _oStyle == "turntable";
+                        if (fixedHorizon && _horizonFixed == false && _levelHorizon)
+                            _levelPending = true;
+                        else if (!fixedHorizon || !_levelHorizon)
+                            _levelPending = false;
+                        _horizonFixed = fixedHorizon;
                     }
                 }
             }
@@ -455,7 +471,7 @@ namespace TrackballNav
             double[] delta = null;
             string style, opv, zmv;
             List<string> pivotCandidates;
-            bool selectionOverrides;
+            bool selectionOverrides, levelOnEntry;
             lock (_lock)
             {
                 if (_acc[0] != 0 || _acc[1] != 0 || _acc[2] != 0 ||
@@ -463,7 +479,10 @@ namespace TrackballNav
                 {
                     delta = (double[])_acc.Clone();
                     Array.Clear(_acc, 0, 6);
+                    levelOnEntry = _levelPending;
+                    _levelPending = false;
                 }
+                else levelOnEntry = false;
                 style = _oStyle;
                 opv = _opPivot;
                 zmv = _zMode;
@@ -527,8 +546,8 @@ namespace TrackballNav
             try
             {
                 if (s_gsBroken || !TryApplyGs(doc, delta, style, opv, zmv, selectionOverrides,
-                                              pivotCandidates))
-                    Apply(doc, delta, style);          // legacy fallback (regens per frame;
+                                              pivotCandidates, levelOnEntry))
+                    Apply(doc, delta, style, levelOnEntry);   // legacy fallback (regens per frame;
                                                        // no pointer pivot -- view-centre orbit)
                 _lastFrameAt = DateTime.UtcNow;
                 Interlocked.Increment(ref _framesApplied);
@@ -860,7 +879,8 @@ namespace TrackballNav
 
         // --- the GS transport: live kernel view, regen-free (docs 8.15) -------------------------
         bool TryApplyGs(Document doc, double[] d, string style, string opv, string zmv,
-                        bool selectionOverrides, List<string> pivotCandidates)
+                        bool selectionOverrides, List<string> pivotCandidates,
+                        bool levelOnEntry = false)
         {
             try
             {
@@ -917,7 +937,13 @@ namespace TrackballNav
                 if (hasOrbit)
                     orbitPivot = _heldOrbitPivot;
                 if (hasOrbit && !orbitPivot.HasValue)
-                    return true;                       // configured chain exhausted: no hidden target
+                {
+                    if (!levelOnEntry)
+                        return true;                   // configured chain exhausted: no hidden target
+                    d = (double[])d.Clone();           // still deliver the one-time level write
+                    d[0] = d[1] = d[2] = 0.0;
+                    hasOrbit = false;
+                }
                 if (hasZoom && zmv == "to_cursor" && !_cam.Persp && !_heldZoomSet)
                 {
                     _heldZoomPivot = selectionOverrides ? CaptureSelectionCenter(doc) : null;
@@ -928,7 +954,8 @@ namespace TrackballNav
                 if (hasZoom && zmv == "to_cursor" && !_cam.Persp)
                     zoomPivot = _heldZoomPivot;
                 _cam = NavMath.Apply(_cam, d, style, OrbitSign, PanSignX, PanSignY,
-                                     PanScale, ZoomSign, ZoomScale, orbitPivot, zoomPivot);
+                                     PanScale, ZoomSign, ZoomScale, orbitPivot, zoomPivot,
+                                     levelOnEntry);
                 NavMath.Write(_gsView, _cam);
                 _gsView.Update();                      // repaint from the kernel cache: NO regen
                 if (hasPan || hasZoom) _heldOrbitSet = false;   // view moved under the cursor ->
@@ -1310,12 +1337,17 @@ namespace TrackballNav
         }
 
         // --- legacy fallback: per-frame Editor.SetCurrentView (regens every call) ---------------
-        void Apply(Document doc, double[] d, string style)
+        void Apply(Document doc, double[] d, string style, bool levelOnEntry = false)
         {
             var ed = doc.Editor;
             using (var vtr = ed.GetCurrentView())
             {
                 bool changed = false;
+                if (style == "turntable" && levelOnEntry && Math.Abs(vtr.ViewTwist) > 1e-12)
+                {
+                    vtr.ViewTwist = 0.0;
+                    changed = true;
+                }
                 if (d[0] != 0 || d[1] != 0 || d[2] != 0)
                 {
                     OrbitView(vtr, d[0], d[1], d[2], style);
@@ -1348,7 +1380,7 @@ namespace TrackballNav
 
         // Rotate the view direction about the camera axes. free = composed camera-space axis, with
         // roll applied to the writable ViewTwist; turntable = yaw about WORLD Z + pitch about
-        // camera-right, twist pinned level.
+        // camera-right. Entry leveling is handled once by Apply; ordinary frames preserve twist.
         void OrbitView(ViewTableRecord vtr, double ox, double oy, double oz, string style)
         {
             var dir = vtr.ViewDirection.GetNormal();          // target -> camera (out of screen)
@@ -1367,7 +1399,6 @@ namespace TrackballNav
                 var m = Matrix3d.Rotation(vy, NavMath.WorldUp, Point3d.Origin)
                       * Matrix3d.Rotation(vx, right, Point3d.Origin);
                 newDir = dir.TransformBy(m);
-                vtr.ViewTwist = 0.0;                           // turntable keeps the horizon level
             }
             else                                               // free
             {
