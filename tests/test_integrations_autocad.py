@@ -93,6 +93,8 @@ def test_autocad_plugin_consumes_advanced_settings_and_all_generic_pivots():
               "TrackballNavAcad" / "Plugin.cs").read_text(encoding="utf-8")
     assert 'TryGetProperty("selection_overrides_pivot"' in source
     assert 'TryGetProperty("level_horizon_on_entry"' in source
+    assert 'TryGetProperty("zoom_style"' in source
+    assert 'TryGetProperty("pivot_hold_sec"' in source
     assert "CaptureSelectionCenter(doc)" in source
     assert 'case "origin": point = Point3d.Origin;' in source
     assert 'case "object":' in source and "CaptureDrawingCenter()" in source

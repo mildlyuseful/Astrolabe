@@ -47,7 +47,7 @@ def test_every_advertised_to_object_zoom_has_a_model_bounds_consumer():
         "blender": ("trackball_daemon/plugins/blender/trackball_nav/__init__.py", "return _object_center()"),
         "freecad": ("trackball_daemon/plugins/freecad/TrackballNav/tbnav_freecad.py", "center, _bb = _object_center(doc)"),
         "fusion360": ("trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py", "return _object_center(tgt)"),
-        "sketchup": ("trackball_daemon/plugins/sketchup/trackball_nav/camera.rb", "when 'to_object' then object_center(model, fallback)"),
+        "sketchup": ("trackball_daemon/plugins/sketchup/trackball_nav/camera.rb", "elsif zoom_mode == 'to_object'"),
         "unreal": ("trackball_daemon/plugins/unreal/TrackballNav/Content/Python/trackball_nav.py", "return _scene_center()"),
         "unity": ("trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs", 'zm == "to_object") return SceneCenter()'),
         "godot": ("trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd", "return _scene_center()"),
@@ -63,11 +63,40 @@ def test_every_advertised_to_object_zoom_has_a_model_bounds_consumer():
 
 def test_zoom_dolly_selector_exists_only_where_both_paths_are_distinct():
     assert {key for key, profile in APP_BINDING_PROFILES.items() if profile.zoom_behaviors} == {
-        "blender", "fusion360", "sketchup"
+        "blender", "fusion360", "sketchup", "unreal", "unity", "godot", "rhino", "autocad"
     }
-    assert "zoom_style" in _source("trackball_daemon/plugins/blender/trackball_nav/__init__.py")
-    assert "zoom_style" in _source("trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py")
-    assert "zoom_style" in _source("trackball_daemon/plugins/sketchup/trackball_nav/camera.rb")
+    checks = {
+        "blender": "trackball_daemon/plugins/blender/trackball_nav/__init__.py",
+        "fusion360": "trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py",
+        "sketchup": "trackball_daemon/plugins/sketchup/trackball_nav/camera.rb",
+        "unreal": "trackball_daemon/plugins/unreal/TrackballNav/Content/Python/trackball_nav.py",
+        "unity": "trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs",
+        "godot": "trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd",
+        "rhino": "trackball_daemon/plugins/rhino/TrackballNav/tbnav_rhino.py",
+        "autocad": "plugin_src/autocad/TrackballNavAcad/Plugin.cs",
+    }
+    for key, path in checks.items():
+        assert "zoom_style" in _source(path), f"{key} exposes Zoom/Dolly without consuming zoom_style"
+
+
+def test_every_app_consumes_configurable_pivot_hold():
+    checks = {
+        "blender": ("trackball_daemon/plugins/blender/trackball_nav/__init__.py", "pivot_hold_sec"),
+        "freecad": ("trackball_daemon/plugins/freecad/TrackballNav/tbnav_freecad.py", "pivot_hold_sec"),
+        "fusion360": ("trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py", "pivot_hold_sec"),
+        "sketchup": ("trackball_daemon/plugins/sketchup/trackball_nav/camera.rb", "pivot_hold_sec"),
+        "unreal": ("trackball_daemon/plugins/unreal/TrackballNav/Content/Python/trackball_nav.py", "pivot_hold_sec"),
+        "unity": ("trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs", "pivot_hold_sec"),
+        "godot": ("trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd", "pivot_hold_sec"),
+        "rhino": ("trackball_daemon/plugins/rhino/TrackballNav/tbnav_rhino.py", "pivot_hold_sec"),
+        "autocad": ("plugin_src/autocad/TrackballNavAcad/Plugin.cs", "pivot_hold_sec"),
+        "solidworks": ("trackball_daemon/solidworks_driver.py", "set_pivot_hold"),
+        "onshape": ("trackball_daemon/onshape_bridge.py", "set_pivot_hold"),
+    }
+    assert set(checks) == set(APP_BINDING_PROFILES)
+    for key, (path, token) in checks.items():
+        assert APP_BINDING_PROFILES[key].supports("screen_hold")
+        assert token in _source(path), f"{key} exposes Pivot hold without consuming it"
 
 
 def test_sketchup_selection_override_does_not_replace_to_object():

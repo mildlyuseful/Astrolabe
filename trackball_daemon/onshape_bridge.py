@@ -135,7 +135,7 @@ except ValueError:
 
 DEFAULT_FLUSH_HZ = 30.0
 _RPC_TIMEOUT = 2.0           # seconds to wait for a client's reply to a self:read/self:update
-_MOTION_IDLE = 0.35          # seconds of no motion before we end the gesture (motion=false)
+_MOTION_IDLE = 0.5           # fallback; configured per app by set_pivot_hold
 _PERSP_TTL = 1.0             # cache view.perspective this long (it changes rarely)
 _OBJ_TTL = 0.5              # cache model.extents (orbit/zoom pivot) this long
 _EXT_TTL = 0.2              # cache view.extents (pan/zoom scale) this long
@@ -908,6 +908,7 @@ class OnshapeBridge:
         self._level_horizon = True
         self._horizon_fixed = None
         self._level_pending = False
+        self._pivot_hold_sec = _MOTION_IDLE
 
     @staticmethod
     def _clamp_rate(hz):
@@ -920,6 +921,13 @@ class OnshapeBridge:
     # --- public surface (mirrors SolidWorksDriver) --------------------------------------------
     def set_rate(self, hz):
         self._period = 1.0 / self._clamp_rate(hz)
+
+    def set_pivot_hold(self, sec):
+        try:
+            sec = float(sec)
+        except (TypeError, ValueError):
+            sec = _MOTION_IDLE
+        self._pivot_hold_sec = min(10.0, max(0.0, sec))
 
     def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True,
                    orbit_pivot_fallbacks=None, level_horizon_on_entry=True):
@@ -1077,7 +1085,7 @@ class OnshapeBridge:
                     last_motion = cycle
                 except _ConnDead:
                     self._drop(conn)
-            elif self._in_motion and (not focused or cycle - last_motion > _MOTION_IDLE):
+            elif self._in_motion and (not focused or cycle - last_motion > self._pivot_hold_sec):
                 # End the gesture promptly when Onshape loses focus, or after an idle pause.
                 try:
                     self._end_motion(conn)

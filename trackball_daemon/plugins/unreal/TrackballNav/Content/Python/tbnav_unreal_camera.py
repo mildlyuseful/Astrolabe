@@ -215,6 +215,23 @@ def dolly(cam, z, dist, toward=None):
     cam.location = list(v_add(tuple(cam.location), v_scale(cam.forward, k)))
 
 
+def lens_zoom(cam, z, field_of_view, toward=None):
+    """Return a new perspective FOV while keeping an optional world point fixed on screen."""
+    old_fov = max(5.0, min(170.0, float(field_of_view)))
+    factor = max(0.05, min(20.0, 1.0 - ZOOM_SIGN * z * ZOOM_SCALE))
+    old_tan = math.tan(math.radians(old_fov) * 0.5)
+    new_tan = max(math.tan(math.radians(2.5)), min(math.tan(math.radians(85.0)),
+                                                       old_tan * factor))
+    new_fov = math.degrees(2.0 * math.atan(new_tan))
+    ratio = new_tan / old_tan
+    if toward is not None:
+        offset = v_sub(toward, tuple(cam.location))
+        planar = v_add(v_scale(cam.right, v_dot(offset, cam.right)),
+                       v_scale(cam.up, v_dot(offset, cam.up)))
+        cam.location = list(v_add(tuple(cam.location), v_scale(planar, 1.0 - ratio)))
+    return new_fov
+
+
 # ---------------------------------------------------------------------------------------
 # fly / walk (first-person) -- mode ports of the Blender add-on
 # ---------------------------------------------------------------------------------------

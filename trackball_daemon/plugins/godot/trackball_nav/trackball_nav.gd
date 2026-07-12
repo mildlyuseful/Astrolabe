@@ -1,9 +1,9 @@
 @tool
 extends EditorPlugin
 
-const ADDIN_VERSION := "0.1.9"
+const ADDIN_VERSION := "0.1.10"
 const DEFAULT_PORT := 47900
-const PIVOT_HOLD_IDLE := 0.35
+const PIVOT_HOLD_IDLE := 0.5
 const OBJ_CACHE_SEC := 0.5
 const TRACE_BIG := 1.0e7
 
@@ -164,17 +164,19 @@ func _apply(frame: Dictionary, idle: float) -> void:
 	if twist_action == "roll":
 		twist_action = "none"
 	var pan_scales := bool(adv.get("pan_scales_with_distance", true))
+	var zoom_style := str(adv.get("zoom_style", "dolly"))
+	var pivot_hold := clampf(float(adv.get("pivot_hold_sec", PIVOT_HOLD_IDLE)), 0.0, 10.0)
 	var sel_override := bool(adv.get("selection_overrides_pivot", true))
 	var pivot_candidates = adv.get("orbit_pivot_candidates", [op])
 	if typeof(pivot_candidates) != TYPE_ARRAY:
 		pivot_candidates = [op]
 	var fly_speed := float(adv.get("fly_speed", 1.0))
 	var walk_speed := float(adv.get("walk_speed", 1.0))
-	var sig := "%s|%s|%s|%s|%s|%s|%s" % [nav_mode, op, style, zm, twist_action, lock_h, sel_override]
+	var sig := "%s|%s|%s|%s|%s|%s|%s|%s" % [nav_mode, op, style, zm, twist_action, zoom_style, lock_h, sel_override]
 	if sig != _last_scheme:
 		_last_scheme = sig
-		_log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s horizon=%s sel_override=%s" % [
-			nav_mode, op, style, zm, twist_action, lock_h, sel_override])
+		_log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s pan_zoom=%s horizon=%s sel_override=%s" % [
+			nav_mode, op, style, zm, twist_action, zoom_style, lock_h, sel_override])
 
 	var inv_res := _apply_action_routing(nav_mode, op, o, p, z, adv)
 	o = inv_res[0]
@@ -193,25 +195,29 @@ func _apply(frame: Dictionary, idle: float) -> void:
 	elif nav_mode == "walk":
 		changed = _apply_walk(cam, o, p, z, walk_speed)
 	else:
-		changed = _apply_orbit(cam, o, p, z, op, style, zm, twist_action, lock_h, pan_scales,
-			idle, sel_override, pivot_candidates)
+		changed = _apply_orbit(camera, cam, o, p, z, op, style, zm, twist_action, zoom_style,
+			lock_h, pan_scales, idle, pivot_hold, sel_override, pivot_candidates)
 	if changed:
 		_write_cam(camera, cam)
 
 
-func _apply_orbit(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float,
-		op: String, _style: String, zm: String, twist_action: String, _lock_h: bool,
-		pan_scales: bool, idle: float, sel_override: bool, pivot_candidates: Array) -> bool:
+func _apply_orbit(camera: Camera3D, cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float,
+		op: String, _style: String, zm: String, twist_action: String, zoom_style: String,
+		_lock_h: bool, pan_scales: bool, idle: float, pivot_hold: float, sel_override: bool,
+		pivot_candidates: Array) -> bool:
 	if absf(o.x) > 1e-12 or absf(o.y) > 1e-12 or absf(o.z) > 1e-12:
 		var twist := o.z
 		var orbit_o := Vector3(o.x, o.y, 0.0)  # never roll
 		var did := false
 		if absf(twist) > 1e-12 and twist_action in ["zoom", "dolly"]:
-			TrackballNavCamera.dolly(cam, twist, _focus_dist, null)
+			if twist_action == "zoom":
+				_projection_zoom(camera, cam, twist, null)
+			else:
+				TrackballNavCamera.dolly(cam, twist, _focus_dist, null)
 			_gesture_invalid = true
 			did = true
 		if absf(orbit_o.x) > 1e-12 or absf(orbit_o.y) > 1e-12:
-			var pivot = _orbit_pivot(op, cam, idle, sel_override, pivot_candidates)
+			var pivot = _orbit_pivot(op, cam, idle, pivot_hold, sel_override, pivot_candidates)
 			if pivot == null:
 				return did
 			_focus_dist = TrackballNavCamera.clamp_dist((cam.location - pivot).length())
@@ -227,7 +233,11 @@ func _apply_orbit(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float,
 		return true
 	if absf(z) > 1e-12:
 		_gesture_invalid = true
-		TrackballNavCamera.dolly(cam, z, _focus_dist, _zoom_toward(zm, idle, sel_override))
+		var toward = _zoom_toward(zm, idle, pivot_hold, sel_override)
+		if zoom_style == "zoom":
+			_projection_zoom(camera, cam, z, toward)
+		else:
+			TrackballNavCamera.dolly(cam, z, _focus_dist, toward)
 		return true
 	return false
 
@@ -257,12 +267,12 @@ func _apply_walk(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float, 
 	return false
 
 
-func _orbit_pivot(op: String, cam: TrackballNavCamera.Cam, idle: float, sel_override: bool,
+func _orbit_pivot(op: String, cam: TrackballNavCamera.Cam, idle: float, hold_sec: float, sel_override: bool,
 		candidates: Array):
 	var center = _selection_center()
 	if sel_override and op != "camera" and center != null:
 		return center
-	if _gesture_pivot != null and not _gesture_invalid and idle <= PIVOT_HOLD_IDLE:
+	if _gesture_pivot != null and not _gesture_invalid and idle <= hold_sec:
 		return _gesture_pivot
 	for method in candidates:
 		var point = null
@@ -285,17 +295,34 @@ func _orbit_pivot(op: String, cam: TrackballNavCamera.Cam, idle: float, sel_over
 	return null
 
 
-func _zoom_toward(zm: String, idle: float, sel_override: bool):
+func _zoom_toward(zm: String, idle: float, hold_sec: float, sel_override: bool):
 	var center = _selection_center()
 	if zm == "to_object":
 		return _scene_center()
 	if zm == "to_cursor":
 		if sel_override and center != null:
 			return center
-		if _zoom_gesture_pivot == null or idle > PIVOT_HOLD_IDLE:
+		if _zoom_gesture_pivot == null or idle > hold_sec:
 			_zoom_gesture_pivot = _cursor_pivot()
 		return _zoom_gesture_pivot
 	return null
+
+
+func _projection_zoom(camera: Camera3D, cam: TrackballNavCamera.Cam, z: float, toward) -> void:
+	var factor := clampf(1.0 - TrackballNavCamera.ZOOM_SIGN * z * TrackballNavCamera.ZOOM_SCALE,
+		0.05, 20.0)
+	var ratio := factor
+	if camera.projection == Camera3D.PROJECTION_PERSPECTIVE:
+		var old_tan := tan(deg_to_rad(clampf(camera.fov, 5.0, 170.0)) * 0.5)
+		var new_tan := clampf(old_tan * factor, tan(deg_to_rad(2.5)), tan(deg_to_rad(85.0)))
+		camera.fov = rad_to_deg(2.0 * atan(new_tan))
+		ratio = new_tan / old_tan
+	else:
+		camera.size = clampf(camera.size * factor, 0.0001, 1.0e7)
+	if toward != null:
+		var offset: Vector3 = toward - cam.location
+		var planar := cam.right * offset.dot(cam.right) + cam.up * offset.dot(cam.up)
+		cam.location += planar * (1.0 - ratio)
 
 
 func _forward_point(cam: TrackballNavCamera.Cam) -> Vector3:

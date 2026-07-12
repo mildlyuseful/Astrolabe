@@ -427,6 +427,25 @@ Commit:
 
 - `fix: align app settings with runtime capabilities`
 
+### Step 6 parity follow-up — Zoom/Dolly and universal Pivot hold
+
+- Added native, distinct **Zoom / Dolly** selection for Unreal, Unity, Godot, Rhino, and AutoCAD.
+  Zoom changes each host's viewport FOV, orthographic size, or field dimensions; Dolly moves the
+  camera. Fixed zoom targets remain fixed on screen where the host API exposes that operation.
+- Kept Godot **Turntable-only**. Its editor viewport cannot persist a rolled/free camera basis, so
+  Free orbit remains intentionally unavailable even though Zoom/Dolly is now selectable.
+- Added configurable **Pivot hold** to every app profile and transported the per-app value through
+  every socket add-on, the Onshape bridge, SolidWorks driver, and AutoCAD gesture lifecycle.
+- Added schema/runtime parity tests, native camera-math tests, and updated feature documentation.
+- Versions: daemon 0.1.70; Blender 0.1.20; FreeCAD 0.1.11; Fusion 0.1.22;
+  SketchUp 0.2.11; Unreal 0.2.11; Unity 0.1.13; Godot 0.1.10; Rhino 0.1.16;
+  AutoCAD 0.3.13.
+- Verification: `pytest -q` — 372 passed; Python compileall and `git diff --check` passed;
+  Blender 5.1 headless navigation math — 30 passed; AutoCAD NavMath console suite passed and
+  AutoCAD 2026 Release build succeeded with its pre-existing WindowsBase warning and no errors.
+  Unreal, Unity, Godot, Rhino, SketchUp, FreeCAD, Fusion, Onshape, and SolidWorks changes still need
+  their normal in-host smoke tests.
+
 ## [ ] Step 7 — Privilege, antivirus, and scary-warning audit
 
 Goal: make installation/runtime security prompts predictable for companion-product users.

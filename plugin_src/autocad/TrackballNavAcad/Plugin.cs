@@ -57,7 +57,7 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.12";  // 0.3.12: To Object/To Cursor zoom pivots
+        public const string PluginVersion = "0.3.13";  // 0.3.13: Zoom/Dolly + configurable pivot hold
                                                        // 0.3.11: level-horizon toggle -- turntable
                                                        // entry levels once (default) or keeps tilt
                                                        // (adv.level_horizon_on_entry; issue #2).
@@ -97,11 +97,13 @@ namespace TrackballNav
         const double PanScale = 1.0;
         const double ZoomSign = 1.0, ZoomScale = 1.0;
         const int TimerMs = 10;           // UI-thread drain cadence (~100 Hz ceiling)
-        const int CommitIdleMs = 180;     // gesture considered over after this much frame silence
+        const int DefaultPivotHoldMs = 500;
 
         readonly object _lock = new object();
         readonly double[] _acc = new double[6];
         string _opPivot = "screen_center", _oStyle = "free", _zMode = "to_center";
+        string _zoomStyle = "zoom";
+        int _pivotHoldMs = DefaultPivotHoldMs;
         bool _selectionOverrides = true;
         bool _levelHorizon = true;        // level once when entering turntable (adv.level_horizon_on_entry;
                                           // false = the current tilt rides along instead)
@@ -422,6 +424,12 @@ namespace TrackballNav
                             if (adv.TryGetProperty("level_horizon_on_entry", out var lvl) &&
                                 (lvl.ValueKind == JsonValueKind.True || lvl.ValueKind == JsonValueKind.False))
                                 _levelHorizon = lvl.GetBoolean();
+                            if (adv.TryGetProperty("zoom_style", out var zoomStyle) &&
+                                zoomStyle.ValueKind == JsonValueKind.String)
+                                _zoomStyle = zoomStyle.GetString() == "dolly" ? "dolly" : "zoom";
+                            if (adv.TryGetProperty("pivot_hold_sec", out var hold) &&
+                                hold.ValueKind == JsonValueKind.Number)
+                                _pivotHoldMs = (int)(Math.Clamp(hold.GetDouble(), 0.0, 10.0) * 1000.0);
                             if (adv.TryGetProperty("orbit_pivot_candidates", out var chain) &&
                                 chain.ValueKind == JsonValueKind.Array)
                             {
@@ -470,9 +478,10 @@ namespace TrackballNav
                 }
             }
             double[] delta = null;
-            string style, opv, zmv;
+            string style, opv, zmv, zoomStyle;
             List<string> pivotCandidates;
             bool selectionOverrides, levelOnEntry;
+            int pivotHoldMs;
             lock (_lock)
             {
                 if (_acc[0] != 0 || _acc[1] != 0 || _acc[2] != 0 ||
@@ -487,6 +496,8 @@ namespace TrackballNav
                 style = _oStyle;
                 opv = _opPivot;
                 zmv = _zMode;
+                zoomStyle = _zoomStyle;
+                pivotHoldMs = _pivotHoldMs;
                 selectionOverrides = _selectionOverrides;
                 pivotCandidates = new List<string>(_pivotCandidates);
             }
@@ -497,7 +508,7 @@ namespace TrackballNav
             if (delta == null)
             {
                 // gesture over? sync the driven camera into the DB exactly once
-                if (_gsActive && (DateTime.UtcNow - _lastFrameAt).TotalMilliseconds > CommitIdleMs)
+                if (_gsActive && (DateTime.UtcNow - _lastFrameAt).TotalMilliseconds > pivotHoldMs)
                     EndGesture(commit: true);
                 else if (_regenPending && !_gsActive && !_regenInFlight)
                     FireDeferredRegen();
@@ -546,9 +557,9 @@ namespace TrackballNav
 
             try
             {
-                if (s_gsBroken || !TryApplyGs(doc, delta, style, opv, zmv, selectionOverrides,
+                if (s_gsBroken || !TryApplyGs(doc, delta, style, opv, zmv, zoomStyle, selectionOverrides,
                                               pivotCandidates, levelOnEntry))
-                    Apply(doc, delta, style, levelOnEntry);   // legacy fallback (regens per frame;
+                    Apply(doc, delta, style, levelOnEntry, zoomStyle); // legacy fallback (regens per frame;
                                                        // no pointer pivot -- view-centre orbit)
                 _lastFrameAt = DateTime.UtcNow;
                 Interlocked.Increment(ref _framesApplied);
@@ -880,6 +891,7 @@ namespace TrackballNav
 
         // --- the GS transport: live kernel view, regen-free (docs 8.15) -------------------------
         bool TryApplyGs(Document doc, double[] d, string style, string opv, string zmv,
+                        string zoomStyle,
                         bool selectionOverrides, List<string> pivotCandidates,
                         bool levelOnEntry = false)
         {
@@ -960,7 +972,7 @@ namespace TrackballNav
                     zoomPivot = _heldZoomPivot;
                 _cam = NavMath.Apply(_cam, d, style, OrbitSign, PanSignX, PanSignY,
                                      PanScale, ZoomSign, ZoomScale, orbitPivot, zoomPivot,
-                                     levelOnEntry);
+                                     levelOnEntry, zoomStyle);
                 NavMath.Write(_gsView, _cam);
                 _gsView.Update();                      // repaint from the kernel cache: NO regen
                 if (hasPan || hasZoom) _heldOrbitSet = false;   // view moved under the cursor ->
@@ -1342,7 +1354,8 @@ namespace TrackballNav
         }
 
         // --- legacy fallback: per-frame Editor.SetCurrentView (regens every call) ---------------
-        void Apply(Document doc, double[] d, string style, bool levelOnEntry = false)
+        void Apply(Document doc, double[] d, string style, bool levelOnEntry = false,
+                   string zoomStyle = "zoom")
         {
             var ed = doc.Editor;
             using (var vtr = ed.GetCurrentView())
@@ -1373,9 +1386,14 @@ namespace TrackballNav
                     double factor = 1.0 + ZoomSign * d[5] * ZoomScale;
                     if (factor > 1e-3)
                     {
-                        vtr.Height /= factor;         // factor > 1 zooms IN
-                        vtr.Width /= factor;
-                        changed = true;
+                        // ViewTableRecord has field dimensions but no writable camera distance.
+                        // Preserve real Dolly semantics: the legacy path can only render Zoom.
+                        if (zoomStyle == "zoom")
+                        {
+                            vtr.Height /= factor;     // factor > 1 zooms IN
+                            vtr.Width /= factor;
+                            changed = true;
+                        }
                     }
                 }
                 if (changed)

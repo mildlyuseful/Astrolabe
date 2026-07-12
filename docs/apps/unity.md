@@ -1,7 +1,7 @@
 # Unity navigation — maintainer's guide
 
 Socket add-on for the **Unity Editor Scene view** (not Play / Game view). Same NavBroker
-protocol as Unreal/Blender. Add-on `0.1.9`.
+protocol as Unreal/Blender.
 
 ## Layout
 
@@ -42,6 +42,10 @@ Per-mode `advanced.axis_source` and `advanced.invert` route every Orbit/Camera/F
 X/Y/Z independently. Rotation actions use `o`; shifted movement actions use `(p.x,p.y,z)`. The
 identity/default map is behavior-neutral, while mappings such as Walk Forward ← Z make twist drive
 forward.
+
+**Pan-mode zoom:** Zoom changes `SceneView.CameraSettings.fieldOfView` in perspective or
+`SceneView.size` in orthographic mode. Dolly changes the eye-to-pivot distance. An object/cursor
+target stays at the same screen position in either path.
 
 **Distance math:** `SceneView.size` is a fit-sphere radius, not eye→pivot distance. Navigation
 uses `cameraDistance` (`size / sin(fov/2)` in perspective) and writes size back by scaling

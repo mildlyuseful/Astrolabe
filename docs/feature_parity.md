@@ -11,13 +11,14 @@ exist in the shared shape without being visible; that does not make them an impl
   current selection. **Selection** remains a separate orbit pivot.
 - **To Cursor** uses a real surface hit and falls back to **To Center** on a miss. Where an app
   supports selection override for cursor zoom, that override does not replace **To Object**.
-- **Pan-mode zoom: Zoom / Dolly** appears only in Blender, Fusion 360, and SketchUp. Those are the
-  only integrations with two distinct, user-selectable runtime paths today.
-- **Screen Center hold** appears only for SolidWorks. It is the only integration that consumes the
-  saved per-app hold duration; other integrations use fixed gesture capture/idle semantics.
-- Godot is turntable-only and its pan route is dolly-only. Its Twist action therefore offers
-  **Zoom** (the existing generic action name for that dolly route) and **None**, without a duplicate
-  Dolly choice or a nonfunctional pan-route selector.
+- **Pan-mode zoom: Zoom / Dolly** appears in Blender, Fusion 360, SketchUp, Unreal, Unity, Godot,
+  Rhino, and AutoCAD. Zoom changes the native projection field/lens; Dolly moves the camera. In an
+  orthographic viewport a physical dolly does not change magnification, by definition.
+- **Pivot hold** appears for every app. It controls the idle gap that ends the held Screen Center or
+  Under Cursor pivot gesture; the next matching motion resolves a fresh hit. Selection and explicit
+  fixed pivots remain deterministic.
+- Godot is still turntable-only because its editor camera cannot persist a rolled/free basis. It now
+  has distinct projection Zoom and camera Dolly paths, but no Free orbit or Roll option.
 - Fusion's Twist action offers **Roll / Zoom / None**. Zoom enters the selected pan-mode Zoom/Dolly
   behavior; a separate Dolly twist option would be a duplicate, not a distinct action.
 
@@ -30,16 +31,11 @@ the integration. They remain future work rather than speculative UI:
   perspective-capable, but their current pivot resolvers deliberately skip Camera. Onshape also
   omits Camera because the supported orthographic view makes eye-pivot rotation degenerate into an
   image slide rather than a useful look operation.
-- **Manual Zoom versus Dolly selection:** Unreal, Unity, and Godot currently wire only camera dolly;
-  FreeCAD, Rhino, AutoCAD, and Onshape choose scale/field zoom versus dolly from the active
-  projection; SolidWorks uses native `ZoomByFactor`. Their APIs may permit another path, but no
-  separate user-selectable implementation exists.
+- **Manual Zoom versus Dolly selection:** FreeCAD, Onshape, and SolidWorks retain their existing
+  single/projection-selected behavior. A second user-selectable path has not been implemented there.
 - **Godot Free orbit/roll:** the shared camera-math helper retains a free-rotation branch for tests,
   but the editor viewport integration always writes a yaw/pitch cursor with no roll. Only Turntable
   is advertised.
-- **Configurable pivot hold outside SolidWorks:** broker add-ons use fixed per-gesture or fixed-idle
-  capture. Parameterizing those existing constants is possible, but has not been implemented or
-  exposed.
 
 When adding one of these features, implement and verify the host behavior first, then enable its
 field/options in `APP_BINDING_PROFILES` in the same change.

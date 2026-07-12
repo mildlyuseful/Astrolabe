@@ -20,13 +20,13 @@ from System.Windows.Forms import Cursor
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.15"          # 0.1.15: real document-bounds Model Center / To Object
+ADDIN_VERSION = "0.1.16"          # 0.1.16: native Zoom/Dolly + configurable pivot hold
                                   # 0.1.14: level horizon on turntable entry
                                   # (adv.level_horizon_on_entry; issue #2).
                                   # 0.1.13: immutable host baseline profile.
                                   # 0.1.12: camera/screen_center canonical pivot names.
 _DEFAULT_PORT = 47900
-PIVOT_HOLD_IDLE = 0.35
+PIVOT_HOLD_IDLE = 0.5
 OBJ_CACHE_SEC = 0.5
 BBOX_MARGIN = 0.10
 
@@ -422,12 +422,13 @@ def _forward_point(cam):
     return (cam.eye[0] + f[0] * d, cam.eye[1] + f[1] * d, cam.eye[2] + f[2] * d)
 
 
-def _orbit_pivot(op, cam, view, idle, sel_override=True, candidates=None):
+def _orbit_pivot(op, cam, view, idle, sel_override=True, candidates=None,
+                 hold_sec=PIVOT_HOLD_IDLE):
     center, bbox = _selection_center()
     if sel_override and op != "camera" and center is not None:
         return center
     ray_bbox = bbox if sel_override else None
-    if _gesture["pivot"] is not None and not _gesture["invalid"] and idle <= PIVOT_HOLD_IDLE:
+    if _gesture["pivot"] is not None and not _gesture["invalid"] and idle <= hold_sec:
         return _gesture["pivot"]
     for method in (candidates or [op]):
         if method == "camera":
@@ -451,14 +452,14 @@ def _orbit_pivot(op, cam, view, idle, sel_override=True, candidates=None):
     return None
 
 
-def _zoom_toward(zm, view, idle=0.0, sel_override=True):
+def _zoom_toward(zm, view, idle=0.0, sel_override=True, hold_sec=PIVOT_HOLD_IDLE):
     center, bbox = _selection_center()
     if zm == "to_object":
         return _document_center()
     if zm == "to_cursor":
         if sel_override and center is not None:
             return center
-        if _zoom_gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
+        if _zoom_gesture["pivot"] is None or idle > hold_sec:
             ray_bbox = bbox if sel_override else None
             _zoom_gesture["pivot"] = _cursor_pivot(view, ray_bbox)
         return _zoom_gesture["pivot"]
@@ -473,13 +474,15 @@ def _apply(view, frame, idle):
     style = frame.get("os", "free")
     zm = frame.get("zm", "to_center")
     adv = frame.get("adv") or {}
+    zoom_style = str(adv.get("zoom_style", "dolly"))
     sel_override = bool(adv.get("selection_overrides_pivot", True))
+    hold_sec = max(0.0, min(10.0, float(adv.get("pivot_hold_sec", PIVOT_HOLD_IDLE))))
     pivot_candidates = adv.get("orbit_pivot_candidates") or [op]
 
-    sig = (op, style, zm, sel_override)
+    sig = (op, style, zm, zoom_style, sel_override)
     if sig != _last_scheme["v"]:
         _last_scheme["v"] = sig
-        _log("scheme: pivot=%s style=%s zoom=%s sel_override=%s" % sig)
+        _log("scheme: pivot=%s style=%s zoom=%s pan_zoom=%s sel_override=%s" % sig)
 
     # Generic daemon invert already applied; no per-mode advanced invert for Rhino default suite.
     cam = _read_camera(view)
@@ -499,7 +502,7 @@ def _apply(view, frame, idle):
 
     if o[0] or o[1] or o[2]:
         pivot = _orbit_pivot(op, cam, view, idle, sel_override=sel_override,
-                             candidates=pivot_candidates)
+                             candidates=pivot_candidates, hold_sec=hold_sec)
         if pivot is None:
             if changed:                      # deliver the entry-leveling even though the
                 _write_camera(view, cam)     # pivot chain produced no orbit frame
@@ -516,12 +519,33 @@ def _apply(view, frame, idle):
         changed = True
     elif z:
         _gesture["invalid"] = True
-        toward = _zoom_toward(zm, view, idle, sel_override=sel_override)
+        toward = _zoom_toward(zm, view, idle, sel_override=sel_override, hold_sec=hold_sec)
+        if _magnify(view, z, zoom_style, toward):
+            return
         cammath.dolly(cam, z, dist, toward)
         changed = True
 
     if changed:
         _write_camera(view, cam)
+
+
+def _magnify(view, z, zoom_style, toward=None):
+    """Use Rhino's native lens Zoom (mode=True) or camera Dolly (mode=False)."""
+    try:
+        factor = max(0.05, min(20.0, 1.0 + cammath.ZOOM_SIGN * z * cammath.ZOOM_SCALE))
+        vp = view.ActiveViewport
+        if toward is None:
+            ok = vp.Magnify(factor, zoom_style == "zoom")
+        else:
+            client = vp.WorldToClient(RG.Point3d(*toward))
+            fixed = System.Drawing.Point(int(round(client.X)), int(round(client.Y)))
+            ok = vp.Magnify(factor, zoom_style == "zoom", fixed)
+        if ok:
+            view.Redraw()
+        return bool(ok)
+    except Exception as exc:
+        _log_rl("magnify", "native %s failed; using camera dolly (%s)" % (zoom_style, exc))
+        return False
 
 
 def _on_idle(sender, e):

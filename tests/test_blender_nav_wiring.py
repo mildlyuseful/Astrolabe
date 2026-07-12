@@ -61,10 +61,10 @@ def test_blender_app_has_advanced_block(isolated_config):
 
 def test_blender_bundled_version_markers_stay_in_sync():
     root = Path(__file__).parents[1] / "trackball_daemon/plugins/blender/trackball_nav"
-    assert json.loads((root / "version.json").read_text(encoding="utf-8"))["version"] == "0.1.19"
+    assert json.loads((root / "version.json").read_text(encoding="utf-8"))["version"] == "0.1.20"
     source = (root / "__init__.py").read_text(encoding="utf-8")
-    assert 'ADDIN_VERSION = "0.1.19"' in source
-    assert '"version": (0, 1, 19)' in source
+    assert 'ADDIN_VERSION = "0.1.20"' in source
+    assert '"version": (0, 1, 20)' in source
 
 
 def test_blender_addon_consumes_shared_zoom_target_and_behavior():

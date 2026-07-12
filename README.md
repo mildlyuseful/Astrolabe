@@ -80,7 +80,9 @@ Per-app settings are rendered from one ordered capability schema in
 `trackball_daemon/binding_schema.py`. New integrations select the shared fields and option sets they
 support; the UI does not contain a separate hand-maintained form for each host. All profiles expose
 Orbit style, Zoom mode, and Twist action. Hosts that can distinguish native camera zoom from dolly
-also expose **Pan-mode zoom**. The audited capability matrix and intentionally deferred options are
+also expose **Pan-mode zoom**; Unreal, Unity, Godot, Rhino, and AutoCAD now join Blender, Fusion,
+and SketchUp in that group. Every app exposes **Pivot hold** for its held Screen Center/Under Cursor
+gesture. The audited capability matrix and intentionally deferred options are
 documented in [`docs/feature_parity.md`](docs/feature_parity.md).
 
 ### Fixed-horizon mode entry
@@ -190,7 +192,7 @@ and moves the active view's camera.
      **`cursor` rotates about the surface under the MOUSE CURSOR** — the same raycast aimed
      through the cursor instead of the screen centre (hover the feature you care about and spin
      the ball), held per gesture; misses continue through the global fallback chain.
-   - **Screen Center pivot hold (s)** (Per-App Bindings, `screen_center`/`cursor` pivots) — seconds the view must be
+   - **Pivot hold (s)** (Per-App Bindings, `screen_center`/`cursor` pivots) — seconds the view must be
      still before the pivot re-raycasts. Default **0.5**; `0` recomputes at the start of
      every orbit; a pan/zoom always recomputes it immediately.
    - **Orbit style** — `free` (all three axes, with roll) or `turntable` (yaw about world-up +

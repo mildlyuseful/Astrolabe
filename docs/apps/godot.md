@@ -1,13 +1,15 @@
 # Godot navigation — maintainer's guide
 
 Socket **EditorPlugin** for Godot 4's editor 3D viewport. Same NavBroker protocol as
-Unreal/Unity. Add-on `0.1.7`.
+Unreal/Unity.
 
 ## Editor camera limits
 
 Godot's 3D editor viewport stores only **yaw/pitch** (no roll). Free trackball orbit and
 twist→roll are disabled: the plugin always uses **turntable**, maps twist to zoom/dolly/none
 (never roll), and horizon-locks fly/walk look. Daemon UI matches (no free orbit / roll / bank).
+This is a current host limitation, not an unimplemented UI option. Pan-mode **Zoom** changes the
+editor Camera3D FOV/orthographic size; **Dolly** translates the camera.
 
 ## Layout
 

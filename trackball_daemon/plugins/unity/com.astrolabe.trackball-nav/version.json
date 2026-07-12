@@ -1,4 +1,4 @@
 {
-  "version": "0.1.12",
-  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.12: real scene-bounds Model Center / To Object."
+  "version": "0.1.13",
+  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.13: native Zoom/Dolly and configurable pivot hold."
 }

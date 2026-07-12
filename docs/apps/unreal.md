@@ -154,8 +154,8 @@ broker frame — see §5.1), interpreted for the editor's free-fly camera. `conf
 
 - **Nav mode** (`advanced.nav_mode`): `orbit` | `fly` | `walk` — the daemon dropdown (or the toggle).
   - **orbit**: un-shifted ball orbits about the pivot; Shift → pan/zoom. Twist is routed by
-    `advanced.twist_action` (`roll` | `zoom` | `dolly` | `none`; for Unreal `zoom` == `dolly` since the
-    camera has no view-distance). `advanced.lock_horizon` forces turntable (horizon stays level).
+    `advanced.twist_action` (`roll` | `zoom` | `dolly` | `none`). Zoom changes the active level
+    viewport FOV; Dolly moves the camera. `advanced.lock_horizon` forces turntable.
   - **fly**: un-shifted ball = **free look that BANKS on twist**; Shift+ball = **6DOF move along the
     camera's own axes** (forward dives/climbs with pitch, vertical along camera-up). `advanced.fly_speed`.
   - **walk**: un-shifted ball = **horizon-locked look** (no bank, twist dropped); Shift+ball = **move
@@ -175,14 +175,15 @@ broker frame — see §5.1), interpreted for the editor's free-fly camera. `conf
   gesture** like `screen_center`; on miss / unfocused viewport it continues the configured chain;
   `screen_center` → the surface under the **screen centre** via `SystemLibrary.line_trace_single` down the
   camera forward axis into the **editor world** (`sub.get_editor_world()`), validated against the
-  selection bbox and **held for the gesture** (re-raycast on pan/zoom or after a ~0.35 s idle).
+  selection bbox and **held for the gesture** (re-raycast on pan/zoom or after the configured Pivot
+  hold idle gap).
   Every unavailable method continues through the configured global chain; `camera` is always the
   eye. If the chain is exhausted, that orbit frame is ignored rather than inventing another pivot.
 - **Orbit style** (`scheme.orbit_style`): `free` (about the camera's own right/up/fwd, twist allowed)
   or `turntable` (yaw about WORLD Z + pitch about camera-right, **roll dropped**).
-- **Zoom mode** (`scheme.zoom_mode`): `to_center` → dolly along forward; `to_object` → dolly toward the
-  selection centre; `to_cursor` → dolly toward the under-mouse surface hit (same Geo ray + trace as
-  cursor orbit, own `_zoom_gesture` hold; miss → forward dolly).
+- **Zoom target** (`scheme.zoom_mode`): `to_center`, `to_object`, or `to_cursor` controls the fixed
+  point. **Pan-mode zoom** (`advanced.zoom_style`) selects native level-viewport FOV Zoom or camera
+  Dolly. Under Cursor uses the same Geo ray and held hit as cursor orbit; a miss uses the center.
 - **Per-mode action routes** (`advanced.axis_source` + `advanced.invert`): every action selects
   X/Y/Z and can invert independently in the add-on, where the active mode is known. Rotation uses
   `o`; shifted movement uses `(p.x,p.y,z)`, so twist can drive Walk Forward. Defaults preserve the
@@ -190,8 +191,8 @@ broker frame — see §5.1), interpreted for the editor's free-fly camera. `conf
 - **`advanced.pan_scales_with_distance`**: pan scaled by the focus distance (zoom-stable) vs a fixed
   reference distance.
 
-Dropped vs Blender (not applicable to Unreal): `zoom_style` (zoom IS a dolly),
-`lock_camera_to_view` (no editor-camera-view equivalent), and the in-editor Alt+` mode-cycle
+Dropped vs Blender (not applicable to Unreal): `lock_camera_to_view` (no editor-camera-view
+equivalent), and the in-editor Alt+` mode-cycle
 shortcut (no equivalent editor input hook wired — use the daemon dropdown). Zoom targeting uses
 the shared `bindings.scheme.zoom_mode` field.
 

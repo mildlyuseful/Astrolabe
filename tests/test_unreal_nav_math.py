@@ -201,6 +201,30 @@ def test_dolly_toward_point():
     assert abs(c.location[0]) < 1e-9 and abs(c.location[1]) < 1e-9
 
 
+def test_lens_zoom_changes_fov_without_dollying():
+    c = _idcam()
+    eye0 = tuple(c.location)
+    new_fov = cam.lens_zoom(c, 0.2, 90.0)
+    assert new_fov < 90.0
+    assert tuple(c.location) == eye0
+
+
+def test_lens_zoom_keeps_target_screen_fraction_fixed():
+    c = _idcam()
+    target = (1000.0, 300.0, 1200.0)
+    old_eye = tuple(c.location)
+    old_fov = 90.0
+    new_fov = cam.lens_zoom(c, 0.2, old_fov, target)
+    old_tan = math.tan(math.radians(old_fov) * 0.5)
+    new_tan = math.tan(math.radians(new_fov) * 0.5)
+    before_x = cam.v_dot(cam.v_sub(target, old_eye), c.right) / old_tan
+    after_x = cam.v_dot(cam.v_sub(target, tuple(c.location)), c.right) / new_tan
+    before_y = cam.v_dot(cam.v_sub(target, old_eye), c.up) / old_tan
+    after_y = cam.v_dot(cam.v_sub(target, tuple(c.location)), c.up) / new_tan
+    assert abs(before_x - after_x) < 1e-6
+    assert abs(before_y - after_y) < 1e-6
+
+
 def test_clamp_dist_floor_and_default():
     assert cam._clamp_dist(0.0) == cam.DIST_DEFAULT     # 0 -> default (avoids a dead pan/zoom)
     assert cam._clamp_dist(-5.0) == cam.DIST_DEFAULT

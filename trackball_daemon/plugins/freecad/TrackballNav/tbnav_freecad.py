@@ -25,7 +25,7 @@ import traceback
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.10"         # 0.1.10: level horizon on turntable entry
+ADDIN_VERSION = "0.1.11"         # 0.1.11: configurable pivot hold
                                  # (adv.level_horizon_on_entry; issue #2).
                                  # 0.1.9: immutable host baseline profile.
                                  # 0.1.8: camera/screen_center canonical pivot names.
@@ -42,7 +42,7 @@ ADDIN_VERSION = "0.1.10"         # 0.1.10: level horizon on turntable entry
 _DEFAULT_PORT = 47900
 STARTUP_DELAY_MS = 1500          # defer boot so the GUI is fully up (FreeCAD.GuiUp race)
 PUMP_MS = 11                     # ~90 Hz main-thread queue drain
-PIVOT_HOLD_IDLE = 0.35           # s without frames that ends a gesture -> re-raycast Screen Center
+PIVOT_HOLD_IDLE = 0.5            # fallback; daemon supplies adv.pivot_hold_sec
 OBJ_CACHE_SEC = 0.5              # object bounding-box centre cache lifetime
 BBOX_MARGIN = 0.10               # accept a Screen Center hit inside bbox + this * diagonal
 CURSOR_HOOK_CHECK_SEC = 0.5         # how often the pump re-checks the cursor observer's view binding
@@ -405,12 +405,13 @@ def _selection_center(doc):
     return (sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n, sum(p[2] for p in pts) / n)
 
 
-def _orbit_pivot(op, view, doc, camera, idle, sel_override=True, candidates=None):
+def _orbit_pivot(op, view, doc, camera, idle, sel_override=True, candidates=None,
+                 hold_sec=PIVOT_HOLD_IDLE):
     """Resolve the selected method followed by the daemon-expanded global candidate chain."""
     selected = _selection_center(doc) if sel_override and op != "camera" else None
     if selected is not None:
         return selected
-    if _gesture["pivot"] is not None and idle <= PIVOT_HOLD_IDLE:
+    if _gesture["pivot"] is not None and idle <= hold_sec:
         return _gesture["pivot"]
     center, bbox = _object_center(doc)
     legacy = candidates is None
@@ -433,7 +434,7 @@ def _orbit_pivot(op, view, doc, camera, idle, sel_override=True, candidates=None
     return cammath.look_at(camera) if legacy else None
 
 
-def _zoom_pivot(zm, view, doc, idle, sel_override=True):
+def _zoom_pivot(zm, view, doc, idle, sel_override=True, hold_sec=PIVOT_HOLD_IDLE):
     if zm == "to_object":
         center, _bb = _object_center(doc)
         return center                      # may be None -> zoom about the look-at
@@ -445,7 +446,7 @@ def _zoom_pivot(zm, view, doc, idle, sel_override=True):
         # Keep the surface point under the MOUSE POINTER fixed on screen while zooming
         # (cammath.zoom already holds an off-centre pivot). Same per-gesture hold as the orbit
         # pivot, in its own slot so orbit/zoom gestures don't clobber each other's pivot.
-        if _zoom_gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
+        if _zoom_gesture["pivot"] is None or idle > hold_sec:
             _center, bbox = _object_center(doc)
             _zoom_gesture["pivot"] = _cursor_pivot(view, bbox)
         return _zoom_gesture["pivot"]      # None (miss/no cursor) -> zoom about the look-at
@@ -467,6 +468,7 @@ def _apply(view, frame, idle):
     adv = frame.get("adv") or {}
     sel_override = bool(adv.get("selection_overrides_pivot", True))
     pivot_candidates = adv.get("orbit_pivot_candidates") or [op]
+    hold_sec = max(0.0, min(10.0, float(adv.get("pivot_hold_sec", PIVOT_HOLD_IDLE))))
 
     sig = (op, style, zm)
     if sig != _last_scheme["v"]:
@@ -492,7 +494,7 @@ def _apply(view, frame, idle):
         _log_rl("rx_orbit", "rx orbit o=(%.4f,%.4f,%.4f) op=%s os=%s" % (o[0], o[1], o[2], op, style))
         _zoom_gesture["pivot"] = None            # view rotates -> next zoom re-raycasts its pivot
         pivot = _orbit_pivot(op, view, doc, camera, idle, sel_override=sel_override,
-                             candidates=pivot_candidates)
+                             candidates=pivot_candidates, hold_sec=hold_sec)
         if pivot is None:
             if changed:                      # deliver the entry-leveling even though the
                 _write_camera(view, node, camera)   # pivot chain produced no orbit frame
@@ -508,7 +510,8 @@ def _apply(view, frame, idle):
     elif z:
         _log_rl("rx_zoom", "rx zoom z=%.4f zm=%s" % (z, zm))
         _gesture["pivot"] = None
-        cammath.zoom(camera, z, _zoom_pivot(zm, view, doc, idle, sel_override=sel_override))
+        cammath.zoom(camera, z, _zoom_pivot(zm, view, doc, idle, sel_override=sel_override,
+                                            hold_sec=hold_sec))
         changed = True
 
     if changed:

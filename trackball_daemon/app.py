@@ -142,6 +142,7 @@ class App:
             adv["host_baseline"] = host_baseline_payload(key)
             adv["selection_overrides_pivot"] = bool(
                 appcfg.get("selection_overrides_pivot", True))
+            adv["pivot_hold_sec"] = appcfg.get("screen_center_pivot_hold_sec", 0.5)
             adv["level_horizon_on_entry"] = effective_level_horizon(
                 self.config.data["general"], appcfg)
             adv["orbit_pivot_fallbacks"] = fallbacks
@@ -173,6 +174,7 @@ class App:
                 orbit_pivot_fallbacks=fallbacks,
                 level_horizon_on_entry=effective_level_horizon(
                     self.config.data["general"], oncfg))
+            self.onshape_bridge.set_pivot_hold(oncfg.get("screen_center_pivot_hold_sec", 0.5))
 
     def _app_rate(self, key):
         """Effective viewport/flush rate (Hz) for app `key`: its per-app override, or the global

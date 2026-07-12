@@ -53,9 +53,9 @@ static class Tests
 
     static CamState Apply(CamState c, double[] d, string style,
                           Point3d? orbitPivot = null, Point3d? zoomPivot = null,
-                          bool levelOnEntry = false) =>
+                          bool levelOnEntry = false, string zoomStyle = "zoom") =>
         NavMath.Apply(c, d, style, Sign, PanSignX, PanSignY, PanScale, ZoomSign, ZoomScale,
-                      orbitPivot, zoomPivot, levelOnEntry);
+                      orbitPivot, zoomPivot, levelOnEntry, zoomStyle);
 
     static void OrbitAboutPivotRigid(string style)
     {
@@ -157,17 +157,44 @@ static class Tests
             CheckClose((c1.Tgt - c0.Tgt).Length, 0.0, 1e-12, "plain zoom: target fixed");
         }
 
-        // --- perspective + zoomPivot: P stays fixed while the camera dollies toward it --------
+        // --- perspective lens zoom: the field shrinks and P keeps its screen coordinate -------
         {
             var c0 = Cam(persp: true);
             var P = new Point3d(9.0, 1.0, 4.0);
             var c1 = Apply(c0, D(z: 0.8), "free", zoomPivot: P);
             double factor = 1.0 + ZoomSign * 0.8 * ZoomScale;
+            CheckClose(c1.Fh, c0.Fh / factor, 1e-12, "persp zoom: field shrinks");
+            CheckClose((c1.Pos - c1.Tgt).Length, 25.0, 1e-9,
+                       "persp zoom: camera distance preserved");
+            var b0 = Basis(c0);
+            var b1 = Basis(c1);
+            CheckClose((P - c1.Tgt).DotProduct(b1.right) / c1.Fh,
+                       (P - c0.Tgt).DotProduct(b0.right) / c0.Fh, 1e-12,
+                       "persp zoom: P screen-x fraction fixed");
+            CheckClose((P - c1.Tgt).DotProduct(b1.up) / c1.Fh,
+                       (P - c0.Tgt).DotProduct(b0.up) / c0.Fh, 1e-12,
+                       "persp zoom: P screen-y fraction fixed");
+        }
+
+        // --- perspective dolly remains a physical eye move with an unchanged projection -------
+        {
+            var c0 = Cam(persp: true);
+            var P = new Point3d(9.0, 1.0, 4.0);
+            var c1 = Apply(c0, D(z: 0.8), "free", zoomPivot: P, zoomStyle: "dolly");
+            double factor = 1.0 + ZoomSign * 0.8 * ZoomScale;
+            CheckClose(c1.Fh, c0.Fh, 1e-12, "dolly: field preserved");
             CheckClose((P + (c0.Tgt - P) / factor - c1.Tgt).Length, 0.0, 1e-12,
-                       "persp to_cursor: target scales about P");
+                       "dolly to_cursor: target scales about P");
             CheckClose((P + (c0.Pos - P) / factor - c1.Pos).Length, 0.0, 1e-12,
-                       "persp to_cursor: eye scales about P");
-            Check((c1.Pos - c1.Tgt).Length < 25.0, "persp to_cursor: dollied in");
+                       "dolly to_cursor: eye scales about P");
+        }
+
+        // --- parallel dolly moves the eye without faking magnification -------------------------
+        {
+            var c0 = Cam();
+            var c1 = Apply(c0, D(z: 0.8), "free", zoomStyle: "dolly");
+            CheckClose(c1.Fh, c0.Fh, 1e-12, "parallel dolly: field preserved");
+            Check((c1.Pos - c1.Tgt).Length < 25.0, "parallel dolly: eye moved in");
         }
 
         // --- pan is unaffected by an orbit pivot (independent channels) -----------------------

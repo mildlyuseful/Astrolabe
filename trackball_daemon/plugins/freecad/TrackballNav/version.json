@@ -1,4 +1,4 @@
 {
-  "version": "0.1.10",
-  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_freecad.py. 0.1.10: level horizon on turntable entry (issue #2)."
+  "version": "0.1.11",
+  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_freecad.py. 0.1.11: configurable pivot hold."
 }

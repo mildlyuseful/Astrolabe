@@ -54,7 +54,7 @@ BINDING_SECTIONS = (
 _BASE = frozenset({
     "rate", "orbit_sensitivity", "pan_gain", "zoom_gain", "zoom_dominance", "toggle",
     "orbit_style", "orbit_pivot", "twist_action", "level_horizon", "selection_override",
-    "zoom_target", "action_routing",
+    "zoom_target", "screen_hold", "action_routing",
 })
 _RICH = frozenset({"nav_mode", "fly_speed", "walk_speed", "lock_horizon", "pan_scales"})
 
@@ -88,25 +88,32 @@ APP_BINDING_PROFILES = MappingProxyType({
         "sketchup", "SketchUp model navigation", rich=True, pivots=PIVOTS_CAMERA,
         twist_actions=("roll", "zoom", "dolly", "none"),
         zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
-    "unreal": _profile("unreal", "Unreal Editor viewport navigation", rich=True,
-                       pivots=PIVOTS_CAMERA),
+    "unreal": _profile(
+        "unreal", "Unreal Editor viewport navigation", rich=True, pivots=PIVOTS_CAMERA,
+        twist_actions=("roll", "zoom", "dolly", "none"),
+        zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
     "unity": _profile(
         "unity", "Unity Scene view navigation", rich=True, pivots=PIVOTS_CAMERA,
-        features=("dynamic_clip", "pivot_extent")),
+        twist_actions=("roll", "zoom", "dolly", "none"),
+        zoom_behaviors=("zoom", "dolly"),
+        features=("zoom_behavior", "dynamic_clip", "pivot_extent")),
     "godot": _profile(
         "godot", "Godot editor viewport navigation", rich=True, no_roll=True,
         pivots=PIVOTS_CAMERA, orbit_styles=("turntable",),
-        features=(), twist_actions=("zoom", "none"),
+        features=("zoom_behavior",), twist_actions=("zoom", "dolly", "none"),
+        zoom_behaviors=("zoom", "dolly"),
         exclude=("lock_horizon", "level_horizon")),
     "freecad": _profile("freecad", "FreeCAD navigation"),
     "fusion360": _profile(
         "fusion360", "Fusion 360 navigation",
         twist_actions=("roll", "zoom", "none"),
         zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
-    "solidworks": _profile("solidworks", "SOLIDWORKS navigation", features=("screen_hold",)),
+    "solidworks": _profile("solidworks", "SOLIDWORKS navigation"),
     "onshape": _profile("onshape", "Onshape navigation", features=("onshape_userscript",)),
-    "autocad": _profile("autocad", "AutoCAD navigation", pivots=PIVOTS_CAMERA),
-    "rhino": _profile("rhino", "Rhino navigation", pivots=PIVOTS_CAMERA),
+    "autocad": _profile("autocad", "AutoCAD navigation", pivots=PIVOTS_CAMERA,
+                         zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
+    "rhino": _profile("rhino", "Rhino navigation", pivots=PIVOTS_CAMERA,
+                       zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
 })
 
 

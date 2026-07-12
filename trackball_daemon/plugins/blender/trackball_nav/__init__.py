@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 19),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 20),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.19"                   # 0.1.19: real scene-bounds Model Center / To Object
+ADDIN_VERSION = "0.1.20"                   # 0.1.20: configurable pivot hold
                                            # 0.1.18: shared Zoom mode targets + twist zoom/dolly
                                            # 0.1.17: level horizon on fixed-horizon mode entry
                                            # (adv.level_horizon_on_entry; issue #2).
@@ -68,7 +68,7 @@ FLY_MOVE = 1.0
 WALK_MOVE = 1.0
 
 DIST_MIN, DIST_MAX = 1e-3, 1e6  # view_distance clamp (Blender's own range is wide)
-PIVOT_HOLD_IDLE = 0.35          # s without frames that ends a gesture -> re-raycast the screen-center pivot
+PIVOT_HOLD_IDLE = 0.5           # fallback; daemon supplies adv.pivot_hold_sec
 
 _DEFAULT_PORT = 47900
 
@@ -82,6 +82,7 @@ _TIMER_INTERVAL = 1.0 / 90.0    # main-thread poll rate (cheap queue drain)
 # HOLD it (so the point under the crosshair stays put during orbit). Invalidated on pan/zoom/idle.
 # The under-mouse "cursor" pivot shares this hold slot (only one pivot is active at a time).
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
+_zoom_gesture = {"pivot": None, "resolved": False}
 # Fixed-horizon transition tracker (issue #2): None until the first frame (an add-on that starts
 # up already in a fixed mode must NOT level -- only a real free->fixed switch does).
 _horizon = {"fixed": None}
@@ -427,7 +428,8 @@ def _cursor_location():
         return None
 
 
-def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True, candidates=None):
+def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True, candidates=None,
+                 hold_sec=PIVOT_HOLD_IDLE):
     """Resolve the first available pivot Vector from the canonical candidate list, or None.
       camera -> the EYE: turns the camera in place (look around), independent of how far the orbit
                    point/view_location happens to be. (Earlier this orbited view_location, which sits
@@ -445,7 +447,7 @@ def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True, candidates=N
         selected = _selection_median()
         if selected is not None:
             return selected
-    if _gesture["pivot"] is not None and not _gesture["invalid"] and idle <= PIVOT_HOLD_IDLE:
+    if _gesture["pivot"] is not None and not _gesture["invalid"] and idle <= hold_sec:
         return _gesture["pivot"]
     for method in (candidates or [op]):
         if method == "camera":
@@ -471,12 +473,15 @@ def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True, candidates=N
     return None
 
 
-def _zoom_pivot(zm, rv, region, win, adv):
+def _zoom_pivot(zm, rv, region, win, adv, idle=0.0, hold_sec=PIVOT_HOLD_IDLE):
     """Zoom target selected by the shared scheme. Misses return None (To Center)."""
     if zm == "to_object":
         return _object_center()
     if zm == "to_cursor":
-        return _raycast_cursor(rv, region, win)
+        if not _zoom_gesture["resolved"] or idle > hold_sec:
+            _zoom_gesture["pivot"] = _raycast_cursor(rv, region, win)
+            _zoom_gesture["resolved"] = True
+        return _zoom_gesture["pivot"]
     return None
 
 
@@ -498,6 +503,7 @@ def _apply_orbit(win, rv, region, o, frame, adv, idle):
     twist_action = adv.get("twist_action", "roll")
     op = frame.get("op", "camera")
     zm = frame.get("zm", "to_center")
+    hold_sec = max(0.0, min(10.0, float(adv.get("pivot_hold_sec", PIVOT_HOLD_IDLE))))
     pitch = o[0] * ORBIT_SCALE[0]
     yaw = o[1] * ORBIT_SCALE[1]
     twist = o[2] * ORBIT_SCALE[2]
@@ -508,10 +514,10 @@ def _apply_orbit(win, rv, region, o, frame, adv, idle):
             roll = twist                           # direction set by the per-mode invert (upstream)
         elif twist_action == "zoom":
             _zoom(rv, twist * float((adv.get("host_baseline") or {}).get("zoom", 1.0)),
-                  _zoom_pivot(zm, rv, region, win, adv))
+                  _zoom_pivot(zm, rv, region, win, adv, idle, hold_sec))
         elif twist_action == "dolly":
             _dolly(rv, twist * float((adv.get("host_baseline") or {}).get("zoom", 1.0)),
-                   _zoom_pivot(zm, rv, region, win, adv))
+                   _zoom_pivot(zm, rv, region, win, adv, idle, hold_sec))
         # "none" (or roll-while-locked): ignore twist
 
     if pitch or yaw or roll:
@@ -520,7 +526,8 @@ def _apply_orbit(win, rv, region, o, frame, adv, idle):
         pivot = _orbit_pivot(
             op, rv, region, idle, win,
             sel_override=bool(adv.get("selection_overrides_pivot", True)),
-            candidates=adv.get("orbit_pivot_candidates") or [op])
+            candidates=adv.get("orbit_pivot_candidates") or [op], hold_sec=hold_sec)
+        _zoom_gesture.update({"pivot": None, "resolved": False})
         if pivot is not None:
             _apply_world_rotation(rv, R, pivot)
 
@@ -678,23 +685,27 @@ def _apply(target, frame, idle):
 
     o, p, z = _apply_action_routing(nav_mode, op, o, p, z, adv)
     o, p, z = _apply_host_baseline(nav_mode, o, p, z, adv)
+    hold_sec = max(0.0, min(10.0, float(adv.get("pivot_hold_sec", PIVOT_HOLD_IDLE))))
 
     if nav_mode == "fly":
         _apply_fly(rv, o, p, z, adv)
         if p[0] or p[1] or z:
             _gesture["invalid"] = True
+            _zoom_gesture.update({"pivot": None, "resolved": False})
     elif nav_mode == "walk":
         _apply_walk(rv, o, p, z, adv)
         if p[0] or p[1] or z:
             _gesture["invalid"] = True
+            _zoom_gesture.update({"pivot": None, "resolved": False})
     else:                                           # orbit mode
         if o[0] or o[1] or o[2]:
             _apply_orbit(_win, rv, region, o, frame, adv, idle)
         elif p[0] or p[1]:
             _pan(rv, p[0], p[1], bool(adv.get("pan_scales_with_distance", True)))
             _gesture["invalid"] = True              # view moved -> recast screen-center next orbit
+            _zoom_gesture.update({"pivot": None, "resolved": False})
         elif z:
-            pivot = _zoom_pivot(zm, rv, region, _win, adv)
+            pivot = _zoom_pivot(zm, rv, region, _win, adv, idle, hold_sec)
             if adv.get("zoom_style", "zoom") == "dolly":
                 _dolly(rv, z, pivot)
             else:
@@ -935,6 +946,7 @@ def register():
     except queue.Empty:
         pass
     _gesture.update({"t": 0.0, "pivot": None, "invalid": True})
+    _zoom_gesture.update({"pivot": None, "resolved": False})
     _horizon["fixed"] = None
     _mode_override["v"] = None
     _daemon_nav["v"] = None

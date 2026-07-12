@@ -1,7 +1,7 @@
 # Rhino navigation — maintainer's guide
 
 Socket Python add-on for **Rhino 8** (default suite only: orbit / pan / zoom). Eye+target
-camera (`SetCameraLocations`), `ORBIT_SCALE = 1.0`. Add-on `0.1.10`.
+camera (`SetCameraLocations`), `ORBIT_SCALE = 1.0`.
 
 ## Layout
 
@@ -28,6 +28,8 @@ Restart Rhino once after Set up (or after an add-on version bump) so Python relo
 
 Generic scheme only (no fly/walk/`advanced`). Pivots: `screen_center`, `cursor`, `object`/`selection`,
 `origin`, plus `camera` (turn in place). `selection_overrides_pivot` is applied.
+Pan-mode **Zoom / Dolly** calls RhinoViewport `Magnify` in lens-zoom or camera-dolly mode; when a
+zoom target is available its client point is supplied as the fixed screen coordinate.
 
 ### Under-cursor pivot
 

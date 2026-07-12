@@ -1,7 +1,7 @@
 // NavMath -- pure camera math for the GS (GraphicsSystem) transport.
 //
 // The GS view is a full camera (position/target/up/fieldWidth/fieldHeight), so every nav op --
-// including free-orbit ROLL (encoded in the up vector) and perspective zoom (a dolly) -- is one
+// including free-orbit ROLL (encoded in the up vector), lens zoom, and camera dolly -- is one
 // SetView call. This file is compiled verbatim into the live probe assemblies (TbProbeGs3) so the
 // math that ships is exactly the math that was verified against a running AutoCAD.
 using System;
@@ -71,7 +71,7 @@ namespace TrackballNav
                                      double[] orbitSign, double panSignX, double panSignY,
                                      double panScale, double zoomSign, double zoomScale,
                                      Point3d? orbitPivot = null, Point3d? zoomPivot = null,
-                                     bool levelOnEntry = false)
+                                     bool levelOnEntry = false, string zoomStyle = "zoom")
         {
             var dir = c.Pos - c.Tgt;                     // target -> camera (out of the screen)
             double dist = dir.Length;
@@ -135,16 +135,19 @@ namespace TrackballNav
                 tgt += right * (panSignX * d[3] * f) + up * (panSignY * d[4] * f);
             }
 
-            // --- zoom (parallel: shrink the field; perspective: dolly toward the target) ------
+            // --- zoom/dolly ------------------------------------------------------------------
+            // Zoom changes the projection field in either projection. Dolly moves the eye along
+            // its optical axis; as in AutoCAD's native camera model, that changes magnification
+            // only in perspective (parallel cameras have no distance-based perspective scale).
             double fw = c.Fw, fh = c.Fh;
             if (d[5] != 0)
             {
                 double factor = 1.0 + zoomSign * d[5] * zoomScale;
                 if (factor > 1e-3)
                 {
-                    if (c.Persp)
+                    if (zoomStyle == "dolly")
                     {
-                        if (zoomPivot.HasValue)
+                        if (c.Persp && zoomPivot.HasValue)
                         {
                             // Scale the target and eye about P. Reconstructing Pos below from the
                             // adjusted target and distance preserves the camera basis while P stays
@@ -152,15 +155,21 @@ namespace TrackballNav
                             var P = zoomPivot.Value;
                             tgt = P + (tgt - P) / factor;
                         }
-                        dist /= factor;                 // factor > 1 zooms IN
+                        dist /= factor;                 // factor > 1 dollies IN
                     }
                     else
                     {
                         fw /= factor; fh /= factor;
                         if (zoomPivot.HasValue)
                         {
+                            // Narrowing the field magnifies the right/up offsets by factor. Shift
+                            // the optical axis toward P by (1 - 1/factor) of its lateral offset so
+                            // P stays at the same screen coordinate. Its depth is intentionally
+                            // unchanged; this is a lens/field zoom, not a dolly.
                             var P = zoomPivot.Value;
-                            tgt = P + (tgt - P) / factor;
+                            var lateral = right * (P - tgt).DotProduct(right)
+                                        + up * (P - tgt).DotProduct(up);
+                            tgt += lateral * (1.0 - 1.0 / factor);
                         }
                     }
                 }

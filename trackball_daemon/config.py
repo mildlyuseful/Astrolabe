@@ -349,8 +349,8 @@ _DEFAULT_SKETCHUP_ADVANCED = {
 
 
 # --- Unreal: per-mode action routes + the "advanced" nav options, mirroring Blender's richer set
-#     but adapted to the editor's free-fly eye+rotator camera. Dropped vs Blender: zoom_style (Unreal
-#     zoom IS a dolly -- no view-distance) and lock_camera_to_view (no
+#     but adapted to the editor's free-fly eye+rotator camera. Dropped vs Blender:
+#     lock_camera_to_view (no
 #     editor-camera-view equivalent). Applied IN THE ADD-ON per mode (same reason as Blender, §12.9).
 #     Signs default off (best-guess, live-tune) -- unlike Blender, no baked-in roll/bank inverts. ----
 _DEFAULT_UNREAL_INVERT = {
@@ -367,6 +367,7 @@ _DEFAULT_UNREAL_ADVANCED = {
     "nav_mode": "orbit",            # orbit | fly | walk
     "lock_horizon": False,          # keep the horizon level even in free orbit (force turntable)
     "twist_action": "roll",         # roll | zoom | dolly | none   (un-shifted twist in ORBIT mode)
+    "zoom_style": "dolly",          # shifted zoom channel: viewport FOV/size zoom | camera dolly
     "pan_scales_with_distance": True,
     "fly_speed": 1.0,
     "walk_speed": 1.0,
@@ -445,6 +446,13 @@ def _fusion_app():
     return a
 
 
+def _zoom_behavior_app(default="dolly"):
+    """Ordinary integration with distinct native Zoom and camera Dolly paths."""
+    a = _app()
+    a["advanced"]["zoom_style"] = default
+    return a
+
+
 def _unreal_app():
     """Unreal's app config: the shared shape plus the Unreal `advanced` block (orbit/fly/walk modes,
     twist action, lock-horizon, per-mode action routes), mirroring Blender's richer set. Default orbit
@@ -513,11 +521,11 @@ DEFAULTS = {
         "unreal":     _unreal_app(),
         "unity":      _unity_app(),
         "godot":      _godot_app(),
-        "rhino":      _app(),
+        "rhino":      _zoom_behavior_app("dolly"),
         "fusion360":  _fusion_app(),
         "solidworks": _app(),
         "onshape":    _app(),
-        "autocad":    _app(),
+        "autocad":    _zoom_behavior_app("zoom"),
     },
     "active_app": "blender",
     # Local loopback bridge the CAD add-ons connect to (127.0.0.1 only). rate_hz is the

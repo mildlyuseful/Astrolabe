@@ -23,6 +23,7 @@ def test_all_apps_have_twist_config_and_zoom_target_config(isolated_config):
     for key, app in cfg.data["apps"].items():
         assert app["advanced"]["twist_action"] in APP_BINDING_PROFILES[key].twist_actions
         assert app["bindings"]["scheme"]["zoom_mode"] == "default"
+        assert APP_BINDING_PROFILES[key].supports("screen_hold")
 
 
 def test_rich_profiles_get_shared_zoom_mode_and_capability_specific_fields():
@@ -30,19 +31,16 @@ def test_rich_profiles_get_shared_zoom_mode_and_capability_specific_fields():
         profile = APP_BINDING_PROFILES[key]
         assert profile.rich_actions
         assert profile.zoom_targets == ("default", "to_center", "to_object", "to_cursor")
-    assert APP_BINDING_PROFILES["blender"].zoom_behaviors == ("zoom", "dolly")
-    assert APP_BINDING_PROFILES["fusion360"].zoom_behaviors == ("zoom", "dolly")
-    assert APP_BINDING_PROFILES["sketchup"].zoom_behaviors == ("zoom", "dolly")
-    assert not APP_BINDING_PROFILES["unreal"].zoom_behaviors
+    for key in ("blender", "fusion360", "sketchup", "unreal", "unity", "godot",
+                "rhino", "autocad"):
+        assert APP_BINDING_PROFILES[key].zoom_behaviors == ("zoom", "dolly")
 
 
 def test_capabilities_do_not_expose_controls_without_distinct_runtime_behavior():
-    # Only SolidWorks currently consumes the configurable idle/hold value.
-    assert [key for key, profile in APP_BINDING_PROFILES.items()
-            if profile.supports("screen_hold")] == ["solidworks"]
-    # Godot's pan route is dolly-only; Fusion's unshifted twist enters its selected pan route.
-    assert APP_BINDING_PROFILES["godot"].zoom_behaviors == ()
-    assert APP_BINDING_PROFILES["godot"].twist_actions == ("zoom", "none")
+    assert all(profile.supports("screen_hold") for profile in APP_BINDING_PROFILES.values())
+    # Godot remains turntable-only even though it now has distinct projection Zoom and Dolly.
+    assert APP_BINDING_PROFILES["godot"].orbit_styles == ("turntable",)
+    assert APP_BINDING_PROFILES["godot"].twist_actions == ("zoom", "dolly", "none")
     assert "dolly" not in APP_BINDING_PROFILES["fusion360"].twist_actions
 
 

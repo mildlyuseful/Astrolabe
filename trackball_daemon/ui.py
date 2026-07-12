@@ -907,9 +907,10 @@ class SettingsWindow:
                            adv + ("pan_scales_with_distance",),
                            hint="Scale movement with camera distance for consistent on-screen travel.")
         elif field == "screen_hold":
-            self._entry_row(parent, "Screen Center hold (s)",
+            self._entry_row(parent, "Pivot hold (s)",
                             ("apps", app_key, "screen_center_pivot_hold_sec"),
-                            hint="Idle time before Screen Center or Under Cursor raycasts a new pivot.")
+                            hint="Idle gap that ends a pivot gesture. The next Screen Center or Under "
+                                 "Cursor motion resolves a new target.")
         elif field == "dynamic_clip":
             self._bool_row(parent, "Override Unity Dynamic Clipping",
                            adv + ("override_dynamic_clip",),

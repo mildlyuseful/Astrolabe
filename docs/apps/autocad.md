@@ -205,6 +205,12 @@ and tracks `_dir/_size/_center` across its own writes**, re-reading direction+si
 `set_scheme(orbit_pivot, orbit_style, zoom_mode)` is pushed from `app._apply_schemes()`. Pivots (the
 3D point we `ZoomCenter` on each orbit frame):
 
+The NETLOAD plugin also consumes **Pan-mode Zoom / Dolly** and **Pivot hold** from the frame's
+advanced payload. Zoom changes GS field width/height; Dolly changes camera distance (and therefore
+has no magnification effect in a parallel projection). Pivot hold replaces the old fixed gesture
+idle constant. The legacy ViewTableRecord fallback can render field Zoom but has no writable camera
+distance for Dolly.
+
 - **`origin`** — the WCS origin `(0,0,0)`.
 - **`object`** — the **drawing-extents centre** (`EXTMIN`/`EXTMAX` midpoint). **`selection`** uses
   the aggregate `Entity.GeometricExtents` centre of the implied selection when available.

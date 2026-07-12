@@ -1,4 +1,4 @@
 {
-  "version": "0.2.10",
-  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.10: real level-bounds Model Center / To Object."
+  "version": "0.2.11",
+  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.11: native Zoom/Dolly and configurable pivot hold."
 }

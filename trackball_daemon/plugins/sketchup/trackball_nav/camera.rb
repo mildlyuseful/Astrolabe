@@ -16,7 +16,7 @@ module TrackballNav
     WALK_MOVE = 1.0
 
     WORLD_UP = Geom::Vector3d.new(0.0, 0.0, 1.0).freeze
-    PIVOT_HOLD_IDLE = 0.35
+    PIVOT_HOLD_IDLE = 0.5
     BBOX_MARGIN = 0.10
     EPSILON = 1.0e-9
     MIN_DISTANCE = 1.0e-4
@@ -24,6 +24,8 @@ module TrackballNav
 
     @gesture_time = 0.0
     @gesture_pivot = nil
+    @zoom_pivot = nil
+    @zoom_resolved = false
     @object_cache = { model_id: nil, time: 0.0, point: nil }
     @last_scheme = nil
     # nil until the first frame: only a real free->fixed transition can trigger leveling.
@@ -66,6 +68,7 @@ module TrackballNav
 
         idle = now - @gesture_time
         @gesture_time = now
+        pivot_hold = [[numeric(advanced['pivot_hold_sec'] || PIVOT_HOLD_IDLE), 0.0].max, 10.0].min
         orbit, pan, zoom = apply_action_routing(nav_mode, pivot_id, orbit, pan, zoom, advanced)
         orbit, pan, zoom = apply_host_baseline(nav_mode, orbit, pan, zoom, advanced)
         # Source routing can move a shifted input between pan and zoom (for example twist/Z ->
@@ -81,7 +84,8 @@ module TrackballNav
           twist_action = (advanced['twist_action'] || 'roll').to_s
           if twist_action == 'zoom' || twist_action == 'dolly'
             twist_changed = zoom_camera(model, view, camera, orbit[2], zoom_mode, twist_action,
-                                        advanced.fetch('selection_overrides_pivot', true) == true)
+                                        advanced.fetch('selection_overrides_pivot', true) == true,
+                                        idle, pivot_hold)
             orbit[2] = 0.0
           elsif twist_action == 'none' || style == 'turntable' || advanced['lock_horizon'] == true
             orbit[2] = 0.0
@@ -105,26 +109,35 @@ module TrackballNav
 
         mode_changed = case nav_mode
                        when 'fly'
-                         invalidate_orbit_pivot! if has_pan || has_zoom
+                         if has_pan || has_zoom
+                           invalidate_orbit_pivot!
+                           invalidate_zoom_pivot!
+                         end
                          fly_camera(view, camera, orbit, pan, zoom, advanced)
                        when 'walk'
-                         invalidate_orbit_pivot! if has_pan || has_zoom
+                         if has_pan || has_zoom
+                           invalidate_orbit_pivot!
+                           invalidate_zoom_pivot!
+                         end
                          walk_camera(view, camera, orbit, pan, zoom, advanced)
                        else
                          if has_orbit
+                           invalidate_zoom_pivot!
                            orbit_camera(model, view, camera, orbit, pivot_id, style, idle,
-                                        advanced['lock_horizon'] == true,
-                                        advanced.fetch('selection_overrides_pivot', true) == true,
-                                        advanced['orbit_pivot_candidates'] || [pivot_id])
+                                         advanced['lock_horizon'] == true,
+                                         advanced.fetch('selection_overrides_pivot', true) == true,
+                                         advanced['orbit_pivot_candidates'] || [pivot_id], pivot_hold)
                          elsif has_pan
                            invalidate_orbit_pivot!
+                           invalidate_zoom_pivot!
                            pan_camera(view, camera, pan,
                                       advanced.fetch('pan_scales_with_distance', true) == true)
                          elsif has_zoom
                            invalidate_orbit_pivot!
                            zoom_camera(model, view, camera, zoom, zoom_mode,
-                                       (advanced['zoom_style'] || 'dolly').to_s,
-                                       advanced.fetch('selection_overrides_pivot', true) == true)
+                                        (advanced['zoom_style'] || 'dolly').to_s,
+                                        advanced.fetch('selection_overrides_pivot', true) == true,
+                                        idle, pivot_hold)
                          else
                            false
                          end
@@ -140,6 +153,7 @@ module TrackballNav
       def reset_gesture!
         @gesture_time = 0.0
         @gesture_pivot = nil
+        invalidate_zoom_pivot!
       end
 
       def object_center(model, fallback)
@@ -219,7 +233,7 @@ module TrackballNav
       end
 
       def orbit_camera(model, view, camera, orbit, pivot_id, style, idle, lock_horizon = false,
-                       selection_overrides = true, candidates = nil)
+                       selection_overrides = true, candidates = nil, hold_sec = PIVOT_HOLD_IDLE)
         eye = camera.eye
         target = camera.target
         up = camera.up
@@ -227,7 +241,7 @@ module TrackballNav
         return false unless axes
 
         pivot = orbit_pivot(model, view, eye, target, pivot_id, idle, selection_overrides,
-                            candidates)
+                            candidates, hold_sec)
         return false unless pivot
 
         if style == 'turntable' || lock_horizon
@@ -340,7 +354,7 @@ module TrackballNav
       end
 
       def zoom_camera(model, view, camera, amount, zoom_mode, zoom_style = 'dolly',
-                      selection_overrides = true)
+                      selection_overrides = true, idle = 0.0, hold_sec = PIVOT_HOLD_IDLE)
         eye = camera.eye
         target = camera.target
         axes = camera_axes(eye, target, camera.up)
@@ -350,7 +364,7 @@ module TrackballNav
         factor = [[factor, 0.05].max, 20.0].min
         current_distance = distance(eye, target)
         factor = MIN_DISTANCE / current_distance if current_distance * factor < MIN_DISTANCE
-        pivot = zoom_pivot(model, view, target, zoom_mode, selection_overrides)
+        pivot = zoom_pivot(model, view, target, zoom_mode, selection_overrides, idle, hold_sec)
 
         if camera.perspective? && zoom_style == 'zoom'
           old_fov = camera.fov.to_f * Math::PI / 180.0
@@ -378,24 +392,29 @@ module TrackballNav
         true
       end
 
-      def zoom_pivot(model, view, fallback, zoom_mode, selection_overrides)
-        selected = selection_center(model) if selection_overrides && zoom_mode == 'to_cursor'
-        return selected if selected
+      def zoom_pivot(model, view, fallback, zoom_mode, selection_overrides, idle = 0.0,
+                     hold_sec = PIVOT_HOLD_IDLE)
+        return fallback if zoom_mode == 'to_center'
+        return (@zoom_pivot || fallback) if @zoom_resolved && idle <= hold_sec
 
-        case zoom_mode
-        when 'to_object' then object_center(model, fallback)
-        when 'to_cursor'
-          @cursor_refresh&.call(view)
-          cursor_pivot(model, view) || fallback
-        else fallback
-        end
+        selected = selection_center(model) if selection_overrides && zoom_mode == 'to_cursor'
+        @zoom_pivot = if selected
+                        selected
+                      elsif zoom_mode == 'to_object'
+                        object_center(model, fallback)
+                      elsif zoom_mode == 'to_cursor'
+                        @cursor_refresh&.call(view)
+                        cursor_pivot(model, view)
+                      end
+        @zoom_resolved = true
+        @zoom_pivot || fallback
       end
 
       def orbit_pivot(model, view, eye, target, pivot_id, idle, selection_overrides = true,
-                      candidates = nil)
+                      candidates = nil, hold_sec = PIVOT_HOLD_IDLE)
         selected = selection_center(model) if selection_overrides && pivot_id != 'camera'
         return selected if selected
-        return @gesture_pivot.clone if @gesture_pivot && idle <= PIVOT_HOLD_IDLE
+        return @gesture_pivot.clone if @gesture_pivot && idle <= hold_sec
 
         (candidates || [pivot_id]).each do |method|
           point = case method
@@ -418,6 +437,11 @@ module TrackballNav
 
       def invalidate_orbit_pivot!
         @gesture_pivot = nil
+      end
+
+      def invalidate_zoom_pivot!
+        @zoom_pivot = nil
+        @zoom_resolved = false
       end
 
       def routed(values, sources, inversions, action, default)
