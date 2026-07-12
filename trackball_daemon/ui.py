@@ -76,7 +76,7 @@ class SettingsWindow:
                 else:
                     appdef = integrations.APPS_BY_KEY.get(key)
                     if appdef is not None:
-                        lbl.config(text=integrations.status_line(appdef), foreground="#666")
+                        lbl.config(text=self._app_status_text(appdef), foreground="#666")
             except tk.TclError:
                 pass
 
@@ -464,8 +464,8 @@ class SettingsWindow:
     # --- tab a: 3D app integrations -----------------------------------------------
     def _build_apps_tab(self, nb):
         outer = ttk.Frame(nb)
-        ttk.Label(outer, text="Supported 3D apps — enable, set up the integration, and "
-                              "choose what starts automatically.",
+        ttk.Label(outer, text="Supported 3D apps — enable integrations, check host compatibility, "
+                              "and expand honest setup/manual-install instructions.",
                   wraplength=600, foreground="#555").pack(anchor="w", padx=10, pady=(10, 6))
         holder = ttk.Frame(outer)
         holder.pack(fill="both", expand=True)
@@ -481,16 +481,18 @@ class SettingsWindow:
         return base
 
     def _app_button_text(self, appdef):
-        key = appdef.key
-        if key in integrations.ADDIN_KEYS:                 # socket add-in apps (e.g. Fusion)
-            if integrations.installed_addin_version(key):
-                if integrations.update_available(key):
-                    return f"Update → v{integrations.bundled_addin_version(key)}"
-                return "Reinstall"
-            return "Set up"
-        if appdef.setup is not None:                       # no-add-in setup (SolidWorks COM, Onshape bridge)
-            return "Re-check" if self.cfg.data["apps"][key].get("installed") else "Enable"
-        return "Set up" if appdef.needs_plugin else "Enable profile"
+        return integrations.setup_action_label(
+            appdef, self.cfg.data["apps"].get(appdef.key, {}))
+
+    @staticmethod
+    def _compatibility_text(appdef):
+        result = integrations.compatibility(appdef)
+        text = f"Supported versions: {appdef.supported_versions}"
+        if result.status == "unsupported":
+            return text + f"\nWARNING: detected {result.message}.", "#b42318"
+        if result.status == "unverified":
+            return text + f"\nCAUTION: detected host {result.message}.", "#b45309"
+        return text, "#555"
 
     def _app_row(self, parent, appdef):
         a = self.cfg.data["apps"][appdef.key]
@@ -501,6 +503,15 @@ class SettingsWindow:
         status.pack(anchor="w", padx=8, pady=(4, 0))
         self._app_status_labels[appdef.key] = status
 
+        compat_text, compat_color = self._compatibility_text(appdef)
+        ttk.Label(card, text=compat_text, foreground=compat_color, wraplength=590,
+                  justify="left").pack(anchor="w", padx=8, pady=(3, 0))
+        ttk.Label(card, text=f"Install model: {appdef.install_model}", foreground="#555",
+                  wraplength=590, justify="left").pack(anchor="w", padx=8, pady=(2, 0))
+        setup_text = "one-time setup required" if appdef.setup_required else "no host setup required"
+        ttk.Label(card, text=f"Setup requirement: {setup_text}", foreground="#555").pack(
+            anchor="w", padx=8, pady=(2, 0))
+
         controls = ttk.Frame(card)
         controls.pack(fill="x", padx=8, pady=6)
 
@@ -509,17 +520,47 @@ class SettingsWindow:
                         command=lambda: self._set_and_save(("apps", appdef.key, "enabled"),
                                                            bool(enabled.get()))).pack(side="left")
 
-        auto = tk.BooleanVar(value=a["start_automatically"])
-        ttk.Checkbutton(controls, text="Start automatically", variable=auto,
-                        command=lambda: self._set_and_save(
-                            ("apps", appdef.key, "start_automatically"),
-                            bool(auto.get()))).pack(side="left", padx=12)
-
         holder = {}
-        btn = ttk.Button(controls, text=self._app_button_text(appdef),
+        action = self._app_button_text(appdef)
+        btn = ttk.Button(controls, text=action or "",
                          command=lambda: self._do_install(appdef, enabled, status, holder))
         holder["btn"] = btn
-        btn.pack(side="right")
+        if action:
+            btn.pack(side="right")
+
+        details = ttk.Frame(card)
+        shown = tk.BooleanVar(value=False)
+
+        def toggle_details():
+            if shown.get():
+                details.pack_forget()
+                shown.set(False)
+                info_btn.config(text="Instructions ▾")
+            else:
+                details.pack(fill="x", padx=8, pady=(0, 8))
+                shown.set(True)
+                info_btn.config(text="Instructions ▴")
+
+        info_btn = ttk.Button(controls, text="Instructions ▾", command=toggle_details)
+        info_btn.pack(side="right", padx=(0, 8))
+
+        instruction_text = integrations.integration_instructions(appdef)
+        ttk.Separator(details).pack(fill="x", pady=(0, 6))
+        ttk.Label(details, text=instruction_text, wraplength=570, justify="left").pack(anchor="w")
+
+        copy_status = tk.StringVar(value="")
+        copy_row = ttk.Frame(details)
+        copy_row.pack(fill="x", pady=(7, 0))
+
+        def copy_instructions():
+            if self._clipboard_set(instruction_text):
+                copy_status.set("Copied")
+            else:
+                copy_status.set("Copy failed")
+
+        ttk.Button(copy_row, text="Copy instructions", command=copy_instructions).pack(side="left")
+        ttk.Label(copy_row, textvariable=copy_status, foreground="#1a7f37").pack(
+            side="left", padx=8)
 
     def _clipboard_set(self, text):
         """Copy ``text`` to the clipboard. Returns True on success."""
@@ -590,7 +631,13 @@ class SettingsWindow:
             enabled_var.set(bool(self.cfg.data["apps"][appdef.key]["enabled"]))
             try:
                 status_label.config(text=self._app_status_text(appdef))
-                holder["btn"].config(text=self._app_button_text(appdef))
+                action = self._app_button_text(appdef)
+                if action:
+                    holder["btn"].config(text=action)
+                    if not holder["btn"].winfo_manager():
+                        holder["btn"].pack(side="right")
+                else:
+                    holder["btn"].pack_forget()
             except tk.TclError:
                 pass
             if appdef.key == "onshape":

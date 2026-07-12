@@ -327,7 +327,7 @@ Commit:
 
 - `feat: level horizon on fixed-mode entry`
 
-## [ ] Step 6 — De-generalize the 3D Apps panel
+## [~] Step 6 — De-generalize the 3D Apps panel
 
 Goal: give each integration honest setup and compatibility UX.
 
@@ -338,6 +338,42 @@ Goal: give each integration honest setup and compatibility UX.
 - Add an expandable Instructions section for every app, including “no setup required” cases.
 - Include manual-install paths for restricted-permission environments.
 - Test metadata completeness and state-specific actions/copy.
+
+Completed:
+
+- Extended every `AppDef` with its install model, setup requirement, first-run action, conservative
+  supported-version list, automatic setup summary, manual/restricted-permissions path, and health
+  check. The UI renders these fields instead of implying that every host installs the same way.
+- Added normalized host-version detection for standard install paths plus cached Windows executable
+  ProductVersion reads for Fusion and SOLIDWORKS. Compatibility is classified as supported,
+  unverified, or known unsupported. The row shows amber caution for unverified versions and red
+  warning for unsupported versions while still showing the detected executable.
+- Added a downward-expandable Instructions section and Copy instructions action to every card.
+  Project-local alternatives are documented for Unreal, Unity, and Godot; all other file-copy hosts
+  show their exact per-user destinations. SolidWorks and Onshape explicitly say that no host add-in
+  is installed.
+- Removed the unused per-app Start automatically checkbox and default config field; neither had a
+  runtime consumer. Retained the useful Enabled toggle. A future run-at-login option belongs at the
+  daemon level, not once per host application.
+- Removed placebo Re-check actions. SolidWorks exposes one initial prerequisite check and Onshape
+  one initial certificate setup; after success their setup buttons disappear. Bundled add-in hosts
+  retain meaningful Set up, Reinstall, and version-gated Update actions.
+- Added metadata completeness, version-policy, warning-state, setup-action, instruction-copy, and
+  no-op-control regression tests. Updated README and Onshape maintainer copy.
+- `pytest -q` — 349 passed.
+- `python -m compileall -q trackball_daemon` and `git diff --check` — passed.
+- The current machine's detected host versions all classify as supported. Tk visual smoke testing
+  could not run because this Python installation cannot locate `init.tcl`; verify the expanded-card
+  layout in the normal packaged app before release.
+
+Versions: daemon 0.1.67. Host add-ins unchanged (this step changes daemon metadata/UI only).
+
+Pending commit:
+
+- `feat: de-generalize 3d app setup panel`
+- Implementation and verification are complete, but staging/commit was blocked by the Codex
+  usage/approval limit. Changes remain unstaged in the working tree; do not start Step 7 before
+  committing this checkpoint.
 
 ## [ ] Step 7 — Privilege, antivirus, and scary-warning audit
 

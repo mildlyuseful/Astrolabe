@@ -76,6 +76,19 @@ def test_current_version_config_untouched(isolated_config):
     assert cfg.data["general"]["scheme"]["zoom_mode"] == "to_cursor"
 
 
+def test_removed_per_app_startup_placeholder_is_cleaned_from_current_config(isolated_config):
+    d = isolated_config / "TrackballDaemon"
+    d.mkdir(parents=True, exist_ok=True)
+    path = d / "config.json"
+    path.write_text(json.dumps({
+        "version": CONFIG_VERSION,
+        "apps": {"blender": {"start_automatically": True}},
+    }), encoding="utf-8")
+    cfg = Config().load()
+    assert "start_automatically" not in cfg.data["apps"]["blender"]
+    assert "start_automatically" not in json.loads(path.read_text(encoding="utf-8"))["apps"]["blender"]
+
+
 def test_fallback_chain_is_added_to_existing_config(isolated_config):
     _write_v2(isolated_config,
               {"orbit_pivot": "view", "orbit_style": "free", "zoom_mode": "to_center"}, {})

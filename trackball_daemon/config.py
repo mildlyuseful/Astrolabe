@@ -404,7 +404,6 @@ def _app(enabled=False):
     return {
         "enabled": enabled,
         "installed": False,
-        "start_automatically": False,
         "addin_version": "",                 # installed add-in version (set on Set up/Update)
         # Per-app viewport refresh / flush rate (Hz) sent to this CAD app. 0 = use the global
         # bridge.rate_hz default. Lets each app run at its own rate (e.g. SolidWorks at 60).
@@ -585,6 +584,11 @@ class Config:
                 self.data["general"]["axis_orientation"] = normalized_orientation
                 changed = True
             for app in self.data["apps"].values():
+                # Step 6 removed this never-wired per-app UI setting. A future run-at-login option
+                # belongs at daemon scope, so clean the stale key from the one local config too.
+                if "start_automatically" in app:
+                    app.pop("start_automatically", None)
+                    changed = True
                 bindings = app.get("bindings") or {}
                 before = copy.deepcopy(bindings)
                 normalize_binding_axis_sources(bindings)

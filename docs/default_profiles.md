@@ -10,7 +10,7 @@ one appears in the normal settings UI:
 - `_DEFAULT_APP_PROFILES` is the shipped user layer. `default_app_profile()` always returns a deep
   copy, so reset/edit code cannot mutate the defaults.
 - `APP_PROFILE_FIELDS` defines the complete atomic reset boundary. Operational state (`enabled`,
-  `installed`, `start_automatically`, and `addin_version`) is intentionally outside it.
+  `installed`, and `addin_version`) is intentionally outside it.
 
 The removed **Shipped profiles** menu had no separate profile operation: it selected the same app as
 the adjacent **Editing app** dropdown. It was redundant and has been removed. The remaining

@@ -345,7 +345,7 @@ The `cursor` pivot orbits about the surface **under the mouse**. Two halves:
   NDC to `/trackball/pointer`. The bridge caches samples (~0.75 s TTL). Off-canvas / stale /
   missing → the method is unavailable and the configured fallback chain continues.
 
-- **Install (daemon UI):** 3D Apps → Onshape → Enable/Re-check shows cert + SpaceMouse steps plus
+- **Install (daemon UI):** 3D Apps → Onshape → Set up shows cert + SpaceMouse steps plus
   **Copy userscript** and the install list. Per-App Bindings → Onshape has a dedicated
   **Copy userscript…** button (copies immediately, then shows “Copied!” + steps). Choosing Orbit
   pivot = **cursor (under mouse)** opens a one-time warning with the same copy/steps and an
@@ -361,7 +361,7 @@ Listed for future UX work — current path is copy-from-daemon + userscript mana
 
 | Approach | User effort | Notes |
 |---|---|---|
-| Fold deeper into Set up (already partially done) | One dialog | Copy button + steps on Enable/Re-check |
+| Fold deeper into Set up (already partially done) | One dialog | Copy button + expandable Instructions |
 | Greasy Fork / GitHub raw + `@updateURL` | One “Install” click | Needs hosted script + version sync |
 | Bookmarklet | Drag bookmark; click per tab | No extension; easy to forget |
 | Tiny Firefox/Chrome extension | “Add to browser” once | Best long-term UX; review/signing cost |
@@ -437,7 +437,7 @@ block; blank cert paths → the generated defaults). Under-cursor orbit needs th
 
 - **Working:** TLS + handshake + connection status; orbit with the hit-test "view" pivot; under-mouse
   **`cursor` pivot** (daemon 0.1.57 — page userscript posts exact `#canvas` NDC; **live-verified**,
-  small residual inaccuracy; install via Copy userscript in Enable/Re-check, Per-App Bindings, or
+  small residual inaccuracy; install via Copy userscript in Set up, Per-App Bindings, or
   the cursor-pivot warning); ortho zoom (rubberband fixed); pan; control scheme
   (screen_center/object/origin/selection/cursor, free/turntable, zoom modes — no `camera`: Onshape
   is orthographic, so turn-in-place degenerates to an image slide and the method is skipped).

@@ -96,6 +96,16 @@ orbit/pan/zoom deltas over `127.0.0.1`, and a thin per-app **add-on** applies th
 app's camera. Navigation is routed to whichever supported app is **focused** (and enabled),
 and only flows in **3D mode** (tray → Mode), so the mouse cursor is untouched in cursor mode.
 
+The **3D Apps** panel is intentionally app-specific. Every card lists its supported host versions,
+detected-version compatibility, install model, and whether setup is actually required. Expand
+**Instructions** for automatic setup, a manual/restricted-permissions path, and a concrete health
+check; **Copy instructions** puts the complete section on the clipboard. Unsupported detected
+versions show a red warning, while versions outside the tested range but not known incompatible
+show an amber unverified warning. Direct integrations such as SolidWorks do not pretend to install
+an add-in, and no-file integrations stop showing a setup button after their one-time check succeeds.
+The former per-app **Start automatically** control was removed from this panel because it did not
+drive any daemon or host behavior.
+
 ### Orbit-pivot fallback chain
 
 **General → 3D control scheme → Failure fallback order** is one ordered chain shared by every 3D
@@ -216,7 +226,7 @@ to the nav broker **unconditionally**, exactly like Fusion/Blender/FreeCAD. Ther
 **nothing for the user to install** beyond the daemon itself. AutoCAD **verticals** (Civil 3D,
 Architecture, Mechanical) are all `acad.exe` and expose the same automation object, so they work too.
 
-1. Settings → **3D Apps** → AutoCAD → **Enable / Install**. This verifies AutoCAD + `pywin32` and
+1. Settings → **3D Apps** → AutoCAD → **Set up**. This verifies AutoCAD + `pywin32` and
    stages the bundled plugin; the same row's **Update** button tracks the plugin version like the
    other add-ins (with AutoCAD running an update is staged and loads on AutoCAD's next start).
 2. **Open AutoCAD with a 3D model-space drawing**, switch the daemon to **3D mode** (tray → Mode), and
@@ -274,7 +284,7 @@ its camera, and the in-process bridge (`onshape_bridge.py`, parallel to the brok
 trackball's orbit/pan/zoom and writes the new camera back. (Full reverse-engineered protocol +
 cert/trust details: [`docs/apps/onshape.md`](docs/apps/onshape.md).)
 
-1. Settings → **3D Apps** → Onshape → **Enable**. This generates a self-signed TLS cert for
+1. Settings → **3D Apps** → Onshape → **Set up**. This generates a self-signed TLS cert for
    `127.51.68.120` in `%APPDATA%\TrackballDaemon\` (it does **not** touch any trust store) and shows
    the two one-time steps below.
 2. **Trust the cert** so Chrome/Edge will connect (they use the Windows cert store). Recommended,

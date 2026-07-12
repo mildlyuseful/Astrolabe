@@ -354,7 +354,7 @@ Each has a dedicated maintainer doc (§15) — read it before touching that inte
   trust**. The under-mouse **`cursor` orbit pivot** (daemon **0.1.57**, **live-verified**) aims
   navlib's hit-test through a **page-reported** `#canvas` NDC: a userscript (`/trackball/pointer.js`)
   posts `getBoundingClientRect()`-exact pointer samples to `/trackball/pointer`. Daemon UI: Copy
-  userscript on Enable/Re-check, Per-App Bindings button, and a one-time warning when picking
+  userscript during initial Set up, in Per-App Bindings, and a one-time warning when picking the
   cursor pivot. **No screen capture.** `view.extents` aspect ≠ canvas aspect (verified). Small
   residual inaccuracy is mostly imperceptible. →
   [`docs/apps/onshape.md`](docs/apps/onshape.md) §8.14–8.15.
@@ -796,8 +796,8 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
   mouse (`_hit_cursor`→`_pixel_ray`→shared `_hit_ray`; `cursor` falls back to the screen-center hit).
   Half A is a **page userscript** that POSTs exact `#canvas` NDC to `/trackball/pointer` (DOM
   `getBoundingClientRect` — no screen capture). `view.extents` aspect ≠ canvas aspect (verified
-  live); auto-left / canvas-calibration UI removed. Daemon UI copies the script on Enable/Re-check,
-  Per-App Bindings, and a dismissible cursor-pivot warning. Small residual inaccuracy is mostly
+  live); auto-left / canvas-calibration UI removed. Daemon UI copies the script during initial Set
+  up, in Per-App Bindings, and a dismissible cursor-pivot warning. Small residual inaccuracy is mostly
   imperceptible (Onshape notes §8.14).
   **Blender — DONE IN CODE (add-on
   0.1.11), headless-tested, NEEDS a live-GUI verify:** the "no on-demand mouse getter" claim was
@@ -843,8 +843,8 @@ Everything that was discussed/requested but not finished, so nothing is lost in 
 - **Packaging** — cut the actual **Nuitka onedir** build (and/or the pip gui-script) for end users who
   have neither Python nor git. The `pyproject` version is dynamic (reads `__version__`), so a cut
   build inherits the daemon build number automatically.
-- **Auto-start on login** — `apps.<key>.start_automatically` exists in config but the daemon's own
-  run-at-login isn't wired.
+- **Auto-start on login** — not implemented. Step 6 removed the unused per-app config/UI control;
+  a future implementation should be one honest daemon-level run-at-login setting.
 - **Auto mode switching** — cursor↔3D is a manual global toggle; it could auto-switch to 3D when a CAD
   app is focused.
 - **Custom UI look** — the settings UI is "standard Windows-10" Tkinter. A richer themed/animated UI

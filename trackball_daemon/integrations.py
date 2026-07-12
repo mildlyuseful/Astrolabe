@@ -18,6 +18,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -42,6 +43,21 @@ class AppDef:
     needs_plugin: bool                 # True: needs an add-on; False: gesture/profile only
     detect: Callable[[], Optional[str]]
     setup: Optional[Callable] = None   # per-app installer; None => generic mark-installed
+    install_model: str = ""
+    setup_required: bool = True
+    first_run_action: Optional[str] = "Set up"
+    supported_versions: str = ""
+    setup_instructions: str = ""
+    manual_install: str = ""
+    health_check: str = ""
+
+
+@dataclass(frozen=True)
+class Compatibility:
+    """Detected host-version result rendered by the 3D Apps panel."""
+    version: Optional[str]
+    status: str                        # supported | unverified | unsupported | unknown
+    message: str
 
 
 def _first_glob(*patterns):
@@ -148,6 +164,135 @@ def detect_autocad():
 
 def detect_onshape():
     return "browser-based (no local install)"
+
+
+# --- host-version compatibility ---------------------------------------------------
+def _match_version(path, pattern):
+    match = re.search(pattern, str(path or ""), re.IGNORECASE)
+    return match.group(1) if match else None
+
+
+@lru_cache(maxsize=16)
+def _exe_product_version(path):
+    """Best-effort Windows ProductVersion. Cached because UI refreshes must stay cheap."""
+    if sys.platform != "win32" or not path or not Path(path).exists():
+        return None
+    try:
+        literal = str(path).replace("'", "''")
+        value = _hidden_check_output([
+            "powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+            f"(Get-Item -LiteralPath '{literal}').VersionInfo.ProductVersion",
+        ]).strip()
+        return value or None
+    except Exception:
+        return None
+
+
+def detected_host_version(appdef: AppDef, detected=None):
+    """Return a normalized host version from the detected executable/path.
+
+    Path parsing covers the normal install layouts without launching a host. SolidWorks and the
+    rolling Fusion installer need the executable ProductVersion instead. None means detection
+    succeeded but the version could not be established, which is surfaced as unverified.
+    """
+    detected = appdef.detect() if detected is None else detected
+    if not detected:
+        return None
+    key = appdef.key
+    if key == "blender":
+        return _match_version(detected, r"Blender\s+(\d+(?:\.\d+)?)")
+    if key == "freecad":
+        return _match_version(detected, r"FreeCAD\s+(\d+(?:\.\d+)?)")
+    if key == "sketchup":
+        return _match_version(detected, r"SketchUp\s+(\d{4})")
+    if key == "unreal":
+        return _match_version(detected, r"UE_(\d+(?:\.\d+)?)")
+    if key == "unity":
+        return _match_version(detected, r"Editor[\\/](\d+(?:\.\d+)+(?:[abfp]\d+)?)")
+    if key == "godot":
+        return _match_version(Path(str(detected)).name, r"Godot[_-]?v?(\d+(?:\.\d+)+)")
+    if key == "rhino":
+        return _match_version(detected, r"Rhino\s+(\d+)")
+    if key == "autocad":
+        return _match_version(detected, r"AutoCAD\s+(\d{4})")
+    if key == "solidworks":
+        raw = _exe_product_version(str(detected))
+        try:
+            # SOLIDWORKS major 33 == 2025, 32 == 2024, etc.
+            return str(int(str(raw).split(".", 1)[0]) + 1992)
+        except (TypeError, ValueError):
+            return None
+    if key == "fusion360":
+        return _exe_product_version(str(detected))
+    if key == "onshape":
+        return "current web release"
+    return None
+
+
+def _version_numbers(version):
+    try:
+        return tuple(int(x) for x in re.findall(r"\d+", str(version)))
+    except (TypeError, ValueError):
+        return ()
+
+
+def compatibility(appdef: AppDef, detected=None) -> Compatibility:
+    """Classify the detected host against the deliberately conservative supported list."""
+    detected = appdef.detect() if detected is None else detected
+    if not detected:
+        return Compatibility(None, "unknown", "not detected")
+    version = detected_host_version(appdef, detected)
+    if appdef.key in ("onshape", "fusion360"):
+        label = version or "rolling release"
+        return Compatibility(label, "supported", f"{label} (rolling release)")
+    if not version:
+        return Compatibility(None, "unverified", "version could not be detected")
+
+    nums = _version_numbers(version)
+    major = nums[0] if nums else -1
+    minor = nums[1] if len(nums) > 1 else 0
+    key = appdef.key
+    supported = False
+    known_incompatible = False
+    if key == "blender":
+        supported = (major == 4 and minor >= 2) or (major == 5 and minor <= 1)
+        known_incompatible = major < 4
+    elif key == "freecad":
+        supported = major == 1 and 0 <= minor <= 1
+    elif key == "sketchup":
+        supported = 2025 <= major <= 2026
+    elif key == "unreal":
+        supported = (major, minor) == (5, 8)
+        known_incompatible = major != 5
+    elif key == "unity":
+        supported = major == 6000
+    elif key == "godot":
+        supported = major == 4 and 4 <= minor <= 7
+        known_incompatible = major != 4
+    elif key == "rhino":
+        supported = major == 8
+        known_incompatible = major < 8
+    elif key == "solidworks":
+        supported = major == 2025
+    elif key == "autocad":
+        supported = 2025 <= major <= 2027
+        known_incompatible = major < 2025
+
+    if supported:
+        return Compatibility(version, "supported", f"version {version} is supported")
+    if known_incompatible:
+        return Compatibility(version, "unsupported", f"version {version} is unsupported")
+    return Compatibility(version, "unverified", f"version {version} has not been verified")
+
+
+def integration_instructions(appdef: AppDef) -> str:
+    """Complete, copyable instructions used by every expandable app card."""
+    return (
+        f"Install model\n{appdef.install_model}\n\n"
+        f"Automatic setup\n{appdef.setup_instructions}\n\n"
+        f"Manual setup / restricted permissions\n{appdef.manual_install}\n\n"
+        f"Health check\n{appdef.health_check}"
+    )
 
 
 # --- Fusion 360 add-in install --------------------------------------------------------
@@ -1204,20 +1349,175 @@ def auto_update(cfg) -> list:
     return updated
 
 
+_APP_UX = {
+    "blender": dict(
+        install_model="User add-on copied into each detected Blender version; optional startup shim.",
+        supported_versions="Blender 4.2 through 5.1 (tested on 5.1.1)",
+        setup_instructions=("Set up copies Trackball Nav to every detected user scripts/addons "
+                            "folder and asks whether to add the auto-enable startup shim."),
+        manual_install=("Copy trackball_daemon\\plugins\\blender\\trackball_nav to "
+                        "%APPDATA%\\Blender Foundation\\Blender\\<version>\\scripts\\addons\\"
+                        "trackball_nav, then enable Trackball Nav in Preferences > Add-ons. "
+                        "No administrator access is required."),
+        health_check=("Restart Blender. The row should show connected while Blender is focused; "
+                      "details are in %APPDATA%\\TrackballDaemon\\blender_addin.log."),
+    ),
+    "freecad": dict(
+        install_model="User Mod add-on; files are copied only under the current Windows profile.",
+        supported_versions="FreeCAD 1.0 through 1.1 (tested on 1.1.1)",
+        setup_instructions="Set up copies TrackballNav into FreeCAD's version-aware user Mod folder.",
+        manual_install=("Copy trackball_daemon\\plugins\\freecad\\TrackballNav to "
+                        "%APPDATA%\\FreeCAD\\v<major>-<minor>\\Mod\\TrackballNav (FreeCAD 1.x), "
+                        "then restart FreeCAD. Use %APPDATA%\\FreeCAD\\Mod for older layouts."),
+        health_check=("Open a 3D view and focus FreeCAD; the row should show connected. Check "
+                      "%APPDATA%\\TrackballDaemon\\freecad_addin.log if it does not."),
+    ),
+    "sketchup": dict(
+        install_model="Per-version Ruby extension in SketchUp's user Plugins folder.",
+        supported_versions="SketchUp Desktop 2025 through 2026 (tested on 2026.2.243)",
+        setup_instructions="Set up copies the loader and extension into every detected annual release.",
+        manual_install=("Copy trackball_daemon\\plugins\\sketchup\\trackball_nav_loader.rb and the "
+                        "trackball_nav folder to %APPDATA%\\SketchUp\\SketchUp <year>\\SketchUp\\"
+                        "Plugins, then restart SketchUp. SketchUp for Web is not supported."),
+        health_check=("Extension Manager should list Trackball Nav; focus a model and look for "
+                      "connected in this row or inspect %APPDATA%\\TrackballDaemon\\sketchup_addin.log."),
+    ),
+    "unreal": dict(
+        install_model="Unreal Editor plugin, installed per engine or per project.",
+        supported_versions="Unreal Engine 5.8 (tested on 5.8.0)",
+        setup_instructions=("Set up copies TrackballNav to each detected Engine/Plugins folder. "
+                            "Engine-level writes may require administrator permission."),
+        manual_install=("Without administrator access, copy trackball_daemon\\plugins\\unreal\\"
+                        "TrackballNav to <YourProject>\\Plugins\\TrackballNav. Enable Trackball Nav "
+                        "and Python Editor Script Plugin in Edit > Plugins, then restart the editor."),
+        health_check=("Focus a perspective level viewport; the row should show connected. Check "
+                      "%APPDATA%\\TrackballDaemon\\unreal_addin.log and the Output Log on failure."),
+    ),
+    "unity": dict(
+        install_model="UPM Editor package copied into each detected Unity project.",
+        supported_versions="Unity 6 / 6000.x (implemented against 6000.5.3f1)",
+        setup_instructions=("Set up finds running/recent projects and copies the package into each "
+                            "project's Packages folder; Unity recompiles it automatically."),
+        manual_install=("Copy trackball_daemon\\plugins\\unity\\com.astrolabe.trackball-nav to "
+                        "<YourProject>\\Packages\\com.astrolabe.trackball-nav. If Set up found no "
+                        "project, the same package is staged under %APPDATA%\\TrackballDaemon\\unity."),
+        health_check=("Open and focus a Scene view; the row should show connected. Check the Unity "
+                      "Console and %APPDATA%\\TrackballDaemon\\unity_addin.log."),
+    ),
+    "godot": dict(
+        install_model="Godot EditorPlugin copied and enabled per project.",
+        supported_versions="Godot 4.4 through 4.7",
+        setup_instructions=("Set up finds running/recent projects, copies addons/trackball_nav, and "
+                            "enables res://addons/trackball_nav/plugin.cfg."),
+        manual_install=("Copy trackball_daemon\\plugins\\godot\\trackball_nav to "
+                        "<YourProject>\\addons\\trackball_nav, then enable Trackball Nav under "
+                        "Project > Project Settings > Plugins. A staged copy is also placed under "
+                        "%APPDATA%\\TrackballDaemon\\godot when no project is found."),
+        health_check=("Reload the project, focus a 3D editor viewport, and look for connected. "
+                      "Check %APPDATA%\\TrackballDaemon\\godot_addin.log on failure."),
+    ),
+    "rhino": dict(
+        install_model="Rhino 8 user Python scripts plus a per-user startup command.",
+        supported_versions="Rhino 8",
+        setup_instructions=("Set up copies TrackballNav into Rhino's user scripts folder and "
+                            "best-effort registers its startup command."),
+        manual_install=("Copy trackball_daemon\\plugins\\rhino\\TrackballNav to "
+                        "%APPDATA%\\McNeel\\Rhinoceros\\8.0\\scripts\\TrackballNav. In Rhino "
+                        "Options > General, add _-RunPythonScript \"<path>\\start.py\" to startup "
+                        "commands, then restart Rhino."),
+        health_check=("Focus a Rhino viewport and look for connected. Check "
+                      "%APPDATA%\\TrackballDaemon\\rhino_addin.log if startup failed."),
+    ),
+    "fusion360": dict(
+        install_model="Fusion user add-in copied to Autodesk's per-user AddIns folder.",
+        supported_versions="Current Fusion production release (rolling Autodesk release)",
+        setup_instructions=("Set up copies TrackballNav. In Fusion, open Utilities > Add-Ins, run "
+                            "TrackballNav once, and enable Run on Startup."),
+        manual_install=("Copy trackball_daemon\\plugins\\fusion360\\TrackballNav to "
+                        "%APPDATA%\\Autodesk\\Autodesk Fusion 360\\API\\AddIns\\TrackballNav, "
+                        "then run it from Utilities > Add-Ins. No administrator access is required."),
+        health_check=("Focus an open design and look for connected. Check "
+                      "%APPDATA%\\TrackballDaemon\\fusion_addin.log if the add-in does not handshake."),
+    ),
+    "solidworks": dict(
+        install_model="Direct COM automation; no SolidWorks add-in or host files are installed.",
+        setup_required=False,
+        first_run_action="Enable",
+        supported_versions="SOLIDWORKS 2025 (tested on 2025)",
+        setup_instructions=("Enable performs a one-time prerequisite check for SOLIDWORKS and "
+                            "pywin32. After that, the Enabled checkbox is the only control needed."),
+        manual_install=("There is nothing to copy. If the prerequisite check fails, install "
+                        "pywin32 into the daemon's Python environment with: pip install pywin32."),
+        health_check=("Open a part or assembly and focus SOLIDWORKS; the row should show connected. "
+                      "Driver messages are recorded in %APPDATA%\\TrackballDaemon\\daemon.log."),
+    ),
+    "onshape": dict(
+        install_model="Browser bridge; no Onshape add-in is installed.",
+        supported_versions="Current Onshape web release (rolling release)",
+        setup_instructions=("Set up creates the bridge's per-user local TLS certificate. Trust it "
+                            "once and enable SpaceMouse/3Dconnexion in Onshape preferences."),
+        manual_install=("No application files need copying. Generate/trust the certificate using "
+                        "the Set up dialog or certutil -user, then install the supplied userscript "
+                        "only if Under Cursor orbit is wanted. Administrator access is not required."),
+        health_check=("Open and focus an Onshape document; the row should show connected after the "
+                      "browser handshake. Check %APPDATA%\\TrackballDaemon\\daemon.log."),
+    ),
+    "autocad": dict(
+        install_model="Per-user .NET plugin staged by the daemon and NETLOADed automatically.",
+        supported_versions="AutoCAD 2025 through 2027 (.NET 8 family; tested on 2026)",
+        setup_instructions=("Set up stages TrackballNavAcad.dll under the daemon's APPDATA folder. "
+                            "The daemon adds that folder to TRUSTEDPATHS and NETLOADs it on attach."),
+        manual_install=("Copy trackball_daemon\\plugins\\autocad\\TrackballNavAcad.dll and "
+                        "version.json to %APPDATA%\\TrackballDaemon\\acad_plugin. Add that folder "
+                        "to TRUSTEDPATHS and run NETLOAD on the DLL. No Program Files write is needed."),
+        health_check=("Type TBNAV in AutoCAD or look for connected in this row. Plugin details are "
+                      "in %APPDATA%\\TrackballDaemon\\acad_plugin.log."),
+    ),
+}
+
+
 APPS = [
-    AppDef("blender",    "Blender",    True,  detect_blender, setup=install_blender),
-    AppDef("freecad",    "FreeCAD",    True,  detect_freecad, setup=install_freecad),
-    AppDef("sketchup",   "SketchUp",   True,  detect_sketchup, setup=install_sketchup),
-    AppDef("unreal",     "Unreal Engine", True, detect_unreal, setup=install_unreal),
-    AppDef("unity",      "Unity",      True,  detect_unity, setup=install_unity),
-    AppDef("godot",      "Godot",      True,  detect_godot, setup=install_godot),
-    AppDef("rhino",      "Rhino",      True,  detect_rhino, setup=install_rhino),
-    AppDef("fusion360",  "Fusion 360", True,  detect_fusion, setup=install_fusion),
-    AppDef("solidworks", "SolidWorks", True,  detect_solidworks, setup=setup_solidworks),
-    AppDef("onshape",    "Onshape",    False, detect_onshape, setup=setup_onshape),
-    AppDef("autocad",    "AutoCAD",    True,  detect_autocad, setup=install_autocad),
+    AppDef("blender", "Blender", True, detect_blender, setup=install_blender,
+           **_APP_UX["blender"]),
+    AppDef("freecad", "FreeCAD", True, detect_freecad, setup=install_freecad,
+           **_APP_UX["freecad"]),
+    AppDef("sketchup", "SketchUp", True, detect_sketchup, setup=install_sketchup,
+           **_APP_UX["sketchup"]),
+    AppDef("unreal", "Unreal Engine", True, detect_unreal, setup=install_unreal,
+           **_APP_UX["unreal"]),
+    AppDef("unity", "Unity", True, detect_unity, setup=install_unity,
+           **_APP_UX["unity"]),
+    AppDef("godot", "Godot", True, detect_godot, setup=install_godot,
+           **_APP_UX["godot"]),
+    AppDef("rhino", "Rhino", True, detect_rhino, setup=install_rhino,
+           **_APP_UX["rhino"]),
+    AppDef("fusion360", "Fusion 360", True, detect_fusion, setup=install_fusion,
+           **_APP_UX["fusion360"]),
+    AppDef("solidworks", "SolidWorks", False, detect_solidworks, setup=setup_solidworks,
+           **_APP_UX["solidworks"]),
+    AppDef("onshape", "Onshape", False, detect_onshape, setup=setup_onshape,
+           **_APP_UX["onshape"]),
+    AppDef("autocad", "AutoCAD", True, detect_autocad, setup=install_autocad,
+           **_APP_UX["autocad"]),
 ]
 APPS_BY_KEY = {a.key: a for a in APPS}
+
+
+def setup_action_label(appdef: AppDef, app_cfg) -> Optional[str]:
+    """The meaningful setup action for the app's current state, or None for no button.
+
+    Bundled add-ins can always be reinstalled/updated. No-file integrations expose their one-time
+    prerequisite/setup action only until it succeeds; there is deliberately no placebo Re-check.
+    """
+    if appdef.key in ADDIN_KEYS:
+        if installed_addin_version(appdef.key):
+            if update_available(appdef.key):
+                return f"Update → v{bundled_addin_version(appdef.key)}"
+            return "Reinstall"
+        return appdef.first_run_action or "Set up"
+    if not bool((app_cfg or {}).get("installed")):
+        return appdef.first_run_action
+    return None
 
 
 def status_line(appdef: AppDef) -> str:
@@ -1226,7 +1526,15 @@ def status_line(appdef: AppDef) -> str:
     found = appdef.detect()
     if not found:
         return "not detected"
-    return found if appdef.key == "onshape" else f"detected: {found}"
+    result = compatibility(appdef, found)
+    if appdef.key == "onshape":
+        return found
+    if result.status == "unsupported":
+        return f"WARNING — detected {result.message}  •  {found}"
+    if result.status == "unverified":
+        return f"CAUTION — detected {result.message}  •  {found}"
+    version = f" v{result.version}" if result.version else ""
+    return f"detected{version}: {found}"
 
 
 def install(appdef: AppDef, cfg):

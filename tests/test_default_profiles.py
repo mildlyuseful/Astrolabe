@@ -120,7 +120,6 @@ def test_reset_restores_complete_profile_once_and_preserves_operational_state(is
     operational = {
         "enabled": True,
         "installed": True,
-        "start_automatically": True,
         "addin_version": "9.9.9",
     }
     app.update(operational)
