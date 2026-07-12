@@ -31,7 +31,7 @@ _reader_thread = None
 # --- tuning: Fusion's intrinsic axis orientation + baseline sensitivity. These bake in the
 #     known-good defaults; the daemon's Per-App Bindings (gain 1.0 = this baseline) scale
 #     from here, and the Invert checkboxes flip further. -------------------------------------
-ORBIT_SCALE = (1.0, 1.0, 1.0)    # daemon v6 applies immutable Fusion host baseline
+ORBIT_SCALE = (1.0, 1.0, 1.0)    # daemon package applies immutable Fusion host baseline
 PAN_SIGN = (1.0, 1.0)
 PAN_SCALE = 1.0
 ZOOM_SCALE = 1.0

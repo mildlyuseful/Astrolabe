@@ -8,12 +8,13 @@ import copy
 import json
 import threading
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 
 from .paths import config_path
 
-# --- 3D-navigation bindings. Gains are neutral 1.0 scalers; the per-app add-on bakes in the
-#     baseline orbit-orientation/pan/zoom feel, and these scale from there. -----------------
+# --- User-facing 3D-navigation overrides. Gains are neutral 1.0 scalers and inversion defaults
+#     are off. Developer-owned software alignment lives only in host_profiles.json. -------------
 _DEFAULT_3D_BINDINGS = {
     # orbit: AXIS_SOURCE / AXIS_SIGN / ANGLE_SCALE
     "orbit": {"axis_source": [0, 1, 2], "axis_sign": [1.0, 1.0, 1.0], "sensitivity": 1.0},
@@ -93,19 +94,16 @@ DEFAULT_ACTION_AXIS_SOURCE = {
 
 @dataclass(frozen=True)
 class HostBaseline:
-    """Immutable developer-owned correction applied before user preferences.
+    """Runtime-immutable developer correction loaded from host_profiles.json.
 
     Scale and sign are separate so dominance/deadzone decisions remain based on the unscaled sensor
-    motion, preserving the established gesture classifier. Axis permutations are identity today;
-    the explicit fields make future unconventional host mappings data rather than code changes.
+    motion, preserving the established gesture classifier. User axis routing remains a separate
+    config/UI concern.
     """
-    orbit_source: tuple = (0, 1, 2)
     orbit_sign: tuple = (1.0, 1.0, 1.0)
     orbit_scale: tuple = (1.0, 1.0, 1.0)
-    pan_source: tuple = (0, 1)
     pan_sign: tuple = (1.0, 1.0)
     pan_scale: float = 1.0
-    zoom_source: int = 2
     zoom_sign: float = 1.0
     zoom_scale: float = 1.0
     move_scale: float = 1.0
@@ -114,34 +112,88 @@ class HostBaseline:
     advanced_invert: tuple = ()
 
 
-HOST_BASELINE_PROFILES = MappingProxyType({
-    "blender": HostBaseline(orbit_scale=(0.5, 0.5, 0.5),
-                            pan_sign=(1.0, -1.0), pan_scale=0.5, zoom_scale=0.5,
-                            move_scale=0.5, apply_in_daemon=False,
-                            advanced_invert=(("camera", "roll"), ("fly", "bank"))),
-    "freecad": HostBaseline(pan_sign=(-1.0, 1.0), pan_scale=0.14, zoom_scale=0.25),
-    "sketchup": HostBaseline(orbit_sign=(-1.0, -1.0, 1.0),
-                             pan_sign=(-1.0, -1.0), pan_scale=0.14, zoom_scale=0.25,
-                             move_scale=0.5, apply_in_daemon=False,
-                             advanced_invert=(("camera", "roll"), ("fly", "bank"))),
-    "unreal": HostBaseline(orbit_scale=(2.0, 2.0, 2.0),
-                           pan_sign=(1.0, -1.0), pan_scale=0.14, zoom_scale=0.25,
-                           move_scale=0.5, apply_in_daemon=False),
-    "unity": HostBaseline(orbit_scale=(2.0, 2.0, 2.0),
-                          pan_sign=(1.0, -1.0), pan_scale=0.14, zoom_scale=0.25,
-                          move_scale=0.5, apply_in_daemon=False),
-    "godot": HostBaseline(orbit_scale=(2.0, 2.0, 2.0),
-                          pan_sign=(1.0, -1.0), pan_scale=0.14, zoom_scale=0.25,
-                          move_scale=0.5, apply_in_daemon=False),
-    "rhino": HostBaseline(pan_sign=(-1.0, 1.0), pan_scale=0.14, zoom_scale=0.25),
-    "fusion360": HostBaseline(orbit_sign=(-1.0, -1.0, 1.0),
-                              pan_sign=(-1.0, -1.0), pan_scale=0.14, zoom_scale=0.25),
-    "solidworks": HostBaseline(orbit_sign=(-1.0, -1.0, 1.0),
-                               pan_sign=(1.0, -1.0), pan_scale=0.2, zoom_scale=0.5),
-    "onshape": HostBaseline(orbit_sign=(-1.0, -1.0, 1.0),
-                            pan_sign=(1.0, -1.0), pan_scale=0.14, zoom_scale=0.25),
-    "autocad": HostBaseline(pan_sign=(-1.0, 1.0), pan_scale=0.5, zoom_scale=0.5),
-})
+HOST_PROFILE_PATH = Path(__file__).with_name("host_profiles.json")
+HOST_PROFILE_APP_KEYS = (
+    "blender", "freecad", "sketchup", "unreal", "unity", "godot", "rhino", "fusion360",
+    "solidworks", "onshape", "autocad",
+)
+HOST_PROFILE_FIELDS = {
+    "orbit_sign", "orbit_scale", "pan_sign", "pan_scale", "zoom_sign", "zoom_scale",
+    "move_scale", "apply_in_daemon", "advanced_invert",
+}
+
+
+def _host_vector(value, size, field, app_key, signs=False):
+    if not isinstance(value, list) or len(value) != size:
+        raise ValueError(f"host profile {app_key}.{field} must contain {size} numbers")
+    if any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in value):
+        raise ValueError(f"host profile {app_key}.{field} must contain only numbers")
+    out = tuple(float(item) for item in value)
+    if signs and any(item not in (-1.0, 1.0) for item in out):
+        raise ValueError(f"host profile {app_key}.{field} signs must be -1 or 1")
+    if not signs and any(item <= 0.0 for item in out):
+        raise ValueError(f"host profile {app_key}.{field} scales must be positive")
+    return out
+
+
+def _host_number(value, field, app_key, sign=False):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"host profile {app_key}.{field} must be a number")
+    value = float(value)
+    if sign and value not in (-1.0, 1.0):
+        raise ValueError(f"host profile {app_key}.{field} sign must be -1 or 1")
+    if not sign and value <= 0.0:
+        raise ValueError(f"host profile {app_key}.{field} scale must be positive")
+    return value
+
+
+def load_host_baseline_profiles(path=HOST_PROFILE_PATH):
+    """Validate developer-owned raw profiles and freeze them for this daemon process."""
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"cannot load host alignment profiles from {path}: {exc}") from exc
+    if (not isinstance(raw, dict) or raw.get("schema") != 1 or
+            not isinstance(raw.get("profiles"), dict)):
+        raise ValueError("host_profiles.json must contain schema 1 and a profiles object")
+    supplied = raw["profiles"]
+    if set(supplied) != set(HOST_PROFILE_APP_KEYS):
+        missing = sorted(set(HOST_PROFILE_APP_KEYS) - set(supplied))
+        extra = sorted(set(supplied) - set(HOST_PROFILE_APP_KEYS))
+        raise ValueError(f"host profile suite mismatch; missing={missing}, extra={extra}")
+
+    profiles = {}
+    for app_key in HOST_PROFILE_APP_KEYS:
+        item = supplied[app_key]
+        if not isinstance(item, dict):
+            raise ValueError(f"host profile {app_key} must be an object")
+        if set(item) != HOST_PROFILE_FIELDS:
+            missing = sorted(HOST_PROFILE_FIELDS - set(item))
+            extra = sorted(set(item) - HOST_PROFILE_FIELDS)
+            raise ValueError(f"host profile {app_key} fields mismatch; missing={missing}, extra={extra}")
+        advanced = item.get("advanced_invert", [])
+        if (not isinstance(advanced, list) or
+                any(not isinstance(path, str) or path.count(".") != 1 or
+                    not all(part.strip() for part in path.split(".", 1)) for path in advanced)):
+            raise ValueError(f"host profile {app_key}.advanced_invert must use mode.action strings")
+        apply_in_daemon = item.get("apply_in_daemon")
+        if not isinstance(apply_in_daemon, bool):
+            raise ValueError(f"host profile {app_key}.apply_in_daemon must be true or false")
+        profiles[app_key] = HostBaseline(
+            orbit_sign=_host_vector(item.get("orbit_sign"), 3, "orbit_sign", app_key, signs=True),
+            orbit_scale=_host_vector(item.get("orbit_scale"), 3, "orbit_scale", app_key),
+            pan_sign=_host_vector(item.get("pan_sign"), 2, "pan_sign", app_key, signs=True),
+            pan_scale=_host_number(item.get("pan_scale"), "pan_scale", app_key),
+            zoom_sign=_host_number(item.get("zoom_sign"), "zoom_sign", app_key, sign=True),
+            zoom_scale=_host_number(item.get("zoom_scale"), "zoom_scale", app_key),
+            move_scale=_host_number(item.get("move_scale"), "move_scale", app_key),
+            apply_in_daemon=apply_in_daemon,
+            advanced_invert=tuple(tuple(path.split(".", 1)) for path in advanced),
+        )
+    return MappingProxyType(profiles)
+
+
+HOST_BASELINE_PROFILES = load_host_baseline_profiles()
 
 
 def host_baseline(app_key):
@@ -398,7 +450,7 @@ def _sketchup_app():
     return a
 
 
-CONFIG_VERSION = 6
+CONFIG_VERSION = 7
 
 DEFAULTS = {
     "version": CONFIG_VERSION,
@@ -606,6 +658,22 @@ class Config:
                     old_group = disk_invert.get(mode) if isinstance(disk_invert.get(mode), dict) else {}
                     if action in old_group:
                         user_invert.setdefault(mode, {})[action] = not bool(old_group[action])
+            changed = True
+        if from_version == 6:
+            # v7 completes the pre-alpha ownership split. Values used while calibrating hosts had
+            # been saved as ordinary user overrides, so reset every per-app navigation profile once
+            # to the neutral shipped user layer. Enable/install/startup/version state is untouched;
+            # global physical orientation is also preserved because it belongs to the user/device.
+            # Only v6 is reset: older configs skipping directly to v7 retain their established user
+            # preferences after the historical migrations instead of being destructively cleared.
+            for app_key in DEFAULT_PROFILE_KEYS:
+                profile = default_app_profile(app_key)
+                app = self.data["apps"][app_key]
+                for field in APP_PROFILE_FIELDS:
+                    if field in profile:
+                        app[field] = copy.deepcopy(profile[field])
+                    else:
+                        app.pop(field, None)
             changed = True
         self.data["version"] = CONFIG_VERSION
         return changed

@@ -193,7 +193,7 @@ which is fine because only one pivot is active at a time. Add-on 0.1.12 applies
 ### 5.3 Immutable host baseline
 
 Blender's orbit `0.5`, pan `(0.5,-0.5)`, zoom/dolly `0.5`, and fly/walk move `0.5`
-corrections live in `HOST_BASELINE_PROFILES`, not editable add-on constants. The add-on constants are
+corrections live in `host_profiles.json`, not editable add-on constants. The add-on constants are
 all neutral and `adv.host_baseline` is the only source of intrinsic direction/feel. Runtime constants
 that remain local are:
 
@@ -383,7 +383,7 @@ These were all found via live trackball testing; the fixes are in the code but t
   add-on version (3 places) if the add-on changed. Restart daemon + F3.
 - **Add an invertible axis:** add the key to the right mode in `_DEFAULT_BLENDER_INVERT`, apply it in
   the `_apply` per-mode invert block, add a checkbox to the relevant `_invert_row` in ui.
-- **Change suite alignment:** edit Blender's immutable `HOST_BASELINE_PROFILES` entry (§5.3), update
+- **Change suite alignment:** edit Blender's packaged `host_profiles.json` entry (§5.3), update
   the baseline tests/docs, and bump the daemon/add-on contract versions.
 - **Ship a new add-on build:** bump `bl_info["version"]` + `ADDIN_VERSION` + `version.json`; the
   daemon's `auto_update` re-copies on next launch (compares `version.json`).

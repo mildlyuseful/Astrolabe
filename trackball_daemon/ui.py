@@ -627,27 +627,17 @@ class SettingsWindow:
             self._set_and_save(("active_app",), self._edit_app.get())   # selection = active
             self._bindings_fields(self._scrollable(holder), self._edit_app.get())
 
-        def choose_default_profile(key):
-            self._edit_app.set(key)
-            rebuild()
-
         profile_actions = ttk.Frame(outer)
         profile_actions.pack(fill="x", padx=10, pady=(0, 4))
-        ttk.Label(profile_actions, text="Shipped profiles:", width=24, anchor="w").pack(side="left")
-        profiles = ttk.Menubutton(profile_actions, text="Default profiles")
-        profile_menu = tk.Menu(profiles, tearoff=False)
-        profiles["menu"] = profile_menu
-        for appdef in integrations.APPS:
-            profile_menu.add_command(label=appdef.name,
-                                     command=lambda key=appdef.key: choose_default_profile(key))
-        profiles.pack(side="left", padx=(8, 0))
+        ttk.Label(profile_actions, text="User overrides:", width=24, anchor="w").pack(side="left")
 
         def reset_current_profile():
             key = self._edit_app.get()
             name = integrations.APPS_BY_KEY[key].name
             if not messagebox.askyesno(
-                    "Reset default profile?",
-                    f"Reset every {name} navigation setting to the shipped intuitive default?\n\n"
+                    "Reset user overrides?",
+                    f"Reset every {name} user-facing navigation setting to its clean default?\n\n"
+                    "Developer host alignment is stored separately and will not change.\n"
                     "Enable/install state and installed add-in version will be preserved.",
                     parent=self.win):
                 return
@@ -656,8 +646,10 @@ class SettingsWindow:
                 w.destroy()
             self._bindings_fields(self._scrollable(holder), key)
 
-        ttk.Button(profile_actions, text="Reset to default profile",
+        ttk.Button(profile_actions, text="Reset user overrides",
                    command=reset_current_profile).pack(side="left", padx=(6, 0))
+        ttk.Label(profile_actions, text="Host alignment is developer-owned and hidden here.",
+                  foreground="#777").pack(side="left", padx=8)
 
         holder.pack(fill="both", expand=True)
 

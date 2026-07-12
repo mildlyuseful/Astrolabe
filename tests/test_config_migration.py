@@ -148,7 +148,7 @@ def test_v5_adds_identity_global_and_action_axis_routing(isolated_config):
         },
     }), encoding="utf-8")
     cfg = Config().load()
-    assert cfg.data["version"] == CONFIG_VERSION == 6
+    assert cfg.data["version"] == CONFIG_VERSION == 7
     assert cfg.data["general"]["axis_orientation"] == {
         "source": [0, 1, 2], "invert": [False, False, False]}
     assert cfg.data["apps"]["blender"]["advanced"]["axis_source"]["walk"] == {

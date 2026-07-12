@@ -226,11 +226,11 @@ class OutputEngine:
                 return
             orbit = (ox, oy, oz)
             movement = (px, py, zoom)
-            aligned_o = tuple(orbit[h.orbit_source[i]] * h.orbit_sign[i] * h.orbit_scale[i]
+            aligned_o = tuple(orbit[i] * h.orbit_sign[i] * h.orbit_scale[i]
                               for i in range(3))
-            aligned_p = tuple(movement[h.pan_source[i]] * h.pan_sign[i] * h.pan_scale
+            aligned_p = tuple(movement[i] * h.pan_sign[i] * h.pan_scale
                               for i in range(2))
-            aligned_z = movement[h.zoom_source] * h.zoom_sign * h.zoom_scale
+            aligned_z = movement[2] * h.zoom_sign * h.zoom_scale
             sink(aligned_o[0], aligned_o[1], aligned_o[2],
                  aligned_p[0], aligned_p[1], aligned_z)
 

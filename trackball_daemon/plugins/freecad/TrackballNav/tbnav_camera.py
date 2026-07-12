@@ -18,7 +18,7 @@ Conventions (VERIFIED live against FreeCAD 1.1 / Coin3D -- see docs/apps/freecad
 """
 import math
 
-# Daemon config v6 applies the immutable FreeCAD host baseline before broker output. Pure camera
+# The daemon's packaged profile applies the immutable FreeCAD host baseline before broker output. Pure camera
 # math is neutral so the developer correction cannot be applied twice.
 ORBIT_SCALE = (1.0, 1.0, 1.0)
 PAN_SIGN = (1.0, 1.0)

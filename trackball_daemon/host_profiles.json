@@ -1,0 +1,126 @@
+{
+  "schema": 1,
+  "profiles": {
+    "blender": {
+      "orbit_sign": [-1, -1, 1],
+      "orbit_scale": [0.5, 0.5, 0.5],
+      "pan_sign": [1, -1],
+      "pan_scale": 0.5,
+      "zoom_sign": 1,
+      "zoom_scale": 0.5,
+      "move_scale": 0.5,
+      "apply_in_daemon": false,
+      "advanced_invert": ["camera.roll", "fly.bank"]
+    },
+    "freecad": {
+      "orbit_sign": [1, 1, 1],
+      "orbit_scale": [1, 1, 1],
+      "pan_sign": [-1, 1],
+      "pan_scale": 0.14,
+      "zoom_sign": 1,
+      "zoom_scale": 0.25,
+      "move_scale": 1,
+      "apply_in_daemon": true,
+      "advanced_invert": []
+    },
+    "sketchup": {
+      "orbit_sign": [-1, -1, 1],
+      "orbit_scale": [1, 1, 1],
+      "pan_sign": [-1, -1],
+      "pan_scale": 0.14,
+      "zoom_sign": 1,
+      "zoom_scale": 0.25,
+      "move_scale": 0.5,
+      "apply_in_daemon": false,
+      "advanced_invert": ["camera.roll", "fly.bank"]
+    },
+    "unreal": {
+      "orbit_sign": [1, 1, 1],
+      "orbit_scale": [2, 2, 2],
+      "pan_sign": [1, -1],
+      "pan_scale": 0.14,
+      "zoom_sign": 1,
+      "zoom_scale": 0.25,
+      "move_scale": 0.5,
+      "apply_in_daemon": false,
+      "advanced_invert": []
+    },
+    "unity": {
+      "orbit_sign": [1, 1, 1],
+      "orbit_scale": [2, 2, 2],
+      "pan_sign": [1, -1],
+      "pan_scale": 0.14,
+      "zoom_sign": 1,
+      "zoom_scale": 0.25,
+      "move_scale": 0.5,
+      "apply_in_daemon": false,
+      "advanced_invert": []
+    },
+    "godot": {
+      "orbit_sign": [1, 1, 1],
+      "orbit_scale": [2, 2, 2],
+      "pan_sign": [1, -1],
+      "pan_scale": 0.14,
+      "zoom_sign": 1,
+      "zoom_scale": 0.25,
+      "move_scale": 0.5,
+      "apply_in_daemon": false,
+      "advanced_invert": []
+    },
+    "rhino": {
+      "orbit_sign": [1, 1, 1],
+      "orbit_scale": [1, 1, 1],
+      "pan_sign": [-1, 1],
+      "pan_scale": 0.14,
+      "zoom_sign": 1,
+      "zoom_scale": 0.25,
+      "move_scale": 1,
+      "apply_in_daemon": true,
+      "advanced_invert": []
+    },
+    "fusion360": {
+      "orbit_sign": [-1, -1, 1],
+      "orbit_scale": [1, 1, 1],
+      "pan_sign": [-1, -1],
+      "pan_scale": 0.14,
+      "zoom_sign": 1,
+      "zoom_scale": 0.25,
+      "move_scale": 1,
+      "apply_in_daemon": true,
+      "advanced_invert": []
+    },
+    "solidworks": {
+      "orbit_sign": [-1, -1, 1],
+      "orbit_scale": [1, 1, 1],
+      "pan_sign": [1, -1],
+      "pan_scale": 0.2,
+      "zoom_sign": 1,
+      "zoom_scale": 0.5,
+      "move_scale": 1,
+      "apply_in_daemon": true,
+      "advanced_invert": []
+    },
+    "onshape": {
+      "orbit_sign": [-1, -1, 1],
+      "orbit_scale": [1, 1, 1],
+      "pan_sign": [1, -1],
+      "pan_scale": 0.14,
+      "zoom_sign": 1,
+      "zoom_scale": 0.25,
+      "move_scale": 1,
+      "apply_in_daemon": true,
+      "advanced_invert": []
+    },
+    "autocad": {
+      "orbit_sign": [1, 1, 1],
+      "orbit_scale": [1, 1, 1],
+      "pan_sign": [-1, 1],
+      "pan_scale": 0.5,
+      "zoom_sign": 1,
+      "zoom_scale": 0.5,
+      "move_scale": 1,
+      "apply_in_daemon": true,
+      "advanced_invert": []
+    }
+  }
+}

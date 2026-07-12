@@ -135,7 +135,7 @@ parts that map, and put **only genuinely Blender-only** options in `apps.blender
 The add-on routes each action immediately before dispatch, so Walk Forward can select Z (twist)
 without changing Orbit. The immutable host baseline bakes in the "inside-out" roll fix; saved
 `camera.roll` and `fly.bank` user defaults remain neutral. This **replaced** the old single
-`invert_camera_roll` flag, and config v6 migrates old saved effective values through XOR composition.
+`invert_camera_roll` flag. The host correction now lives outside the saved user layer.
 Dropped from the brief's starting shape because they are reconciled into the generic scheme:
 `orbit_method` (→ `orbit_style`) and `orbit_around` (→ `orbit_pivot` + `camera`).
 
@@ -199,7 +199,7 @@ This keeps the pivot fixed on screen for *every* non-camera pivot, because the e
   `scene.ray_cast(evaluated_depsgraph_get(), origin, dir)` → `location` (held per gesture; recast on
   pan/zoom or after `PIVOT_HOLD_IDLE`)
 
-Baseline signs/scales live in daemon `HOST_BASELINE_PROFILES`; the add-on's camera math is neutral.
+Baseline signs/scales live in daemon `host_profiles.json`; the add-on's camera math is neutral.
 **Orbit is calibrated to 1:1** with a shipped factor of `0.5`: the add-on rotates by the aligned
 broker delta and the dual-sensor device reports ~2× the physical angle. User Invert/Gain composes on
 top without changing the developer-owned correction.

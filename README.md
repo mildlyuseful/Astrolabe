@@ -60,7 +60,7 @@ mode-specific action. Those routes are independent: for example, setting **Walk 
 makes twist drive forward without changing Orbit or Fly. Identity/default routes preserve the
 pre-v5 behavior exactly.
 
-### Shipped default profiles and host alignment
+### User overrides and developer host alignment
 
 Each supported app has two separate layers. An immutable **host baseline** contains the
 developer-owned sign and scale corrections that make the software feel like the rest of the suite.
@@ -68,9 +68,11 @@ The saved per-app profile contains only user choices. Runtime composition is phy
 then host alignment, then user routing/inversion/gain; resetting user settings cannot erase the
 software correction, and changing a correction does not silently rewrite preferences.
 
-In **Per-App Bindings**, **Default profiles** lists the full supported-app suite and switches the
-profile being edited. **Reset to default profile** restores every navigation field for that app in
-one save while preserving enable/install state, startup choice, and installed add-in version.
+The normal **Per-App Bindings** UI contains only user overrides and starts neutral: gains at their
+defaults and inversion boxes unchecked. **Reset user overrides** restores every navigation field
+for the selected app in one save while preserving enable/install state, startup choice, and
+installed add-in version. Host alignment is intentionally absent from this UI; developers edit the
+separate packaged `trackball_daemon/host_profiles.json` file.
 Maintainer details and the baseline table live in
 [`docs/default_profiles.md`](docs/default_profiles.md).
 

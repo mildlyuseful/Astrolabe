@@ -1,14 +1,20 @@
 # Host baselines and shipped default profiles
 
-Step 4 separates software alignment from user preference. The source of truth is
-`trackball_daemon/config.py`:
+Step 4 separates software alignment from user preference. There are two independent files and only
+one appears in the normal settings UI:
 
-- `HOST_BASELINE_PROFILES` is an immutable mapping of frozen `HostBaseline` values. It contains
-  developer-owned axis, sign, and scale corrections for every supported app.
+- `trackball_daemon/host_profiles.json` is packaged developer data. `config.py` validates it at
+  startup and exposes it as the runtime-immutable `HOST_BASELINE_PROFILES` mapping.
+- `%APPDATA%/TrackballDaemon/config.json` is per-user state. The normal UI edits only this layer;
+  user gains start at their defaults and all user inversion checkboxes start unchecked.
 - `_DEFAULT_APP_PROFILES` is the shipped user layer. `default_app_profile()` always returns a deep
   copy, so reset/edit code cannot mutate the defaults.
 - `APP_PROFILE_FIELDS` defines the complete atomic reset boundary. Operational state (`enabled`,
   `installed`, `start_automatically`, and `addin_version`) is intentionally outside it.
+
+The removed **Shipped profiles** menu had no separate profile operation: it selected the same app as
+the adjacent **Editing app** dropdown. It was redundant and has been removed. The remaining
+**Reset user overrides** button resets the app selected by **Editing app**.
 
 ## Composition contract
 
@@ -19,8 +25,8 @@ The conceptual order is:
 3. Saved per-app source, invert, and gain settings express the user's preference.
 
 Host sign/scale and user invert/gain are composed multiplicatively (baseline direction XOR user
-invert). The currently shipped host source maps are identity; their explicit fields reserve a safe
-place for future unconventional host axis maps.
+invert). Global and per-action source routing remain user/device settings rather than host-profile
+calibration data.
 
 Lightweight integrations receive aligned deltas at the daemon output boundary. Blender, SketchUp,
 Unreal, Unity, and Godot need to know the active Orbit/Fly/Walk action first, so the daemon sends
@@ -44,13 +50,33 @@ camera constants are neutral to prevent double application.
 | AutoCAD | `(1, 1, 1)` | `(-0.5, 0.5)` | `0.5` | `1` | daemon |
 
 Blender and SketchUp also have immutable `camera.roll` and `fly.bank` direction corrections. The
-wire value is baseline XOR saved user preference. Config v6 migrates explicitly saved v5 values so
-their effective directions do not change; absent old keys use the new neutral saved default.
+wire value is baseline XOR saved user preference. Config v7 performs a one-time reset of v6 per-app
+navigation fields because v6 could still contain values used during developer calibration. It
+preserves global physical orientation plus app enable/install/startup/version state. Older configs
+that skip directly to v7 retain their established user preferences after historical migrations.
 
-## Changing a shipped default
+## Developer tuning workflow
 
-Change the immutable baseline only for a software-convention or suite-alignment correction. Change
-the default app profile for an intuitive user-facing default. Then bump the daemon and every add-in
-whose wire/math contract changed, add a migration if existing effective behavior would change, and
-update the baseline/reset/composition tests. Do not reintroduce non-neutral sign/scale constants in
-integration camera math.
+1. Stop the daemon. Open `trackball_daemon/host_profiles.json` in the source tree. Do not edit the
+   user's `%APPDATA%/TrackballDaemon/config.json` for host calibration.
+2. Find the software key. Flip an intrinsic direction by changing the corresponding
+   `orbit_sign`, `pan_sign`, or `zoom_sign` entry between `1` and `-1`. Tune magnitude with the
+   positive `orbit_scale`, `pan_scale`, `zoom_scale`, or `move_scale` value.
+3. For a mode-specific inside/out correction in a rich integration, add/remove a `mode.action`
+   string in `advanced_invert` (for example `camera.roll` or `fly.bank`).
+4. Do not change `apply_in_daemon` while tuning feel. It is `false` only for Blender, SketchUp,
+   Unreal, Unity, and Godot because those integrations must apply the baseline after resolving their
+   active Orbit/Fly/Walk action. All other integrations use `true`.
+5. Restart the daemon. A source/editable install reads the edited JSON immediately at startup; a
+   packaged release must be rebuilt so the revised JSON is included. Add-ins do not need a version
+   bump for a data-only factor change because the daemon supplies the factors at runtime.
+6. Keep the normal UI neutral while validating. If you temporarily use a user checkbox or gain to
+   discover a correction, transfer that correction into `host_profiles.json`, restart, then click
+   **Reset user overrides** for that app before judging the result.
+7. Run `pytest -q tests/test_default_profiles.py tests/test_output_bitexact.py`, then the full
+   `pytest -q`. Invalid signs, non-positive scales, malformed action paths, or missing app profiles
+   fail fast at daemon import/startup.
+
+Change `host_profiles.json` only for a software-convention or suite-alignment correction. Change the
+default app profile in `config.py` only for an intuitive user-facing default. Do not reintroduce
+non-neutral sign/scale constants in integration camera math.
