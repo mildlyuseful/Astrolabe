@@ -306,9 +306,9 @@ class SolidWorksDriver:
         self._zoom_hold_sec = DEFAULT_PIVOT_HOLD
         self._last_activity_t = 0.0                           # monotonic time of the last orbit/pan/zoom
         self._rl = {}                                         # rate-limited info-log timestamps
-        # Level-horizon-on-entry (issue #2). _horizon_fixed is None until the first set_scheme so a
-        # daemon that STARTS in turntable never levels -- only a real free->turntable switch queues
-        # _level_pending, which the worker applies on the next flush (COM stays worker-thread-only).
+        # _horizon_fixed is None until the first set_scheme, so starting in turntable never levels.
+        # Only a real free->turntable switch queues _level_pending; the worker applies it on the
+        # next flush because COM access remains worker-thread-only.
         self._level_horizon = True
         self._horizon_fixed = None
         self._level_pending = False
@@ -345,7 +345,7 @@ class SolidWorksDriver:
                         "sel_override": bool(selection_overrides_pivot)}
         if orbit_pivot_fallbacks is not None:
             self._scheme["fallbacks"] = list(orbit_pivot_fallbacks)
-        # Fixed-horizon transition (issue #2): a free->turntable switch queues one leveling pass,
+        # A free->turntable switch queues one horizon-leveling pass,
         # applied by the worker on the next flush. Leaving turntable cancels a queued pass.
         self._level_horizon = bool(level_horizon_on_entry)
         fixed = (orbit_style == "turntable")
@@ -677,7 +677,7 @@ class SolidWorksDriver:
             return None, None
 
     def _apply_level_horizon(self, view):
-        """Remove existing roll on turntable entry (issue #2): rotate the view about the camera
+        """Remove existing roll on turntable entry: rotate the view about the camera
         forward axis (Orientation3 column 2) until camera-right is horizontal (perpendicular to
         WORLD_UP), then pan so the screen-centre point keeps its exact screen position -- the same
         RotateAboutAxis + dT compensation the orbit path uses. Scale2 (zoom) and the view depth

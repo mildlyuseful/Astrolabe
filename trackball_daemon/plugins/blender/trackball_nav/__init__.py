@@ -43,18 +43,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.22"                   # 0.1.22: independent orbit/zoom holds
-                                           # 0.1.18: shared Zoom mode targets + twist zoom/dolly
-                                           # 0.1.17: level horizon on fixed-horizon mode entry
-                                           # (adv.level_horizon_on_entry; issue #2).
-                                           # 0.1.16: immutable host baseline profile.
-                                           # 0.1.15: per-action X/Y/Z source routing.
-                                           # 0.1.12: selection_overrides_pivot is functional.
-                                           # 0.1.10: 3D-cursor pivot value renamed cursor->cursor_3d
-                                           # (daemon config v3; "cursor" now means under-the-mouse).
-                                           # 0.1.11: under-mouse "cursor" pivot implemented via a
-                                           # passive modal-operator mouse tracker (no on-demand
-                                           # mouse getter exists in the bpy API -- verified).
+ADDIN_VERSION = "0.1.22"                   # keep in sync with bl_info and version.json
 
 # Host correction arrives in ``adv.host_baseline`` from the daemon's immutable profile registry.
 # Camera math stays neutral so corrections cannot be double-applied here and in the daemon.
@@ -83,8 +72,8 @@ _TIMER_INTERVAL = 1.0 / 90.0    # main-thread poll rate (cheap queue drain)
 # The under-mouse "cursor" pivot shares this hold slot (only one pivot is active at a time).
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
 _zoom_gesture = {"pivot": None, "resolved": False}
-# Fixed-horizon transition tracker (issue #2): None until the first frame (an add-on that starts
-# up already in a fixed mode must NOT level -- only a real free->fixed switch does).
+# Fixed-horizon transition tracker: None until the first frame so startup in a fixed mode does not
+# level the view; only a real free->fixed switch does.
 _horizon = {"fixed": None}
 # Under-mouse "cursor" pivot: Blender has NO on-demand mouse getter (verified 2026-07-06 -- no
 # mouse/cursor/pointer property on Window/Screen/Area/Region/RegionView3D/Context; Event.mouse_* only

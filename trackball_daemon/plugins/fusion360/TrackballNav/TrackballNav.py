@@ -37,27 +37,7 @@ PAN_SCALE = 1.0
 ZOOM_SCALE = 1.0
 ZOOM_SIGN = 1.0
 
-ADDIN_VERSION = "0.1.24"         # 0.1.24: independent orbit/zoom holds
-                                 # 0.1.20: level horizon on turntable entry
-                                 # (adv.level_horizon_on_entry; issue #2).
-                                 # 0.1.19: immutable host baseline profile.
-                                 # 0.1.18: camera/screen_center canonical pivot names.
-                                 # 0.1.16: read selection from app.userInterface.activeSelections.
-                                 # 0.1.15: real selection/origin pivots + selection override.
-                                 # 0.1.14: scheme values renamed (pointer->cursor, cursor->selection,
-                                 # to_pointer->to_cursor) to match the daemon v3 config migration.
-                                 # 0.1.11: "pointer" orbit pivot + "to_pointer" zoom (orbit/zoom about
-                                 # the surface under the MOUSE POINTER; GetCursorPos + screenToView +
-                                 # viewToModelSpace ray -- see the POINTER PIVOT block below).
-                                 # 0.1.12: DPI fix -- GetCursorPos is PHYSICAL px but screenToView's
-                                 # INPUT is LOGICAL, so at 125% hits landed down-right of the cursor;
-                                 # now divided by the monitor's effective DPI scale.
-                                 # 0.1.13: range-check fix -- screenToView's OUTPUT is PHYSICAL
-                                 # viewport px while vp.width/height are LOGICAL, so the old bounds
-                                 # check wrongly REJECTED the right/bottom ~20% band ("fails to
-                                 # target" there, user-reported); validate against vp.size * scale
-                                 # and feed viewToModelSpace the PHYSICAL pixel unscaled. Keep in
-                                 # sync with TrackballNav.manifest.
+ADDIN_VERSION = "0.1.24"         # keep in sync with TrackballNav.manifest
 
 _last_err = {"t": 0.0, "s": ""}
 _last_scheme = {"v": None}
@@ -107,15 +87,15 @@ _obj_cache = {"t": 0.0, "p": None}      # cached object bounding-box center (rec
 # per gesture and HELD; re-cast only after the view moves (pan/zoom) or the gesture ends (idle).
 _gesture = {"t": 0.0, "pivot": None}    # last-frame time + held orbit pivot (Point3D | None)
 _zoom_gesture = {"pivot": None}          # "to_cursor" zoom's own held pivot (reset on orbit/pan)
-# Fixed-horizon transition tracker (issue #2): None until the first frame, so an add-in that
-# starts up already in turntable never levels -- only a real free->turntable switch does.
+# Fixed-horizon transition tracker: None until the first frame so startup in turntable does not
+# level the view; only a real free->turntable switch does.
 _horizon = {"fixed": None}
 PIVOT_HOLD_IDLE = 0.5                    # fallback for orbit/zoom hold settings
 APERTURE_FRACS = (0.03, 0.10, 0.30)      # ray thickness tried, as a fraction of the view half-height
 RAY_PUSHBACK = 8.0                       # start the ray this many half-heights behind screen-centre
 BBOX_MARGIN = 0.10                       # accept a hit inside the bbox grown by this fraction of its diag
 
-# --- CURSOR PIVOT (op == "cursor" / zm == "to_cursor"; pre-0.1.14 values "pointer"/"to_pointer"):
+# --- CURSOR PIVOT (op == "cursor" / zm == "to_cursor") ---------------------------------------
 # orbit/zoom about the surface under the
 # live MOUSE POINTER. Design decision -- Fusion's documented mouse-tracking hook is Command.mouseMove,
 # but a Command is MODAL: while active it owns clicks, and the user activating ANY other tool (or
@@ -127,18 +107,11 @@ BBOX_MARGIN = 0.10                       # accept a hit inside the bbox grown by
 # cache to go stale). If the GUI pass ever disproves the screenToView mapping, the fallbacks are the
 # _client_view_pixel window mapping below, then a Command.mouseMove cache as the last resort.
 #
-# LIVE-GUI VERIFIED over two user passes at 125% scaling (2026-07-04). Pass 1 (0.1.11): the chain
-# WORKS (tracking, per-gesture hold, fallbacks) but hits landed DOWN-RIGHT of the cursor. Pass 2
-# (0.1.12): "works very precisely", EXCEPT the right/bottom band failed to target. Fitting the
-# logged samples (view = 1.25*logical_in - physical_origin, exact across all of them) pinned the
-# full coordinate model -- see _cursor_view_pixel's docstring: screenToView takes LOGICAL screen
-# px and returns PHYSICAL viewport px; viewToModelSpace consumes PHYSICAL; vp.width/height are
-# LOGICAL. 0.1.12 fixed the input scale; 0.1.13 fixed the OUTPUT bounds check (validate against
-# vp.size * scale -- the logical bounds rejected correct physical values in the right/bottom ~20%,
-# precisely the region the 0.1.11 bug used to map off-screen). STILL TO VERIFY LIVE: the 0.1.13
-# right/bottom band re-check (hover near the right/bottom viewport edges and orbit; watch the
-# "cursor map:" line), and mixed-DPI multi-monitor setups (the range check + object-centre
-# fallback bound the damage).
+# Fusion's coordinate APIs mix units: screenToView takes LOGICAL screen pixels and returns PHYSICAL
+# viewport pixels; viewToModelSpace consumes PHYSICAL pixels; vp.width/height are LOGICAL. Divide
+# the cursor input by monitor scale, validate the output against scaled viewport bounds, and pass
+# that output to viewToModelSpace unchanged. The range check and object-centre fallback bound any
+# mixed-DPI multi-monitor mismatch.
 
 
 def _active_design():
@@ -361,10 +334,8 @@ def _cursor_view_pixel(vp):
       * screenToView:      LOGICAL screen px IN -> PHYSICAL viewport px OUT
       * viewToModelSpace:  PHYSICAL viewport px IN ("works very precisely" only with these)
       * vp.width/height:   LOGICAL px
-    So: divide the physical cursor by the monitor scale for screenToView's input (the 0.1.12
-    down-right-offset fix), but range-validate its OUTPUT against vp.width*scale (0.1.13 -- the
-    logical bounds wrongly rejected the right/bottom ~20% band: exactly the region the 0.1.11 bug
-    used to map off-screen) and pass it through UNSCALED."""
+    Divide the physical cursor by the monitor scale for screenToView's input, range-validate its
+    output against vp.width*scale, and pass it through unscaled."""
     sp = _cursor_screen_pos()
     if sp is None:
         return None
@@ -577,7 +548,7 @@ def _apply(frame):
         true_up = right.crossProduct(fwd)
         true_up.normalize()
 
-        # Level ONCE when the style transitions free->turntable (issue #2): rebuild upVector so
+        # Level ONCE when the style transitions free->turntable: rebuild upVector so
         # camera-right is horizontal while eye/target (and so the view direction, distance, and
         # any held orbit point) stay put. Transitions only -- prev None (fresh add-in) never
         # levels, and ordinary turntable frames never re-level. Skipped in the degenerate

@@ -1,9 +1,6 @@
 """Godot integration registry: EditorPlugin into project addons/, enable in project.godot."""
 import json
 import os
-import sys
-
-import pytest
 
 from trackball_daemon import integrations
 from trackball_daemon.config import Config
@@ -114,12 +111,3 @@ def test_install_from_projects_cfg(isolated_config, tmp_path, monkeypatch):
     ok, msg = integrations.install(integrations.APPS_BY_KEY["godot"], cfg)
     assert ok is True, msg
     assert (proj / "addons" / "trackball_nav" / "plugin.cfg").exists()
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")
-def test_status_line_reflects_detection(monkeypatch):
-    appdef = integrations.APPS_BY_KEY["godot"]
-    monkeypatch.setattr(appdef, "detect", lambda: r"C:\Godot\Godot_v4.3-stable_win64.exe")
-    assert "detected" in integrations.status_line(appdef).lower()
-    monkeypatch.setattr(appdef, "detect", lambda: None)
-    assert integrations.status_line(appdef) == "not detected"

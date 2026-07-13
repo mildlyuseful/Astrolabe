@@ -6,6 +6,7 @@ and the same synthesized mouse input. The golden constants below were captured f
 pre-change engine at default config; an exact-equality compare catches any drift.
 """
 import struct
+import threading
 
 import pytest
 
@@ -176,3 +177,41 @@ def test_ordinary_profile_twist_none_drops_twist(engine, monkeypatch):
 
     assert nav[-1][2] == 0.0
     assert nav[-1][5] == 0.0
+
+
+def test_config_reload_and_focus_switch_publish_one_coherent_mapping(engine, monkeypatch):
+    """A slow config refresh cannot overwrite a newer foreground-app switch."""
+    engine.set_active_bindings("fusion360")
+    original = engine._build_mapping
+    reload_entered = threading.Event()
+    release_reload = threading.Event()
+    switch_started = threading.Event()
+    switch_done = threading.Event()
+
+    def blocking_build(app_key):
+        if threading.current_thread().name == "mapping-reload":
+            reload_entered.set()
+            release_reload.wait(2.0)
+        return original(app_key)
+
+    monkeypatch.setattr(engine, "_build_mapping", blocking_build)
+    reload_thread = threading.Thread(target=engine.apply_config, name="mapping-reload")
+
+    def switch_app():
+        switch_started.set()
+        engine.set_active_bindings("rhino")
+        switch_done.set()
+
+    switch_thread = threading.Thread(target=switch_app, name="mapping-switch")
+    reload_thread.start()
+    assert reload_entered.wait(1.0)
+    switch_thread.start()
+    assert switch_started.wait(1.0)
+    assert not switch_done.wait(0.05)       # serialized behind the in-progress snapshot build
+    release_reload.set()
+    reload_thread.join(2.0)
+    switch_thread.join(2.0)
+
+    assert not reload_thread.is_alive() and not switch_thread.is_alive()
+    assert switch_done.is_set()
+    assert engine._bindings_app == engine._mapping.app_key == "rhino"

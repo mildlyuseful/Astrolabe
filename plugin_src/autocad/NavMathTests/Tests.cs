@@ -113,7 +113,7 @@ static class Tests
                        "level toggle off: current tilt preserved");
         }
 
-        // --- null pivot == the pre-0.3.0 behaviour: the target never moves on orbit ----------
+        // --- null pivot keeps the camera target fixed during orbit ---------------------------
         {
             var c0 = Cam();
             var c1 = Apply(c0, D(0.20, 0.35, 0.10), "free");

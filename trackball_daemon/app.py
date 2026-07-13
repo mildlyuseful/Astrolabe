@@ -4,7 +4,7 @@ the nav transports (broker / SolidWorks / Onshape / AutoCAD loader).
 Threading model (Windows):
   * main thread       -> hidden Tk root + mainloop (owns all GUI; window shown/hidden on demand)
   * tray thread       -> pystray icon loop (menu callbacks marshalled to Tk via root.after)
-  * ble thread        -> asyncio BLE loop (unchanged data path)
+  * ble thread        -> asyncio BLE loop and packet-boundary focus routing
   * broker threads    -> NavBroker accept + sender (streams frames to the socket add-ons)
   * SolidWorks worker -> its own CoInitialize'd COM thread (in-process driver)
   * AutoCAD worker    -> its own CoInitialize'd COM thread (plugin loader; delivery only)
@@ -31,6 +31,9 @@ from .tray import TrayController
 from .ui import SettingsWindow
 from .util import get_logger
 from .winfocus import foreground_process_name
+
+
+_NO_PACKET_APP = object()
 
 
 class App:
@@ -86,9 +89,10 @@ class App:
         self.connected_apps = []
         self._last_apps_pushed = None
         self._engine_app = None
+        self._packet_app_key = _NO_PACKET_APP
         self._last_scheme_pushed = None
 
-    # --- BLE wiring (unchanged data path) -----------------------------------------
+    # --- BLE wiring and packet-boundary routing -----------------------------------
     def get_ble_params(self):
         d = self.config.data["device"]
         return d["name"], d.get("address", ""), d["char_uuid"]
@@ -260,16 +264,36 @@ class App:
             return None
         return key
 
-    def _nav_sink(self, ox, oy, oz, px, py, zoom):
-        # Called on the BLE thread. Stream only when a supported, enabled app is focused.
-        key = self._active_app_key()
-        if key is None:
-            return
+    def _activate_nav_app(self, key):
+        """Switch mappings/rate/scheme before transforming the focused app's next packet."""
         if key != self._engine_app:               # drive each app with its own bindings + rate
             self._engine_app = key
             self.engine.set_active_bindings(key)
             self._apply_rates()
             self._apply_schemes()
+
+    def _handle_ble_packet(self, data):
+        """Choose one focused app for both mapping and routing of this complete BLE packet."""
+        key = self._active_app_key()
+        if key is not None:
+            self._activate_nav_app(key)
+        previous = getattr(self, "_packet_app_key", _NO_PACKET_APP)
+        self._packet_app_key = key
+        try:
+            self.engine.handle_packet(bytes(data))
+        finally:
+            self._packet_app_key = previous
+
+    def _nav_sink(self, ox, oy, oz, px, py, zoom):
+        # Called synchronously by _handle_ble_packet after that method selected the app whose
+        # mapping produced these values. Direct callers (including tests/debug helpers) fall back
+        # to a fresh foreground lookup.
+        key = getattr(self, "_packet_app_key", _NO_PACKET_APP)
+        if key is _NO_PACKET_APP:
+            key = self._active_app_key()
+        if key is None:
+            return
+        self._activate_nav_app(key)
         if key == "onshape":                      # browser bridge (NL-Proxy emulation), not the broker
             self.onshape_bridge.submit(ox, oy, oz, px, py, zoom)
         elif key == "solidworks":                 # external COM automation, not the socket broker
@@ -337,7 +361,9 @@ class App:
         for key, old, new in integrations.auto_update(self.config):
             self.log.info(f"updated {key} add-in {old} -> {new} (restart {key} to apply)")
 
-        notify_cb = lambda sender, data: self.engine.handle_packet(bytes(data))
+        def notify_cb(sender, data):
+            self._handle_ble_packet(data)
+
         start_ble_thread(self.get_ble_params, notify_cb, self.set_status, self.stop_event)
 
         if self.debug:

@@ -1,8 +1,5 @@
 """Rhino integration registry: scripts dir install + version-gated auto_update."""
 import json
-import sys
-
-import pytest
 
 from trackball_daemon import integrations
 from trackball_daemon.config import Config
@@ -94,12 +91,3 @@ def test_auto_update_recopies_on_version_bump(isolated_config, tmp_path, monkeyp
     updated = integrations.auto_update(cfg)
     assert any(key == "rhino" for key, _o, _n in updated)
     assert integrations.installed_addin_version("rhino") == "0.1.18"
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")
-def test_status_line_reflects_detection(monkeypatch):
-    appdef = integrations.APPS_BY_KEY["rhino"]
-    monkeypatch.setattr(appdef, "detect", lambda: r"C:\Program Files\Rhino 8\System\Rhino.exe")
-    assert "detected" in integrations.status_line(appdef).lower()
-    monkeypatch.setattr(appdef, "detect", lambda: None)
-    assert integrations.status_line(appdef) == "not detected"

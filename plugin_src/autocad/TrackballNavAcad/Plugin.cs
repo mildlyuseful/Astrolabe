@@ -18,8 +18,7 @@
 //
 //   2. Editor.GetCurrentView()/SetCurrentView (fallback: paper space, GS failure): works
 //      everywhere but regens EVERY call (~5-7 ms/frame with real entities) -- smooth-ish motion,
-//      per-frame regeneration. This was the v0.1.x primary until the user noticed the model still
-//      regenerating each frame; the WorldDraw counter confirmed it.
+//      per-frame regeneration. WorldDraw measurements confirmed why this is fallback-only.
 //
 // This assembly is NETLOADed into acad.exe by the daemon. It connects to the trackball daemon's
 // nav broker (127.0.0.1:47900 -- the same socket protocol as the Fusion/Blender/FreeCAD/Unreal
@@ -57,37 +56,7 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.15";  // 0.3.15: separate holds + stationary-cursor recast
-                                                       // 0.3.11: level-horizon toggle -- turntable
-                                                       // entry levels once (default) or keeps tilt
-                                                       // (adv.level_horizon_on_entry; issue #2).
-                                                       // 0.3.10: immutable host baseline profile.
-                                                       // 0.3.9: cursor pivot is strict too — no
-                                                       // construction-plane/view-depth synthesis;
-                                                       // empty-space hovers miss and continue the
-                                                       // configured chain.
-                                                       // 0.3.8: real screen_center pivot (strict
-                                                       // expanding ray through the viewport centre;
-                                                       // a miss continues the configured chain).
-                                                       // 0.3.7: canonical camera/screen_center names.
-                                                       // 0.3.5: real origin/object/selection pivots
-                                                       // + selection_overrides_pivot.
-                                                       // 0.3.4: AabbNearHit always uses the near
-                                                       // face (tEnter) — UCS-plane samples inside
-                                                       // a solid no longer return interior points.
-                                                       // 0.3.3: cursor pivot — nearest of all
-                                                       // GetPickedEntities (front solid, not
-                                                       // paths[0]); Fusion-style expanding
-                                                       // ray-AABB on plane miss (2D Wireframe).
-                                                       // 0.3.2: cursor pivot — 2D-wireframe OOB
-                                                       // fallback (reproject plane hits to view
-                                                       // depth; freeze PointMonitor mid-gesture;
-                                                       // AABB near-face for solids).
-                                                       // 0.3.1: scheme values renamed (pointer->cursor,
-                                                       // to_pointer->to_cursor; daemon config v3).
-                                                       // 0.3.0: "pointer" orbit pivot + "to_pointer"
-                                                       // zoom (orbit/zoom about the point under the
-                                                       // mouse, cached by an Editor.PointMonitor)
+        public const string PluginVersion = "0.3.15";  // keep in sync with bundled version metadata
         const string BrokerHost = "127.0.0.1";
         const int BrokerPort = 47900;
 
@@ -142,8 +111,7 @@ namespace TrackballNav
         bool _regenInFlight;               // REGEN queued/executing: navigation is HELD until it
                                            // finishes -- REGEN rebuilds the kernel's views, and
                                            // driving a GS view across that is a native access
-                                           // violation (v0.2.3 crashed AutoCAD exactly this way;
-                                           // AVs are not catchable from managed code)
+                                           // violation; AVs are not catchable from managed code
         DateTime _regenFiredAt;
         Document _regenWatchDoc;
         static volatile bool s_gsBroken;   // any GS failure -> legacy transport for the session
@@ -155,7 +123,7 @@ namespace TrackballNav
         // an active object snap > the picked entity's depth along the view ray > the raw
         // ComputedPoint (which lies on the UCS construction plane, NOT the 3D surface).
         // _ptrOnEntity = true when the cache used an osnap / picked-entity depth (false = plane
-        // point — only the cursor's construction-plane projection, NOT a target: 0.3.9+
+        // point — only the cursor's construction-plane projection, NOT a target.
         // CapturePointerPivot then walks the strict expanding ray for a real surface and
         // otherwise reports a MISS so the configured fallback chain continues).
         Document _pmDoc;                   // doc whose Editor.PointMonitor we're subscribed to
@@ -165,8 +133,9 @@ namespace TrackballNav
         DateTime _ptrAt;
 
         // "cursor"/"to_cursor" per-gesture holds: captured at the first orbit/zoom frame of a
-        // gesture from the pointer cache (null = no target under the cursor -> orbit falls
-        // through the configured chain; to_cursor zoom degrades to To Center),
+        // gesture from the pointer cache. A missing surface target makes orbit continue through
+        // its configured chain; to_cursor zoom first synthesizes a pointer-depth target and uses
+        // centered zoom only if that is also unavailable.
         // then HELD so the pivot never chases a moving target. Pan/zoom invalidate orbit; orbit
         // invalidates cursor zoom. Pan deliberately preserves cursor zoom across mixed input.
         Point3d? _heldOrbitPivot; bool _heldOrbitSet;
@@ -715,8 +684,8 @@ namespace TrackballNav
         // point (accepted when within `radius` of the ray). Everything else: AABB near-face
         // (thickened by `radius` for the expanding aperture search). id must be top-level.
         // `strict` drops the radius-0 bbox-centre depth synthesis: only a real (radius-
-        // thickened) ray/AABB intersection counts — the honesty the screen_center pivot
-        // needs, while the cursor pivot keeps the lenient under-the-mouse depth salvage.
+        // thickened) ray/AABB intersection counts. Both screen_center and the cursor's expanding
+        // ray use it; the known picked-entity path may use the default depth salvage.
         static Point3d? EntityRayDepth(Transaction tr, ObjectId id, Point3d onPlane,
                                        Vector3d viewDirUnit, double radius, bool strict = false)
         {
@@ -819,8 +788,8 @@ namespace TrackballNav
 
         // The held "cursor" pivot: the cached cursor point when it lies ON an entity (osnap /
         // picked depth), else a STRICT expanding model-space ray through the cursor — that
-        // recovers 2D Wireframe mid-face / near-edge, where faces never pick. 0.3.9 dropped
-        // the construction-plane / view-depth synthesis: hovering empty space is a MISS and
+        // recovers 2D Wireframe mid-face / near-edge, where faces never pick. Construction-plane
+        // or view-depth synthesis is deliberately excluded: hovering empty space is a MISS and
         // returns null so the configured fallback chain continues, the same actual-target-or-
         // fall-through contract as screen_center and the other hosts' ray pivots. Both paths
         // stay validated against the drawing extents grown by 10% of their diagonal.
@@ -1155,8 +1124,7 @@ namespace TrackballNav
         //    back) + UpdateTiledViewportsInDatabase. ZERO WorldDraws measured live (docs 8.15).
         //  - 2D Wireframe: build a ViewTableRecord from the SHADOW and push it through the classic
         //    ed.SetCurrentView while the current view still holds the OLD camera -- that is the
-        //    one path that rebuilds the 2D projected display list (v0.1.x did it per frame; this
-        //    does it ONCE per gesture -- docs 8.16).
+        //    one path that rebuilds the 2D projected display list, and it runs ONCE per gesture.
         // A single commit failure can be transient (doc closed mid-gesture) -- the next gesture
         // just re-seeds from the DB; only a RELIABLY failing commit demotes to the legacy path.
         int _commitFailures;
@@ -1190,8 +1158,8 @@ namespace TrackballNav
                         // into the EXISTING *Active VPORT record(s), then IMMEDIATELY re-apply
                         // them with UpdateTiledViewportsFromDatabase. The pairing matters:
                         //  - UpdateTiledViewportsInDatabase ERASES+RECREATES the records ->
-                        //    dangling kernel view -> AV next gesture (the v0.2.5 crash);
-                        //  - field writes left UN-applied -> the same AV (the v0.2.7 crash);
+                        //    dangling kernel view -> AV next gesture;
+                        //  - field writes left UN-applied -> the same AV;
                         //  - write + FromDatabase: the record is the SOURCE, so the record, the
                         //    editor view, and the display all agree -- and native wheel zoom
                         //    (which consults the record; the cause of the wireframe snap-back)

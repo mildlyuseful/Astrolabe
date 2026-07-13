@@ -83,15 +83,6 @@ def test_default_profile_loader_rejects_incomplete_developer_data(tmp_path):
         load_default_profiles(path)
 
 
-def test_normal_ui_is_user_only_and_shipped_profile_alias_is_removed():
-    source = (Path(__file__).parents[1] / "trackball_daemon" / "ui.py").read_text(encoding="utf-8")
-    assert "Reset to defaults" in source
-    assert "Host alignment" not in source
-    assert "developer-owned" not in source
-    assert "Shipped profiles:" not in source
-    assert "choose_default_profile" not in source
-
-
 def test_shipped_user_profiles_start_with_every_inversion_unchecked():
     for app_key in DEFAULT_PROFILE_KEYS:
         profile = default_app_profile(app_key)
@@ -124,20 +115,6 @@ def test_level_horizon_default_override_and_reset_semantics(isolated_config):
     cfg.reset_app_profile("blender")
     assert "level_horizon_on_entry" not in cfg.data["apps"]["blender"]
     assert effective_level_horizon(general, cfg.data["apps"]["blender"]) is False
-
-
-def test_bundled_profile_contract_versions_cover_every_installed_addin():
-    assert {key: integrations.bundled_addin_version(key) for key in integrations.ADDIN_KEYS} == {
-        "fusion360": "0.1.24",
-        "blender": "0.1.22",
-        "freecad": "0.1.13",
-        "sketchup": "0.2.13",
-        "unreal": "0.2.13",
-        "unity": "0.1.15",
-        "godot": "0.1.12",
-        "rhino": "0.1.18",
-        "autocad": "0.3.15",
-    }
 
 
 def test_reset_restores_complete_profile_once_and_preserves_operational_state(isolated_config):

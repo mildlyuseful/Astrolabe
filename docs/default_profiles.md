@@ -32,6 +32,13 @@ Host sign/scale and user invert/gain are composed multiplicatively (baseline dir
 invert). Global and per-action source routing remain user/device settings rather than host-profile
 calibration data.
 
+Orbit-pivot and cursor-zoom gesture lifetimes are deliberately separate in config v8:
+`orbit_pivot_hold_sec` controls ray-derived orbit pivots, while `zoom_cursor_hold_sec` controls only
+the target used by **To Cursor** zoom. Pan or zoom invalidates the orbit pivot; pan preserves the
+cursor-zoom target, while orbit invalidates it. A surface miss remains a miss for orbit and advances
+the configured fallback chain. For **To Cursor** zoom, however, integrations synthesize a point on the
+cursor ray at a sensible target/model depth so empty space does not silently become **To Center**.
+
 Lightweight integrations receive aligned deltas at the daemon output boundary. Blender, SketchUp,
 Unreal, Unity, and Godot need to know the active Orbit/Fly/Walk action first, so the daemon sends
 `adv.host_baseline` and those add-ons apply it immediately after per-action routing. Their local
@@ -39,25 +46,35 @@ camera constants are neutral to prevent double application.
 
 ## Shipped baselines
 
-| App | Orbit factors | Pan factors | Zoom | Move | Applied by |
+`host_profiles.json` is authoritative. The table below is a readable snapshot of the current
+effective factors (`sign * scale` for each axis), not a second configuration source. Update it from
+the JSON whenever calibration changes.
+
+| App | Effective orbit XYZ | Effective pan XY | Zoom | Move | Applied by |
 |---|---:|---:|---:|---:|---|
-| Blender | `(0.5, 0.5, 0.5)` | `(0.5, -0.5)` | `0.5` | `0.5` | add-on |
-| FreeCAD | `(1, 1, 1)` | `(-0.14, 0.14)` | `0.25` | `1` | daemon |
-| SketchUp | `(-1, -1, 1)` | `(-0.14, -0.14)` | `0.25` | `0.5` | add-on |
-| Unreal | `(2, 2, 2)` | `(0.14, -0.14)` | `0.25` | `0.5` | add-on |
-| Unity | `(2, 2, 2)` | `(0.14, -0.14)` | `0.25` | `0.5` | add-on |
-| Godot | `(2, 2, 2)` | `(0.14, -0.14)` | `0.25` | `0.5` | add-on |
-| Rhino | `(1, 1, 1)` | `(-0.14, 0.14)` | `0.25` | `1` | daemon |
+| Blender | `(0.5, -0.5, 0.5)` | `(-0.4, -0.4)` | `0.4` | `0.5` | add-on |
+| FreeCAD | `(-1, -1, 1)` | `(-0.3, -0.3)` | `0.5` | `1` | daemon |
+| SketchUp | `(-1, -1, 1)` | `(-0.3, -0.3)` | `0.25` | `0.5` | add-on |
+| Unreal | `(2, 2, -2)` | `(-0.3, -0.3)` | `0.25` | `0.5` | add-on |
+| Unity | `(1, 1, -1)` | `(-0.14, -0.14)` | `0.25` | `0.25` | add-on |
+| Godot | `(-1, -1, 1)` | `(-0.3, -0.3)` | `0.25` | `0.5` | add-on |
+| Rhino | `(-1, -1, 1)` | `(-0.14, -0.14)` | `0.25` | `1` | daemon |
 | Fusion 360 | `(-1, -1, 1)` | `(-0.14, -0.14)` | `0.25` | `1` | daemon |
-| SolidWorks | `(-1, -1, 1)` | `(0.2, -0.2)` | `0.5` | `1` | daemon |
-| Onshape | `(-1, -1, 1)` | `(0.14, -0.14)` | `0.25` | `1` | daemon |
-| AutoCAD | `(1, 1, 1)` | `(-0.5, 0.5)` | `0.5` | `1` | daemon |
+| SolidWorks | `(1, 1, 1)` | `(0.2, 0.2)` | `0.5` | `1` | daemon |
+| Onshape | `(-1, -1, 1)` | `(-0.3, -0.3)` | `0.25` | `1` | daemon |
+| AutoCAD | `(-1, -1, 1)` | `(-0.5, -0.5)` | `0.5` | `1` | daemon |
 
 Blender and SketchUp also have immutable `camera.roll` and `fly.bank` direction corrections. The
 wire value is baseline XOR saved user preference. Config v7 performs a one-time reset of v6 per-app
 navigation fields because v6 could still contain values used during developer calibration. It
-preserves global physical orientation plus app enable/install/startup/version state. Older configs
+preserves global physical orientation plus app enable/install/version state. Older configs
 that skip directly to v7 retain their established user preferences after historical migrations.
+
+Config v8 introduces the independent `zoom_cursor_hold_sec` field and retires the temporary
+`screen_center_pivot_hold_sec` name. Migration preserves that old value as
+`orbit_pivot_hold_sec`; Zoom hold comes from the shipped default because the old field controlled
+only the orbit pivot. The still older `view_pivot_hold_sec` name was already migrated to
+`orbit_pivot_hold_sec` in config v4.
 
 ## Developer tuning workflow
 

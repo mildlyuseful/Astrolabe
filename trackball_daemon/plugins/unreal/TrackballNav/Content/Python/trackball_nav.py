@@ -28,20 +28,9 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.13"         # 0.2.13: independent orbit/zoom holds
-                                 # 0.2.9: level horizon on fixed-horizon mode entry
-                                 # (adv.level_horizon_on_entry; issue #2).
-                                 # 0.2.8: immutable host baseline profile.
-                                 # 0.2.7: per-action X/Y/Z source routing.
-                                 # selected, orbit/to_cursor use the selection centre instead of the
-                                 # designated view/cursor/origin pivot; when False, raycasts ignore
-                                 # the selection bbox gate.
-                                 # 0.2.3: under-mouse "cursor" orbit + "to_cursor" zoom via
-                                 # GeoReferencingEditorBPLibrary (Half A) + line_trace (Half B).
-                                 # 0.2.2: cursor investigated + PARKED (no viewport mouse in Python).
-                                 # Keep in sync with version.json AND TrackballNav.uplugin VersionName.
+ADDIN_VERSION = "0.2.13"         # keep in sync with version.json and TrackballNav.uplugin
 _DEFAULT_PORT = 47900
-PIVOT_HOLD_IDLE = 0.5            # fallback; daemon supplies adv.pivot_hold_sec
+PIVOT_HOLD_IDLE = 0.5            # fallback for adv.orbit_hold_sec / adv.zoom_hold_sec
 OBJ_CACHE_SEC = 0.5              # selection bounding-box centre cache lifetime
 BBOX_MARGIN = 0.10               # accept a hit inside the model bbox grown by this * diagonal
 TRACE_BIG = 1.0e7               # cm: raycast length along camera forward / deprojected ray
@@ -62,8 +51,8 @@ _gesture = {"t": 0.0, "pivot": None, "invalid": True}
 _zoom_gesture = {"pivot": None}  # "to_cursor" zoom's own per-gesture hold (reset on orbit/pan)
 _obj_cache = {"t": 0.0, "center": None, "bbox": None}
 _scene_cache = {"t": 0.0, "center": None}
-# Fixed-horizon transition tracker (issue #2): None until the first frame, so an add-on that
-# starts up already in a fixed mode never levels -- only a real free->fixed switch does.
+# Fixed-horizon transition tracker: None until the first frame so startup in a fixed mode does not
+# level the view; only a real free->fixed switch does.
 _horizon = {"fixed": None}
 _focus = {"dist": cammath.DIST_DEFAULT}   # eye->focus distance (cm), scales pan/zoom; updated on orbit
 _last_scheme = {"v": None}
@@ -750,7 +739,7 @@ def _apply(info, frame, idle):
     cam = _read_camera(info)
 
     # Level ONCE when the effective mode transitions into a fixed-horizon mode (turntable orbit,
-    # lock-horizon, or walk) and the daemon's toggle is on (issue #2). Transitions only -- prev
+    # lock-horizon, or walk) and the daemon's toggle is on. Transitions only -- prev
     # None (fresh session) never levels, and ordinary fixed-mode frames never re-level.
     fixed = (nav_mode == "walk") or (
         nav_mode == "orbit" and (style == "turntable" or lock))

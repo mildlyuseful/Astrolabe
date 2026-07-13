@@ -20,11 +20,7 @@ from System.Windows.Forms import Cursor
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.18"          # 0.1.18: independent orbit/zoom holds
-                                  # 0.1.14: level horizon on turntable entry
-                                  # (adv.level_horizon_on_entry; issue #2).
-                                  # 0.1.13: immutable host baseline profile.
-                                  # 0.1.12: camera/screen_center canonical pivot names.
+ADDIN_VERSION = "0.1.18"          # keep in sync with version.json
 _DEFAULT_PORT = 47900
 PIVOT_HOLD_IDLE = 0.5
 OBJ_CACHE_SEC = 0.5
@@ -38,8 +34,8 @@ _idle_hooked = False
 _host = "?"
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
 _zoom_gesture = {"pivot": None}
-# Fixed-horizon transition tracker (issue #2): None until the first frame, so an add-on that
-# starts up already in turntable never levels -- only a real free->turntable switch does.
+# Fixed-horizon transition tracker: None until the first frame so startup in turntable does not
+# level the view; only a real free->turntable switch does.
 _horizon = {"fixed": None}
 _obj_cache = {"t": 0.0, "center": None, "bbox": None}
 _scene_cache = {"t": 0.0, "center": None}
@@ -189,7 +185,7 @@ def _raycast_client(view, client_x, client_y, bbox):
     """Raycast from viewport pixel to the front surface under that pixel.
 
     The path that reliably hits geometry is the raw frustum ``RayShoot``
-    (``Ray3d(line.From, line.Direction)``) — same as 0.1.7. That ray often runs
+    (``Ray3d(line.From, line.Direction)``). That ray often runs
     far→near so ``hits[0]`` is the *back* face.
 
     Front face: meshed brep + ``MeshRay`` from the camera through the far frustum
@@ -197,7 +193,7 @@ def _raycast_client(view, client_x, client_y, bbox):
     RayShoot back-face fallback).
 
     Do **not** use bare ``vector.IsTiny`` — in Rhino Python that name is a method
-    object (always truthy), which silently aborted 0.1.8/0.1.9 before any shoot.
+    object (always truthy), which silently aborts before any shoot.
     """
     try:
         vp = view.ActiveViewport
@@ -209,7 +205,6 @@ def _raycast_client(view, client_x, client_y, bbox):
         if doc is None:
             return None
         cam = vp.CameraLocation
-        # Exact construction from the working 0.1.7 logs.
         shoot_ray = RG.Ray3d(line.From, line.Direction)
         # Eye → farther frustum end (into the scene) for MeshRay front-face picks.
         if cam.DistanceTo(line.From) >= cam.DistanceTo(line.To):
@@ -512,7 +507,7 @@ def _apply(view, frame, idle):
     changed = False
     turntable = style == "turntable"
 
-    # Level ONCE when the style transitions free->turntable (issue #2): remove existing roll
+    # Level ONCE when the style transitions free->turntable: remove existing roll
     # instead of locking the tilted horizon. eye/target stay put, so distance and the active
     # orbit point are preserved. Transitions only; ordinary turntable frames never re-level.
     prev = _horizon["fixed"]

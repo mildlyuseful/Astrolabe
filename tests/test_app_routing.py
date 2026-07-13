@@ -8,10 +8,16 @@ line and the 3D-Apps rows) must merge broker add-ons with the SolidWorks driver'
 App is built with __new__ so we don't spin up config/threads/GUI -- we exercise the real
 methods against lightweight stubs.
 """
+import struct
 import threading
 from types import SimpleNamespace
 
+import pytest
+
+from trackball_daemon import output as output_mod
 from trackball_daemon.app import App
+from trackball_daemon.config import Config, host_baseline_payload
+from trackball_daemon.output import OutputEngine
 
 
 def _scheme(pivot="default", style="default", zoom="default"):
@@ -173,6 +179,30 @@ def test_no_focused_app_drops_frame():
     app._nav_sink(9, 9, 9, 9, 9, 9)
     assert app.broker.calls == []
     assert app.sw_driver.calls == []
+
+
+def test_first_packet_after_focus_switch_uses_new_app_mapping(isolated_config, monkeypatch):
+    """Focus selection must happen before OutputEngine transforms the packet."""
+    cfg = Config().load()
+    cfg.data["apps"]["fusion360"]["bindings"]["orbit"]["axis_source"] = [0, 1, 2]
+    cfg.data["apps"]["rhino"]["bindings"]["orbit"]["axis_source"] = [2, 0, 1]
+    app = _bare_app()
+    app.config = cfg
+    app.engine = OutputEngine(cfg)
+    app.engine.nav_sink = app._nav_sink
+    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
+    focused = ["fusion360"]
+    app._active_app_key = lambda: focused[0]
+    packet = struct.pack("<fff", 0.01, 0.02, 0.03)
+
+    app._handle_ble_packet(packet)
+    focused[0] = "rhino"
+    app._handle_ble_packet(packet)
+
+    baseline = host_baseline_payload("rhino")["orbit"]
+    assert app.broker.calls[-1][:3] == pytest.approx(
+        (0.03 * baseline[0], 0.01 * baseline[1], 0.02 * baseline[2]))
+    assert app.engine._mapping.app_key == "rhino"
 
 
 # --- per-app refresh rate -------------------------------------------------------------

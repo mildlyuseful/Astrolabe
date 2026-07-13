@@ -103,7 +103,7 @@
     "onshape": {
       "orbit_sign": [-1, -1, 1],
       "orbit_scale": [1, 1, 1],
-      "pan_sign": [-1, -1], 
+      "pan_sign": [-1, -1],
       "pan_scale": 0.3,
       "zoom_sign": 1,
       "zoom_scale": 0.25,

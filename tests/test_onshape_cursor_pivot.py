@@ -12,7 +12,6 @@ These tests cover the deterministic offline pieces with a fake connection:
 What it CANNOT prove (needs the live browser + userscript): that the page report lands on the
 real WebGL canvas and that Onshape's hit-test returns the surface under the mouse.
 """
-import math
 import os
 import sys
 import time

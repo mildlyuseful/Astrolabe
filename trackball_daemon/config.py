@@ -300,8 +300,8 @@ _DEFAULT_BLENDER_INVERT = {
 # --- Blender-only "Advanced" nav options. Deep-merged in additively, so they appear on existing
 #     configs WITHOUT a CONFIG_VERSION bump. The parts that map to the generic scheme are NOT
 #     duplicated here -- orbit method <-> scheme.orbit_style (free/turntable) and orbit-around <->
-#     scheme.orbit_pivot stay the single source of
-#     truth. See docs/apps/blender_design.md for the reconciliation table.
+#     scheme.orbit_pivot stay the single source of truth. See docs/apps/blender.md for the current
+#     ownership and reconciliation rules.
 _DEFAULT_BLENDER_ADVANCED = {
     "nav_mode": "orbit",            # orbit | fly | walk
     "lock_horizon": False,          # keep the horizon level even in trackball (NDOF "Lock Horizon")
@@ -508,7 +508,7 @@ DEFAULTS = {
         # after the failed method). Unsupported methods are skipped by that integration.
         "orbit_pivot_fallbacks": list(DEFAULT_ORBIT_PIVOT_FALLBACKS),
         # On switching INTO a fixed-horizon mode (Turntable orbit style, Lock Horizon, Walk),
-        # remove any existing roll instead of locking the tilted horizon (issue #2). False keeps
+        # remove any existing roll instead of locking the tilted horizon. False keeps
         # the old lock-current-tilt behavior. Per-app override: apps.<key>.level_horizon_on_entry
         # (absent = follow this default; see effective_level_horizon). Deep-merged additively --
         # no CONFIG_VERSION bump.
@@ -561,6 +561,18 @@ def _deep_merge(base, override):
         else:
             out[k] = v
     return out
+
+
+def _mapping_shapes_match(base, override):
+    """Known mapping nodes must remain mappings; unknown legacy keys are left untouched."""
+    if not isinstance(override, dict):
+        return False
+    for key, value in override.items():
+        expected = base.get(key)
+        if isinstance(expected, dict):
+            if not isinstance(value, dict) or not _mapping_shapes_match(expected, value):
+                return False
+    return True
 
 
 DEFAULT_PROFILE_PATH = Path(__file__).with_name("default_profiles.json")
@@ -631,8 +643,16 @@ class Config:
                 # Corrupt/unreadable -> fall back to defaults but keep the bad file untouched.
                 self.data = copy.deepcopy(DEFAULTS)
                 return self
+            raw_version = disk.get("version", 1) if isinstance(disk, dict) else None
+            if (not isinstance(raw_version, int) or isinstance(raw_version, bool)
+                    or not _mapping_shapes_match(DEFAULTS, disk)):
+                # Syntactically valid JSON can still be unusable as config (for example [], a
+                # string version, or a list where a settings object belongs). Treat it exactly like
+                # malformed JSON and preserve the file for diagnosis/recovery.
+                self.data = copy.deepcopy(DEFAULTS)
+                return self
             self.data = _deep_merge(DEFAULTS, disk)
-            changed = self._migrate(int(disk.get("version", 1)), disk)
+            changed = self._migrate(raw_version, disk)
             orientation = self.data["general"].get("axis_orientation") or {}
             normalized_orientation = {
                 "source": normalize_axis_permutation(orientation.get("source")),
@@ -642,8 +662,8 @@ class Config:
                 self.data["general"]["axis_orientation"] = normalized_orientation
                 changed = True
             for app in self.data["apps"].values():
-                # Step 6 removed this never-wired per-app UI setting. A future run-at-login option
-                # belongs at daemon scope, so clean the stale key from the one local config too.
+                # This legacy per-app setting never had a runtime consumer. Run-at-login belongs
+                # at daemon scope, so clean the stale key from the local config too.
                 if "start_automatically" in app:
                     app.pop("start_automatically", None)
                     changed = True

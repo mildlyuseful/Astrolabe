@@ -5,8 +5,9 @@ Daemon: the architecture, the verified Coin camera model, and the FreeCAD-specif
 real live debugging. FreeCAD is a **socket add-on** integration (like Fusion/Blender), not an
 in-process driver (SolidWorks/Onshape). Read this before touching the add-on.
 
-Verified live on the dev machine: **FreeCAD 1.1.1**, PySide6, Coin3D/pivy. Current add-on `0.1.6`,
-daemon `__version__` `0.1.59`; the selection-override addition is offline-tested pending a feel pass.
+The camera model and bootstrap were originally verified live on FreeCAD 1.1.1 with PySide6 and
+Coin3D/pivy. Current code versions come from `ADDIN_VERSION`, `version.json`, and
+`trackball_daemon.__version__`; do not maintain a version snapshot here.
 
 ---
 
@@ -129,8 +130,8 @@ view.redraw()                               # force a repaint (needed when drive
   (Part `Shape.BoundBox` ∪ Mesh `Mesh.BoundBox`, cached ~0.5 s); `selection` → mean of the **selection**
   bbox centres (`Gui.Selection.getSelection()`); `screen_center` → the
   surface under the **screen centre** via `view.getObjectInfo((w/2, h/2))`, validated against the
-  model bbox (+10 % of its diagonal) and **held for the whole gesture** (re-raycast on pan/zoom or
-  after a ~0.35 s idle gap); `cursor` → the surface under the **live MOUSE CURSOR**:
+  model bbox and held for the configured orbit gesture (re-raycast on pan/zoom or after
+  `orbit_hold_sec`); `cursor` → the surface under the **live MOUSE CURSOR**:
   a passive `SoLocation2Event` observer on the active view caches the last viewport pixel
   (`_cursor_event_cb`, re-bound to the current view every 0.5 s by the pump via
   `_ensure_cursor_hook`), and `_cursor_pivot` feeds that pixel to the SAME `getObjectInfo` pick,
@@ -147,11 +148,16 @@ view.redraw()                               # force a repaint (needed when drive
   horizon stays level).
 - **Zoom mode** (`scheme.zoom_mode`): `to_center` (about the look-at) / `to_object` (about the model
   centre) / `to_cursor` (about the surface under the mouse cursor — the same
-  `_cursor_pivot` raycast with its own per-gesture hold `_zoom_gesture`, so the point under the
-  cursor stays put on screen while zooming; a miss falls back to the look-at).
+  `_cursor_pivot` raycast with its own hold `_zoom_gesture`, so the point under the cursor stays put
+  on screen while zooming; a miss synthesizes a cursor-ray point at the current focal/model depth).
 
-`config.apps.freecad` is the lean generic shape (`_app()`); there is **no** Blender-style `advanced`
-block.
+`orbit_hold_sec` and `zoom_hold_sec` are independent. Pan/zoom invalidate the orbit pivot; pan
+preserves the cursor-zoom target; orbit invalidates it. Entering Turntable from Free optionally
+levels the horizon once while preserving position, focal point, focal distance, and the active
+pivot. A world-up singularity is skipped.
+
+FreeCAD uses the lean capability profile: it has the shared `advanced` values such as Twist action
+and holds, but no Blender-style mode-specific Orbit/Fly/Walk action tree.
 
 ---
 
@@ -325,10 +331,8 @@ the camera orientation measurably changed. Pan and zoom land the same way (`rx p
 - **Live (the only thing tests can't cover):** install via the daemon's **Set up**, run the daemon,
   open a FreeCAD 3D view, switch to 3D mode, focus FreeCAD, and use the trackball. Lean on
   `%APPDATA%\TrackballDaemon\freecad_addin.log` (`scheme:` / `rx orbit|pan|zoom` / `screen-center-pivot` /
-  `applied`). **Sign/scale calibration** (`ORBIT_SCALE` etc. in `tbnav_camera.py`) is the one item
-  that wants a real trackball — the magnitudes follow Blender's verified 1:1 reasoning, but the
-  **direction signs are best-guess defaults**; flip with the per-app Invert checkboxes or the
-  constants.
+  `applied`). Suite alignment lives in `host_profiles.json`; use neutral user settings during a
+  live sign/scale pass and transfer host corrections there, never into camera-math constants.
 
 ---
 
@@ -344,14 +348,9 @@ the camera orientation measurably changed. Pan and zoom land the same way (`rx p
   `cursor`/`to_cursor` in add-on 0.1.4 / daemon config v3, when the old `cursor` value became
   `selection`). Known limitation: no "mouse left the viewport" signal
   (Gotcha #14) — the last in-viewport pixel is used, bounded by the bbox validation.
-- **Deferred / not done:** **discrete view ops** (Frame Selected, axis snaps) need a button-event
-  channel the broker doesn't have yet. **`camera` (turn-in-place) is unsupported** — the add-on's
+- **`camera` (turn-in-place) is unsupported** — the add-on's
   resolver skips it like `cursor_3d` and the configured chain continues (a `camera` primary keeps
-  its selection-override exemption). FreeCAD's Coin camera is an eye+orientation model (perspective
-  or ortho), so a real turn-in-place (rotate `cam.orientation` while holding `cam.position`, focal
-  point follows) is implementable — **candidate for future development**, matching
-  Blender/SketchUp/Unreal/Unity/Godot/Rhino/AutoCAD.
-- **Verify-live items:** the per-axis **sign/scale** defaults; perspective-camera feel (FreeCAD
-  defaults to ortho, so the persp path is lightly exercised live); the **human-feel pass** on the
-  `cursor` pivot (hover + orbit with the physical trackball — the event chain itself is verified,
-  §9).
+  its selection-override exemption). FreeCAD's Coin camera is an eye+orientation model, so a real
+  turn-in-place is implementable. Camera parity and the current live-verification matrix are tracked
+  in [`TODO.md`](../../TODO.md), including perspective feel, nested world-space bounds, horizon
+  entry, independent holds, and the physical under-cursor pass.

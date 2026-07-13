@@ -364,26 +364,38 @@ def _acad_runtime_plugin_dir():
     return autocad_driver._runtime_plugin_dir()
 
 
-def _copy_acad_plugin() -> bool:
-    """Copy the bundled plugin DLL + version manifest into the runtime dir. Returns False when the
-    DLL is locked (AutoCAD has this session's copy loaded) -- the loader retries the copy on its
-    next session attach, i.e. the update lands on AutoCAD's next start."""
+def _is_locked_acad_plugin(exc: OSError) -> bool:
+    """Return whether Windows reported an in-use file, rather than a generic write failure."""
+    return getattr(exc, "winerror", None) in (32, 33)  # sharing / lock violation
+
+
+def _copy_acad_plugin() -> tuple[str, str]:
+    """Copy the AutoCAD runtime payload and distinguish copied, staged, and failed outcomes.
+
+    ``staged`` requires an existing runtime DLL plus a Windows sharing/lock violation. The loader
+    can retry from the bundled copy next session. Missing bundles and other write failures are
+    honest errors, not staged updates.
+    """
     src = _bundled_addin("autocad", "TrackballNavAcad.dll")
     if not src.exists():
-        return False
+        return "error", "Bundled AutoCAD plugin is missing from this build."
     dst_dir = _acad_runtime_plugin_dir()
-    dst_dir.mkdir(parents=True, exist_ok=True)
+    dst = dst_dir / src.name
     try:
-        shutil.copy2(src, dst_dir / src.name)
-    except OSError:
-        return False
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+    except OSError as exc:
+        if dst.exists() and _is_locked_acad_plugin(exc):
+            return "staged", ("The existing runtime plugin could not be replaced while AutoCAD "
+                              f"may be using it ({exc}).")
+        return "error", f"Could not copy the AutoCAD plugin into {dst_dir}: {exc}"
     ver = _bundled_addin("autocad", "version.json")
     if ver.exists():
         try:
             shutil.copy2(ver, dst_dir / "version.json")
-        except OSError:
-            pass
-    return True
+        except OSError as exc:
+            return "copied", f"Plugin copied, but its version manifest could not be updated: {exc}"
+    return "copied", ""
 
 
 def install_autocad(appdef: "AppDef", cfg) -> tuple[bool, str]:
@@ -404,20 +416,24 @@ def install_autocad(appdef: "AppDef", cfg) -> tuple[bool, str]:
         return False, ("pywin32 is required to NETLOAD the AutoCAD plugin (COM delivery), but it "
                        "isn't installed.\nInstall it with:  pip install pywin32")
     ver = bundled_addin_version("autocad") or "?"
-    copied = _copy_acad_plugin()
+    copy_status, copy_detail = _copy_acad_plugin()
+    if copy_status == "error":
+        return False, copy_detail
     a = cfg.data["apps"][appdef.key]
     a["installed"] = True
     a["enabled"] = True
-    a["addin_version"] = ver if copied else (installed_addin_version("autocad") or "")
+    a["addin_version"] = (ver if copy_status == "copied"
+                            else (installed_addin_version("autocad") or ""))
     cfg.save()
-    if copied:
-        return True, (f"AutoCAD plugin v{ver} installed.\n\nNothing to do inside AutoCAD: the "
+    if copy_status == "copied":
+        warning = f"\n\nNote: {copy_detail}" if copy_detail else ""
+        return True, (f"AutoCAD plugin v{ver} installed.{warning}\n\nNothing to do inside AutoCAD: the "
                       "daemon NETLOADs it automatically when it attaches to a running AutoCAD "
                       "(if AutoCAD is open right now with an older plugin loaded, restart it to "
                       "pick this version up). Type TBNAV in AutoCAD to check the plugin status.")
-    return True, (f"AutoCAD plugin update to v{ver} is STAGED — the currently loaded plugin file "
-                  "is locked by a running AutoCAD.\n\nClose AutoCAD; the daemon installs and "
-                  "loads the new version automatically the next time AutoCAD starts.")
+    return True, (f"AutoCAD plugin update to v{ver} is STAGED — an existing runtime copy could not "
+                  f"be replaced. {copy_detail}\n\nClose AutoCAD; the daemon retries the bundled "
+                  "copy and loads it automatically the next time AutoCAD starts.")
 
 
 # --- Onshape: browser bridge (impersonate the 3Dconnexion local NL-Proxy) -------------------
@@ -679,7 +695,7 @@ def install_sketchup(appdef: "AppDef", cfg) -> tuple[bool, str]:
     Extension Manager and enables it on startup. Overwriting an existing copy is an update.
     """
     if not detect_sketchup():
-        return False, "SketchUp Desktop was not found on this machine â€” install Pro/Studio first."
+        return False, "SketchUp Desktop was not found on this machine -- install Pro/Studio first."
     src_root = _bundled_addin("sketchup")
     src_loader = src_root / "trackball_nav_loader.rb"
     src_addon = src_root / "trackball_nav"
@@ -708,11 +724,11 @@ def install_sketchup(appdef: "AppDef", cfg) -> tuple[bool, str]:
     a["addin_version"] = bundled_addin_version(appdef.key) or ""
     cfg.save()
     verb = "updated" if was_installed else "installed"
-    years = ", ".join(installed_to) or "â€”"
+    years = ", ".join(installed_to) or "--"
     return True, (
         f"SketchUp extension {verb} (v{a['addin_version']}) for SketchUp {years}.\n\n"
         "It registers in Extension Manager and auto-loads on SketchUp's next launch. Restart "
-        "SketchUp, open a model, switch the daemon to 3D mode, and focus SketchUp â€” the row "
+        "SketchUp, open a model, switch the daemon to 3D mode, and focus SketchUp -- the row "
         "flips to \"connected\" once the Ruby extension attaches."
     )
 
@@ -1339,16 +1355,16 @@ def update_available(key: str) -> bool:
 
 
 def auto_update(cfg) -> list:
-    """Re-copy any installed add-in whose bundled version is newer. Returns [(key, old, new)].
-    Safe while the app is running -- new files take effect on the app's next launch."""
+    """Re-copy installed add-ins and report only versions confirmed at their runtime location."""
     updated = []
     for key in _ADDINS:
         old = installed_addin_version(key)
         if old is not None and update_available(key):
             appdef = APPS_BY_KEY[key]
             ok, _msg, _copies = normalize_install_result(appdef.setup(appdef, cfg))
-            if ok:
-                updated.append((key, old, bundled_addin_version(key)))
+            installed = installed_addin_version(key)
+            if ok and installed is not None and not update_available(key):
+                updated.append((key, old, installed))
     return updated
 
 

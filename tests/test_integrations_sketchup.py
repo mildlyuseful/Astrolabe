@@ -5,10 +5,7 @@ The real licensed application is never launched by these tests. Install paths an
 isolated with monkeypatch + the shared isolated_config fixture.
 """
 import json
-import sys
 from pathlib import Path
-
-import pytest
 
 from trackball_daemon import integrations
 from trackball_daemon.config import Config
@@ -119,12 +116,3 @@ def test_sketchup_extension_consumes_shared_zoom_and_twist_controls():
     assert "advanced['zoom_style']" in source
     assert "def zoom_pivot(" in source
     assert "camera.fov =" in source
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")
-def test_status_line_reflects_detection(monkeypatch):
-    appdef = integrations.APPS_BY_KEY["sketchup"]
-    monkeypatch.setattr(appdef, "detect", lambda: _FAKE_2026)
-    assert "detected" in integrations.status_line(appdef).lower()
-    monkeypatch.setattr(appdef, "detect", lambda: None)
-    assert integrations.status_line(appdef) == "not detected"

@@ -211,8 +211,8 @@ def orbit(cam, o, turntable, pivot):
 def level_horizon(cam):
     """Remove existing roll: rebuild the orientation so camera-right is horizontal (perpendicular
     to WORLD_UP) while the view direction is unchanged. position and focalDistance are untouched,
-    so the eye AND the look-at stay put -- only the roll goes (issue #2: level on fixed-horizon
-    mode entry). Returns False in the degenerate straight-up/straight-down view, where roll is
+    so the eye AND the look-at stay put -- only the roll goes. Returns False in the degenerate
+    straight-up/straight-down view, where roll is
     indistinguishable from yaw and leveling is undefined (turntable has the same singularity)."""
     _r, _u, fwd, _b = axes(cam)
     right = v_cross(fwd, WORLD_UP)

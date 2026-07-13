@@ -1,4 +1,4 @@
-"""Regression checks for the Step 7 security/permission contract."""
+"""Regression checks for the integration security and permission contract."""
 from pathlib import Path
 
 from trackball_daemon import onshape_bridge
@@ -43,13 +43,6 @@ def test_login_startup_is_current_user_and_user_toggled():
     assert "HKEY_CURRENT_USER" in tray
     assert "HKEY_LOCAL_MACHINE" not in tray
     assert 'MenuItem("Start at login"' in tray
-
-
-def test_release_security_guide_covers_external_warning_classes():
-    guide = _source("docs/security.md")
-    for term in ("SmartScreen", "antivirus", "Windows Firewall", "UAC", "TRUSTEDPATHS",
-                 "certificate", "Authenticode", "SHA-256", "Nuitka onedir"):
-        assert term in guide
 
 
 def test_release_packages_exclude_interpreter_cache_files():

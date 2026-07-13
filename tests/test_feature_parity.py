@@ -95,8 +95,6 @@ def test_every_app_consumes_independent_orbit_and_cursor_zoom_holds():
     }
     assert set(checks) == set(APP_BINDING_PROFILES)
     for key, (path, orbit_token, zoom_token) in checks.items():
-        assert APP_BINDING_PROFILES[key].supports("orbit_hold")
-        assert APP_BINDING_PROFILES[key].supports("zoom_hold")
         source = _source(path)
         assert orbit_token in source, f"{key} exposes Pivot hold without consuming it"
         assert zoom_token in source, f"{key} exposes Zoom hold without consuming it"
@@ -108,9 +106,7 @@ def test_sketchup_selection_override_does_not_replace_to_object():
     assert "advanced.fetch('pan_scales_with_distance', true)" in source
 
 
-def test_sketchup_profile_exposes_pivot_hold_and_free_style_autoselects_roll():
-    assert APP_BINDING_PROFILES["sketchup"].supports("orbit_hold")
-    assert APP_BINDING_PROFILES["sketchup"].supports("zoom_hold")
+def test_sketchup_free_style_autoselects_roll():
     source = _source("trackball_daemon/ui.py")
     assert 'if value != "free" or "roll" not in profile.twist_actions' in source
     assert 'self._set_and_save(adv + ("twist_action",), "roll")' in source

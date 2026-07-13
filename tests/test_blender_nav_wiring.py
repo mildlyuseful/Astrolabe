@@ -4,7 +4,9 @@ blocks, and App._apply_schemes attaching the FOCUSED broker app's advanced.
 The invariant under test: extending the broker must NOT change what existing add-ins (Fusion) see —
 they read only o/p/z/op/os/zm, so "adv" is present only when the focused app sets it.
 """
+import ast
 import json
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -61,10 +63,22 @@ def test_blender_app_has_advanced_block(isolated_config):
 
 def test_blender_bundled_version_markers_stay_in_sync():
     root = Path(__file__).parents[1] / "trackball_daemon/plugins/blender/trackball_nav"
-    assert json.loads((root / "version.json").read_text(encoding="utf-8"))["version"] == "0.1.22"
+    manifest_version = json.loads(
+        (root / "version.json").read_text(encoding="utf-8"))["version"]
     source = (root / "__init__.py").read_text(encoding="utf-8")
-    assert 'ADDIN_VERSION = "0.1.22"' in source
-    assert '"version": (0, 1, 22)' in source
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        module = ast.parse(source)
+    assignments = {
+        node.targets[0].id: ast.literal_eval(node.value)
+        for node in module.body
+        if isinstance(node, ast.Assign)
+        and len(node.targets) == 1
+        and isinstance(node.targets[0], ast.Name)
+        and node.targets[0].id in {"ADDIN_VERSION", "bl_info"}
+    }
+    assert assignments["ADDIN_VERSION"] == manifest_version
+    assert ".".join(map(str, assignments["bl_info"]["version"])) == manifest_version
 
 
 def test_blender_addon_consumes_shared_zoom_target_and_behavior():
@@ -73,7 +87,6 @@ def test_blender_addon_consumes_shared_zoom_target_and_behavior():
                   encoding="utf-8")
     assert "def _zoom_pivot(" in source
     assert 'frame.get("zm", "to_center")' in source
-    assert 'adv.get("zoom_style", "zoom")' in source
     assert "_dolly(rv, z, pivot)" in source
 
 

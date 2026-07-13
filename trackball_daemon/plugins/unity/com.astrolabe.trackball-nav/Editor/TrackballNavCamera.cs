@@ -59,8 +59,8 @@ namespace Astrolabe.TrackballNav
 
         // Remove existing roll: rebuild Right/Up so camera-right is horizontal (perpendicular to
         // WorldUp) while Forward is unchanged. The eye stays put, so the focus distance and the
-        // synthesised orbit point (Location + Forward*dist) are preserved -- only the roll goes
-        // (issue #2: level on fixed-horizon mode entry). False in the degenerate straight-up/
+        // synthesised orbit point (Location + Forward*dist) are preserved -- only the roll goes.
+        // False in the degenerate straight-up/
         // straight-down view, where roll is indistinguishable from yaw.
         public static bool LevelHorizon(ref Cam cam)
         {

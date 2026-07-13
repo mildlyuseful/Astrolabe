@@ -933,7 +933,7 @@ class OnshapeBridge:
         # Control scheme (orbit pivot / orbit style / zoom mode); a dict ref-swap is atomic, so the
         # worker reads it lock-free each flush (same pattern as the broker / SW driver).
         self._scheme = {"op": "screen_center", "os": "free", "zm": "to_center"}
-        # Level-horizon-on-entry (issue #2). _horizon_fixed is None until the first set_scheme so
+        # _horizon_fixed is None until the first set_scheme so
         # a daemon that STARTS in turntable never levels -- only a real free->turntable switch
         # queues _level_pending, which the worker applies on the next navigation step.
         self._level_horizon = True
@@ -976,7 +976,7 @@ class OnshapeBridge:
         self._held_pivot = None
         self._held_zoom_pivot = None
         self._held_zoom_resolved = False
-        # Fixed-horizon transition (issue #2): a free->turntable switch queues one leveling pass,
+        # A free->turntable switch queues one horizon-leveling pass,
         # applied by the worker on the next navigation step. Leaving turntable cancels it.
         self._level_horizon = bool(level_horizon_on_entry)
         fixed = (orbit_style == "turntable")
@@ -1202,7 +1202,7 @@ class OnshapeBridge:
         changed_affine = False
         new_extents = None
 
-        # Level ONCE on turntable entry (queued by set_scheme; issue #2): rebuild right/up so
+        # Level ONCE on turntable entry (queued by set_scheme): rebuild right/up so
         # camera-right is horizontal while back (the view direction) and the eye stay put -- the
         # screen centre and zoom are untouched, only the roll goes. Skipped in the degenerate
         # straight-along-WORLD_UP view. Uses the same +Z Top-plane normal as the turntable itself.

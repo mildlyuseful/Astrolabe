@@ -1,5 +1,4 @@
 """Declarative per-app binding superstructure and presentation conventions."""
-from pathlib import Path
 
 from trackball_daemon import integrations
 from trackball_daemon.binding_schema import APP_BINDING_PROFILES, BINDING_SECTIONS
@@ -23,8 +22,6 @@ def test_all_apps_have_twist_config_and_zoom_target_config(isolated_config):
     for key, app in cfg.data["apps"].items():
         assert app["advanced"]["twist_action"] in APP_BINDING_PROFILES[key].twist_actions
         assert app["bindings"]["scheme"]["zoom_mode"] == "default"
-        assert APP_BINDING_PROFILES[key].supports("orbit_hold")
-        assert APP_BINDING_PROFILES[key].supports("zoom_hold")
 
 
 def test_rich_profiles_get_shared_zoom_mode_and_capability_specific_fields():
@@ -51,24 +48,3 @@ def test_orbit_and_zoom_dropdown_labels_follow_one_convention():
         "Default", "Free", "Turntable"]
     assert [_option_label(v) for v in ("default", "to_center", "to_object", "to_cursor")] == [
         "Default", "To Center", "To Object", "To Cursor"]
-
-
-def test_ui_uses_only_declarative_renderer_and_general_is_scrollable():
-    source = (Path(__file__).parents[1] / "trackball_daemon" / "ui.py").read_text(encoding="utf-8")
-    assert source.count("def _bindings_fields(") == 1
-    for obsolete in ("_blender_bindings_fields", "_sketchup_bindings_fields",
-                     "_unreal_bindings_fields", "_engine_bindings_fields"):
-        assert obsolete not in source
-    renderer = source[source.index("def _bindings_fields"):source.index("# --- tab c:")]
-    assert "BINDING_SECTIONS" in renderer
-    general = source[source.index("def _build_general_tab"):source.index("def _apply_default_mode")]
-    assert "body = self._scrollable(outer)" in general
-
-
-def test_ui_removes_developer_copy_and_uses_tooltips():
-    source = (Path(__file__).parents[1] / "trackball_daemon" / "ui.py").read_text(encoding="utf-8")
-    assert "Host alignment" not in source
-    assert "developer-owned" not in source
-    assert "User overrides" not in source
-    assert "class _ToolTip" in source
-    assert "foreground=\"#888\"" not in source

@@ -11,20 +11,6 @@ if sys.platform == "win32":
     _kernel32 = ctypes.windll.kernel32
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 
-    def foreground_window_title():
-        """Title text of the foreground window, or "" on failure. Used to recognize browser-based
-        apps (e.g. Onshape) by their tab title, since the foreground PROCESS is just the browser."""
-        try:
-            hwnd = _user32.GetForegroundWindow()
-            if not hwnd:
-                return ""
-            length = _user32.GetWindowTextLengthW(hwnd)
-            buf = ctypes.create_unicode_buffer(length + 1)
-            _user32.GetWindowTextW(hwnd, buf, length + 1)
-            return buf.value or ""
-        except Exception:
-            return ""
-
     def foreground_process_name():
         try:
             hwnd = _user32.GetForegroundWindow()
@@ -51,6 +37,3 @@ if sys.platform == "win32":
 else:
     def foreground_process_name():
         return None
-
-    def foreground_window_title():
-        return ""

@@ -12,7 +12,9 @@ Tests: [`tests/test_autocad_loader.py`](../../tests/test_autocad_loader.py),
 [`tests/test_integrations_autocad.py`](../../tests/test_integrations_autocad.py),
 [`tests/test_app_routing.py`](../../tests/test_app_routing.py). Wiring: `app.py`, `config.py`,
 `integrations.py`, `ui.py`, `winfocus.py`. User-facing summary: the AutoCAD section of
-[`README.md`](../../README.md). (Current at daemon `__version__` 0.1.58, plugin 0.3.5.)
+[`README.md`](../../README.md). Treat `trackball_daemon.__version__` and
+`Plugin.PluginVersion`/`plugins/autocad/version.json` as the authoritative version sources rather
+than copying release numbers into this persistent guide.
 
 ---
 
@@ -55,9 +57,50 @@ is entirely at the COM boundary and in AutoCAD's viewport model. AutoCAD **verti
 Architecture, Mechanical) are all `acad.exe` and expose the same `AutoCAD.Application`, so they work
 for free.
 
+### Current plugin control contract (0.3.15)
+
+The plugin is a normal nav-broker client. A socket thread only parses/accumulates frames; a WinForms
+timer created on AutoCAD's UI thread applies them. The primary GS path holds a shadow camera for the
+gesture, updates the live kernel view, and commits once at gesture end. Paper space or a GS failure
+uses the slower `Editor.GetCurrentView`/`SetCurrentView` fallback *inside the plugin*; that is distinct
+from the retired daemon-side COM navigation transport below.
+
+- **Orbit pivots:** `camera` (turn in place), `origin`, `object` (drawing extents), `selection`
+  (selected entities' aggregate geometric extents), strict `screen_center`, and strict `cursor`.
+  The two ray pivots accept a real entity/AABB/curve hit only; empty space makes that candidate
+  unavailable and resolution continues through the daemon-expanded fallback chain. The AABB near
+  face is an approximation when AutoCAD exposes no exact surface intersection.
+- **Selection override:** a non-empty selection replaces external pivots when enabled; Camera stays
+  a true eye pivot. Exhausting the configured candidates produces no orbit frame rather than a
+  hidden target fallback.
+- **Zoom target and behavior:** `to_center`, `to_object`, and `to_cursor` work in parallel and
+  perspective projections. Pan-mode **Zoom** changes GS field width/height; **Dolly** changes camera
+  distance (which has no magnification effect in a parallel projection). To Cursor first uses a real
+  pointer hit, then synthesizes a point on the cursor ray at current target depth on empty space.
+- **Independent holds (config v8):** `orbit_pivot_hold_sec` and `zoom_cursor_hold_sec` are separate.
+  Pan or zoom invalidates the orbit pivot; pan preserves the cursor-zoom target, while orbit
+  invalidates it. A scheme change clears both.
+- **Fixed-horizon entry:** a real free→turntable transition can remove existing roll once, controlled
+  by General/per-app `level_horizon_on_entry`. Startup establishes state without a false transition;
+  ordinary turntable frames preserve the established horizon.
+- **Stationary cursor:** `Editor.PointMonitor` fires only on physical mouse movement. After every
+  navigation frame, plugin 0.3.15 reprojects its cached plane sample through the new camera basis and
+  marks it as a ray seed rather than an entity hit. A pan followed by orbit therefore recasts the new
+  scene under an unmoved cursor without requiring a mouse jog.
+- **Alignment:** `Plugin.cs` camera multipliers are neutral. Effective AutoCAD signs/scales come from
+  `trackball_daemon/host_profiles.json` composed with user settings; see
+  [`../default_profiles.md`](../default_profiles.md).
+
 ---
 
-## 2. Architecture & threading
+## Retired daemon-side COM transport reference
+
+Sections 2–7 describe `archive/autocad_com_transport/autocad_driver.py`, not the production
+transport. They preserve measured ActiveX behavior that remains useful for external AutoCAD
+automation. Do not use their methods, pivots, performance numbers, or tuning constants to describe
+the current plugin.
+
+## 2. [ARCHIVED COM] Architecture & threading
 
 Mirrors `SolidWorksDriver` exactly (intentionally):
 
@@ -73,7 +116,7 @@ Mirrors `SolidWorksDriver` exactly (intentionally):
 
 ---
 
-## 3. Attaching to a running AutoCAD (`_attach`, `_find_running_acad`)
+## 3. [ARCHIVED COM] Attaching to a running AutoCAD (`_attach`, `_find_running_acad`)
 
 We **attach only — never launch** AutoCAD. `_find_running_acad` **enumerates the Running Object
 Table**, normalizes each dispatch to its `.Application` (both `AcadApplication` *and* `AcadDocument`
@@ -90,7 +133,7 @@ register** (`addin_version` is always `""`), exactly like SolidWorks.
 
 ---
 
-## 4. The verified view model (the math foundation — measured live, trust this)
+## 4. [ARCHIVED COM] The verified ActiveX view model
 
 AutoCAD's 3D view is driven through the **active viewport**, but with a crucial split between
 **reading** and **writing**:
@@ -172,7 +215,7 @@ world +X.
 
 ---
 
-## 5. The per-frame camera ops (`_flush`)
+## 5. [ARCHIVED COM] The per-frame camera ops (`_flush`)
 
 Each non-empty frame, on the worker thread:
 
@@ -200,40 +243,17 @@ and tracks `_dir/_size/_center` across its own writes**, re-reading direction+si
 
 ---
 
-## 6. Orbit pivots & styles (the control scheme — `_apply_orbit`, `_pivot_point`)
+## 6. [ARCHIVED COM] Orbit pivots & styles (`_apply_orbit`, `_pivot_point`)
 
-`set_scheme(orbit_pivot, orbit_style, zoom_mode)` is pushed from `app._apply_schemes()`. Pivots (the
-3D point we `ZoomCenter` on each orbit frame):
+The archived transport tracked one WCS point in `_center` and routed all recentering through
+`ZoomCenter`. `origin` used WCS origin, `object` used drawing extents, and the old view/default path
+used the tracked screen-centred point. It had no real viewport-centre hit-test, no PointMonitor
+cursor path, no independent selection extents, and no useful Camera/free-roll implementation.
+Those capabilities belong to the current plugin contract in §1, not this archive.
 
-The NETLOAD plugin also consumes **Pan-mode Zoom / Dolly** and **Pivot hold** from the frame's
-advanced payload. Zoom changes GS field width/height; Dolly changes camera distance (and therefore
-has no magnification effect in a parallel projection). Pivot hold replaces the old fixed gesture
-idle constant. The legacy ViewTableRecord fallback can render field Zoom but has no writable camera
-distance for Dolly.
-
-- **`origin`** — the WCS origin `(0,0,0)`.
-- **`object`** — the **drawing-extents centre** (`EXTMIN`/`EXTMAX` midpoint). **`selection`** uses
-  the aggregate `Entity.GeometricExtents` centre of the implied selection when available.
-- **`camera`** — the camera position; orbiting around it turns the view in place.
-- **`screen_center`** — **plugin 0.3.8+**: the first surface under the **viewport centre**, found by
-  the same expanding model-space ray the cursor pivot uses (aimed through the view centre), but
-  **strict** — no construction-plane or view-depth synthesis. Nothing under the centre makes the
-  method unavailable and the configured fallback chain continues. Held per gesture. The archived COM
-  fallback still has no viewport-centre pick. (See §8.6.)
-  **Plugin 0.3.9 made `cursor` strict the same way**: the construction-plane / view-depth salvage
-  was dropped, so hovering empty space is a miss that continues the chain (2D-Wireframe mid-face
-  hovers are still recovered — the strict expanding ray hits the solid's AABB).
-- **`cursor`** — TRUE under-the-mouse orbit, but **only in the NETLOAD plugin** (§8.17: an
-  in-process `Editor.PointMonitor` caches the cursor point; `to_cursor` zoom rides the same cache).
-  This COM fallback has no cursor hit-test, so here `cursor` degrades to the extents centre like
-  `selection` — in practice the plugin owns the frames whenever it's loaded, so the fallback path is
-  rarely what the user feels.
-
-Orbit **style**: `free` rotates about the composed camera axis (`right·vx + up·vy + forward·vz`);
-`turntable` yaws about `WORLD_UP` + pitches about camera-right (**roll dropped**), composed into one
-rotation via quaternion. **AutoCAD auto-levels the up to world Z** and `VIEWTWIST` is **not settable**
-via `SetVariable`, so **free-roll is limited/approximate** — turntable is the natural fit (§8.4). Both
-rotate `VIEWDIR` by one Rodrigues rotation, then `ZoomCenter(pivot, VIEWSIZE)` keeps the pivot centred.
+Archived `turntable` yawed about world Z and pitched about camera-right. ActiveX could not set
+`VIEWTWIST`, so the external path could not provide the plugin's true free-roll. Both styles changed
+`VIEWDIR` and then used `ZoomCenter` to keep the tracked point centred.
 
 Pan (`_apply_pan`): `ZoomCenter` to `_center + PAN_SIGN * delta * PAN_SCALE * VIEWSIZE` along camera
 right/up (so pan feels constant at any zoom; no reassign → no regen). Zoom (`_apply_zoom`):
@@ -241,11 +261,11 @@ right/up (so pan feels constant at any zoom; no reassign → no regen). Zoom (`_
 
 ---
 
-## 7. Tuning knobs (top of `autocad_driver.py`)
+## 7. [ARCHIVED COM] Tuning knobs from the retired `autocad_driver.py`
 
-Defaults were sanity-checked live (all four ops move the view correctly) but the **feel** is a
-per-hardware pass; **flip a sign if a channel goes the wrong way** (HANDOFF §12.5). Drawing units vary
-wildly, so `PAN_SCALE`/`ZOOM_SCALE` are strong live-tune items.
+These values document the archived external driver exactly; they are not read by the current
+plugin. Current plugin multipliers are neutral, with effective alignment supplied by
+`host_profiles.json` as described in §1.
 
 | Constant | Value | Meaning |
 |---|---|---|
@@ -260,16 +280,20 @@ wildly, so `PAN_SCALE`/`ZOOM_SCALE` are strong live-tune items.
 | `_OBJ_CACHE_TTL` | `0.5` | drawing-extents cache lifetime. |
 | `_RETRY_PERIOD` | `2.0` | seconds between attach attempts while AutoCAD isn't running. |
 
-Per-app sensitivity / invert / scheme and the viewport rate come from config (Per-App Bindings → the
-`autocad` app), same as the other apps.
+The archived driver's per-app sensitivity/invert/scheme and viewport rate came from daemon config.
 
 ---
 
-## 8. GOTCHAS & SOLVED PROBLEMS (read this)
+## 8. Implementation history, gotchas, and solved problems
+
+Subsections explicitly tagged **[ARCHIVED COM]** describe the retired daemon-side ActiveX
+transport. Untagged plugin subsections describe the current NETLOAD transport or history that still
+explains its implementation. This mixed chronology is kept because the measured AutoCAD API
+behavior is difficult to rediscover, but the tags are the transport boundary.
 
 Each is *symptom → cause → fix*. All found by **live probing** against AutoCAD 2026.
 
-### 8.1 `GetActiveObject` can be "Operation unavailable" → enumerate the ROT
+### 8.1 [ARCHIVED COM] `GetActiveObject` can be "Operation unavailable" → enumerate the ROT
 - **Symptom:** `win32com.client.GetActiveObject("AutoCAD.Application")` raises `-2147221021`
   ("Operation unavailable") even though `acad.exe` is running and a drawing is open.
 - **Cause:** AutoCAD's ROT registration / marshaling isn't always reachable through the class moniker
@@ -278,7 +302,7 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   `.Application`, filters by `.Name == "AutoCAD"`, and picks the one with the most `Documents`. This is
   the same ROT-first pattern SolidWorks uses, and it's the reliable attach.
 
-### 8.2 The reassign commit ritual — nothing repaints without `doc.ActiveViewport = vp`
+### 8.2 [ARCHIVED COM] The reassign commit ritual — nothing repaints without `doc.ActiveViewport = vp`
 - **Symptom:** you set `vp.Direction`/`Target` and call `acad.Update()`, but the view doesn't move; the
   sysvars don't change either.
 - **Cause:** `doc.ActiveViewport` hands you a **working copy**. Mutating it is inert until it's
@@ -289,7 +313,7 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   leaves the framing wrong (§8.3), orbit follows it with `ZoomCenter(pivot, VIEWSIZE)` (which also
   supplies the repaint — no `acad.Update()` needed).
 
-### 8.3 The `AcadViewport` clone is desynced — read the view from SYSVARS, and NEVER set `.Center`
+### 8.3 [ARCHIVED COM] The `AcadViewport` clone is desynced — read SYSVARS and never set `.Center`
 - **Symptom:** `doc.ActiveViewport.Direction`/`Target`/`Center`/`Height` don't match what's on screen
   (they read defaults like `Direction=(0,0,1)`, `Height=9.0`), so orbiting "from" them jumps the view.
 - **Cause:** the model-space active-viewport object's cached geometry is **not** kept in sync with the
@@ -301,7 +325,7 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   Instead, orbit sets Direction+Target, reassigns, then re-frames with `ZoomCenter(pivot, VIEWSIZE)`,
   which restores VIEWCTR **and** VIEWSIZE cleanly.
 
-### 8.4 AutoCAD auto-levels the up; `VIEWTWIST` isn't settable → free-roll is limited
+### 8.4 [ARCHIVED COM] AutoCAD auto-levels up; `VIEWTWIST` is not settable
 - **Symptom:** the roll channel (`oz`) has no effect; "free" orbit behaves like turntable (verticals
   re-level themselves).
 - **Cause:** setting a new `Direction` makes AutoCAD **auto-level the up to world Z** (verified:
@@ -312,7 +336,7 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   camera-right) is the natural AutoCAD fit and is what `view/free` effectively become for direction.
   A true roll would need a `SendCommand('DVIEW … TWist …')` per frame — flickery, not worth it.
 
-### 8.5 Per-op guards: one failing COM call must not blank the viewport
+### 8.5 [ARCHIVED COM] Per-op guards: one failing COM call must not blank the viewport
 - Each op (`orbit`, `pan`, `zoom`) is caught, logged **once** via `_warn_once`, and skipped — the
   others still run. **Only the app-alive probe (`acad.Documents.Count`) raising causes a disconnect**
   (that genuinely means AutoCAD closed). A transient pywin32 "Property … can not be set" on `Direction`
@@ -328,10 +352,11 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   method unavailable. **Plugin 0.3.8 implements it honestly**: `CaptureScreenCenterPivot` aims the
   §8.17 expanding model-space ray (`ExpandRayDepth`) through the **view centre** (`PivotViewBasis` —
   the GS shadow target during a gesture) in **strict mode**: `EntityRayDepth(strict:true)` accepts
-  only a real (radius-thickened) ray/AABB or curve intersection and drops the radius-0 bbox-centre
-  depth synthesis the cursor pivot keeps for its under-the-mouse salvage. A miss returns null and the
-  configured fallback chain continues — the same "actual target or fall through" contract as the
-  other hosts. AABB near-face is the depth approximation (GeometricExtents is all AutoCAD offers
+  only a real (radius-thickened) ray/AABB or curve intersection and rejects radius-0 bbox-centre or
+  view-depth synthesis. The `cursor` orbit path has the same strict contract since 0.3.9. A miss
+  returns null and the configured fallback chain continues — the same "actual target or fall
+  through" contract as the other hosts. AABB near-face is the depth approximation
+  (GeometricExtents is all AutoCAD offers
   without firing real selection), so on very non-boxy geometry the pivot can sit slightly off the
   true surface — same accuracy class as the cursor pivot's expanded hits. Needs a live feel pass.
   Plugin 0.3.7 resolves `selection`
@@ -340,7 +365,7 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   pivot. The archived COM transport still lacks this path; the in-process plugin is the sole live
   navigation transport.
 
-### 8.7 A freshly `Documents.Add()`ed doc mis-resolves properties → re-fetch `ActiveDocument`
+### 8.7 [ARCHIVED COM] A new document can mis-resolve properties → re-fetch `ActiveDocument`
 - **Symptom (probe/testing only):** the object returned by `acad.Documents.Add()` raises
   `AttributeError: Add.ActiveSpace` (pywin32 suggests `ActiveLayer`) on property access.
 - **Cause:** late-bound dispatch doesn't populate the member map for the `Add()`-returned dispatch.
@@ -348,15 +373,14 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   dispatch resolves properties correctly. The driver never creates drawings, but the probe scripts and
   anyone writing a live test must know this.
 
-### 8.8 No add-in, by design
-- AutoCAD's smooth path is a **.NET/ObjectARX plugin** (per-version build + `NETLOAD`). We deliberately
-  avoid it, exactly like the admin-registered SolidWorks add-in. Everything is the in-process COM
-  driver: nothing to install, copy, or auto-update (`autocad` is **not** in `integrations._ADDINS`, so
-  `auto_update` never touches it; asserted in `tests/test_integrations_autocad.py`). The trade-off is
-  the out-of-process COM ceiling + the orbit regen (§8.10) — an ObjectARX plugin would be flicker-free
-  (3Dconnexion's own AutoCAD SpaceMouse support is exactly such a plugin).
+### 8.8 [ARCHIVED COM] Why the first transport avoided an add-in (superseded)
+- The original transport deliberately avoided a per-version .NET/ObjectARX build and accepted the
+  out-of-process COM ceiling plus orbit regen (§8.10). That decision is historical: the current
+  transport **is** the bundled NETLOAD plugin, and AutoCAD **is** a first-class
+  `integrations._ADDINS` entry with install/update/version handling. Keep this section only as context
+  for why the archived driver exists.
 
-### 8.9 `AcadViewport.Center` is destructive — the zoom→orbit "jump" saga
+### 8.9 [ARCHIVED COM] `AcadViewport.Center` is destructive — the zoom→orbit "jump" saga
 - **Symptom (reported from real use):** after a zoom gesture the model **jumps sideways** (a large
   instantaneous pan, no input), worse when zoomed in; and the model sits zoomed-out/oscillating.
 - **Cause:** an earlier design set `vp.Center = (0,0)` on every orbit/pan commit to "keep the pivot
@@ -371,7 +395,7 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   (`_center`). Verified live on off-origin geometry: `VIEWSIZE` stays put and the zoom→orbit jump fell
   from ~40 to **~0.2**.
 
-### 8.10 The orbit (Direction) reassign REGENs — and the regen can't be separated from the rotation
+### 8.10 [ARCHIVED COM] A Direction reassign regenerates and cannot be split from rotation
 - **Symptom (reported from real use):** the model **regenerates and flickers every time the camera
   moves**; a user asked to keep the *view moving* (grid/ViewCube redraw smoothly) while throttling only
   the *regen* — as AutoCAD's own interactive orbit does.
@@ -396,7 +420,7 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
     Lower the app's **Viewport refresh rate** to trade flicker-frequency for smoothness.
   Neither is native-smooth; the only *fully* smooth orbit is the ObjectARX route (§8.8).
 
-### 8.11 The orbit "flash of default zoom" — set `Height` in the reassign
+### 8.11 [ARCHIVED COM] Prevent the reassign's default-zoom flash by setting `Height`
 - **Symptom (reported from real use):** orbiting at a non-default zoom **flashes the model at the
   default zoom** for a frame before snapping back to the set zoom.
 - **Cause:** the reassign's intermediate repaint used the desynced clone's **default `Height`** (the
@@ -405,7 +429,7 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   right zoom. `Height` is safe to set (verified live: no blowup — unlike `Center`, §8.9). This removes
   the zoom-flash from every reassign (independent of the per-frame vs deferred choice, §8.10).
 
-### 8.12 Seed the orbit pivot from `VIEWCTR`, not `TARGET`
+### 8.12 [ARCHIVED COM] Seed the orbit pivot from `VIEWCTR`, not `TARGET`
 - **Symptom:** after a **Zoom Extents**, the first orbit could swing the model off-centre / around
   empty space.
 - **Cause:** the pivot was seeded from `TARGET`, but a Zoom Extents leaves `TARGET` wherever it was
@@ -416,7 +440,7 @@ Each is *symptom → cause → fix*. All found by **live probing** against AutoC
   are read from sysvars; the earlier "TARGET is on the optical axis" reasoning held only *after* an
   orbit had set `Target`, not after a fresh fit.)
 
-### 8.13 The second look: the WHOLE API was swept — and the overlay is the gap-closer
+### 8.13 [ARCHIVED COM] API sweep and overlay workaround
 On a direct "ignore prior conclusions" challenge, the **entire type library** (461 types, enumerated
 from the running instance's `ITypeInfo`) was dumped and every fresh lead probed live:
 - **`IAcadViewport.SetView(view)`** — the one untried view-setter. Verified: **inert until the same
@@ -644,7 +668,7 @@ on daemon start, and `install_autocad` STAGES the copy when the DLL is locked by
 AutoCAD (it lands via the loader's copy-on-attach at the next AutoCAD start). The loader's
 `_netload_plugin` copies `version.json` alongside the DLL.
 
-### 8.17 The `cursor` orbit pivot / `to_cursor` zoom (plugin v0.3.0 … v0.3.3) — verified live
+### 8.17 The `cursor` orbit pivot / `to_cursor` zoom (introduced 0.3.0; current through 0.3.15)
 
 Orbit about the point **under the mouse cursor** (the SpaceMouse "rotation center = cursor"
 behaviour). Two halves, both in the plugin (the retired COM transport had no cursor access — §6):
@@ -674,14 +698,16 @@ behaviour). Two halves, both in the plugin (the retired COM transport had no cur
   old orbit-about-target exactly): a rigid rotation about P (`tgt' = P + m·(tgt−P)`; the eye
   follows via `tgt' + dir'·dist`, so P keeps its exact screen position), and `to_object`/`to_cursor`
   zoom scales the target and eye about P by `1/factor` in both parallel and perspective views.
-  Per-gesture hold in `TryApplyGs`: the pivot is captured ONCE at the first orbit frame of a
-  gesture from the cache — validated against the drawing extents +10 % of the diagonal — and held;
-  a pan/zoom frame invalidates the orbit hold (re-captured at the live cursor on the next orbit
-  frame). Pan preserves the independent To Cursor zoom hold. Because PointMonitor only refreshes
+  `TryApplyGs` captures a pivot on the first orbit frame and holds it until the configured
+  `orbit_pivot_hold_sec` lifecycle calls for a recapture. A pan or zoom frame invalidates the orbit
+  hold; pan preserves the independent To Cursor zoom hold, while orbit invalidates it. Because
+  PointMonitor only refreshes
   on physical mouse movement, v0.3.15 reprojects its cached plane sample into the new camera basis
   after every navigation frame; a stationary cursor therefore raycasts the post-pan scene without
-  requiring a mouse jog. Gesture end resets both held pivots. **Plane / empty handling (v0.3.9, strict):** a plane-only
-  sample (no entity under the cursor) tries the **expanding ray-AABB** (v0.3.3, Fusion-style
+  requiring a mouse jog. Gesture end resets both held pivots.
+
+  **Orbit plane / empty handling (v0.3.9, strict):** a plane-only sample (no entity under the
+  cursor) tries the **expanding ray-AABB** (v0.3.3, Fusion-style
   `APERTURE_FRACS` of VIEWSIZE): walk model space with a thickening ray in **strict mode**
   (`EntityRayDepth(strict:true)` — real ray/AABB or curve intersections only) and take the nearest
   hit — recovers 2D Wireframe mid-face / near-edge when PointMonitor's aperture was empty. Nothing
@@ -689,7 +715,10 @@ behaviour). Two halves, both in the plugin (the retired COM transport had no cur
   (reproject the plane point / an OOB entity sample to the `VIEWCTR`/GS-target view depth — "still
   under the cursor", but a fabricated pivot in empty space) were REMOVED in 0.3.9 to match the
   actual-target-or-fall-through contract of every other host's ray pivots; an OOB entity sample
-  now also returns null instead of reprojecting.
+  now also returns null instead of reprojecting. **To Cursor zoom deliberately differs:** after the
+  same strict real-hit attempt, an empty-space sample synthesizes a point on the cursor ray at the
+  current GS target depth. This preserves under-cursor screen position instead of silently changing
+  the requested mode to To Center.
   The legacy `SetCurrentView` fallback path does NOT support the cursor pivot (view-centre orbit
   as before).
 - **Verification (throwaway instance, headless — no human mouse):** NETLOAD in a COM-launched
@@ -731,8 +760,8 @@ exclusion-set special case, no `client_infos()` polling); `autocad_driver.py` no
 per AutoCAD session, liveness-probed via `Documents.Count`); the tray/apps line shows autocad
 ONLY via the plugin's broker handshake. The full transport — `AutoCADDriver`, `acad_overlay.py`,
 and their tests, exactly as shipped in 0.1.37/0.1.40 — is preserved at
-**`archive/autocad_com_transport/`** with a README. §2–§7 and §8.1–§8.13 of this doc describe
-that archived code and remain the verified ActiveX reference; resurrect the pattern only for a
+**`archive/autocad_com_transport/`** with a README. Sections 2–7 and the §8 subsections explicitly
+tagged **[ARCHIVED COM]** remain the verified ActiveX reference; resurrect the pattern only for a
 target with no in-process path.
 
 AutoCAD 2026 is installed and everything above was verified end-to-end from throwaway scripts.
@@ -777,23 +806,25 @@ real COM behaviour — that's what this section's live testing is for.
 
 ---
 
-## 10. Status & known limitations (at handoff)
+## 10. Current status and known limitations
 
 - **Working & live-verified** (AutoCAD 2026 / ACAD 25.1s): the plugin transport end-to-end —
   regen-free GS orbit/pan/zoom/roll in 3D visual styles, the 2D-Wireframe record-write commit +
   one visible REGEN per gesture (§8.16, crash-tested), `cursor`/`to_cursor` (§8.17), broker
   handshake + focus gating; the loader's zero-friction delivery (ROT attach → copy → trust →
   NETLOAD, once per session); the settings-UI install/update flow with locked-DLL staging.
-- **Needs a feel/sign pass on hardware** if anything feels off: the plugin's
-  `OrbitSign`/`Pan*`/`Zoom*` constants in `Plugin.cs` (drawing units vary wildly, so pan/zoom
-  scale especially).
-- **Limitations:** `to_object` zoom is TODO; the `screen_center` pivot (0.3.8) needs a live feel
-  pass and its depth is AABB-near-face approximate (§8.6); the `cursor` pivot's 0.3.9 strictness
+- **Needs a live interaction pass:** the v8 independent holds, one-shot free→turntable horizon
+  leveling, empty-space synthetic To Cursor target, and 0.3.15 stationary-cursor reprojection were
+  added after the original live cursor verification. Direction/sensitivity tuning belongs in
+  `host_profiles.json` and user settings; the plugin's local multipliers are intentionally neutral.
+- **Limitations:** the `screen_center` pivot (0.3.8) needs a live feel pass and its depth is
+  AABB-near-face approximate (§8.6); the `cursor` pivot's 0.3.9 strictness
   (empty-space hover = miss → chain; 2D-Wireframe mid-face recovery now rides the strict expanding
   ray) also needs a live re-check — the pre-0.3.9 behavior was live-verified WITH the salvage
   paths that were since removed; pre-2025 AutoCAD (no .NET 8 host) has
   **no transport** since the COM fallback was
-  retired (§8.18) — it would need a .NET Framework plugin variant; paper space no-ops. The COM
+  retired (§8.18) — it would need a .NET Framework plugin variant. Paper space and GS failures use
+  the plugin's slower `SetCurrentView` fallback, which lacks the GS path's full pivot behavior. The COM
   transport's own ceilings (reassign-regen per orbit commit, no `VIEWTWIST`, no raycast — §8.4/
   §8.6/§8.10/§8.13) now matter only if the archive is ever resurrected.
 
@@ -816,14 +847,19 @@ real COM behaviour — that's what this section's live testing is for.
   autocad frames take the generic broker branch in `_nav_sink` (no exclusion-set special case);
   rate + scheme reach the plugin through the broker like any socket add-on. AutoCAD is matched as
   the foreground app by the **process name `acad`** (`_APP_PROC_HINTS`).
-- **`config.py`** — the `autocad` app uses the shared `_app()` shape (`rate_hz`, `bindings.scheme`
-  per-app override with `"default"` inheriting General). Deep-merge adds it to existing configs with no
-  `CONFIG_VERSION` bump.
+- **`config.py`** — the `autocad` app uses the shared app profile: `rate_hz`,
+  `orbit_pivot_hold_sec`, `zoom_cursor_hold_sec`, `selection_overrides_pivot`, nullable
+  `level_horizon_on_entry`, and `bindings.scheme` (`"default"` inherits General). Config v8 renames
+  `screen_center_pivot_hold_sec` to `orbit_pivot_hold_sec` and adds the independent Zoom hold from
+  shipped defaults; the older `view_pivot_hold_sec` name was retired in v4.
 - **`integrations.py`** — `detect_autocad` (globs `Autodesk\AutoCAD*\acad.exe`) and
   `install_autocad` (verify AutoCAD + pywin32, copy/stage the bundled plugin, enable). AutoCAD IS
   a first-class `_ADDINS` entry (`version.json` manifest → install/update UI + auto_update).
-- **`ui.py`** — no AutoCAD-specific code: the add-in row (Install/Update + version) renders
-  generically from `_ADDINS`; the per-app Bindings + scheme dropdowns render generically.
+- **`binding_schema.py` / `ui.py`** — the declarative AutoCAD profile exposes the supported pivots,
+  selection override, independent hold entries, zoom style, and horizon-entry option. The add-in row
+  (Install/Update + version) renders generically from `_ADDINS`.
+- **`host_profiles.json`** — the developer-owned AutoCAD alignment factors composed before the
+  neutral plugin multipliers; user source/invert/gain settings compose on top.
 - **`winfocus.py`** — `foreground_process_name` (used to route to AutoCAD when `acad` is frontmost).
 - **`requirements.txt`** — `pywin32` (Windows). Missing ⇒ the loader disables itself and logs once
   (the plugin can still be NETLOADed by hand).

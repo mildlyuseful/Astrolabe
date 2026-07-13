@@ -8,9 +8,6 @@ to a fake engine tree under tmp_path so these run deterministically on any machi
 config dir is isolated into a temp APPDATA by the `isolated_config` fixture.
 """
 import json
-import sys
-
-import pytest
 
 from trackball_daemon import integrations
 from trackball_daemon.config import Config
@@ -136,14 +133,3 @@ def test_auto_update_skips_when_not_installed(isolated_config, tmp_path, monkeyp
     cfg = Config().load()
     # never installed -> auto_update must not touch it (installed version is None)
     assert all(key != "unreal" for key, _old, _new in integrations.auto_update(cfg))
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")
-def test_status_line_reflects_detection(monkeypatch):
-    appdef = integrations.APPS_BY_KEY["unreal"]
-    monkeypatch.setattr(
-        appdef, "detect",
-        lambda: r"C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe")
-    assert "detected" in integrations.status_line(appdef).lower()
-    monkeypatch.setattr(appdef, "detect", lambda: None)
-    assert integrations.status_line(appdef) == "not detected"

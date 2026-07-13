@@ -6,7 +6,9 @@ everything else must pass through untouched.
 """
 import json
 
-from trackball_daemon.config import (Config, CONFIG_VERSION, DEFAULT_ACTION_AXIS_SOURCE,
+import pytest
+
+from trackball_daemon.config import (Config, CONFIG_VERSION, DEFAULTS, DEFAULT_ACTION_AXIS_SOURCE,
                                      DEFAULT_ORBIT_PIVOT_FALLBACKS,
                                      normalize_action_axis_sources,
                                      normalize_axis_permutation,
@@ -23,6 +25,26 @@ def _write_v2(tmp_path, general_scheme, app_schemes):
         "apps": {k: {"bindings": {"scheme": v}} for k, v in app_schemes.items()},
     }
     (d / "config.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+@pytest.mark.parametrize("payload", [
+    None,
+    [],
+    {"version": "8"},
+    {"version": True},
+    {"version": CONFIG_VERSION, "general": []},
+])
+def test_valid_json_with_invalid_config_shape_falls_back_without_overwriting(
+        isolated_config, payload):
+    directory = isolated_config / "TrackballDaemon"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / "config.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    cfg = Config().load()
+
+    assert cfg.data == DEFAULTS
+    assert json.loads(path.read_text(encoding="utf-8")) == payload
 
 
 def test_historical_scheme_values_reach_current_names(isolated_config):

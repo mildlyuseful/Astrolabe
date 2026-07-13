@@ -57,7 +57,7 @@ namespace TrackballNav
         // d = {ox, oy, oz, px, py, z} (the broker frame, already daemon-scaled); signs/scales are
         // the caller's tuning constants.
         //
-        // Pivots (both optional; the null defaults are the pre-0.3.0 behaviour exactly):
+        // Pivots are optional; null preserves target-centered camera behavior:
         //   orbitPivot -- orbit rigidly about this WORLD point instead of the camera target: the
         //                 target rotates around it too, so the point keeps its screen position
         //                 (the "cursor" scheme -- the point under the mouse stays put).

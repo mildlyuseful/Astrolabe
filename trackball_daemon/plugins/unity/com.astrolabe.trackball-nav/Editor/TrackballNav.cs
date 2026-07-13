@@ -15,9 +15,7 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.15";  // 0.1.15: independent orbit/zoom holds
-                                               // 0.1.11: level horizon on fixed-horizon mode entry
-                                               // (adv.level_horizon_on_entry; issue #2).
+        const string AddinVersion = "0.1.15";  // keep in sync with package and version metadata
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.5f;
         const float ObjCacheSec = 0.5f;
@@ -41,8 +39,8 @@ namespace Astrolabe.TrackballNav
         static Vector3? _objCenter;
         static Bounds? _objBbox;
         static string _lastScheme;
-        // Fixed-horizon transition tracker (issue #2): null until the first frame, so a session
-        // that starts already in a fixed mode never levels -- only a real free->fixed switch does.
+        // Fixed-horizon transition tracker: null until the first frame, so startup in a fixed mode
+        // does not level the view; only a real free->fixed switch does.
         static bool? _horizonFixed;
         static Vector2 _sceneMouseGui;   // last Scene GUI mouse (top-left origin)
         static bool _hasSceneMouse;
@@ -521,7 +519,7 @@ namespace Astrolabe.TrackballNav
             _focusDist = eyeDist;
 
             // Level ONCE when the effective mode transitions into a fixed-horizon mode (turntable
-            // orbit, lock-horizon, or walk) and the daemon's toggle is on (issue #2). Transitions
+            // orbit, lock-horizon, or walk) and the daemon's toggle is on. Transitions
             // only: ordinary fixed-mode frames never re-level.
             bool fixedHorizon = navMode == "walk" ||
                 (navMode == "orbit" && (style == "turntable" || lockHorizon));

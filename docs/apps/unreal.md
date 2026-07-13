@@ -6,11 +6,9 @@ and the Unreal-specific gotchas that would otherwise cost real debugging. Unreal
 add-on** integration (like Fusion/Blender/FreeCAD), not an in-process driver. Read this before
 touching the add-on.
 
-Verified live on the dev machine: **Unreal Engine 5.8** (`5.8.0-55116800+++UE5+Release-5.8`), the
-built-in **Python Editor Script Plugin**. Add-on `0.2.4` (Blender-parity scheme: orbit/fly/walk,
-camera pivot, twist action, lock-horizon, per-mode inverts; under-mouse `cursor` orbit /
-`to_cursor` zoom via Epic's stock **GeoReferencing** editor BPLibrary — gotcha #13;
-`selection_overrides_pivot` — gotcha #14).
+The camera/API model was originally verified against Unreal Engine 5.8 and the built-in Python
+Editor Script Plugin. Current versions come from `ADDIN_VERSION`, `version.json`, the `.uplugin`, and
+`trackball_daemon.__version__`; do not maintain a snapshot here.
 
 ---
 
@@ -83,7 +81,7 @@ Unreal's bundled Python). They only talk over the broker socket.
 ```
 BLE trackball → output.py (per-app sensitivity/sign + Shift gating) → App._nav_sink
   → (focused app == unreal, enabled) → NavBroker.submit  (accumulate; flush one coalesced frame/Hz)
-        frame = {"o":[ox,oy,oz], "p":[px,py], "z":zoom, "op":…, "os":…, "zm":…  (+ Blender-only "adv", IGNORED)}
+        frame = {"o":[ox,oy,oz], "p":[px,py], "z":zoom, "op":…, "os":…, "zm":…, "adv":{…}}
   ──────────────────── localhost TCP ────────────────────
   → add-on reader thread (background; newline-JSON → queue.Queue)
   → Slate post-tick pump _pump(delta)  (MAIN/game thread; drains the queue)
@@ -150,7 +148,7 @@ sub.set_level_viewport_camera_info(unreal.Vector(*loc), new_rot)
 
 The Unreal add-on carries the **same rich scheme as Blender** (an additive `"adv"` object on each
 broker frame — see §5.1), interpreted for the editor's free-fly camera. `config.apps.unreal` uses
-`_unreal_app()` (the lean shape **plus** a Blender-style `advanced` block).
+the shared shipped profile plus Unreal's rich `advanced` action block.
 
 - **Nav mode** (`advanced.nav_mode`): `orbit` | `fly` | `walk` — the daemon dropdown (or the toggle).
   - **orbit**: un-shifted ball orbits about the pivot; Shift → pan/zoom. Twist is routed by
@@ -164,9 +162,8 @@ broker frame — see §5.1), interpreted for the editor's free-fly camera. `conf
     two real differences are (a) banking on look, (b) 3D-along-look vs horizontal-plane movement. Kept
     as separate modes for Blender parity.
 - **Pivots** (`scheme.orbit_pivot`): `camera` → the **eye** (turn the camera in place / free-fly);
-  `origin` → (0,0,0); `object` → median of the **selected actors'** bounding-box centres
-  (`EditorActorSubsystem.get_selected_level_actors()` → `actor.get_actor_bounds(False)`), cached
-  ~0.5 s; `selection` currently uses the same selected-actor centre — **Unreal has NO 3D cursor**
+  `origin` → (0,0,0); `object` → aggregate bounds center of the level's scene actors;
+  `selection` → aggregate bounds center of selected actors — **Unreal has NO 3D cursor**
   (verified: no such Python
   API; all Blender-style `*cursor*` names are mouse/UI/gizmo, and no 3D-cursor option is shown for Unreal);
   the under-mouse `cursor` pivot (add-on **0.2.3**) raycasts the surface under the **level-viewport
@@ -183,13 +180,18 @@ broker frame — see §5.1), interpreted for the editor's free-fly camera. `conf
   or `turntable` (yaw about WORLD Z + pitch about camera-right, **roll dropped**).
 - **Zoom target** (`scheme.zoom_mode`): `to_center`, `to_object`, or `to_cursor` controls the fixed
   point. **Pan-mode zoom** (`advanced.zoom_style`) selects native level-viewport FOV Zoom or camera
-  Dolly. Under Cursor uses the same Geo ray and held hit as cursor orbit; a miss uses the center.
+  Dolly. Under Cursor uses the same Geo ray and an independent held target; an empty-space miss
+  synthesizes a point on that ray at the tracked focus depth.
 - **Per-mode action routes** (`advanced.axis_source` + `advanced.invert`): every action selects
   X/Y/Z and can invert independently in the add-on, where the active mode is known. Rotation uses
   `o`; shifted movement uses `(p.x,p.y,z)`, so twist can drive Walk Forward. Defaults preserve the
   old wiring. Unlike Blender, no roll/bank inversion is baked in.
 - **`advanced.pan_scales_with_distance`**: pan scaled by the focus distance (zoom-stable) vs a fixed
   reference distance.
+
+Entering Turntable, Lock Horizon, or Walk from a roll-capable state optionally calls
+`cammath.level_horizon` once. It preserves location, view direction, focus distance, and the active
+pivot. The first frame establishes state; ordinary fixed-mode frames do not repeatedly level.
 
 Dropped vs Blender (not applicable to Unreal): `lock_camera_to_view` (no editor-camera-view
 equivalent), and the in-editor Alt+` mode-cycle
@@ -288,8 +290,8 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
 5c. **Unreal has NO 3D cursor.** Probed the whole `unreal` namespace + `LevelEditorSubsystem`/
    `EditorActorSubsystem` — there is no queryable Blender-style 3D-cursor / editor-pivot point (every
    `*cursor*` name is the mouse cursor / a UI gizmo). The daemon therefore does not offer the
-   **3D Cursor** pivot for Unreal. `selection` and `object` both resolve to the selected-actor centre
-   in this integration.
+   **3D Cursor** pivot for Unreal. Selection and Model Center remain distinct: Model Center uses
+   aggregate scene bounds.
 5d. **fly ≠ walk** (don't collapse them). Verified: fly look BANKS on twist and moves along the
    camera's 3D forward (dives when pitched); walk look is horizon-locked (twist dropped) and moves in
    the ground plane + world-Z. They coincide only when level and un-twisted.
@@ -331,15 +333,15 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
       `unreal_addin.log`.
     - **Rejected alternatives:** a custom Trackball C++ module; an EUW click-capturing overlay;
       `get_mouse_position_on_platform` + a calibrated viewport rect (no reliable screen origin).
-    - **Live-GUI verify still TODO:** headless stubs cover the pipeline; confirm hover+orbit feel and
-      the focus gate on a real editor + trackball.
-14. **`selection_overrides_pivot` (add-on 0.2.4).** Config key `apps.unreal.selection_overrides_pivot`
+    - Headless stubs cover the pipeline; the real-editor hover/focus pass is tracked in
+      [`TODO.md`](../../TODO.md).
+14. **`selection_overrides_pivot`.** Config key `apps.unreal.selection_overrides_pivot`
     (default **True**; deep-merged, no config-version bump). The daemon folds it into the frame's
     `adv` object. When **True** and level actors are selected, orbit (`screen_center` / `cursor` / `origin`)
     and `to_cursor` zoom use the **selection centre** instead of the designated pivot. When
     **False**, the designated pivot is used even with a selection (raycast bbox gate disabled).
-    `object` / `selection` pivots still mean selection centre. Placeholder toggles exist for every
-    other 3D app in the UI; only Unreal applies it today.
+    Model Center and Selection remain distinct. The same selection-override contract is implemented
+    by every supported host; Unreal's bbox gate behavior is the host-specific detail here.
 
 ---
 
@@ -395,9 +397,8 @@ deferral FreeCAD made for its sign calibration).
   `Play-In-Editor active` (PIE guard), `no perspective viewport` (no level/viewport open),
   `GeoReferencingEditorBPLibrary missing` (dependency not enabled). The tray's `Apps: unreal v…`
   confirms the hello handshake.
-- **Deferred / not done:** the **live GUI sign/scale calibration** (best-guess defaults); **live
-  verify** of under-cursor orbit / `to_cursor` zoom feel + focus-gate; **discrete view ops** (Frame
-  Selected, axis snaps) need a button-event channel the broker doesn't have yet.
+- The current live-GUI matrix (cursor focus, independent holds, horizon entry, signs/feel, PIE) and
+  discrete button-event work are tracked in [`TODO.md`](../../TODO.md).
 - **Install caveat:** writing the plugin into an engine `Plugins` dir needs **admin**; without it the
   daemon prints manual steps (engine dir as admin, or the project `Plugins` dir no-admin). The plugin
   must be **enabled once** per project before it loads.

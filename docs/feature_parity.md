@@ -23,20 +23,6 @@ exist in the shared shape without being visible; that does not make them an impl
 - Fusion's Twist action offers **Roll / Zoom / None**. Zoom enters the selected pan-mode Zoom/Dolly
   behavior; a separate Dolly twist option would be a duplicate, not a distinct action.
 
-## Deliberately not exposed yet
-
-These hosts have an API or internal math that could support more, but no complete feature exists in
-the integration. They remain future work rather than speculative UI:
-
-- **Camera (turn-in-place) orbit:** Fusion 360, FreeCAD, and SolidWorks. Their camera/view APIs are
-  perspective-capable, but their current pivot resolvers deliberately skip Camera. Onshape also
-  omits Camera because the supported orthographic view makes eye-pivot rotation degenerate into an
-  image slide rather than a useful look operation.
-- **Manual Zoom versus Dolly selection:** FreeCAD, Onshape, and SolidWorks retain their existing
-  single/projection-selected behavior. A second user-selectable path has not been implemented there.
-- **Godot Free orbit/roll:** the shared camera-math helper retains a free-rotation branch for tests,
-  but the editor viewport integration always writes a yaw/pitch cursor with no roll. Only Turntable
-  is advertised.
-
-When adding one of these features, implement and verify the host behavior first, then enable its
-field/options in `APP_BINDING_PROFILES` in the same change.
+Open parity work and host-accounted limitations live in [`TODO.md`](../TODO.md). When adding one of
+those features, implement and verify the host behavior first, then enable its field/options in
+`APP_BINDING_PROFILES` in the same change.

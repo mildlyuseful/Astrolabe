@@ -246,8 +246,8 @@ def horizontal(v):
 def level_horizon(cam):
     """Remove existing roll: rebuild right/up so camera-right is horizontal (perpendicular to
     WORLD_UP) while forward is unchanged. The eye stays put, so the tracked focus distance and
-    the synthesised orbit point (location + forward*dist) are preserved -- only the roll goes
-    (issue #2: level on fixed-horizon mode entry). Returns False in the degenerate
+    the synthesised orbit point (location + forward*dist) are preserved -- only the roll goes.
+    Returns False in the degenerate
     straight-up/straight-down view, where roll is indistinguishable from yaw (the same
     singularity basis_to_rotator resolves by reporting roll 0)."""
     right = v_cross(WORLD_UP, cam.forward)       # Unreal: right = up x forward (verified)

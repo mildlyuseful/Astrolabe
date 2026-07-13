@@ -25,20 +25,7 @@ import traceback
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.13"         # 0.1.13: independent orbit/zoom holds
-                                 # (adv.level_horizon_on_entry; issue #2).
-                                 # 0.1.9: immutable host baseline profile.
-                                 # 0.1.8: camera/screen_center canonical pivot names.
-                                 # 0.1.5: selection_overrides_pivot is functional.
-                                 # 0.1.4: scheme values renamed (pointer->cursor,
-                                 # cursor->selection, to_pointer->to_cursor; daemon config v3).
-                                 # reported in the hello handshake (shown in the daemon's tray); keep
-                                 # in sync with version.json. 0.1.1: pan scale fix (was ~100x too
-                                 # small). 0.1.2: orbit scale 0.5->1.0 (true 1:1; was half-speed from
-                                 # copying Blender's RegionView3D halving). 0.1.3: "pointer" orbit
-                                 # pivot + "to_pointer" zoom (orbit/zoom about the surface under the
-                                 # MOUSE POINTER, via a passive SoLocation2Event observer). Bump so
-                                 # auto_update re-copies.
+ADDIN_VERSION = "0.1.13"         # keep in sync with version.json
 _DEFAULT_PORT = 47900
 STARTUP_DELAY_MS = 1500          # defer boot so the GUI is fully up (FreeCAD.GuiUp race)
 PUMP_MS = 11                     # ~90 Hz main-thread queue drain
@@ -66,8 +53,8 @@ _host = "?"
 # idle gap.
 _gesture = {"t": 0.0, "pivot": None}
 _zoom_gesture = {"pivot": None}   # "to_cursor" zoom's own per-gesture hold (reset on orbit/pan)
-# Fixed-horizon transition tracker (issue #2): None until the first frame, so an add-on that
-# starts up already in turntable never levels -- only a real free->turntable switch does.
+# Fixed-horizon transition tracker: None until the first frame so startup in turntable does not
+# level the view; only a real free->turntable switch does.
 _horizon = {"fixed": None}
 _obj_cache = {"t": 0.0, "center": None, "bbox": None}
 _last_scheme = {"v": None}
@@ -500,7 +487,7 @@ def _apply(view, frame, idle):
     camera, node = _read_camera(view)
 
     changed = False
-    # Level ONCE when the style transitions free->turntable (issue #2): remove existing roll
+    # Level ONCE when the style transitions free->turntable: remove existing roll
     # instead of locking the tilted horizon. Transitions only -- prev None (fresh add-on) never
     # levels, and ordinary turntable frames never re-level.
     fixed = (style == "turntable")

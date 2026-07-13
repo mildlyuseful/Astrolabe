@@ -10,7 +10,8 @@ Primary code: [`trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py`
 (+ `TrackballNav.manifest`). Tests: [`tests/test_fusion_cursor_pivot.py`](../../tests/test_fusion_cursor_pivot.py)
 (pixel→ray→pivot math against a stubbed `adsk`). Wiring: `app.py`, `config.py`, `integrations.py`
 (`install_fusion` / auto-update), `ui.py`. User-facing setup: the Fusion section of
-[`README.md`](../../README.md). (Current at add-in `0.1.16`, daemon `0.1.59`.)
+[`README.md`](../../README.md). Current versions come from `ADDIN_VERSION`, the manifest, and
+`trackball_daemon.__version__`; do not maintain a snapshot here.
 
 ---
 
@@ -21,10 +22,9 @@ Fusion **CustomEvent**; the event handler applies the camera change on Fusion's 
 (the Fusion API is main-thread-only — same marshalling problem every socket add-on solves, each
 with its host's mechanism: Blender uses a timer, FreeCAD a `QTimer`, Unreal a Slate post-tick,
 SketchUp `UI.start_timer`). The camera model is the classic **eye + target + up**: orbit rotates
-eye about the pivot by the full ball angle (magnitude 1.0 — the eye+target convention, see
-HANDOFF §12.12), pan translates along camera right/up, zoom moves the eye along the view axis.
-Baseline signs/scales (`ORBIT_SCALE`/`PAN_SIGN`/`PAN_SCALE`/`ZOOM_SCALE`/`ZOOM_SIGN`) are at the
-top of `TrackballNav.py`; the daemon's Per-App Bindings scale from that baseline.
+eye about the pivot, pan translates along camera right/up, and zoom changes projection or dollies
+according to the selected behavior. Intrinsic signs/scales live in `host_profiles.json` and are
+applied by the daemon before the frame reaches this lean add-in; the add-in camera math is neutral.
 
 ## 2. Install / reload / versioning
 
@@ -82,8 +82,9 @@ continue through the configured fallback chain on a miss, hold the pivot for the
   0.1.14 with the daemon's config v3): `GetCursorPos` → DPI divide →
   `screenToView` → `viewToModelSpace` to aim the ray (perspective: eye→point; ortho: parallel,
   pushed back), then the same pick/validate/hold machinery. If `screenToView` output fails the
-  physical-bounds check, a window-under-cursor client-rect mapping is the fallback, then the
-  object centre.
+  physical-bounds check, a window-under-cursor client-rect mapping is the coordinate fallback. A
+  failed orbit hit continues through the configured pivot chain; a failed To Cursor hit synthesizes
+  a point on the cursor ray at the current target/model depth.
 - The cursor is read fresh at each gesture start — there is deliberately **no cache to go
   stale**.
 - Add-in 0.1.15 resolves `origin` explicitly; 0.1.16 computes `selection` from the aggregate
@@ -94,9 +95,13 @@ continue through the configured fallback chain on a miss, hold the pivot for the
   and the configured chain continues (a `camera` primary still keeps its selection-override
   exemption). This is a capability gap, not a geometric impossibility: Fusion's viewport is
   perspective-capable, so a real turn-in-place (rotate the camera basis about `camera.eye` with
-  the eye fixed) is implementable — **candidate for future development**. Today only
-  Blender/SketchUp/Unreal/Unity/Godot/Rhino/AutoCAD implement camera turn-in-place; Fusion,
-  SolidWorks, and FreeCAD skip it (and Onshape skips it on purpose — orthographic).
+  the eye fixed) is implementable. This parity item is tracked in [`TODO.md`](../../TODO.md).
+
+Entering Turntable from Free optionally levels the horizon once. The transition rebuilds the up
+vector against world up without moving eye/target or changing the view distance/pivot. The first
+frame establishes state, the world-up singularity is skipped, and ordinary Turntable frames do not
+re-level. `orbit_hold_sec` and `zoom_hold_sec` are independent; pan/zoom invalidate the orbit pivot,
+pan preserves the To Cursor zoom target, and orbit invalidates the zoom target.
 
 ## 5. Testing
 
@@ -107,5 +112,5 @@ python -m pytest tests -q                                # daemon wiring + regre
 
 There is no headless Fusion, so live verification = install the add-in, watch
 `fusion_addin.log`, and use the `cursor map:` line to confirm the coordinate mapping on the
-actual monitor scale. Still to verify live: the 0.1.13 right/bottom-band re-check (hover near
-the right/bottom viewport edges and orbit).
+actual monitor scale. The current live matrix—including occurrence geometry, horizon entry,
+independent holds, and edge/DPI checks—is tracked in [`TODO.md`](../../TODO.md).

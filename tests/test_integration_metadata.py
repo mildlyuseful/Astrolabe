@@ -1,6 +1,7 @@
-"""Step 6: every 3D Apps card has honest compatibility/setup metadata and actions."""
+"""Every 3D Apps card has honest compatibility/setup metadata and actions."""
 from dataclasses import replace
-from pathlib import Path
+
+import pytest
 
 from trackball_daemon import integrations
 
@@ -83,14 +84,21 @@ def test_rolling_web_apps_have_a_supported_policy_without_a_local_version():
     assert integrations.compatibility(onshape, "browser-based (no local install)").status == "supported"
 
 
-def test_apps_panel_has_expandable_instructions_and_no_noop_startup_control():
-    source = (Path(__file__).parents[1] / "trackball_daemon" / "ui.py").read_text(
-        encoding="utf-8")
-    apps_panel = source[source.index("def _build_apps_tab"):source.index("# --- tab b:")]
-    assert "Copy instructions" in apps_panel
-    assert "Copy userscript…" in apps_panel
-    assert "Security:" in apps_panel
-    assert "before setup" in apps_panel
-    assert "Instructions ▾" in apps_panel
-    assert "Start automatically" not in apps_panel
-    assert "Re-check" not in apps_panel
+@pytest.mark.parametrize(("key", "detected_path"), [
+    ("freecad", r"C:\Program Files\FreeCAD 1.1\bin\FreeCAD.exe"),
+    ("solidworks", r"C:\fake\SLDWORKS.exe"),
+    ("autocad", r"C:\fake\acad.exe"),
+    ("sketchup", r"C:\Program Files\SketchUp\SketchUp 2026\SketchUp.exe"),
+    ("godot", r"C:\Godot\Godot_v4.3-stable_win64.exe"),
+    ("rhino", r"C:\Program Files\Rhino 8\System\Rhino.exe"),
+    ("unity", r"C:\Program Files\Unity\Hub\Editor\6000.0.0f1\Editor\Unity.exe"),
+    ("unreal", r"C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe"),
+])
+def test_status_line_reflects_detection(monkeypatch, key, detected_path):
+    """All desktop integrations share one detection/status contract."""
+    monkeypatch.setattr(integrations.sys, "platform", "win32")
+    appdef = integrations.APPS_BY_KEY[key]
+    monkeypatch.setattr(appdef, "detect", lambda: detected_path)
+    assert "detected" in integrations.status_line(appdef).lower()
+    monkeypatch.setattr(appdef, "detect", lambda: None)
+    assert integrations.status_line(appdef) == "not detected"

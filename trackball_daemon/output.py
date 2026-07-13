@@ -5,6 +5,7 @@ raw-to-logical axis orientation is applied once at packet ingress; cursor and pe
 consume the same logical XYZ vector. Identity defaults preserve the original behavior exactly.
 """
 import ctypes
+from dataclasses import dataclass
 import math
 import struct
 import sys
@@ -120,6 +121,44 @@ def quat_to_gl_matrix(q):
 MODE_CUBE, MODE_CURSOR = 0, 1
 
 
+@dataclass(frozen=True)
+class _OutputMapping:
+    """One immutable packet-mapping snapshot published as a single reference."""
+    global_src: tuple
+    global_sign: tuple
+    c_xsrc: int
+    c_xsign: float
+    c_ysrc: int
+    c_ysign: float
+    c_gain: float
+    s_src: int
+    s_sign: float
+    s_gain: float
+    s_dead: float
+    s_dom: float
+    app_key: str
+    binding_profile: object
+    twist_action: str
+    host_baseline: object
+    o_src: tuple
+    o_sign: tuple
+    o_sens: float
+    p_xsrc: int
+    p_xsign: float
+    p_ysrc: int
+    p_ysign: float
+    p_gain: float
+    z_src: int
+    z_sign: float
+    z_gain: float
+    z_dead: float
+    z_dom: float
+    dist_min: float
+    dist_max: float
+    dist_default: float
+    toggle: str
+
+
 class OutputEngine:
     """Owns the cube/view state and routes each rotation packet -- identical math to the
     original on_rotation(), with the numbers pulled from config via apply_config()."""
@@ -130,6 +169,8 @@ class OutputEngine:
     def __init__(self, config):
         self.cfg = config
         self.lock = threading.Lock()            # protects view state (orientation/pan/distance)
+        self._mapping_lock = threading.RLock()  # serialize config reloads with foreground switches
+        self._mapping = None
         self.orientation = (1.0, 0.0, 0.0, 0.0)
         self.pan_x = 0.0
         self.pan_y = 0.0
@@ -153,56 +194,80 @@ class OutputEngine:
         self._last_mode = self.mode
 
     def apply_config(self):
-        """Refresh the cached mapping numbers from config (call after any config change)."""
+        """Build and atomically publish a complete mapping after a config change."""
+        with self._mapping_lock:
+            app_key = self._bindings_app or self.cfg.data["active_app"]
+            self._mapping = self._build_mapping(app_key)
+
+    def _build_mapping(self, app_key):
+        """Build a mapping without exposing a partially refreshed set of fields."""
         g = self.cfg.data["general"]
         orientation = g.get("axis_orientation") or {}
-        self.global_src = [int(v) for v in orientation.get("source", [0, 1, 2])]
-        self.global_sign = [-1.0 if v else 1.0
-                            for v in orientation.get("invert", [False, False, False])]
+        global_src = tuple(int(v) for v in orientation.get("source", [0, 1, 2]))
+        global_sign = tuple(-1.0 if v else 1.0
+                            for v in orientation.get("invert", [False, False, False]))
         c, s = g["cursor"], g["scroll"]
-        self.c_xsrc, self.c_xsign = int(c["x_src"]), float(c["x_sign"])
-        self.c_ysrc, self.c_ysign = int(c["y_src"]), float(c["y_sign"])
-        self.c_gain = float(c["gain"])
-        self.s_src, self.s_sign, self.s_gain = int(s["src"]), float(s["sign"]), float(s["gain"])
-        self.s_dead, self.s_dom = float(s["deadzone"]), float(s["dominance"])
 
         apps = self.cfg.data["apps"]
-        app_key = self._bindings_app or self.cfg.data["active_app"]
-        app = apps.get(app_key) or apps[self.cfg.data["active_app"]]
-        self.app_key = app_key
-        self.binding_profile = binding_profile(app_key)
-        self.twist_action = str((app.get("advanced") or {}).get("twist_action", "roll"))
-        self.host_baseline = host_baseline(app_key)
+        if app_key not in apps:
+            app_key = self.cfg.data["active_app"]
+        app = apps[app_key]
         b = app["bindings"]
         o, p, z = b["orbit"], b["pan"], b["zoom"]
-        # Fold the user's per-axis invert flags into the cached signs (default off => no-op,
-        # so cube/cursor output stays bit-identical). handle_packet is unchanged.
+        # Fold the user's per-axis invert flags into the snapshot signs (default off => no-op,
+        # so cube/cursor output stays bit-identical).
         inv = b.get("invert", {})
         oi = inv.get("orbit", [False, False, False])
         pi = inv.get("pan", [False, False])
         zi = bool(inv.get("zoom", False))
-        self.o_src = [int(v) for v in o["axis_source"]]
-        self.o_sign = [float(o["axis_sign"][k]) * (-1.0 if oi[k] else 1.0) for k in range(3)]
-        self.o_sens = float(o["sensitivity"])
-        self.p_xsrc = int(p["x_src"]); self.p_xsign = float(p["x_sign"]) * (-1.0 if pi[0] else 1.0)
-        self.p_ysrc = int(p["y_src"]); self.p_ysign = float(p["y_sign"]) * (-1.0 if pi[1] else 1.0)
-        self.p_gain = float(p["gain"])
-        self.z_src = int(z["src"]); self.z_sign = float(z["sign"]) * (-1.0 if zi else 1.0)
-        self.z_gain = float(z["gain"])
-        self.z_dead, self.z_dom = float(z["deadzone"]), float(z["dominance"])
-        self.dist_min, self.dist_max = float(z["dist_min"]), float(z["dist_max"])
-        self.dist_default = float(z["dist_default"])
-        self.toggle = b.get("toggle", "shift")
+        return _OutputMapping(
+            global_src=global_src,
+            global_sign=global_sign,
+            c_xsrc=int(c["x_src"]),
+            c_xsign=float(c["x_sign"]),
+            c_ysrc=int(c["y_src"]),
+            c_ysign=float(c["y_sign"]),
+            c_gain=float(c["gain"]),
+            s_src=int(s["src"]),
+            s_sign=float(s["sign"]),
+            s_gain=float(s["gain"]),
+            s_dead=float(s["deadzone"]),
+            s_dom=float(s["dominance"]),
+            app_key=app_key,
+            binding_profile=binding_profile(app_key),
+            twist_action=str((app.get("advanced") or {}).get("twist_action", "roll")),
+            host_baseline=host_baseline(app_key),
+            o_src=tuple(int(v) for v in o["axis_source"]),
+            o_sign=tuple(float(o["axis_sign"][k]) * (-1.0 if oi[k] else 1.0)
+                         for k in range(3)),
+            o_sens=float(o["sensitivity"]),
+            p_xsrc=int(p["x_src"]),
+            p_xsign=float(p["x_sign"]) * (-1.0 if pi[0] else 1.0),
+            p_ysrc=int(p["y_src"]),
+            p_ysign=float(p["y_sign"]) * (-1.0 if pi[1] else 1.0),
+            p_gain=float(p["gain"]),
+            z_src=int(z["src"]),
+            z_sign=float(z["sign"]) * (-1.0 if zi else 1.0),
+            z_gain=float(z["gain"]),
+            z_dead=float(z["deadzone"]),
+            z_dom=float(z["dominance"]),
+            dist_min=float(z["dist_min"]),
+            dist_max=float(z["dist_max"]),
+            dist_default=float(z["dist_default"]),
+            toggle=b.get("toggle", "shift"),
+        )
 
     # --- runtime controls (thread-safe) -------------------------------------------
     def set_mode(self, mode):
         self.mode = mode
 
     def set_active_bindings(self, key):
-        """Re-cache 3D bindings for app `key` (None => config active_app). Cheap; called on
-        focus change so each CAD app is driven with its own orbit/pan/zoom sensitivities."""
-        self._bindings_app = key
-        self.apply_config()
+        """Atomically switch to app ``key`` and publish its complete mapping snapshot."""
+        with self._mapping_lock:
+            app_key = key or self.cfg.data["active_app"]
+            mapping = self._build_mapping(app_key)
+            self._bindings_app = key
+            self._mapping = mapping
 
     def toggle_mode(self):
         self.mode = MODE_CURSOR if self.mode == MODE_CUBE else MODE_CUBE
@@ -212,29 +277,29 @@ class OutputEngine:
         with self.lock:
             self.orientation = (1.0, 0.0, 0.0, 0.0)
             self.pan_x = self.pan_y = 0.0
-            self.distance = self.dist_default
+            self.distance = self._mapping.dist_default
 
     def get_view(self):
         with self.lock:
             return self.orientation, self.pan_x, self.pan_y, self.distance
 
-    def _emit_nav(self, ox, oy, oz, px, py, zoom):
+    def _emit_nav(self, mapping, ox, oy, oz, px, py, zoom):
         sink = self.nav_sink
         if sink is not None:
             # Ordinary integrations do not have mode-aware routing inside their host add-on. Apply
             # the global Twist action here, before host alignment, so Turntable can use twist for
             # zoom (or ignore it) just like the rich integrations. Rich profiles consume the same
             # setting after their per-mode action routing and must not be transformed twice.
-            if not self.binding_profile.rich_actions and oz:
-                if self.twist_action in ("zoom", "dolly"):
+            if not mapping.binding_profile.rich_actions and oz:
+                if mapping.twist_action in ("zoom", "dolly"):
                     zoom += oz
                     oz = 0.0
-                elif self.twist_action == "none":
+                elif mapping.twist_action == "none":
                     oz = 0.0
             # Developer-owned host alignment is applied only at the integration boundary, after
             # the global/body mapping and composably with the saved user mapping. The local debug
             # cube therefore remains a host-neutral calibration reference.
-            h = self.host_baseline
+            h = mapping.host_baseline
             if not h.apply_in_daemon:  # rich add-on applies mode-aware baseline from frame.adv
                 sink(ox, oy, oz, px, py, zoom)
                 return
@@ -252,10 +317,11 @@ class OutputEngine:
     def handle_packet(self, data):
         if len(data) < 12:
             return
+        mapping = self._mapping             # one immutable mapping for this entire packet
         raw = struct.unpack_from("<fff", data, 0)
         # The one physical-orientation transform. Everything downstream (pointer, cube, broker,
         # per-app action routing) speaks this same body-relative logical XYZ frame.
-        recv = tuple(self.global_sign[i] * raw[self.global_src[i]] for i in range(3))
+        recv = tuple(mapping.global_sign[i] * raw[mapping.global_src[i]] for i in range(3))
 
         mode = self.mode
         if mode != self._last_mode:                 # reset cursor accumulators on any switch
@@ -263,48 +329,49 @@ class OutputEngine:
             self._mx = self._my = self._sc = 0.0
 
         if mode == MODE_CUBE:
-            if self.toggle == "shift" and shift_held():
+            if mapping.toggle == "shift" and shift_held():
                 # SHIFT held: pan (move part) + zoom (twist part), mutually exclusive via the
                 # same dominance test cursor mode uses for move-vs-scroll. Orbit is paused.
-                twist = self.z_sign * recv[self.z_src]
-                plane = math.hypot(recv[self.p_xsrc], recv[self.p_ysrc])
-                if abs(twist) > self.z_dead and abs(twist) > self.z_dom * plane:
-                    zoom_d = twist * self.z_gain                  # same value as before
+                twist = mapping.z_sign * recv[mapping.z_src]
+                plane = math.hypot(recv[mapping.p_xsrc], recv[mapping.p_ysrc])
+                if abs(twist) > mapping.z_dead and abs(twist) > mapping.z_dom * plane:
+                    zoom_d = twist * mapping.z_gain                  # same value as before
                     with self.lock:
-                        self.distance = min(self.dist_max, max(self.dist_min, self.distance - zoom_d))
-                    self._emit_nav(0.0, 0.0, 0.0, 0.0, 0.0, zoom_d)
+                        self.distance = min(
+                            mapping.dist_max, max(mapping.dist_min, self.distance - zoom_d))
+                    self._emit_nav(mapping, 0.0, 0.0, 0.0, 0.0, 0.0, zoom_d)
                 else:
-                    pdx = self.p_xsign * recv[self.p_xsrc] * self.p_gain
-                    pdy = self.p_ysign * recv[self.p_ysrc] * self.p_gain
+                    pdx = mapping.p_xsign * recv[mapping.p_xsrc] * mapping.p_gain
+                    pdy = mapping.p_ysign * recv[mapping.p_ysrc] * mapping.p_gain
                     with self.lock:
                         self.pan_x += pdx
                         self.pan_y += pdy
-                    self._emit_nav(0.0, 0.0, 0.0, pdx, pdy, 0.0)
+                    self._emit_nav(mapping, 0.0, 0.0, 0.0, pdx, pdy, 0.0)
             else:
                 # Orbit: axis-angle increment -> delta quaternion, composed in the world frame.
-                vx = self.o_sign[0] * recv[self.o_src[0]] * self.o_sens
-                vy = self.o_sign[1] * recv[self.o_src[1]] * self.o_sens
-                vz = self.o_sign[2] * recv[self.o_src[2]] * self.o_sens
+                vx = mapping.o_sign[0] * recv[mapping.o_src[0]] * mapping.o_sens
+                vy = mapping.o_sign[1] * recv[mapping.o_src[1]] * mapping.o_sens
+                vz = mapping.o_sign[2] * recv[mapping.o_src[2]] * mapping.o_sens
                 dq = quat_from_axis_angle(vx, vy, vz)
                 with self.lock:
                     self.orientation = quat_normalize(quat_mul(dq, self.orientation))
-                self._emit_nav(vx, vy, vz, 0.0, 0.0, 0.0)
+                self._emit_nav(mapping, vx, vy, vz, 0.0, 0.0, 0.0)
             return
 
         # ---- CURSOR mode: convert this packet's rotation into pointer/wheel input ----
-        yaw = self.s_sign * recv[self.s_src]
-        plane = math.hypot(recv[self.c_xsrc], recv[self.c_ysrc])
-        if abs(yaw) > self.s_dead and abs(yaw) > self.s_dom * plane:
+        yaw = mapping.s_sign * recv[mapping.s_src]
+        plane = math.hypot(recv[mapping.c_xsrc], recv[mapping.c_ysrc])
+        if abs(yaw) > mapping.s_dead and abs(yaw) > mapping.s_dom * plane:
             # yaw dominates -> scroll the wheel, carry the fractional remainder
-            self._sc += yaw * self.s_gain
+            self._sc += yaw * mapping.s_gain
             notches = int(self._sc)
             if notches:
                 send_mouse(wheel=notches)
                 self._sc -= notches
         else:
             # otherwise -> move the pointer, carry sub-pixel remainder
-            self._mx += self.c_xsign * recv[self.c_xsrc] * self.c_gain
-            self._my += self.c_ysign * recv[self.c_ysrc] * self.c_gain
+            self._mx += mapping.c_xsign * recv[mapping.c_xsrc] * mapping.c_gain
+            self._my += mapping.c_ysign * recv[mapping.c_ysrc] * mapping.c_gain
             ix, iy = int(self._mx), int(self._my)
             if ix or iy:
                 send_mouse(dx=ix, dy=iy)

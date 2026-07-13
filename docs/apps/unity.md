@@ -32,11 +32,17 @@ you to open a project and Set up again. Manual: copy the staged folder into
 
 ## Controls (Unreal/Blender parity)
 
-Orbit / fly / walk, pivots (`camera`, `screen_center`, `cursor`, `object`, `origin`), free/turntable,
-`twist_action`, `selection_overrides_pivot`, `to_cursor` zoom. Under-cursor stores a world ray on
+Orbit / fly / walk, pivots (`camera`, `screen_center`, `cursor`, `selection`, `object`, `origin`),
+free/turntable, `twist_action`, `selection_overrides_pivot`, and To Cursor zoom. Model Center uses
+aggregate scene bounds and is distinct from the current selection. Under-cursor stores a world ray on
 mouse move via `HandleUtility.GUIPointToWorldRay`, then hits with Physics / own mesh triangle
 tests (AABB fallback). Re-cast from the update pump. Never uses `PlaceObject` or
 `IntersectRayMesh` (missing on some Editor builds).
+
+Orbit ray misses continue the configured global chain. Empty-space To Cursor zoom synthesizes a
+point on the cursor ray at the tracked focus depth. Orbit and cursor-zoom targets have independent
+hold settings: pan invalidates the orbit pivot but preserves the zoom target, and view rotation
+invalidates the zoom target.
 
 Per-mode `advanced.axis_source` and `advanced.invert` route every Orbit/Camera/Fly/Walk action from
 X/Y/Z independently. Rotation actions use `o`; shifted movement actions use `(p.x,p.y,z)`. The
@@ -60,11 +66,18 @@ navigating; turning the toggle off restores Dynamic Clipping.
 pivots at `scene_AABB_radius × mult` from the camera. Hits beyond that (e.g. near the horizon)
 are rejected so the view does not rocket away.
 
+**Fixed-horizon entry:** moving from a rolled Free/Orbit/Fly state into Turntable, Lock Horizon, or
+Walk optionally removes roll once through `TrackballNavCamera.LevelHorizon`. Location, forward
+direction, focus distance, and pivot remain stable; the first frame only establishes state.
+
+Intrinsic signs/scales arrive in `adv.host_baseline` and are applied after mode-specific routing.
+Keep `TrackballNavCamera.cs` neutral and tune suite alignment in `host_profiles.json`.
+
 ## Logs
 
 `%APPDATA%\TrackballDaemon\unity_addin.log`
 
 ## Reload
 
-Edit scripts → Unity recompiles (domain reload). Version bump: `package.json` + `version.json`
-(+ comment in `TrackballNav.cs` AddinVersion).
+Edit scripts → Unity recompiles (domain reload). Keep the code/package version marker and
+`version.json` synchronized. Live checks are tracked in [`TODO.md`](../../TODO.md).

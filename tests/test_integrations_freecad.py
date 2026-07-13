@@ -7,9 +7,6 @@ monkeypatched to a fake path so these run deterministically on any machine/CI; t
 config + Mod dir are isolated into a temp APPDATA by the `isolated_config` fixture.
 """
 import json
-import sys
-
-import pytest
 
 from trackball_daemon import integrations
 from trackball_daemon.config import Config
@@ -102,12 +99,3 @@ def test_auto_update_skips_when_not_installed(isolated_config, monkeypatch):
     cfg = Config().load()
     # never installed -> auto_update must not touch it (installed version is None)
     assert all(key != "freecad" for key, _old, _new in integrations.auto_update(cfg))
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")
-def test_status_line_reflects_detection(monkeypatch):
-    appdef = integrations.APPS_BY_KEY["freecad"]
-    monkeypatch.setattr(appdef, "detect", lambda: _FAKE_11)
-    assert "detected" in integrations.status_line(appdef).lower()
-    monkeypatch.setattr(appdef, "detect", lambda: None)
-    assert integrations.status_line(appdef) == "not detected"
