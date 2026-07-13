@@ -34,6 +34,26 @@ def test_rich_profiles_get_shared_zoom_mode_and_capability_specific_fields():
         assert APP_BINDING_PROFILES[key].zoom_behaviors == ("zoom", "dolly")
 
 
+def test_every_advanced_control_has_a_shipped_config_value(isolated_config):
+    cfg = Config().load()
+    config_key_by_field = {
+        "nav_mode": "nav_mode",
+        "fly_speed": "fly_speed",
+        "walk_speed": "walk_speed",
+        "lock_horizon": "lock_horizon",
+        "pan_scales": "pan_scales_with_distance",
+        "camera_lock": "lock_camera_to_view",
+        "zoom_behavior": "zoom_style",
+        "dynamic_clip": "override_dynamic_clip",
+        "pivot_extent": "pivot_extent_mult",
+    }
+    for app_key, profile in APP_BINDING_PROFILES.items():
+        advanced = cfg.data["apps"][app_key]["advanced"]
+        for field, config_key in config_key_by_field.items():
+            if profile.supports(field):
+                assert config_key in advanced, f"{app_key}.{config_key} is required by {field}"
+
+
 def test_capabilities_do_not_expose_controls_without_distinct_runtime_behavior():
     assert all(profile.supports("orbit_hold") for profile in APP_BINDING_PROFILES.values())
     assert all(profile.supports("zoom_hold") for profile in APP_BINDING_PROFILES.values())

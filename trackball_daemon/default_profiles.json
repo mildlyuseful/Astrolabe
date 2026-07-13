@@ -66,6 +66,7 @@
         "nav_mode": "orbit",
         "lock_horizon": false,
         "zoom_style": "dolly",
+        "pan_scales_with_distance": true,
         "fly_speed": 1.0,
         "walk_speed": 1.0,
         "invert": {
