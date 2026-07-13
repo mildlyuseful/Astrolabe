@@ -69,12 +69,22 @@ def test_addin_actions_follow_real_install_and_update_state(monkeypatch):
     assert integrations.setup_action_label(blender, {}) == "Set up"
 
     monkeypatch.setattr(integrations, "installed_addin_version", lambda _key: "1.0")
-    monkeypatch.setattr(integrations, "update_available", lambda _key: False)
+    monkeypatch.setattr(integrations, "update_available", lambda _key, **_kwargs: False)
     assert integrations.setup_action_label(blender, {}) == "Reinstall"
 
-    monkeypatch.setattr(integrations, "update_available", lambda _key: True)
+    monkeypatch.setattr(integrations, "update_available", lambda _key, **_kwargs: True)
     monkeypatch.setattr(integrations, "bundled_addin_version", lambda _key: "2.0")
     assert integrations.setup_action_label(blender, {}) == "Update → v2.0"
+
+
+def test_loaded_copy_version_overrides_primary_destination_for_update_state(monkeypatch):
+    unity = integrations.APPS_BY_KEY["unity"]
+    monkeypatch.setattr(integrations, "installed_addin_version", lambda _key: "2.0")
+    monkeypatch.setattr(integrations, "bundled_addin_version", lambda _key: "2.0")
+
+    assert integrations.setup_action_label(unity, {}, installed_version="1.0") == "Update → v2.0"
+    assert integrations.setup_action_label(unity, {}, installed_version="2.0") == "Reinstall"
+    assert integrations.update_available("unity", installed_version="1.0") is True
 
 
 def test_rolling_web_apps_have_a_supported_policy_without_a_local_version():

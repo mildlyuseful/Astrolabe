@@ -260,6 +260,7 @@ def _status_app():
     app._sw_apps = []
     app._onshape_apps = []
     app.connected_apps = []
+    app.observed_addin_versions = {}
     return app
 
 
@@ -293,6 +294,16 @@ def test_connection_merge_includes_autocad_as_broker_client():
     app._on_clients_changed([("fusion360", "2.7", 1234)])
     keys = [a for a, _, _ in app.connected_apps]
     assert "autocad" not in keys and "fusion360" in keys    # AutoCAD removed, other app stays
+
+
+def test_loaded_addin_version_is_remembered_after_disconnect():
+    app = _status_app()
+    app._on_clients_changed([("unity", "1.2.3", 42)])
+    assert app.observed_addin_versions["unity"] == "1.2.3"
+
+    app._on_clients_changed([])
+    assert app.connected_apps == []
+    assert app.observed_addin_versions["unity"] == "1.2.3"
 
 
 def test_app_connection_summary():

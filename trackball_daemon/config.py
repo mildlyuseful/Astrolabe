@@ -13,32 +13,6 @@ from types import MappingProxyType
 
 from .paths import config_path
 
-# --- User-facing 3D-navigation overrides. Gains are neutral 1.0 scalers and inversion defaults
-#     are off. Developer-owned software alignment lives only in host_profiles.json. -------------
-_DEFAULT_3D_BINDINGS = {
-    # orbit: AXIS_SOURCE / AXIS_SIGN / ANGLE_SCALE
-    "orbit": {"axis_source": [0, 1, 2], "axis_sign": [1.0, 1.0, 1.0], "sensitivity": 1.0},
-    # pan: PAN_X_* / PAN_Y_* / PAN_GAIN (1.0 = the add-on's baseline pan feel)
-    "pan":   {"x_src": 1, "x_sign": 1.0, "y_src": 0, "y_sign": -1.0, "gain": 1.0},
-    # zoom: ZOOM_* / DIST_* (1.0 = the add-on's baseline zoom feel)
-    "zoom":  {"src": 2, "sign": 1.0, "gain": 1.0, "deadzone": 0.004, "dominance": 1.7,
-              "dist_min": 2.5, "dist_max": 30.0, "dist_default": 6.0},
-    # which modifier switches orbit -> pan/zoom ("shift" == original behavior, "none" = always orbit)
-    "toggle": "shift",
-    # per-axis direction flips (user preference, on top of the base signs). All default off.
-    "invert": {"orbit": [False, False, False], "pan": [False, False], "zoom": False},
-    # per-app control scheme; "default" inherits the General default (see DEFAULTS["general"]).
-    # orbit_pivot: screen_center | camera | cursor | selection | cursor_3d | object | origin.
-    # "cursor"/"to_cursor" target the surface under the MOUSE CURSOR; when an app cannot resolve
-    # a pivot method, orbit resolution continues through the configured global chain. "selection"
-    # is the selected-items pivot; "object" is the model/project bounds centre;
-    # "cursor_3d" is Blender's 3D cursor. (v3 migration renamed pointer->cursor,
-    # cursor->selection/cursor_3d, to_pointer->to_cursor; the retired to_cursor alias of
-    # to_center migrated to to_center.) effective_scheme passes values through untouched, so
-    # no daemon-side whitelist gates these.
-    "scheme": {"orbit_pivot": "default", "orbit_style": "default", "zoom_mode": "default"},
-}
-
 # Physical device orientation. ``source[i]`` says which raw sensor axis becomes logical X/Y/Z;
 # it must remain a permutation so no physical axis is accidentally duplicated or lost. Inversion
 # is applied after the permutation and before both cursor and 3D routing.
@@ -78,18 +52,6 @@ def normalize_axis_index(value, default):
     except (TypeError, ValueError):
         return int(default)
     return value if value in (0, 1, 2) else int(default)
-
-
-# Rich integrations first receive the app's ordinary orbit vector (X/Y/Z) and shifted movement
-# vector (Pan X/Pan Y/Zoom). Each action can independently select one member of its vector. The
-# defaults reproduce the pre-v5 fixed wiring exactly; duplication is intentionally allowed here.
-DEFAULT_ACTION_AXIS_SOURCE = {
-    "orbit":  {"pitch": 0, "yaw": 1, "twist": 2, "pan_x": 0, "pan_y": 1, "zoom": 2},
-    "camera": {"pitch": 0, "yaw": 1, "roll": 2},
-    "fly":    {"pitch": 0, "yaw": 1, "bank": 2,
-               "forward": 1, "strafe": 0, "vertical": 2},
-    "walk":   {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2},
-}
 
 
 @dataclass(frozen=True)
@@ -283,112 +245,6 @@ def orbit_pivot_candidates(primary, fallbacks):
             out.append(method)
     return out
 
-# --- Per-mode action routing for Blender. The add-on interprets the same inputs differently per nav
-#     mode, so source selection and inversion are applied IN THE ADD-ON once the mode is known,
-#     giving independent control. Defaults bake in the "inside-out" roll fix: camera roll + fly
-#     bank are inverted vs external-pivot orbit. ("camera" shares orbit's pan/zoom inverts.)
-_DEFAULT_BLENDER_INVERT = {
-    "orbit":     {"pitch": False, "yaw": False, "twist": False,
-                  "pan_x": False, "pan_y": False, "zoom": False},
-    "camera":    {"pitch": False, "yaw": False, "roll": False},
-    "fly":       {"pitch": False, "yaw": False, "bank": False,
-                  "forward": False, "strafe": False, "vertical": False},
-    "walk":      {"pitch": False, "yaw": False,
-                  "forward": False, "strafe": False, "vertical": False},
-}
-
-# --- Blender-only "Advanced" nav options. Deep-merged in additively, so they appear on existing
-#     configs WITHOUT a CONFIG_VERSION bump. The parts that map to the generic scheme are NOT
-#     duplicated here -- orbit method <-> scheme.orbit_style (free/turntable) and orbit-around <->
-#     scheme.orbit_pivot stay the single source of truth. See docs/apps/blender.md for the current
-#     ownership and reconciliation rules.
-_DEFAULT_BLENDER_ADVANCED = {
-    "nav_mode": "orbit",            # orbit | fly | walk
-    "lock_horizon": False,          # keep the horizon level even in trackball (NDOF "Lock Horizon")
-    "twist_action": "roll",         # roll | zoom | dolly | none   (un-shifted twist in ORBIT mode)
-    "zoom_style": "zoom",           # zoom (view_distance) | dolly (translate the eye)
-    "lock_camera_to_view": False,   # in CAMERA view, drive scene.camera from the trackball
-    "pan_scales_with_distance": True,
-    "fly_speed": 1.0,
-    "walk_speed": 1.0,
-    "invert": _DEFAULT_BLENDER_INVERT,   # per-mode direction flips (applied in the add-on)
-    "axis_source": DEFAULT_ACTION_AXIS_SOURCE,
-}
-
-
-# Every integration exposes Twist action. Rich integrations consume it after their mode-specific
-# routing; ordinary integrations are routed by OutputEngine before host alignment.
-_DEFAULT_COMMON_ADVANCED = {
-    "twist_action": "roll",         # roll | zoom | dolly | none
-}
-
-
-# --- SketchUp: Blender-parity orbit/camera/fly/walk controls. SketchUp has an explicit
-#     eye/target/up camera, so these options are applied by the Ruby extension. Per-mode routes
-#     match Blender's names and inside-out roll/bank defaults; there is no 3D-cursor option. -------
-_DEFAULT_SKETCHUP_INVERT = {
-    "orbit":     {"pitch": False, "yaw": False, "twist": False,
-                  "pan_x": False, "pan_y": False, "zoom": False},
-    "camera":    {"pitch": False, "yaw": False, "roll": False},
-    "fly":       {"pitch": False, "yaw": False, "bank": False,
-                  "forward": False, "strafe": False, "vertical": False},
-    "walk":      {"pitch": False, "yaw": False,
-                  "forward": False, "strafe": False, "vertical": False},
-}
-
-_DEFAULT_SKETCHUP_ADVANCED = {
-    "nav_mode": "orbit",            # orbit | fly | walk
-    "lock_horizon": False,           # keep external-pivot free orbit level
-    "twist_action": "roll",
-    "zoom_style": "dolly",          # shifted zoom channel: native zoom | camera dolly
-    "fly_speed": 1.0,
-    "walk_speed": 1.0,
-    "invert": _DEFAULT_SKETCHUP_INVERT,
-    "axis_source": DEFAULT_ACTION_AXIS_SOURCE,
-}
-
-
-# --- Unreal: per-mode action routes + the "advanced" nav options, mirroring Blender's richer set
-#     but adapted to the editor's free-fly eye+rotator camera. Dropped vs Blender:
-#     lock_camera_to_view (no
-#     editor-camera-view equivalent). Applied IN THE ADD-ON per mode (same reason as Blender, §12.9).
-#     Signs default off (best-guess, live-tune) -- unlike Blender, no baked-in roll/bank inverts. ----
-_DEFAULT_UNREAL_INVERT = {
-    "orbit":     {"pitch": False, "yaw": False, "twist": False,
-                  "pan_x": False, "pan_y": False, "zoom": False},
-    "camera":    {"pitch": False, "yaw": False, "roll": False},
-    "fly":       {"pitch": False, "yaw": False, "bank": False,
-                  "forward": False, "strafe": False, "vertical": False},
-    "walk":      {"pitch": False, "yaw": False,
-                  "forward": False, "strafe": False, "vertical": False},
-}
-
-_DEFAULT_UNREAL_ADVANCED = {
-    "nav_mode": "orbit",            # orbit | fly | walk
-    "lock_horizon": False,          # keep the horizon level even in free orbit (force turntable)
-    "twist_action": "roll",         # roll | zoom | dolly | none   (un-shifted twist in ORBIT mode)
-    "zoom_style": "dolly",          # shifted zoom channel: viewport FOV/size zoom | camera dolly
-    "pan_scales_with_distance": True,
-    "fly_speed": 1.0,
-    "walk_speed": 1.0,
-    "invert": _DEFAULT_UNREAL_INVERT,   # paired with axis_source in the add-on
-    "axis_source": DEFAULT_ACTION_AXIS_SOURCE,
-}
-
-# Unity reuses the Unreal advanced block, plus a Scene-view-only override for Dynamic Clipping
-# (Camera overlay: near/far auto-fit from size — feels like zoom-to-fit while looking around).
-# Godot: turntable-only, no roll (editor cursor is yaw/pitch only — free orbit / twist→roll
-# cannot persist).
-_DEFAULT_UNITY_ADVANCED = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
-_DEFAULT_UNITY_ADVANCED["override_dynamic_clip"] = True  # force SceneView.cameraSettings.dynamicClip off
-# Soft max for under-cursor / screen-center pivots: scene AABB radius × this multiplier.
-# Stops horizon-line hits from rocketing the camera to infinity.
-_DEFAULT_UNITY_ADVANCED["pivot_extent_mult"] = 8.0
-_DEFAULT_GODOT_ADVANCED = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
-_DEFAULT_GODOT_ADVANCED["twist_action"] = "zoom"
-_DEFAULT_GODOT_ADVANCED["lock_horizon"] = True
-
-
 def effective_scheme(general_scheme, app_scheme):
     """Resolve a per-app scheme against the general default (per-app 'default' => inherit)."""
     out = {}
@@ -409,82 +265,21 @@ def effective_level_horizon(general_cfg, app_cfg):
     return bool((general_cfg or {}).get("level_horizon_on_entry", True))
 
 
-def _app(enabled=False):
-    return {
-        "enabled": enabled,
-        "installed": False,
-        "addin_version": "",                 # installed add-in version (set on Set up/Update)
-        # Per-app viewport refresh / flush rate (Hz) sent to this CAD app. 0 = use the global
-        # bridge.rate_hz default. Lets each app run at its own rate (e.g. SolidWorks at 60).
-        "rate_hz": 0,
-        # Independent idle gaps for orbit pivots and under-cursor zoom targets. Pan invalidates
-        # only the orbit pivot; cursor zoom retains its target until zoom_cursor_hold_sec expires.
-        "orbit_pivot_hold_sec": 0.5,
-        "zoom_cursor_hold_sec": 0.5,
-        # When True and something is selected, orbit (and supported to_cursor zoom paths) use the
-        # selection centre instead of the designated pivot. Every integration consumes this setting;
-        # it is deep-merged onto existing configs without a CONFIG_VERSION bump.
-        "selection_overrides_pivot": True,
-        "bindings": copy.deepcopy(_DEFAULT_3D_BINDINGS),
-        "advanced": copy.deepcopy(_DEFAULT_COMMON_ADVANCED),
-    }
-
-
-def _blender_app():
-    """Blender's app config: the shared shape plus the Blender-only `advanced` block, with the
-    Blender-native default orbit pivot 'camera' (turn in place about the eye)."""
-    a = _app()
-    a["bindings"]["scheme"]["orbit_pivot"] = "camera"
-    a["advanced"] = copy.deepcopy(_DEFAULT_BLENDER_ADVANCED)
-    return a
-
-
-def _fusion_app():
-    """Fusion supports both view-extents zoom and camera dolly."""
-    a = _app()
-    a["advanced"]["zoom_style"] = "zoom"
-    return a
-
-
-def _zoom_behavior_app(default="dolly"):
-    """Ordinary integration with distinct native Zoom and camera Dolly paths."""
-    a = _app()
-    a["advanced"]["zoom_style"] = default
-    return a
-
-
-def _unreal_app():
-    """Unreal's app config: the shared shape plus the Unreal `advanced` block (orbit/fly/walk modes,
-    twist action, lock-horizon, per-mode action routes), mirroring Blender's richer set. Default orbit
-    pivot stays 'screen_center' (raycast the first surface under the viewport center)."""
-    a = _app()
-    a["advanced"] = copy.deepcopy(_DEFAULT_UNREAL_ADVANCED)
-    return a
-
-
-def _unity_app():
-    """Unity Scene view: Unreal-shaped advanced block (orbit/fly/walk + under-cursor + selection)."""
-    a = _app()
-    a["advanced"] = copy.deepcopy(_DEFAULT_UNITY_ADVANCED)
-    return a
-
-
-def _godot_app():
-    """Godot editor 3D viewport: turntable-only (no free orbit / roll — editor limitation)."""
-    a = _app()
-    a["advanced"] = copy.deepcopy(_DEFAULT_GODOT_ADVANCED)
-    a["bindings"]["scheme"]["orbit_style"] = "turntable"
-    return a
-
-
-def _sketchup_app():
-    """SketchUp's shared app shape plus camera/fly/walk and per-mode direction controls."""
-    a = _app()
-    a["advanced"] = copy.deepcopy(_DEFAULT_SKETCHUP_ADVANCED)
-    return a
+def _app_runtime_state(enabled=False):
+    """Minimum non-profile state. Navigation settings are merged from default_profiles.json."""
+    return {"enabled": enabled, "installed": False, "addin_version": ""}
 
 
 CONFIG_VERSION = 8
+
+APP_PROFILE_FIELDS = ("rate_hz", "orbit_pivot_hold_sec", "zoom_cursor_hold_sec",
+                      "selection_overrides_pivot", "level_horizon_on_entry",
+                      "bindings", "advanced")
+DEFAULT_PROFILE_KEYS = HOST_PROFILE_APP_KEYS
+GENERAL_PROFILE_FIELDS = {
+    "default_mode", "axis_orientation", "cursor", "scroll", "buttons", "scheme",
+    "orbit_pivot_fallbacks", "level_horizon_on_entry",
+}
 
 DEFAULTS = {
     "version": CONFIG_VERSION,
@@ -493,40 +288,8 @@ DEFAULTS = {
         "address": "",                                       # blank => scan by name
         "char_uuid": "2cad0002-6e64-0146-b139-9cf2a4cd57fc",
     },
-    "general": {
-        "default_mode": "cube",                              # "cube" (3D nav) | "cursor" (pointer)
-        "axis_orientation": copy.deepcopy(DEFAULT_AXIS_ORIENTATION),
-        # CURSOR-mode pointer mapping (MOUSE_* constants)
-        "cursor": {"x_src": 1, "x_sign": 1.0, "y_src": 0, "y_sign": 1.0, "gain": 216.0},
-        # CURSOR-mode wheel mapping (SCROLL_* constants)
-        "scroll": {"src": 2, "sign": 1.0, "gain": 29.0, "deadzone": 0.004, "dominance": 1.7},
-        # reserved: the device handles physical buttons in HID mode; kept here for the UI
-        "buttons": {"left": "left", "right": "right", "middle": "middle"},
-        # default 3D control scheme (per-app can override). Defaults == current behavior.
-        "scheme": {"orbit_pivot": "screen_center", "orbit_style": "free", "zoom_mode": "to_center"},
-        # If the selected pivot cannot resolve, every integration restarts here (it does not begin
-        # after the failed method). Unsupported methods are skipped by that integration.
-        "orbit_pivot_fallbacks": list(DEFAULT_ORBIT_PIVOT_FALLBACKS),
-        # On switching INTO a fixed-horizon mode (Turntable orbit style, Lock Horizon, Walk),
-        # remove any existing roll instead of locking the tilted horizon. False keeps
-        # the old lock-current-tilt behavior. Per-app override: apps.<key>.level_horizon_on_entry
-        # (absent = follow this default; see effective_level_horizon). Deep-merged additively --
-        # no CONFIG_VERSION bump.
-        "level_horizon_on_entry": True,
-    },
-    "apps": {
-        "blender":    _blender_app(),
-        "freecad":    _app(),
-        "sketchup":   _sketchup_app(),
-        "unreal":     _unreal_app(),
-        "unity":      _unity_app(),
-        "godot":      _godot_app(),
-        "rhino":      _zoom_behavior_app("dolly"),
-        "fusion360":  _fusion_app(),
-        "solidworks": _app(),
-        "onshape":    _app(),
-        "autocad":    _zoom_behavior_app("zoom"),
-    },
+    "general": {},
+    "apps": {key: _app_runtime_state() for key in DEFAULT_PROFILE_KEYS},
     "active_app": "blender",
     # Local loopback bridge the CAD add-ons connect to (127.0.0.1 only). rate_hz is the
     # 3D viewport update/refresh rate -- lower it if the CAD app lags behind your motion.
@@ -541,16 +304,6 @@ DEFAULTS = {
     "onshape": {"address": "127.51.68.120", "port": 8181, "cert_path": "", "key_path": "",
                 "cursor_userscript_warn_dismissed": False},
 }
-
-# Shipped user-layer profiles. Operational/install state is intentionally excluded so resetting a
-# navigation profile never disables an app or forgets an installed add-in version.
-# level_horizon_on_entry is listed but absent from every shipped profile, so a reset REMOVES the
-# per-app override and the app follows the General checkbox again.
-APP_PROFILE_FIELDS = ("rate_hz", "orbit_pivot_hold_sec", "zoom_cursor_hold_sec",
-                      "selection_overrides_pivot", "level_horizon_on_entry",
-                      "bindings", "advanced")
-DEFAULT_PROFILE_KEYS = tuple(DEFAULTS["apps"])
-
 
 def _deep_merge(base, override):
     """Overlay disk values onto defaults so new keys appear automatically on upgrade."""
@@ -589,7 +342,7 @@ def load_default_profiles(path=DEFAULT_PROFILE_PATH):
     general = raw.get("general")
     common = raw.get("common")
     overrides = raw.get("profiles")
-    if not isinstance(general, dict) or set(general) != set(DEFAULTS["general"]):
+    if not isinstance(general, dict) or set(general) != GENERAL_PROFILE_FIELDS:
         raise ValueError("default profile general settings must contain the complete General suite")
     if not isinstance(common, dict) or set(common) != set(APP_PROFILE_FIELDS):
         raise ValueError("default profile common settings must contain every app profile field")
@@ -612,6 +365,11 @@ _SHIPPED_GENERAL, _DEFAULT_APP_PROFILES = load_default_profiles()
 DEFAULTS["general"] = copy.deepcopy(_SHIPPED_GENERAL)
 for _app_key, _profile in _DEFAULT_APP_PROFILES.items():
     DEFAULTS["apps"][_app_key].update(copy.deepcopy(_profile))
+
+# Normalization defaults are also user-profile data. Derive them from the resolved packaged JSON
+# rather than maintaining another literal copy in Python.
+DEFAULT_ACTION_AXIS_SOURCE = copy.deepcopy(
+    _DEFAULT_APP_PROFILES["blender"]["advanced"]["axis_source"])
 
 
 def default_app_profile(app_key):
@@ -701,8 +459,8 @@ class Config:
             # v2: per-app orbit-invert / pan-gain / zoom-gain corrections moved into the CAD
             # add-ons. Reset 3D bindings so the daemon gains scale from a neutral 1.0 baseline
             # (otherwise the old saved corrections would double the baked-in ones).
-            for app in self.data["apps"].values():
-                app["bindings"] = copy.deepcopy(_DEFAULT_3D_BINDINGS)
+            for app_key, app in self.data["apps"].items():
+                app["bindings"] = copy.deepcopy(default_app_profile(app_key)["bindings"])
             changed = True
         if from_version < 3:
             # v3: scheme values renamed to match the UI labels. Under-mouse "pointer"/

@@ -6,29 +6,15 @@ here.
 
 ## Highest priority
 
+No open items currently.
+
+## Normal priority
+
 - **Isolate broker frames by target application.** `NavBroker` currently sends each frame to every
   connected socket client. Most add-ons do not independently verify Windows foreground ownership,
   so opening more than one integrated host can move a background viewport. Make the target app part
   of the broker submission/flush contract, retain per-target scheme data, and add a multi-client
   regression test.
-- **Add continuous integration.** The repository has no automated pull-request checks. Run the
-  Python suite and compile check on every pull request; run the AutoCAD NavMath console suite where
-  the Autodesk reference assemblies are available.
-- **Audit multi-destination add-on updates.** Blender, SketchUp, Unreal, Unity, and Godot can have
-  several install destinations, but update state is inferred from one primary destination. A
-  current primary can hide a stale secondary copy. Compare every detected destination and report or
-  update each one explicitly.
-- **Validate host-alignment ownership across registries.** A binding profile with rich actions must
-  agree with `host_profiles.json:apply_in_daemon`; drift can apply alignment twice or not at all.
-  Add one cross-registry contract check or derive both decisions from one source.
-- **Consolidate shipped-profile definitions.** `default_profiles.json` is the packaged source used
-  by clean installs and reset, but `config.py` still constructs overlapping Python defaults before
-  the file overwrites them. Derive the per-app navigation layer from the JSON once and keep only
-  the minimum bootstrap shape in Python.
-- **Review Free-orbit Twist behavior.** Selecting Free orbit currently changes the independent
-  Twist action to Roll. Decide whether this should be an explicit user action, a one-time default
-  only for untouched profiles, or documented coupling; do not silently replace a deliberate Zoom,
-  Dolly, or None choice.
 
 ## Host feature parity
 

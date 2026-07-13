@@ -52,6 +52,7 @@ trackball_daemon/
 
 plugin_src/autocad/          C# source and console math tests for the bundled AutoCAD plugin
 tests/                       daemon, config, driver, integration, and pure camera-math tests
+.github/workflows/ci.yml     Windows PR/main checks for Python and AutoCAD NavMath
 tools/                       host probes and diagnostic/self-test scripts
 docs/apps/                   per-host maintainer guides
 docs/spikes/                 durable investigation reports
@@ -67,6 +68,10 @@ Configuration ownership is deliberately split:
 - `%APPDATA%\TrackballDaemon\config.json` stores device and user choices.
 - `binding_schema.py` defines which controls are honest for each host. A field is exposed only when
   every advertised option has a distinct runtime consumer.
+
+`config.py` constructs only per-app operational state in Python, then merges the complete resolved
+navigation profile from `default_profiles.json`. The test suite also enforces the ownership
+contract `rich_actions == not apply_in_daemon`, so each host baseline is applied exactly once.
 
 See [`docs/default_profiles.md`](docs/default_profiles.md) for the composition and tuning workflow.
 
@@ -203,8 +208,13 @@ independent hold times, zoom style, and horizon-entry behavior. Add-ons must ign
 use safe defaults for missing ones.
 
 The current broker broadcasts a submitted frame to every connected socket client; target-client
-isolation is tracked as high-priority work in `TODO.md`. Do not claim foreground isolation is
+isolation is tracked as normal-priority work in `TODO.md`. Do not claim foreground isolation is
 complete until the broker itself scopes delivery.
+
+Each socket add-on's hello reports the version of the copy actually loaded by that host document.
+The daemon remembers the most recently observed version per app and uses it for Setup/Update status,
+so a stale active project copy is not hidden by a current primary install path. The existing setup
+actions still copy updates to every destination that host's installer detects.
 
 ## 7. Navigation behavior contract
 

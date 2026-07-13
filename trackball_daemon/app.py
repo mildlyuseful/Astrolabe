@@ -87,6 +87,10 @@ class App:
         self._sw_apps = []                         # [(app, version, pid)] from the SW driver (0/1)
         self._onshape_apps = []                    # [(app, version, pid)] from the Onshape bridge
         self.connected_apps = []
+        # The handshake version belongs to the copy actually loaded by the current/most recently
+        # connected host document. Preserve it after disconnect so update UX does not fall back to
+        # an unrelated "primary" install destination.
+        self.observed_addin_versions = {}
         self._last_apps_pushed = None
         self._engine_app = None
         self._packet_app_key = _NO_PACKET_APP
@@ -324,6 +328,11 @@ class App:
         # AutoCAD appears via _broker_apps: its plugin handshakes with the broker like any add-on.
         apps = self._broker_apps + self._sw_apps + self._onshape_apps
         self.connected_apps = apps
+        observed = getattr(self, "observed_addin_versions", None)
+        if observed is not None:
+            for app_key, version, _pid in apps:
+                if app_key in integrations.ADDIN_KEYS and version not in (None, "", "?"):
+                    observed[app_key] = str(version)
         self.log.info("3D apps: " + (", ".join(f"{a} v{v}" for a, v, _ in apps) or "none"))
 
     def app_connection_summary(self):

@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Astrolabe — Control Daemon</title>
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-mode="cube">
+<div class="desktop">
+  <div class="window" id="app">
+
+    <header class="titlebar">
+      <div class="brand">
+        <svg class="brand-logo" viewBox="0 0 64 64" aria-hidden="true">
+          <circle cx="32" cy="30" r="17" fill="none" stroke="currentColor" stroke-width="2.5"/>
+          <line x1="9.4" y1="21.8" x2="54.6" y2="38.2" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        </svg>
+        <span class="brand-name">ASTROLABE</span>
+        <span class="brand-sub">control daemon</span>
+      </div>
+      <div class="titlebar-right">
+        <div class="conn-pill" title="BLE link status — the dot pulses while the rotation stream is live">
+          <span class="conn-dot"></span>Connected
+        </div>
+        <button class="win-btn" id="btn-hide" title="Closing hides to the tray — the daemon keeps running" aria-label="Hide to tray">
+          <svg viewBox="0 0 10 10"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="body">
+
+      <aside class="rail">
+
+        <div class="ball-wrap" title="Top view, front of the device toward you. Hover any X/Y/Z control to highlight its axis.">
+          <svg class="ball-diagram" id="rail-ball" width="168" viewBox="0 0 200 180" role="img"
+               aria-label="Trackball rotation axes, top view">
+            <defs>
+              <marker id="m-x" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="6.5"
+                      markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="var(--ax-x)"/>
+              </marker>
+              <marker id="m-y" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="6.5"
+                      markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="var(--ax-y)"/>
+              </marker>
+              <marker id="m-z" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="6.5"
+                      markerHeight="6.5" orient="auto-start-reverse">
+                <path d="M0,0 L10,5 L0,10 z" fill="var(--ax-z)"/>
+              </marker>
+              <radialGradient id="ball-g" cx="0.38" cy="0.32" r="0.85">
+                <stop offset="0%" stop-color="rgba(255,255,255,0.09)"/>
+                <stop offset="60%" stop-color="rgba(255,255,255,0.02)"/>
+                <stop offset="100%" stop-color="rgba(0,0,0,0.12)"/>
+              </radialGradient>
+            </defs>
+
+            <!-- housing rim (top view) + front marker -->
+            <circle cx="100" cy="92" r="74" fill="none" stroke="var(--line2)"/>
+            <line x1="100" y1="166" x2="100" y2="173" stroke="var(--text3)" stroke-width="1.5"/>
+
+            <!-- ball -->
+            <circle cx="100" cy="92" r="52" fill="#11161d" stroke="var(--line3)"/>
+            <circle cx="100" cy="92" r="52" fill="url(#ball-g)"/>
+
+            <!-- X: pitch (arc ends short of the ellipse extremes so the
+                 arrowhead tangent reads as a continuing sweep) -->
+            <g class="ax ax-x">
+              <line class="ax-line" x1="48" y1="92" x2="100" y2="92" stroke-dasharray="3 4" opacity="0.35"/>
+              <line class="ax-line" x1="100" y1="92" x2="158" y2="92" marker-end="url(#m-x)"/>
+              <path class="ax-arc" d="M 141.2 107.6 A 6.5 18 0 0 0 141.2 76.4" marker-end="url(#m-x)"/>
+              <text class="ax-label" x="167" y="96">X</text>
+            </g>
+
+            <!-- Y: yaw -->
+            <g class="ax ax-y">
+              <line class="ax-line" x1="100" y1="92" x2="100" y2="144" stroke-dasharray="3 4" opacity="0.35"/>
+              <line class="ax-line" x1="100" y1="92" x2="100" y2="34" marker-end="url(#m-y)"/>
+              <path class="ax-arc" d="M 84.4 55.3 A 18 5.5 0 0 1 115.6 55.3" marker-end="url(#m-y)"/>
+              <text class="ax-label" x="100" y="24" text-anchor="middle">Y</text>
+            </g>
+
+            <!-- Z: twist (out of the page) -->
+            <g class="ax ax-z">
+              <circle class="ax-ring" cx="100" cy="92" r="5"/>
+              <circle class="ax-dot" cx="100" cy="92" r="1.6"/>
+              <path class="ax-arc" d="M 114.8 75.4 A 22.2 22.2 0 1 0 114.8 108.6" marker-end="url(#m-z)"/>
+              <text class="ax-label" x="100" y="152" text-anchor="middle">Z</text>
+            </g>
+          </svg>
+
+          <!-- axis legend swaps with the input mode -->
+          <div class="ball-legend">
+            <div class="legend legend-3d">
+              <span data-ax-hl="0"><b class="lx">X</b> pitch</span><i>·</i>
+              <span data-ax-hl="1"><b class="ly">Y</b> yaw</span><i>·</i>
+              <span data-ax-hl="2"><b class="lz">Z</b> twist</span>
+            </div>
+            <div class="legend legend-cur">
+              <span data-ax-hl="0"><b class="lx">X</b> cursor ↕</span><i>·</i>
+              <span data-ax-hl="1"><b class="ly">Y</b> cursor ↔</span><i>·</i>
+              <span data-ax-hl="2"><b class="lz">Z</b> scroll</span>
+            </div>
+          </div>
+          <div class="ball-cap">TOP VIEW · FRONT TOWARD YOU</div>
+        </div>
+
+        <div class="mode-toggle" id="mode-toggle" role="radiogroup" aria-label="Input mode"
+             title="Global input mode — also toggleable from the tray">
+          <div class="mode-thumb" id="mode-thumb"></div>
+          <button data-mode="cursor" role="radio">Cursor</button>
+          <button data-mode="cube" role="radio">3D&nbsp;Nav</button>
+        </div>
+
+        <nav class="rnav" id="rnav">
+          <span class="rnav-tick" id="rnav-tick"></span>
+          <button data-page="overview">Overview<span class="rnav-sub">link, runtime &amp; status</span></button>
+          <button data-page="apps">3D Apps<span class="rnav-sub">setup &amp; per-app bindings</span></button>
+          <button data-page="general">General<span class="rnav-sub">device, pointer &amp; defaults</span></button>
+        </nav>
+
+        <div class="rail-foot">
+          <div class="handshake" title="Add-ons currently handshaking with the nav broker">
+            <span class="dot good"></span><span class="mono">blender&nbsp;v0.1.12</span>
+          </div>
+          <div class="rail-meta"><span class="mono">daemon v0.1.59</span>
+            <button class="quit-link" id="btn-quit">Quit</button></div>
+          <div class="demo-note">UI demo — drives nothing</div>
+        </div>
+
+      </aside>
+
+      <main class="content" id="view"></main>
+
+    </div>
+  </div>
+</div>
+
+<datalist id="rate-presets">
+  <option value="Default"><option value="15"><option value="30"><option value="45">
+  <option value="60"><option value="90"><option value="120">
+</datalist>
+
+<div id="modal-root"></div>
+<div id="toast-root"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

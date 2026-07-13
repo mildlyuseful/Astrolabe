@@ -11,8 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from trackball_daemon.app import App
-from trackball_daemon.config import (Config, _DEFAULT_BLENDER_ADVANCED, _DEFAULT_SKETCHUP_ADVANCED,
-                                     compose_advanced_with_host_baseline, host_baseline_payload)
+from trackball_daemon.config import (Config, compose_advanced_with_host_baseline,
+                                     default_app_profile, host_baseline_payload)
 from trackball_daemon.navbroker import NavBroker
 from trackball_daemon.ui import _PIVOT_LABELS
 
@@ -53,7 +53,7 @@ def test_blender_app_has_advanced_block(isolated_config):
     cfg = Config().load()
     blender = cfg.data["apps"]["blender"]
     assert "advanced" in blender
-    assert set(blender["advanced"]) == set(_DEFAULT_BLENDER_ADVANCED)
+    assert blender["advanced"] == default_app_profile("blender")["advanced"]
     # Blender's native default pivot is "camera" (orbit about view_location)
     assert blender["bindings"]["scheme"]["orbit_pivot"] == "camera"
     # Every app now has the shared Twist action; Fusion additionally supports zoom vs dolly.
@@ -100,13 +100,13 @@ def test_advanced_appears_on_old_config_via_deep_merge(isolated_config):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(disk, f)
     cfg = Config().load()
-    assert cfg.data["apps"]["blender"]["advanced"] == _DEFAULT_BLENDER_ADVANCED  # merged back in
+    assert cfg.data["apps"]["blender"]["advanced"] == default_app_profile("blender")["advanced"]
 
 
 def test_sketchup_app_has_blender_parity_advanced_block(isolated_config):
     cfg = Config().load()
     sketchup = cfg.data["apps"]["sketchup"]
-    assert sketchup["advanced"] == _DEFAULT_SKETCHUP_ADVANCED
+    assert sketchup["advanced"] == default_app_profile("sketchup")["advanced"]
     assert sketchup["advanced"]["nav_mode"] == "orbit"
     assert set(sketchup["advanced"]["invert"]) == {"orbit", "camera", "fly", "walk"}
     assert set(sketchup["advanced"]["invert"]["fly"]) == {
@@ -126,7 +126,7 @@ def test_sketchup_advanced_appears_on_old_config_via_deep_merge(isolated_config)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(disk, f)
     cfg = Config().load()
-    assert cfg.data["apps"]["sketchup"]["advanced"] == _DEFAULT_SKETCHUP_ADVANCED
+    assert cfg.data["apps"]["sketchup"]["advanced"] == default_app_profile("sketchup")["advanced"]
 
 
 # --- App._apply_schemes: advanced only for a focused Blender ---------------------------

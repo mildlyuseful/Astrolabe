@@ -2,6 +2,7 @@
 from pathlib import Path
 
 from trackball_daemon.binding_schema import APP_BINDING_PROFILES
+from trackball_daemon.ui import _free_orbit_needs_roll_warning
 
 
 ROOT = Path(__file__).parents[1]
@@ -106,10 +107,15 @@ def test_sketchup_selection_override_does_not_replace_to_object():
     assert "advanced.fetch('pan_scales_with_distance', true)" in source
 
 
-def test_sketchup_free_style_autoselects_roll():
+def test_free_orbit_warns_without_overwriting_twist_action():
     source = _source("trackball_daemon/ui.py")
-    assert 'if value != "free" or "roll" not in profile.twist_actions' in source
-    assert 'self._set_and_save(adv + ("twist_action",), "roll")' in source
+    assert 'Switch to "roll" for 3-axis orbit' in source
+    assert 'self._set_and_save(adv + ("twist_action",), "roll")' not in source
+    assert _free_orbit_needs_roll_warning("free", "turntable", "zoom") is True
+    assert _free_orbit_needs_roll_warning("default", "free", "none") is True
+    assert _free_orbit_needs_roll_warning("free", "free", "roll") is False
+    assert _free_orbit_needs_roll_warning("turntable", "free", "zoom") is False
+    assert _free_orbit_needs_roll_warning("free", "free", "zoom", supports_roll=False) is False
 
 
 def test_godot_holds_resolved_zoom_target_including_synthetic_depth():

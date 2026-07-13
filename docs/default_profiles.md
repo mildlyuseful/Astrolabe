@@ -13,6 +13,9 @@ edited by the normal settings UI:
   user gains start at their defaults and all user inversion checkboxes start unchecked.
 - `_DEFAULT_APP_PROFILES` is the validated, resolved in-memory view of `default_profiles.json`.
   `default_app_profile()` always returns a deep copy, so reset/edit code cannot mutate the defaults.
+- `config.py` keeps only each app's operational bootstrap fields (`enabled`, `installed`, and
+  `addin_version`) in Python. Bindings, schemes, holds, advanced routing, and other resettable
+  navigation values are merged from the resolved JSON profile rather than duplicated in code.
 - `APP_PROFILE_FIELDS` defines the complete atomic reset boundary. Operational state (`enabled`,
   `installed`, and `addin_version`) is intentionally outside it.
 

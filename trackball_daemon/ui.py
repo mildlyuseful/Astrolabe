@@ -39,6 +39,12 @@ def _option_label(value):
     return _OPTION_LABELS.get(value, value[:1].upper() + value[1:])
 
 
+def _free_orbit_needs_roll_warning(app_style, general_style, twist_action, supports_roll=True):
+    """Whether the effective orbit is Free but twist is not providing the third rotation axis."""
+    effective_style = general_style if app_style == "default" else app_style
+    return bool(supports_roll and effective_style == "free" and twist_action != "roll")
+
+
 class _ToolTip:
     """Small dependency-free Tk tooltip used instead of permanent explanatory copy."""
     def __init__(self, widget, text):
@@ -96,6 +102,8 @@ class SettingsWindow:
         self.win = None
         self.status_var = None
         self._app_status_labels = {}      # key -> ttk.Label (3D Apps tab)
+        self._app_action_buttons = {}     # key -> setup/update button
+        self._refresh_twist_warning = None
 
     # --- show / hide --------------------------------------------------------------
     def show(self):
@@ -135,11 +143,27 @@ class SettingsWindow:
                 if not lbl.winfo_exists():
                     continue
                 if key in connected:
-                    lbl.config(text=f"active • connected (v{connected[key]})", foreground="#1a7f37")
+                    version = connected[key]
+                    stale = (key in integrations.ADDIN_KEYS and
+                             integrations.update_available(key, installed_version=version))
+                    suffix = "  •  update available" if stale else ""
+                    lbl.config(text=f"active • connected (v{version}){suffix}",
+                               foreground="#1a7f37")
                 else:
                     appdef = integrations.APPS_BY_KEY.get(key)
                     if appdef is not None:
                         lbl.config(text=self._app_status_text(appdef), foreground="#666")
+            except tk.TclError:
+                pass
+        for key, button in self._app_action_buttons.items():
+            try:
+                action = self._app_button_text(integrations.APPS_BY_KEY[key])
+                if action:
+                    button.config(text=action)
+                    if not button.winfo_manager():
+                        button.pack(side="right")
+                else:
+                    button.pack_forget()
             except tk.TclError:
                 pass
 
@@ -175,6 +199,8 @@ class SettingsWindow:
             node = node[k]
         node[keys[-1]] = value
         self.cfg.save()                  # -> notifies listeners -> engine.apply_config()
+        if self._refresh_twist_warning is not None:
+            self._refresh_twist_warning()
 
     @staticmethod
     def _tooltip(widget, text):
@@ -365,7 +391,8 @@ class SettingsWindow:
                              "the General default again.")
         return var
 
-    def _mapped_combo_row(self, parent, label, keys, options, hint="", on_change=None):
+    def _mapped_combo_row(self, parent, label, keys, options, hint="", on_change=None,
+                          trailing_factory=None):
         """Readonly combo whose display labels differ from the stored values. `options` is a list of
         (display, value) pairs -- used for the Blender Advanced combos that relabel the generic
         scheme with Blender terms. Optional `on_change(new_value)` runs after save."""
@@ -382,6 +409,8 @@ class SettingsWindow:
         combo.pack(side="left")
         self._tooltip(label_widget, hint)
         self._tooltip(combo, hint)
+        if trailing_factory is not None:
+            trailing_factory(frame, var)
 
         def _on_select(_e=None):
             val = val_by_disp[var.get()]
@@ -557,13 +586,19 @@ class SettingsWindow:
 
     def _app_status_text(self, appdef):
         base = integrations.status_line(appdef)
-        if appdef.key in integrations.ADDIN_KEYS and integrations.update_available(appdef.key):
+        observed = getattr(self.app, "observed_addin_versions", {}).get(appdef.key)
+        stale = (integrations.update_available(appdef.key, installed_version=observed)
+                 if observed is not None else integrations.update_available(appdef.key))
+        if appdef.key in integrations.ADDIN_KEYS and stale:
             return base + "  •  update available"
         return base
 
     def _app_button_text(self, appdef):
-        return integrations.setup_action_label(
-            appdef, self.cfg.data["apps"].get(appdef.key, {}))
+        observed = getattr(self.app, "observed_addin_versions", {}).get(appdef.key)
+        if observed is not None:
+            return integrations.setup_action_label(
+                appdef, self.cfg.data["apps"].get(appdef.key, {}), installed_version=observed)
+        return integrations.setup_action_label(appdef, self.cfg.data["apps"].get(appdef.key, {}))
 
     @staticmethod
     def _compatibility_text(appdef):
@@ -608,6 +643,7 @@ class SettingsWindow:
         btn = ttk.Button(controls, text=action or "",
                          command=lambda: self._do_install(appdef, enabled, status, holder))
         holder["btn"] = btn
+        self._app_action_buttons[appdef.key] = btn
         if action:
             btn.pack(side="right")
 
@@ -840,6 +876,7 @@ class SettingsWindow:
     def _bindings_fields(self, parent, app_key):
         profile = binding_profile(app_key)
         controls = {}
+        self._refresh_twist_warning = None
         ttk.Label(parent, text=profile.title, foreground="#555").pack(
             anchor="w", padx=10, pady=(8, 2))
         for section in BINDING_SECTIONS:
@@ -886,21 +923,10 @@ class SettingsWindow:
             self._entry_row(parent, "Walk speed", adv + ("walk_speed",),
                             hint="Movement multiplier while Mode is Walk.")
         elif field == "orbit_style":
-            def select_free_twist(value):
-                # Free orbit should feel like a trackball immediately, but this is only a
-                # one-time convenience: changing Twist action afterwards remains unrestricted.
-                if value != "free" or "roll" not in profile.twist_actions:
-                    return
-                self._set_and_save(adv + ("twist_action",), "roll")
-                twist_var = controls.get("twist_action")
-                if twist_var is not None:
-                    twist_var.set(_option_label("roll"))
-
             controls["orbit_style"] = self._mapped_combo_row(
                 parent, "Orbit style", base + ("scheme", "orbit_style"),
                 [(_option_label(v), v) for v in profile.orbit_styles],
-                hint="Default follows General. Free permits roll; Turntable keeps a fixed horizon.",
-                on_change=select_free_twist)
+                hint="Default follows General. Free permits roll; Turntable keeps a fixed horizon.")
         elif field == "orbit_pivot":
             options = [("Default", "default")]
             options.extend([(_PIVOT_LABELS[value], value) for value in profile.pivots])
@@ -910,10 +936,37 @@ class SettingsWindow:
                 on_change=(self._warn_onshape_cursor_userscript_if_needed
                            if app_key == "onshape" else None))
         elif field == "twist_action":
+            def add_roll_warning(frame, _var):
+                warning = tk.Canvas(frame, width=18, height=18, highlightthickness=0, bd=0,
+                                    cursor="question_arrow")
+                warning.create_oval(2, 2, 16, 16, fill="#c62828", outline="#c62828")
+                warning.create_text(9, 9, text="!", fill="white", font=("TkDefaultFont", 9, "bold"))
+                self._tooltip(warning, 'Switch to "roll" for 3-axis orbit')
+                controls["twist_warning"] = warning
+
+                def refresh_warning():
+                    try:
+                        app_style = self._get(base + ("scheme", "orbit_style"))
+                        general_style = self._get(("general", "scheme", "orbit_style"))
+                        twist_action = self._get(adv + ("twist_action",))
+                        show = _free_orbit_needs_roll_warning(
+                            app_style, general_style, twist_action,
+                            supports_roll="roll" in profile.twist_actions)
+                        if show and not warning.winfo_manager():
+                            warning.pack(side="left", padx=(6, 0))
+                        elif not show and warning.winfo_manager():
+                            warning.pack_forget()
+                    except tk.TclError:
+                        pass
+
+                self._refresh_twist_warning = refresh_warning
+                refresh_warning()
+
             controls["twist_action"] = self._mapped_combo_row(
                 parent, "Twist action", adv + ("twist_action",),
                 [(_option_label(v), v) for v in profile.twist_actions],
-                hint="Action driven by unshifted twist in Orbit mode, including Turntable.")
+                hint="Action driven by unshifted twist in Orbit mode, including Turntable.",
+                trailing_factory=add_roll_warning)
         elif field == "lock_horizon":
             self._bool_row(parent, "Lock horizon", adv + ("lock_horizon",),
                            hint="Keep the horizon fixed even when Orbit style is Free.")

@@ -83,6 +83,11 @@ The status row and tray list the versions of add-ons that are actually connected
 are versioned and copied again when a newer daemon bundle is available; host restart/reload is
 usually required before new code is active.
 
+The 3D Apps panel uses the version reported by the currently or most recently connected host copy
+when deciding whether to show **Update**. This exposes a stale project/document-local copy even when
+another install destination is current; the update action still refreshes all destinations detected
+for that integration.
+
 ## Integration summary
 
 Detailed and current setup instructions are built into the **3D Apps** panel. The linked documents
@@ -145,6 +150,10 @@ show the setting because its editor camera cannot retain roll.
 **Pivot hold** controls when a ray-derived orbit target is recaptured. **Zoom hold** is independent
 and applies only to To Cursor zoom. Panning or zooming invalidates the orbit target; panning
 preserves the held cursor-zoom target, while rotating the view invalidates that zoom target.
+
+Free orbit needs **Twist action: Roll** for full three-axis rotation. Choosing Free no longer changes
+Twist automatically; if another action is selected, a red warning icon beside Twist explains how to
+restore three-axis orbit without overwriting the user's choice.
 
 ## Troubleshooting
 

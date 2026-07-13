@@ -1347,8 +1347,13 @@ def _ver_tuple(v):
         return (0,)
 
 
-def update_available(key: str) -> bool:
-    inst = installed_addin_version(key)
+_VERSION_UNSET = object()
+
+
+def update_available(key: str, installed_version=_VERSION_UNSET) -> bool:
+    """Compare the bundle with a specific loaded copy, or the fallback install path when omitted."""
+    inst = (installed_addin_version(key)
+            if installed_version is _VERSION_UNSET else installed_version)
     if inst is None:
         return False
     return _ver_tuple(bundled_addin_version(key)) > _ver_tuple(inst)
@@ -1572,15 +1577,17 @@ APPS = [
 APPS_BY_KEY = {a.key: a for a in APPS}
 
 
-def setup_action_label(appdef: AppDef, app_cfg) -> Optional[str]:
+def setup_action_label(appdef: AppDef, app_cfg, installed_version=_VERSION_UNSET) -> Optional[str]:
     """The meaningful setup action for the app's current state, or None for no button.
 
     Bundled add-ins can always be reinstalled/updated. No-file integrations expose their one-time
     prerequisite/setup action only until it succeeds; there is deliberately no placebo Re-check.
     """
     if appdef.key in ADDIN_KEYS:
-        if installed_addin_version(appdef.key):
-            if update_available(appdef.key):
+        version = (installed_addin_version(appdef.key)
+                   if installed_version is _VERSION_UNSET else installed_version)
+        if version:
+            if update_available(appdef.key, installed_version=version):
                 return f"Update → v{bundled_addin_version(appdef.key)}"
             return "Reinstall"
         return appdef.first_run_action or "Set up"

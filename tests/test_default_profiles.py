@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 
 from trackball_daemon import integrations
+from trackball_daemon.binding_schema import APP_BINDING_PROFILES
 from trackball_daemon.config import (
     APP_PROFILE_FIELDS,
+    DEFAULTS,
     DEFAULT_PROFILE_PATH,
     DEFAULT_PROFILE_KEYS,
     HOST_BASELINE_PROFILES,
@@ -39,6 +41,13 @@ def test_host_profiles_are_loaded_from_separate_packaged_raw_file():
     assert tuple(raw["profiles"]) == HOST_PROFILE_APP_KEYS
     pyproject = (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
     assert '"host_profiles.json", "default_profiles.json", "plugins/**/*"' in pyproject
+
+
+def test_host_alignment_has_exactly_one_owner_for_every_app():
+    """Rich add-ons align after action routing; lean integrations are aligned by the daemon."""
+    assert set(APP_BINDING_PROFILES) == set(HOST_BASELINE_PROFILES)
+    for app_key, binding in APP_BINDING_PROFILES.items():
+        assert binding.rich_actions is not HOST_BASELINE_PROFILES[app_key].apply_in_daemon, app_key
 
 
 def test_shipped_user_defaults_are_loaded_from_separate_packaged_file():
@@ -165,3 +174,10 @@ def test_default_profile_source_contains_every_navigation_field(isolated_config)
         assert set(profile) == expected_fields
         assert profile == {field: copy.deepcopy(cfg.data["apps"][key][field])
                            for field in expected_fields}
+
+
+def test_python_bootstrap_contains_only_operational_app_state():
+    for key in DEFAULT_PROFILE_KEYS:
+        expected = {"enabled": False, "installed": False, "addin_version": ""}
+        expected.update(default_app_profile(key))
+        assert DEFAULTS["apps"][key] == expected
