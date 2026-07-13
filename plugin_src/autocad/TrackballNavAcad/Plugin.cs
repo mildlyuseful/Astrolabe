@@ -57,7 +57,7 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.14";  // 0.3.14: pan invalidation + cursor-depth zoom
+        public const string PluginVersion = "0.3.15";  // 0.3.15: separate holds + stationary-cursor recast
                                                        // 0.3.11: level-horizon toggle -- turntable
                                                        // entry levels once (default) or keeps tilt
                                                        // (adv.level_horizon_on_entry; issue #2).
@@ -104,6 +104,7 @@ namespace TrackballNav
         string _opPivot = "screen_center", _oStyle = "free", _zMode = "to_center";
         string _zoomStyle = "zoom";
         int _pivotHoldMs = DefaultPivotHoldMs;
+        int _zoomHoldMs = DefaultPivotHoldMs;
         bool _selectionOverrides = true;
         bool _levelHorizon = true;        // level once when entering turntable (adv.level_horizon_on_entry;
                                           // false = the current tilt rides along instead)
@@ -166,9 +167,8 @@ namespace TrackballNav
         // "cursor"/"to_cursor" per-gesture holds: captured at the first orbit/zoom frame of a
         // gesture from the pointer cache (null = no target under the cursor -> orbit falls
         // through the configured chain; to_cursor zoom degrades to To Center),
-        // then HELD so the pivot never chases a moving target. A pan/zoom frame invalidates the
-        // orbit hold (the view moved under the cursor); orbit/pan invalidate the zoom hold; a
-        // gesture end (EndGesture) resets both.
+        // then HELD so the pivot never chases a moving target. Pan/zoom invalidate orbit; orbit
+        // invalidates cursor zoom. Pan deliberately preserves cursor zoom across mixed input.
         Point3d? _heldOrbitPivot; bool _heldOrbitSet;
         Point3d? _heldZoomPivot;  bool _heldZoomSet;
 
@@ -427,9 +427,12 @@ namespace TrackballNav
                             if (adv.TryGetProperty("zoom_style", out var zoomStyle) &&
                                 zoomStyle.ValueKind == JsonValueKind.String)
                                 _zoomStyle = zoomStyle.GetString() == "dolly" ? "dolly" : "zoom";
-                            if (adv.TryGetProperty("pivot_hold_sec", out var hold) &&
+                            if (adv.TryGetProperty("orbit_hold_sec", out var hold) &&
                                 hold.ValueKind == JsonValueKind.Number)
                                 _pivotHoldMs = (int)(Math.Clamp(hold.GetDouble(), 0.0, 10.0) * 1000.0);
+                            if (adv.TryGetProperty("zoom_hold_sec", out var zoomHold) &&
+                                zoomHold.ValueKind == JsonValueKind.Number)
+                                _zoomHoldMs = (int)(Math.Clamp(zoomHold.GetDouble(), 0.0, 10.0) * 1000.0);
                             if (adv.TryGetProperty("orbit_pivot_candidates", out var chain) &&
                                 chain.ValueKind == JsonValueKind.Array)
                             {
@@ -481,7 +484,7 @@ namespace TrackballNav
             string style, opv, zmv, zoomStyle;
             List<string> pivotCandidates;
             bool selectionOverrides, levelOnEntry;
-            int pivotHoldMs;
+            int pivotHoldMs, zoomHoldMs;
             lock (_lock)
             {
                 if (_acc[0] != 0 || _acc[1] != 0 || _acc[2] != 0 ||
@@ -498,6 +501,7 @@ namespace TrackballNav
                 zmv = _zMode;
                 zoomStyle = _zoomStyle;
                 pivotHoldMs = _pivotHoldMs;
+                zoomHoldMs = _zoomHoldMs;
                 selectionOverrides = _selectionOverrides;
                 pivotCandidates = new List<string>(_pivotCandidates);
             }
@@ -508,7 +512,8 @@ namespace TrackballNav
             if (delta == null)
             {
                 // gesture over? sync the driven camera into the DB exactly once
-                if (_gsActive && (DateTime.UtcNow - _lastFrameAt).TotalMilliseconds > pivotHoldMs)
+                if (_gsActive && (DateTime.UtcNow - _lastFrameAt).TotalMilliseconds >
+                    Math.Max(pivotHoldMs, zoomHoldMs))
                     EndGesture(commit: true);
                 else if (_regenPending && !_gsActive && !_regenInFlight)
                     FireDeferredRegen();
@@ -557,8 +562,12 @@ namespace TrackballNav
 
             try
             {
+                double idleMs = _gsActive
+                    ? (DateTime.UtcNow - _lastFrameAt).TotalMilliseconds
+                    : double.PositiveInfinity;
                 if (s_gsBroken || !TryApplyGs(doc, delta, style, opv, zmv, zoomStyle, selectionOverrides,
-                                              pivotCandidates, levelOnEntry))
+                                              pivotCandidates, idleMs, pivotHoldMs, zoomHoldMs,
+                                              levelOnEntry))
                     Apply(doc, delta, style, levelOnEntry, zoomStyle); // legacy fallback (regens per frame;
                                                        // no pointer pivot -- view-centre orbit)
                 _lastFrameAt = DateTime.UtcNow;
@@ -904,6 +913,7 @@ namespace TrackballNav
         bool TryApplyGs(Document doc, double[] d, string style, string opv, string zmv,
                         string zoomStyle,
                         bool selectionOverrides, List<string> pivotCandidates,
+                        double idleMs, int orbitHoldMs, int zoomHoldMs,
                         bool levelOnEntry = false)
         {
             try
@@ -951,6 +961,16 @@ namespace TrackballNav
                 bool hasPan = d[3] != 0 || d[4] != 0;
                 bool hasZoom = d[5] != 0;
                 Point3d? orbitPivot = null, zoomPivot = null;
+                if (hasPan || (hasOrbit && idleMs > orbitHoldMs))
+                {
+                    _heldOrbitSet = false;
+                    _heldOrbitPivot = null;
+                }
+                if (hasZoom && zmv == "to_cursor" && idleMs > zoomHoldMs)
+                {
+                    _heldZoomSet = false;
+                    _heldZoomPivot = null;
+                }
                 if (hasOrbit && !_heldOrbitSet)
                 {
                     _heldOrbitPivot = ResolveOrbitPivot(doc, opv, selectionOverrides,
@@ -967,23 +987,31 @@ namespace TrackballNav
                     d[0] = d[1] = d[2] = 0.0;
                     hasOrbit = false;
                 }
-                if (hasZoom && (zmv == "to_object" || zmv == "to_cursor") && !_heldZoomSet)
+                if (hasZoom && zmv == "to_object")
+                    _heldZoomPivot = CaptureDrawingCenter();
+                if (hasZoom && zmv == "to_cursor" && !_heldZoomSet)
                 {
-                    if (zmv == "to_object")
-                        _heldZoomPivot = CaptureDrawingCenter();
-                    else
-                    {
-                        _heldZoomPivot = selectionOverrides ? CaptureSelectionCenter(doc) : null;
-                        if (!_heldZoomPivot.HasValue)
-                            _heldZoomPivot = CapturePointerPivot() ?? CapturePointerDepthPoint();
-                    }
+                    _heldZoomPivot = selectionOverrides ? CaptureSelectionCenter(doc) : null;
+                    if (!_heldZoomPivot.HasValue)
+                        _heldZoomPivot = CapturePointerPivot() ?? CapturePointerDepthPoint();
                     _heldZoomSet = true;
                 }
                 if (hasZoom && (zmv == "to_object" || zmv == "to_cursor"))
                     zoomPivot = _heldZoomPivot;
+                var camBefore = _cam;
                 _cam = NavMath.Apply(_cam, d, style, OrbitSign, PanSignX, PanSignY,
                                      PanScale, ZoomSign, ZoomScale, orbitPivot, zoomPivot,
                                      levelOnEntry, zoomStyle);
+                if (_ptrValid && (hasOrbit || hasPan || hasZoom))
+                {
+                    // PointMonitor does not fire while the mouse is stationary (and is frozen
+                    // during a GS gesture). Move its screen-ray seed with the camera so a pan can
+                    // invalidate the orbit pivot and immediately raycast the NEW scene under the
+                    // same cursor, without requiring a mouse jog. Any cached entity depth belongs
+                    // to the old view and must not be reused as an actual hit.
+                    _ptrPoint = NavMath.ReprojectScreenSample(_ptrPoint, camBefore, _cam);
+                    _ptrOnEntity = false;
+                }
                 NavMath.Write(_gsView, _cam);
                 _gsView.Update();                      // repaint from the kernel cache: NO regen
                 if (hasPan || hasZoom)                         // view moved under the cursor ->
@@ -991,7 +1019,7 @@ namespace TrackballNav
                     _heldOrbitSet = false;
                     _heldOrbitPivot = null;
                 }
-                if (hasOrbit || hasPan)                        // next zoom re-captures
+                if (hasOrbit)                                  // next cursor zoom re-captures
                 {
                     _heldZoomSet = false;
                     _heldZoomPivot = null;

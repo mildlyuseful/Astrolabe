@@ -196,6 +196,37 @@ namespace TrackballNav
             return onRay + viewDirUnit * (depthPoint - onRay).DotProduct(viewDirUnit);
         }
 
+        // Keep a PointMonitor sample on the same screen-relative ray after the camera moves.
+        // PointMonitor only fires when the physical mouse moves, so retaining its raw WCS point
+        // across a trackball pan would make the next "fresh" cursor ray use the OLD view. Express
+        // the sample on the old target plane as fractions of the old field, then rebuild it on the
+        // new target plane/basis. The result is deliberately only a ray seed, never a depth hit.
+        public static Point3d ReprojectScreenSample(Point3d sample, CamState before, CamState after)
+        {
+            static (Vector3d dir, Vector3d right, Vector3d up) Basis(CamState c)
+            {
+                var rawDir = c.Pos - c.Tgt;
+                var dir = rawDir.Length < 1e-12 ? WorldUp : rawDir.GetNormal();
+                var up = c.Up.Length < 1e-12 ? Vector3d.YAxis : c.Up.GetNormal();
+                var right = up.CrossProduct(dir);
+                right = right.Length < 1e-12 ? Vector3d.XAxis : right.GetNormal();
+                up = dir.CrossProduct(right).GetNormal();
+                return (dir, right, up);
+            }
+
+            var oldBasis = Basis(before);
+            var oldPlane = AtViewDepth(sample, oldBasis.dir, before.Tgt);
+            var offset = oldPlane - before.Tgt;
+            double nx = Math.Abs(before.Fw) < 1e-12 ? 0.0
+                : offset.DotProduct(oldBasis.right) / before.Fw;
+            double ny = Math.Abs(before.Fh) < 1e-12 ? 0.0
+                : offset.DotProduct(oldBasis.up) / before.Fh;
+            var newBasis = Basis(after);
+            return after.Tgt
+                + newBasis.right * (nx * after.Fw)
+                + newBasis.up * (ny * after.Fh);
+        }
+
         // True when `p` lies inside the drawing extents grown by `marginFrac` of their diagonal.
         // Degenerate / unset extents (EXTMAX < EXTMIN, zero, or astronomical) → accept.
         public static bool InsideGrownExtents(Point3d p, Point3d mn, Point3d mx,

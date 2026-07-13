@@ -37,7 +37,7 @@ PAN_SCALE = 1.0
 ZOOM_SCALE = 1.0
 ZOOM_SIGN = 1.0
 
-ADDIN_VERSION = "0.1.23"         # 0.1.23: empty-space To Cursor depth
+ADDIN_VERSION = "0.1.24"         # 0.1.24: independent orbit/zoom holds
                                  # 0.1.20: level horizon on turntable entry
                                  # (adv.level_horizon_on_entry; issue #2).
                                  # 0.1.19: immutable host baseline profile.
@@ -110,7 +110,7 @@ _zoom_gesture = {"pivot": None}          # "to_cursor" zoom's own held pivot (re
 # Fixed-horizon transition tracker (issue #2): None until the first frame, so an add-in that
 # starts up already in turntable never levels -- only a real free->turntable switch does.
 _horizon = {"fixed": None}
-PIVOT_HOLD_IDLE = 0.5                    # fallback; daemon supplies adv.pivot_hold_sec
+PIVOT_HOLD_IDLE = 0.5                    # fallback for orbit/zoom hold settings
 APERTURE_FRACS = (0.03, 0.10, 0.30)      # ray thickness tried, as a fraction of the view half-height
 RAY_PUSHBACK = 8.0                       # start the ray this many half-heights behind screen-centre
 BBOX_MARGIN = 0.10                       # accept a hit inside the bbox grown by this fraction of its diag
@@ -553,7 +553,8 @@ def _apply(frame):
         adv = frame.get("adv") or {}
         sel_override = bool(adv.get("selection_overrides_pivot", True))
         pivot_candidates = adv.get("orbit_pivot_candidates") or [op]
-        hold_sec = max(0.0, min(10.0, float(adv.get("pivot_hold_sec", PIVOT_HOLD_IDLE))))
+        orbit_hold = max(0.0, min(10.0, float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE))))
+        zoom_hold = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
         sig = (op, style, zm, sel_override)
         if sig != _last_scheme["v"]:           # confirm live scheme changes are received
             _last_scheme["v"] = sig
@@ -605,7 +606,7 @@ def _apply(frame):
             # ---- ORBIT: rotate eye + target + up about the chosen pivot ----
             _zoom_gesture["pivot"] = None     # view rotates -> the next zoom re-raycasts its pivot
             pivot = _orbit_pivot(op, cam, tgt, idle, sel_override=sel_override,
-                                 candidates=pivot_candidates, hold_sec=hold_sec)
+                                 candidates=pivot_candidates, hold_sec=orbit_hold)
             if pivot is None:
                 if leveled:                   # deliver the entry-leveling even though the
                     cam.isSmoothTransition = False   # pivot chain produced no orbit frame
@@ -640,7 +641,6 @@ def _apply(frame):
         elif p[0] or p[1]:
             # ---- PAN: shift eye + target in the view plane ----
             _gesture["pivot"] = None          # view moved -> the next orbit re-raycasts its pivot
-            _zoom_gesture["pivot"] = None
             ps = cam.viewExtents * PAN_SCALE
             gx = PAN_SIGN[0] * p[0] * ps
             gy = PAN_SIGN[1] * p[1] * ps
@@ -660,7 +660,7 @@ def _apply(frame):
             s = 1.0 - ZOOM_SIGN * z * ZOOM_SCALE
             if s < 0.01:
                 s = 0.01
-            P = _zoom_pivot(zm, cam, tgt, idle, sel_override=sel_override, hold_sec=hold_sec)
+            P = _zoom_pivot(zm, cam, tgt, idle, sel_override=sel_override, hold_sec=zoom_hold)
             zoom_style = str(adv.get("zoom_style", "zoom"))
             eye_xyz, target_xyz, scale_extents = _zoom_geometry(
                 (eye.x, eye.y, eye.z), (tgt.x, tgt.y, tgt.z), (P.x, P.y, P.z), s, zoom_style)

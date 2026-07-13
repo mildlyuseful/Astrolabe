@@ -68,7 +68,8 @@ module TrackballNav
 
         idle = now - @gesture_time
         @gesture_time = now
-        pivot_hold = [[numeric(advanced['pivot_hold_sec'] || PIVOT_HOLD_IDLE), 0.0].max, 10.0].min
+        orbit_hold = [[numeric(advanced['orbit_hold_sec'] || PIVOT_HOLD_IDLE), 0.0].max, 10.0].min
+        zoom_hold = [[numeric(advanced['zoom_hold_sec'] || PIVOT_HOLD_IDLE), 0.0].max, 10.0].min
         orbit, pan, zoom = apply_action_routing(nav_mode, pivot_id, orbit, pan, zoom, advanced)
         orbit, pan, zoom = apply_host_baseline(nav_mode, orbit, pan, zoom, advanced)
         # Source routing can move a shifted input between pan and zoom (for example twist/Z ->
@@ -85,7 +86,7 @@ module TrackballNav
           if twist_action == 'zoom' || twist_action == 'dolly'
             twist_changed = zoom_camera(model, view, camera, orbit[2], zoom_mode, twist_action,
                                         advanced.fetch('selection_overrides_pivot', true) == true,
-                                        idle, pivot_hold)
+                                        idle, zoom_hold)
             orbit[2] = 0.0
           elsif twist_action == 'none' || style == 'turntable' || advanced['lock_horizon'] == true
             orbit[2] = 0.0
@@ -126,10 +127,9 @@ module TrackballNav
                            orbit_camera(model, view, camera, orbit, pivot_id, style, idle,
                                          advanced['lock_horizon'] == true,
                                          advanced.fetch('selection_overrides_pivot', true) == true,
-                                         advanced['orbit_pivot_candidates'] || [pivot_id], pivot_hold)
+                                         advanced['orbit_pivot_candidates'] || [pivot_id], orbit_hold)
                          elsif has_pan
                            invalidate_orbit_pivot!
-                           invalidate_zoom_pivot!
                            pan_camera(view, camera, pan,
                                       advanced.fetch('pan_scales_with_distance', true) == true)
                          elsif has_zoom
@@ -137,7 +137,7 @@ module TrackballNav
                            zoom_camera(model, view, camera, zoom, zoom_mode,
                                         (advanced['zoom_style'] || 'dolly').to_s,
                                         advanced.fetch('selection_overrides_pivot', true) == true,
-                                        idle, pivot_hold)
+                                        idle, zoom_hold)
                          else
                            false
                          end

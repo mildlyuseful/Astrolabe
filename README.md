@@ -81,8 +81,8 @@ Per-app settings are rendered from one ordered capability schema in
 support; the UI does not contain a separate hand-maintained form for each host. All profiles expose
 Orbit style, Zoom mode, and Twist action. Hosts that can distinguish native camera zoom from dolly
 also expose **Pan-mode zoom**; Unreal, Unity, Godot, Rhino, and AutoCAD now join Blender, Fusion,
-and SketchUp in that group. Every app exposes **Pivot hold** for its held Screen Center/Under Cursor
-gesture. The audited capability matrix and intentionally deferred options are
+   and SketchUp in that group. Every app exposes an orbit **Pivot hold** and a separate **Zoom hold**
+   used only by To Cursor zoom. The audited capability matrix and intentionally deferred options are
 documented in [`docs/feature_parity.md`](docs/feature_parity.md).
 
 Security-sensitive setup is explicit and per app. The daemon does not need a public firewall rule
@@ -197,14 +197,16 @@ and moves the active view's camera.
      **`cursor` rotates about the surface under the MOUSE CURSOR** — the same raycast aimed
      through the cursor instead of the screen centre (hover the feature you care about and spin
      the ball), held per gesture; misses continue through the global fallback chain.
-   - **Pivot hold (s)** (Per-App Bindings, `screen_center`/`cursor` pivots) — seconds the view must be
-     still before the pivot re-raycasts. Default **0.5**; `0` recomputes at the start of
-     every orbit; a pan/zoom always recomputes it immediately.
+   - **Pivot hold (s)** (Per-App Bindings → Orbit) — seconds the view must be still before an orbit
+     pivot re-raycasts. Default **0.5**; `0` recomputes at the start of every orbit. Pan and zoom
+     invalidate only the orbit pivot.
+   - **Zoom hold (s)** (Per-App Bindings → Pan / Zoom) — the independent hold for **To Cursor**
+     zoom. Pan preserves this target; To Center and To Object do not use this timer.
    - **Orbit style** — `free` (all three axes, with roll) or `turntable` (yaw about world-up +
      pitch about camera-right, roll dropped so the model never tilts).
    - **Zoom mode** — `to_center` (default) zooms about the view centre; `to_object` keeps the
      bounding-box centre fixed; **`to_cursor` keeps the point under the mouse cursor fixed** while
-     zooming (a miss falls back to `to_center`).
+     zooming (an empty-space cursor ray uses a point at a scene-sensible target depth).
    - **Selection overrides orbit center** makes a non-empty selection replace the designated
      orbit pivot (and `to_cursor` zoom pivot). Switching the orbit pivot takes effect immediately.
 

@@ -25,7 +25,7 @@ import traceback
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.12"         # 0.1.12: empty-space To Cursor depth
+ADDIN_VERSION = "0.1.13"         # 0.1.13: independent orbit/zoom holds
                                  # (adv.level_horizon_on_entry; issue #2).
                                  # 0.1.9: immutable host baseline profile.
                                  # 0.1.8: camera/screen_center canonical pivot names.
@@ -42,7 +42,7 @@ ADDIN_VERSION = "0.1.12"         # 0.1.12: empty-space To Cursor depth
 _DEFAULT_PORT = 47900
 STARTUP_DELAY_MS = 1500          # defer boot so the GUI is fully up (FreeCAD.GuiUp race)
 PUMP_MS = 11                     # ~90 Hz main-thread queue drain
-PIVOT_HOLD_IDLE = 0.5            # fallback; daemon supplies adv.pivot_hold_sec
+PIVOT_HOLD_IDLE = 0.5            # fallback for adv.orbit_hold_sec / adv.zoom_hold_sec
 OBJ_CACHE_SEC = 0.5              # object bounding-box centre cache lifetime
 BBOX_MARGIN = 0.10               # accept a Screen Center hit inside bbox + this * diagonal
 CURSOR_HOOK_CHECK_SEC = 0.5         # how often the pump re-checks the cursor observer's view binding
@@ -487,7 +487,8 @@ def _apply(view, frame, idle):
     adv = frame.get("adv") or {}
     sel_override = bool(adv.get("selection_overrides_pivot", True))
     pivot_candidates = adv.get("orbit_pivot_candidates") or [op]
-    hold_sec = max(0.0, min(10.0, float(adv.get("pivot_hold_sec", PIVOT_HOLD_IDLE))))
+    orbit_hold = max(0.0, min(10.0, float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE))))
+    zoom_hold = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
 
     sig = (op, style, zm)
     if sig != _last_scheme["v"]:
@@ -513,7 +514,7 @@ def _apply(view, frame, idle):
         _log_rl("rx_orbit", "rx orbit o=(%.4f,%.4f,%.4f) op=%s os=%s" % (o[0], o[1], o[2], op, style))
         _zoom_gesture["pivot"] = None            # view rotates -> next zoom re-raycasts its pivot
         pivot = _orbit_pivot(op, view, doc, camera, idle, sel_override=sel_override,
-                             candidates=pivot_candidates, hold_sec=hold_sec)
+                             candidates=pivot_candidates, hold_sec=orbit_hold)
         if pivot is None:
             if changed:                      # deliver the entry-leveling even though the
                 _write_camera(view, node, camera)   # pivot chain produced no orbit frame
@@ -523,14 +524,13 @@ def _apply(view, frame, idle):
     elif p[0] or p[1]:
         _log_rl("rx_pan", "rx pan p=(%.4f,%.4f)" % (p[0], p[1]))
         _gesture["pivot"] = None                 # view moved -> next orbit re-raycasts its pivot
-        _zoom_gesture["pivot"] = None
         cammath.pan(camera, p[0], p[1])
         changed = True
     elif z:
         _log_rl("rx_zoom", "rx zoom z=%.4f zm=%s" % (z, zm))
         _gesture["pivot"] = None
         cammath.zoom(camera, z, _zoom_pivot(zm, view, doc, idle, sel_override=sel_override,
-                                            hold_sec=hold_sec))
+                                            hold_sec=zoom_hold))
         changed = True
 
     if changed:

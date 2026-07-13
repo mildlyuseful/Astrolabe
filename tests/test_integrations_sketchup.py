@@ -24,7 +24,7 @@ def _patch_sketchup(monkeypatch, exes):
 
 def test_sketchup_is_a_bundled_addin():
     assert "sketchup" in integrations.ADDIN_KEYS
-    assert integrations.bundled_addin_version("sketchup") == "0.2.12"
+    assert integrations.bundled_addin_version("sketchup") == "0.2.13"
     assert integrations.APPS_BY_KEY["sketchup"].setup is integrations.install_sketchup
 
 
@@ -51,12 +51,12 @@ def test_install_copies_loader_and_addon_to_all_years(isolated_config, monkeypat
     assert "2024" in msg and "2026" in msg
     su = cfg.data["apps"]["sketchup"]
     assert su["installed"] is True and su["enabled"] is True
-    assert su["addin_version"] == "0.2.12"
+    assert su["addin_version"] == "0.2.13"
     for addon in integrations.sketchup_addon_dirs():
         assert (addon.parent / "trackball_nav_loader.rb").exists()
         for name in ("main.rb", "camera.rb", "version.json"):
             assert (addon / name).exists(), f"missing {name} in {addon}"
-    assert integrations.installed_addin_version("sketchup") == "0.2.12"
+    assert integrations.installed_addin_version("sketchup") == "0.2.13"
 
 
 def test_install_fails_when_sketchup_absent(isolated_config, monkeypatch):
@@ -89,7 +89,7 @@ def test_auto_update_recopies_on_version_bump(isolated_config, monkeypatch):
     assert integrations.update_available("sketchup") is True
     updated = integrations.auto_update(cfg)
     assert any(key == "sketchup" for key, _old, _new in updated)
-    assert integrations.installed_addin_version("sketchup") == "0.2.12"
+    assert integrations.installed_addin_version("sketchup") == "0.2.13"
 
 
 def test_auto_update_skips_when_not_installed(isolated_config, monkeypatch):

@@ -79,24 +79,27 @@ def test_zoom_dolly_selector_exists_only_where_both_paths_are_distinct():
         assert "zoom_style" in _source(path), f"{key} exposes Zoom/Dolly without consuming zoom_style"
 
 
-def test_every_app_consumes_configurable_pivot_hold():
+def test_every_app_consumes_independent_orbit_and_cursor_zoom_holds():
     checks = {
-        "blender": ("trackball_daemon/plugins/blender/trackball_nav/__init__.py", "pivot_hold_sec"),
-        "freecad": ("trackball_daemon/plugins/freecad/TrackballNav/tbnav_freecad.py", "pivot_hold_sec"),
-        "fusion360": ("trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py", "pivot_hold_sec"),
-        "sketchup": ("trackball_daemon/plugins/sketchup/trackball_nav/camera.rb", "pivot_hold_sec"),
-        "unreal": ("trackball_daemon/plugins/unreal/TrackballNav/Content/Python/trackball_nav.py", "pivot_hold_sec"),
-        "unity": ("trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs", "pivot_hold_sec"),
-        "godot": ("trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd", "pivot_hold_sec"),
-        "rhino": ("trackball_daemon/plugins/rhino/TrackballNav/tbnav_rhino.py", "pivot_hold_sec"),
-        "autocad": ("plugin_src/autocad/TrackballNavAcad/Plugin.cs", "pivot_hold_sec"),
-        "solidworks": ("trackball_daemon/solidworks_driver.py", "set_pivot_hold"),
-        "onshape": ("trackball_daemon/onshape_bridge.py", "set_pivot_hold"),
+        "blender": ("trackball_daemon/plugins/blender/trackball_nav/__init__.py", "orbit_hold_sec", "zoom_hold_sec"),
+        "freecad": ("trackball_daemon/plugins/freecad/TrackballNav/tbnav_freecad.py", "orbit_hold_sec", "zoom_hold_sec"),
+        "fusion360": ("trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py", "orbit_hold_sec", "zoom_hold_sec"),
+        "sketchup": ("trackball_daemon/plugins/sketchup/trackball_nav/camera.rb", "orbit_hold_sec", "zoom_hold_sec"),
+        "unreal": ("trackball_daemon/plugins/unreal/TrackballNav/Content/Python/trackball_nav.py", "orbit_hold_sec", "zoom_hold_sec"),
+        "unity": ("trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs", "orbit_hold_sec", "zoom_hold_sec"),
+        "godot": ("trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd", "orbit_hold_sec", "zoom_hold_sec"),
+        "rhino": ("trackball_daemon/plugins/rhino/TrackballNav/tbnav_rhino.py", "orbit_hold_sec", "zoom_hold_sec"),
+        "autocad": ("plugin_src/autocad/TrackballNavAcad/Plugin.cs", "orbit_hold_sec", "zoom_hold_sec"),
+        "solidworks": ("trackball_daemon/solidworks_driver.py", "set_pivot_hold", "set_zoom_hold"),
+        "onshape": ("trackball_daemon/onshape_bridge.py", "set_pivot_hold", "set_zoom_hold"),
     }
     assert set(checks) == set(APP_BINDING_PROFILES)
-    for key, (path, token) in checks.items():
-        assert APP_BINDING_PROFILES[key].supports("screen_hold")
-        assert token in _source(path), f"{key} exposes Pivot hold without consuming it"
+    for key, (path, orbit_token, zoom_token) in checks.items():
+        assert APP_BINDING_PROFILES[key].supports("orbit_hold")
+        assert APP_BINDING_PROFILES[key].supports("zoom_hold")
+        source = _source(path)
+        assert orbit_token in source, f"{key} exposes Pivot hold without consuming it"
+        assert zoom_token in source, f"{key} exposes Zoom hold without consuming it"
 
 
 def test_sketchup_selection_override_does_not_replace_to_object():
@@ -106,7 +109,8 @@ def test_sketchup_selection_override_does_not_replace_to_object():
 
 
 def test_sketchup_profile_exposes_pivot_hold_and_free_style_autoselects_roll():
-    assert APP_BINDING_PROFILES["sketchup"].supports("screen_hold")
+    assert APP_BINDING_PROFILES["sketchup"].supports("orbit_hold")
+    assert APP_BINDING_PROFILES["sketchup"].supports("zoom_hold")
     source = _source("trackball_daemon/ui.py")
     assert 'if value != "free" or "roll" not in profile.twist_actions' in source
     assert 'self._set_and_save(adv + ("twist_action",), "roll")' in source

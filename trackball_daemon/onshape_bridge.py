@@ -940,6 +940,7 @@ class OnshapeBridge:
         self._horizon_fixed = None
         self._level_pending = False
         self._pivot_hold_sec = _MOTION_IDLE
+        self._zoom_hold_sec = _MOTION_IDLE
 
     @staticmethod
     def _clamp_rate(hz):
@@ -959,6 +960,13 @@ class OnshapeBridge:
         except (TypeError, ValueError):
             sec = _MOTION_IDLE
         self._pivot_hold_sec = min(10.0, max(0.0, sec))
+
+    def set_zoom_hold(self, sec):
+        try:
+            sec = float(sec)
+        except (TypeError, ValueError):
+            sec = _MOTION_IDLE
+        self._zoom_hold_sec = min(10.0, max(0.0, sec))
 
     def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True,
                    orbit_pivot_fallbacks=None, level_horizon_on_entry=True):
@@ -1148,11 +1156,14 @@ class OnshapeBridge:
             focused = conn.focus or self._force_focus
             if has and focused:
                 try:
-                    self._navigate(conn, delta)
+                    idle = cycle - last_motion if last_motion > 0.0 else float("inf")
+                    self._navigate(conn, delta, idle)
                     last_motion = cycle
                 except _ConnDead:
                     self._drop(conn)
-            elif self._in_motion and (not focused or cycle - last_motion > self._pivot_hold_sec):
+            elif self._in_motion and (
+                    not focused or cycle - last_motion > max(self._pivot_hold_sec,
+                                                               self._zoom_hold_sec)):
                 # End the gesture promptly when Onshape loses focus, or after an idle pause.
                 try:
                     self._end_motion(conn)
@@ -1176,7 +1187,7 @@ class OnshapeBridge:
             pass
 
     # --- one navigation step (read camera -> apply -> write) ----------------------------------
-    def _navigate(self, conn, delta):
+    def _navigate(self, conn, delta, idle=0.0):
         ox, oy, oz, px, py, zoom = delta
         affine = conn.read("view.affine")
         if not (isinstance(affine, list) and len(affine) >= 16):
@@ -1208,7 +1219,7 @@ class OnshapeBridge:
             self._held_zoom_resolved = False
             # Orbit about the gesture pivot, captured ONCE at the start of the gesture and held (so
             # the hit-test runs once, not per frame, and the pivot doesn't chase the moving view).
-            pivot = self._gesture_pivot(conn, scheme, eye, right, up, back)
+            pivot = self._gesture_pivot(conn, scheme, eye, right, up, back, idle)
             if pivot is None:
                 if changed_affine:              # still deliver the entry-leveling write below
                     ox = oy = oz = 0.0
@@ -1221,10 +1232,15 @@ class OnshapeBridge:
             eye = self._pan(conn, eye, right, up, px, py)
             changed_affine = True
             self._held_pivot = None         # pan moved the screen centre -> re-hit on the next orbit
-            self._held_zoom_pivot = None
-            self._held_zoom_resolved = False
         elif zoom:
-            if not self._held_zoom_resolved:
+            cursor_zoom = scheme.get("zm", "to_center") == "to_cursor"
+            if cursor_zoom and idle > self._zoom_hold_sec:
+                self._held_zoom_pivot = None
+                self._held_zoom_resolved = False
+            if not cursor_zoom:
+                self._held_zoom_pivot = self._zoom_target(conn, scheme, eye, right, up, back)
+                self._held_zoom_resolved = False
+            elif not self._held_zoom_resolved:
                 self._held_zoom_pivot = self._zoom_target(conn, scheme, eye, right, up, back)
                 self._held_zoom_resolved = True
             zpivot = self._held_zoom_pivot
@@ -1273,10 +1289,12 @@ class OnshapeBridge:
         self._in_motion = True
         conn.write_best_effort("motion", True)
 
-    def _gesture_pivot(self, conn, scheme, eye, right, up, back):
+    def _gesture_pivot(self, conn, scheme, eye, right, up, back, idle=0.0):
         """The orbit pivot for this gesture -- computed once (this is where the hit-test happens),
         then HELD until a pan/zoom moves the view or the gesture ends. Also shows Onshape's on-screen
         pivot marker when it (re)computes."""
+        if idle > self._pivot_hold_sec:
+            self._held_pivot = None
         if self._held_pivot is None:
             self._held_pivot = self._pivot(conn, scheme, eye, right, up, back)
             if self._held_pivot is not None:

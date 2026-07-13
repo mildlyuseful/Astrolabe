@@ -1,14 +1,18 @@
 # Host baselines and shipped default profiles
 
-Step 4 separates software alignment from user preference. There are two independent files and only
-one appears in the normal settings UI:
+Software alignment and shipped user preference are separate packaged developer files. Neither is
+edited by the normal settings UI:
 
 - `trackball_daemon/host_profiles.json` is packaged developer data. `config.py` validates it at
   startup and exposes it as the runtime-immutable `HOST_BASELINE_PROFILES` mapping.
+- `trackball_daemon/default_profiles.json` is the editable source for the settings a clean install
+  and **Reset to defaults** receive. `general` contains General-tab defaults, `common` contains the
+  complete per-app setting suite, and `profiles` contains only each host's overrides. A null
+  per-app `level_horizon_on_entry` means inherit the General default.
 - `%APPDATA%/TrackballDaemon/config.json` is per-user state. The normal UI edits only this layer;
   user gains start at their defaults and all user inversion checkboxes start unchecked.
-- `_DEFAULT_APP_PROFILES` is the shipped user layer. `default_app_profile()` always returns a deep
-  copy, so reset/edit code cannot mutate the defaults.
+- `_DEFAULT_APP_PROFILES` is the validated, resolved in-memory view of `default_profiles.json`.
+  `default_app_profile()` always returns a deep copy, so reset/edit code cannot mutate the defaults.
 - `APP_PROFILE_FIELDS` defines the complete atomic reset boundary. Operational state (`enabled`,
   `installed`, and `addin_version`) is intentionally outside it.
 
@@ -57,6 +61,8 @@ that skip directly to v7 retain their established user preferences after histori
 
 ## Developer tuning workflow
 
+### Host alignment
+
 1. Stop the daemon. Open `trackball_daemon/host_profiles.json` in the source tree. Do not edit the
    user's `%APPDATA%/TrackballDaemon/config.json` for host calibration.
 2. Find the software key. Flip an intrinsic direction by changing the corresponding
@@ -77,6 +83,17 @@ that skip directly to v7 retain their established user preferences after histori
    `pytest -q`. Invalid signs, non-positive scales, malformed action paths, or missing app profiles
    fail fast at daemon import/startup.
 
-Change `host_profiles.json` only for a software-convention or suite-alignment correction. Change the
-default app profile in `config.py` only for an intuitive user-facing default. Do not reintroduce
-non-neutral sign/scale constants in integration camera math.
+### Shipped user defaults
+
+1. Stop the daemon and open `trackball_daemon/default_profiles.json`.
+2. Change `general` for the General-tab defaults. Change `common` when every app should ship with
+   the same value, such as `orbit_pivot_hold_sec` or `zoom_cursor_hold_sec`.
+3. Add a value beneath one app in `profiles` only when that host needs a different default. Nested
+   dictionaries are deep-merged with `common`; omitted values inherit it.
+4. Restart the daemon. Existing user configs keep their saved preferences; use **Reset to defaults**
+   on an app to test its newly resolved shipped profile. A clean config uses the file immediately.
+5. Run `pytest -q tests/test_default_profiles.py tests/test_config_migration.py`, then the full suite.
+
+Change `host_profiles.json` only for software-convention/suite-alignment corrections. Change
+`default_profiles.json` for intuitive user-facing defaults. Do not reintroduce non-neutral
+sign/scale constants in integration camera math.

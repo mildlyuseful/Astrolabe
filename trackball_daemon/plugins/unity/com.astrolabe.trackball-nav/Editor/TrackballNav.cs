@@ -15,7 +15,7 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.14";  // 0.1.14: held pivots + empty-space To Cursor depth
+        const string AddinVersion = "0.1.15";  // 0.1.15: independent orbit/zoom holds
                                                // 0.1.11: level horizon on fixed-horizon mode entry
                                                // (adv.level_horizon_on_entry; issue #2).
         const int DefaultPort = 47900;
@@ -495,7 +495,8 @@ namespace Astrolabe.TrackballNav
             var pivotCandidates = MiniJson.StringList(adv, "orbit_pivot_candidates", op);
             float flySpeed = MiniJson.Float(adv, "fly_speed", 1f);
             float walkSpeed = MiniJson.Float(adv, "walk_speed", 1f);
-            float pivotHold = Mathf.Clamp(MiniJson.Float(adv, "pivot_hold_sec", PivotHoldIdle), 0f, 10f);
+            float orbitHold = Mathf.Clamp(MiniJson.Float(adv, "orbit_hold_sec", PivotHoldIdle), 0f, 10f);
+            float zoomHold = Mathf.Clamp(MiniJson.Float(adv, "zoom_hold_sec", PivotHoldIdle), 0f, 10f);
 
             var sig = $"{navMode}|{op}|{style}|{zm}|{twistAction}|{zoomStyle}|{lockHorizon}|{selOverride}|{MiniJson.Bool(adv, "override_dynamic_clip", true)}";
             if (sig != _lastScheme)
@@ -541,7 +542,7 @@ namespace Astrolabe.TrackballNav
                 changed = ApplyWalk(ref cam, o, p, z, walkSpeed);
             else
                 changed = ApplyOrbit(ref cam, o, p, z, op, style, zm, twistAction, zoomStyle,
-                    lockHorizon, panScales, idle, pivotHold, selOverride, pivotCandidates, sv,
+                    lockHorizon, panScales, idle, orbitHold, zoomHold, selOverride, pivotCandidates, sv,
                     ref projectionZoom);
 
             if (!changed && !leveled) return;
@@ -644,7 +645,7 @@ namespace Astrolabe.TrackballNav
 
         static bool ApplyOrbit(ref TrackballNavCamera.Cam cam, Vector3 o, Vector2 p, float z,
             string op, string style, string zm, string twistAction, string zoomStyle,
-            bool lockHorizon, bool panScales, float idle, float pivotHold, bool selOverride,
+            bool lockHorizon, bool panScales, float idle, float orbitHold, float zoomHold, bool selOverride,
             System.Collections.Generic.List<string> pivotCandidates, SceneView sv,
             ref ProjectionZoom projectionZoom)
         {
@@ -671,7 +672,7 @@ namespace Astrolabe.TrackballNav
                 }
                 if (Mathf.Abs(orbitO.x) > 1e-12f || Mathf.Abs(orbitO.y) > 1e-12f || Mathf.Abs(orbitO.z) > 1e-12f)
                 {
-                    var pivot = OrbitPivot(op, cam, idle, pivotHold, selOverride, pivotCandidates, sv);
+                    var pivot = OrbitPivot(op, cam, idle, orbitHold, selOverride, pivotCandidates, sv);
                     if (!pivot.HasValue) return did;
                     if (pivot.HasValue)
                     {
@@ -696,7 +697,6 @@ namespace Astrolabe.TrackballNav
             {
                 _gestureInvalid = true;
                 _gesturePivot = null;
-                _zoomGesturePivot = null;
                 TrackballNavCamera.Pan(ref cam, p.x, p.y, panScales ? _focusDist : TrackballNavCamera.DistDefault);
                 return true;
             }
@@ -704,7 +704,7 @@ namespace Astrolabe.TrackballNav
             {
                 _gestureInvalid = true;
                 _gesturePivot = null;
-                var toward = ZoomToward(zm, idle, pivotHold, selOverride, sv);
+                var toward = ZoomToward(zm, idle, zoomHold, selOverride, sv);
                 if (zoomStyle == "zoom")
                     projectionZoom = PrepareProjectionZoom(sv, ref cam, z, toward);
                 else

@@ -677,7 +677,10 @@ behaviour). Two halves, both in the plugin (the retired COM transport had no cur
   Per-gesture hold in `TryApplyGs`: the pivot is captured ONCE at the first orbit frame of a
   gesture from the cache — validated against the drawing extents +10 % of the diagonal — and held;
   a pan/zoom frame invalidates the orbit hold (re-captured at the live cursor on the next orbit
-  frame), gesture end resets both. **Plane / empty handling (v0.3.9, strict):** a plane-only
+  frame). Pan preserves the independent To Cursor zoom hold. Because PointMonitor only refreshes
+  on physical mouse movement, v0.3.15 reprojects its cached plane sample into the new camera basis
+  after every navigation frame; a stationary cursor therefore raycasts the post-pan scene without
+  requiring a mouse jog. Gesture end resets both held pivots. **Plane / empty handling (v0.3.9, strict):** a plane-only
   sample (no entity under the cursor) tries the **expanding ray-AABB** (v0.3.3, Fusion-style
   `APERTURE_FRACS` of VIEWSIZE): walk model space with a thickening ray in **strict mode**
   (`EntityRayDepth(strict:true)` — real ray/AABB or curve intersections only) and take the nearest

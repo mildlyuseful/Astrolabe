@@ -1,4 +1,4 @@
 {
-  "version": "0.2.12",
-  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.12: cursor-depth zoom and explicit invalidation."
+  "version": "0.2.13",
+  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.13: independent orbit/zoom holds."
 }

@@ -1,4 +1,4 @@
 {
-  "version": "0.1.17",
-  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_rhino.py. 0.1.17: cursor-depth zoom and explicit invalidation."
+  "version": "0.1.18",
+  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_rhino.py. 0.1.18: independent orbit/zoom holds."
 }

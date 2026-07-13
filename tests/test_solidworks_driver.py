@@ -848,15 +848,15 @@ def test_zoom_to_cursor_miss_uses_cursor_at_model_depth():
     assert view.translation_sets, "empty-space To Cursor must retain the cursor screen point"
 
 
-def test_orbit_and_pan_reset_zoom_cursor_pivot():
+def test_orbit_resets_but_pan_preserves_zoom_cursor_pivot():
     drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_cursor")
     _model, _view = _cursor_setup(drv)
     drv._zoom_pivot = (1.0, 2.0, 3.0)
     drv._flush((0.05, 0.0, 0.0, 0.0, 0.0, 0.0))             # orbit -> reset
     assert drv._zoom_pivot is None
     drv._zoom_pivot = (1.0, 2.0, 3.0)
-    drv._flush((0.0, 0.0, 0.0, 0.3, 0.0, 0.0))              # pan -> reset
-    assert drv._zoom_pivot is None
+    drv._flush((0.0, 0.0, 0.0, 0.3, 0.0, 0.0))              # pan -> preserve
+    assert drv._zoom_pivot == (1.0, 2.0, 3.0)
 
 
 def test_set_scheme_releases_zoom_pivot():

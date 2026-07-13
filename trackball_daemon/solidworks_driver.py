@@ -303,6 +303,7 @@ class SolidWorksDriver:
         # "to_cursor" zoom's own held pivot (reset on orbit/pan and by set_scheme).
         self._zoom_pivot = None
         self._pivot_hold_sec = DEFAULT_PIVOT_HOLD
+        self._zoom_hold_sec = DEFAULT_PIVOT_HOLD
         self._last_activity_t = 0.0                           # monotonic time of the last orbit/pan/zoom
         self._rl = {}                                         # rate-limited info-log timestamps
         # Level-horizon-on-entry (issue #2). _horizon_fixed is None until the first set_scheme so a
@@ -367,6 +368,13 @@ class SolidWorksDriver:
         except (TypeError, ValueError):
             sec = DEFAULT_PIVOT_HOLD
         self._pivot_hold_sec = min(10.0, max(0.0, sec))
+
+    def set_zoom_hold(self, sec):
+        try:
+            sec = float(sec)
+        except (TypeError, ValueError):
+            sec = DEFAULT_PIVOT_HOLD
+        self._zoom_hold_sec = min(10.0, max(0.0, sec))
 
     # --- producer side (BLE thread) -- only accumulates, never blocks / touches COM ------
     def submit(self, ox, oy, oz, px, py, zoom):
@@ -607,7 +615,7 @@ class SolidWorksDriver:
                 self._orbit_pivot_resolved = False
                 self._orbit_pivot_found = False
                 #                                     'cursor' pivot must recompute on the next orbit
-            if ox or oy or oz or px or py:
+            if ox or oy or oz:
                 self._zoom_pivot = None             # view rotated/moved under the cursor -> the
                 #                                     'to_cursor' zoom pivot re-raycasts next zoom
         finally:
@@ -1081,7 +1089,7 @@ class SolidWorksDriver:
             if zm == "to_object":
                 center = self._object_center(model)
             elif zm == "to_cursor" and can_hold:
-                if self._zoom_pivot is None or idle >= self._pivot_hold_sec:
+                if self._zoom_pivot is None or idle >= self._zoom_hold_sec:
                     ad = view.Orientation3.ArrayData
                     c0 = (ad[0], ad[3], ad[6]); c1 = (ad[1], ad[4], ad[7])
                     c2 = (ad[2], ad[5], ad[8])

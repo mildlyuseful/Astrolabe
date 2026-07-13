@@ -9,6 +9,7 @@ import pytest
 from trackball_daemon import integrations
 from trackball_daemon.config import (
     APP_PROFILE_FIELDS,
+    DEFAULT_PROFILE_PATH,
     DEFAULT_PROFILE_KEYS,
     HOST_BASELINE_PROFILES,
     HOST_PROFILE_APP_KEYS,
@@ -18,6 +19,7 @@ from trackball_daemon.config import (
     effective_level_horizon,
     host_baseline,
     load_host_baseline_profiles,
+    load_default_profiles,
 )
 
 
@@ -36,7 +38,19 @@ def test_host_profiles_are_loaded_from_separate_packaged_raw_file():
     assert raw["schema"] == 1
     assert tuple(raw["profiles"]) == HOST_PROFILE_APP_KEYS
     pyproject = (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
-    assert 'trackball_daemon = ["host_profiles.json", "plugins/**/*"]' in pyproject
+    assert '"host_profiles.json", "default_profiles.json", "plugins/**/*"' in pyproject
+
+
+def test_shipped_user_defaults_are_loaded_from_separate_packaged_file():
+    raw = json.loads(DEFAULT_PROFILE_PATH.read_text(encoding="utf-8"))
+    assert raw["schema"] == 1
+    assert set(raw["common"]) == set(APP_PROFILE_FIELDS)
+    assert tuple(raw["profiles"]) == DEFAULT_PROFILE_KEYS
+    general, profiles = load_default_profiles()
+    assert general["scheme"]["orbit_style"] == "free"
+    assert profiles["godot"]["bindings"]["scheme"]["orbit_style"] == "turntable"
+    assert profiles["blender"]["orbit_pivot_hold_sec"] == 0.5
+    assert profiles["blender"]["zoom_cursor_hold_sec"] == 0.5
 
 
 def test_host_profile_loader_rejects_incomplete_or_invalid_developer_data(tmp_path):
@@ -52,6 +66,21 @@ def test_host_profile_loader_rejects_incomplete_or_invalid_developer_data(tmp_pa
     path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="signs must be -1 or 1"):
         load_host_baseline_profiles(path)
+
+
+def test_default_profile_loader_rejects_incomplete_developer_data(tmp_path):
+    raw = json.loads(DEFAULT_PROFILE_PATH.read_text(encoding="utf-8"))
+    raw["common"].pop("zoom_cursor_hold_sec")
+    path = tmp_path / "default_profiles.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="common settings must contain every app profile field"):
+        load_default_profiles(path)
+
+    raw = json.loads(DEFAULT_PROFILE_PATH.read_text(encoding="utf-8"))
+    raw["profiles"].pop("onshape")
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ValueError, match="suite mismatch"):
+        load_default_profiles(path)
 
 
 def test_normal_ui_is_user_only_and_shipped_profile_alias_is_removed():
@@ -99,15 +128,15 @@ def test_level_horizon_default_override_and_reset_semantics(isolated_config):
 
 def test_bundled_profile_contract_versions_cover_every_installed_addin():
     assert {key: integrations.bundled_addin_version(key) for key in integrations.ADDIN_KEYS} == {
-        "fusion360": "0.1.23",
-        "blender": "0.1.21",
-        "freecad": "0.1.12",
-        "sketchup": "0.2.12",
-        "unreal": "0.2.12",
-        "unity": "0.1.14",
-        "godot": "0.1.11",
-        "rhino": "0.1.17",
-        "autocad": "0.3.14",
+        "fusion360": "0.1.24",
+        "blender": "0.1.22",
+        "freecad": "0.1.13",
+        "sketchup": "0.2.13",
+        "unreal": "0.2.13",
+        "unity": "0.1.15",
+        "godot": "0.1.12",
+        "rhino": "0.1.18",
+        "autocad": "0.3.15",
     }
 
 

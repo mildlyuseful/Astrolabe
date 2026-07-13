@@ -223,6 +223,23 @@ static class Tests
             CheckClose(onDepth.Z, tgt.Z, 1e-12, "AtViewDepth: top view preserves Z=target");
         }
 
+        // --- stationary cursor: camera pan/zoom must preserve its screen-relative ray --------
+        {
+            var before = new CamState {
+                Pos = new Point3d(0, 0, 10), Tgt = Point3d.Origin,
+                Up = Vector3d.YAxis, Fw = 20, Fh = 10, Persp = false
+            };
+            var sample = new Point3d(4, -2, 100); // +20% field width, -20% field height
+            var after = new CamState {
+                Pos = new Point3d(7, 3, 13), Tgt = new Point3d(7, 3, 3),
+                Up = Vector3d.YAxis, Fw = 10, Fh = 5, Persp = false
+            };
+            var moved = NavMath.ReprojectScreenSample(sample, before, after);
+            CheckClose(moved.X, 9.0, 1e-9, "screen sample: X follows pan and field scale");
+            CheckClose(moved.Y, 2.0, 1e-9, "screen sample: Y follows pan and field scale");
+            CheckClose(moved.Z, 3.0, 1e-9, "screen sample: rebuilt on new target plane");
+        }
+
         // --- InsideGrownExtents ---------------------------------------------------------------
         {
             var mn = new Point3d(0, 0, 0);

@@ -28,7 +28,7 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.12"         # 0.2.12: cursor-depth zoom + explicit invalidation
+ADDIN_VERSION = "0.2.13"         # 0.2.13: independent orbit/zoom holds
                                  # 0.2.9: level horizon on fixed-horizon mode entry
                                  # (adv.level_horizon_on_entry; issue #2).
                                  # 0.2.8: immutable host baseline profile.
@@ -637,7 +637,8 @@ def _apply_host_baseline(nav_mode, twist_action, o, p, z, adv):
 
 
 def _apply_orbit(cam, o, p, z, op, style, zm, twist_action, zoom_style, lock, pan_scales, idle,
-                 sel_override=True, pivot_candidates=None, hold_sec=PIVOT_HOLD_IDLE):
+                 sel_override=True, pivot_candidates=None, orbit_hold=PIVOT_HOLD_IDLE,
+                 zoom_hold=PIVOT_HOLD_IDLE):
     """ORBIT mode: orbit (with twist routed by twist_action), pan, or dolly. Exactly one channel is
     non-zero per frame (the daemon gates them on Shift)."""
     if o[0] or o[1] or o[2]:
@@ -658,7 +659,7 @@ def _apply_orbit(cam, o, p, z, op, style, zm, twist_action, zoom_style, lock, pa
             # "none" (or roll while horizon-locked): twist ignored
         if orbit_o[0] or orbit_o[1] or orbit_o[2]:
             pivot = _orbit_pivot(op, cam, idle, sel_override=sel_override,
-                                 candidates=pivot_candidates or [op], hold_sec=hold_sec)
+                                 candidates=pivot_candidates or [op], hold_sec=orbit_hold)
             if pivot is None:
                 return did
             if pivot is not None:
@@ -671,13 +672,12 @@ def _apply_orbit(cam, o, p, z, op, style, zm, twist_action, zoom_style, lock, pa
     if p[0] or p[1]:
         _log_rl("rx_pan", "rx pan p=(%.4f,%.4f)" % (p[0], p[1]))
         _gesture.update({"pivot": None, "invalid": True})
-        _zoom_gesture["pivot"] = None
         cammath.pan(cam, p[0], p[1], _focus["dist"] if pan_scales else cammath.DIST_DEFAULT)
         return True
     if z:
         _log_rl("rx_zoom", "rx zoom z=%.4f zm=%s" % (z, zm))
         _gesture.update({"pivot": None, "invalid": True})
-        toward = _zoom_toward(zm, idle, sel_override=sel_override, hold_sec=hold_sec)
+        toward = _zoom_toward(zm, idle, sel_override=sel_override, hold_sec=zoom_hold)
         if zoom_style == "zoom" and _apply_lens_zoom(cam, z, toward):
             pass
         else:
@@ -736,7 +736,8 @@ def _apply(info, frame, idle):
     zoom_style = adv.get("zoom_style", "dolly")
     pan_scales = bool(adv.get("pan_scales_with_distance", True))
     sel_override = bool(adv.get("selection_overrides_pivot", True))
-    hold_sec = max(0.0, min(10.0, float(adv.get("pivot_hold_sec", PIVOT_HOLD_IDLE))))
+    orbit_hold = max(0.0, min(10.0, float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE))))
+    zoom_hold = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
 
     sig = (nav_mode, op, style, zm, twist_action, zoom_style, lock, sel_override)
     if sig != _last_scheme["v"]:
@@ -771,7 +772,7 @@ def _apply(info, frame, idle):
                                lock, pan_scales, idle,
                                sel_override=sel_override,
                                pivot_candidates=adv.get("orbit_pivot_candidates") or [op],
-                               hold_sec=hold_sec)
+                               orbit_hold=orbit_hold, zoom_hold=zoom_hold)
 
     if changed or leveled:
         _write_camera(cam)

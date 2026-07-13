@@ -88,6 +88,7 @@ def test_apps_panel_has_expandable_instructions_and_no_noop_startup_control():
         encoding="utf-8")
     apps_panel = source[source.index("def _build_apps_tab"):source.index("# --- tab b:")]
     assert "Copy instructions" in apps_panel
+    assert "Copy userscript…" in apps_panel
     assert "Security:" in apps_panel
     assert "before setup" in apps_panel
     assert "Instructions ▾" in apps_panel

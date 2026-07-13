@@ -236,7 +236,8 @@ from inside Blender, independent of broker/`nav_mode`-delivery timing.
 - `advanced.*` — Blender-only: `nav_mode`, `lock_horizon`, `twist_action`, `zoom_style`,
   shared `bindings.scheme.zoom_mode`, `lock_camera_to_view`, `pan_scales_with_distance`, `fly_speed`, `walk_speed`, and
   the per-mode `axis_source` and `invert` blocks.
-- `rate_hz`, `screen_center_pivot_hold_sec` — per-app rate and the screen-center hold.
+- `rate_hz`, `orbit_pivot_hold_sec`, `zoom_cursor_hold_sec` — per-app rate, orbit-pivot hold,
+  and the independent To Cursor zoom hold.
 
 Everything is **additive + deep-merged** (`config._deep_merge`), so new keys appear on existing
 configs automatically. Step 3 bumped `CONFIG_VERSION` to 5 for the cross-app global orientation;

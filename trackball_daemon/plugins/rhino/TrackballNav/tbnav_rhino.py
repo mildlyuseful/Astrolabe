@@ -20,7 +20,7 @@ from System.Windows.Forms import Cursor
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.17"          # 0.1.17: cursor-depth zoom + explicit invalidation
+ADDIN_VERSION = "0.1.18"          # 0.1.18: independent orbit/zoom holds
                                   # 0.1.14: level horizon on turntable entry
                                   # (adv.level_horizon_on_entry; issue #2).
                                   # 0.1.13: immutable host baseline profile.
@@ -497,7 +497,8 @@ def _apply(view, frame, idle):
     adv = frame.get("adv") or {}
     zoom_style = str(adv.get("zoom_style", "dolly"))
     sel_override = bool(adv.get("selection_overrides_pivot", True))
-    hold_sec = max(0.0, min(10.0, float(adv.get("pivot_hold_sec", PIVOT_HOLD_IDLE))))
+    orbit_hold = max(0.0, min(10.0, float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE))))
+    zoom_hold = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
     pivot_candidates = adv.get("orbit_pivot_candidates") or [op]
 
     sig = (op, style, zm, zoom_style, sel_override)
@@ -523,7 +524,7 @@ def _apply(view, frame, idle):
 
     if o[0] or o[1] or o[2]:
         pivot = _orbit_pivot(op, cam, view, idle, sel_override=sel_override,
-                             candidates=pivot_candidates, hold_sec=hold_sec)
+                             candidates=pivot_candidates, hold_sec=orbit_hold)
         if pivot is None:
             if changed:                      # deliver the entry-leveling even though the
                 _write_camera(view, cam)     # pivot chain produced no orbit frame
@@ -535,12 +536,11 @@ def _apply(view, frame, idle):
         changed = True
     elif p[0] or p[1]:
         _gesture.update({"pivot": None, "invalid": True})
-        _zoom_gesture["pivot"] = None
         cammath.pan(cam, p[0], p[1], dist)
         changed = True
     elif z:
         _gesture.update({"pivot": None, "invalid": True})
-        toward = _zoom_toward(zm, view, idle, sel_override=sel_override, hold_sec=hold_sec)
+        toward = _zoom_toward(zm, view, idle, sel_override=sel_override, hold_sec=zoom_hold)
         if _magnify(view, z, zoom_style, toward):
             return
         cammath.dolly(cam, z, dist, toward)

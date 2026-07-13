@@ -40,10 +40,10 @@ BINDING_SECTIONS = (
     BindingSection("navigation", "Navigation mode", (
         "nav_mode", "fly_speed", "walk_speed")),
     BindingSection("orbit", "Orbit", (
-        "orbit_style", "orbit_pivot", "twist_action", "lock_horizon", "level_horizon",
-        "selection_override")),
+        "orbit_style", "orbit_pivot", "orbit_hold", "twist_action", "lock_horizon",
+        "level_horizon", "selection_override")),
     BindingSection("pan_zoom", "Pan / Zoom", (
-        "zoom_target", "zoom_behavior", "pan_scales", "screen_hold", "dynamic_clip",
+        "zoom_target", "zoom_hold", "zoom_behavior", "pan_scales", "dynamic_clip",
         "pivot_extent")),
     BindingSection("camera", "Camera view", ("camera_lock",)),
     BindingSection("routing", "Action axes & directions", ("action_routing",)),
@@ -54,7 +54,7 @@ BINDING_SECTIONS = (
 _BASE = frozenset({
     "rate", "orbit_sensitivity", "pan_gain", "zoom_gain", "zoom_dominance", "toggle",
     "orbit_style", "orbit_pivot", "twist_action", "level_horizon", "selection_override",
-    "zoom_target", "screen_hold", "action_routing",
+    "zoom_target", "orbit_hold", "zoom_hold", "action_routing",
 })
 _RICH = frozenset({"nav_mode", "fly_speed", "walk_speed", "lock_horizon", "pan_scales"})
 

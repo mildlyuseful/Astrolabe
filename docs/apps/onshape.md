@@ -187,7 +187,7 @@ Algorithm:
 5. No valid, confirmed hit at any aperture → the method is **unavailable**; resolution continues
    through the **configured fallback chain** (General → Failure fallback order).
 6. **Hold the pivot for the whole gesture** (`_held_pivot`): captured once on the first orbit frame,
-   reused every frame, re-picked only after a pan/zoom or idle > 0.35s. The hit-test therefore runs
+   reused every frame, re-picked only after a pan/zoom or the configured Pivot hold expires. The hit-test therefore runs
    **once per gesture (a handful of round-trips), not per frame.**
 
 Other pivots: `origin` = world origin; `object` = model centre; `selection` reads navlib's
@@ -302,8 +302,9 @@ These are the non-obvious things, each as *symptom → cause → fix*. Most cost
 
 ### 8.7 Capture the pivot once per gesture and hold it
 - Re-raycasting every frame both chases the moving view (the pivot would crawl) and adds round-trips.
-  `_held_pivot` is captured on the first orbit frame and held; pan/zoom and idle>0.35s invalidate it.
-  Mirrors the SolidWorks driver's pivot-hold.
+  `_held_pivot` is captured on the first orbit frame and held; pan/zoom and the configured orbit
+  hold invalidate it. `_held_zoom_pivot` has an independent Zoom hold used only by To Cursor;
+  pan preserves it and orbit invalidates it. Mirrors the SolidWorks driver's split holds.
 
 ### 8.8 Onshape is orthographic by default
 - `view.perspective` is `false`. The orthographic zoom path (scale extents, §8.3) is the one that
@@ -437,8 +438,8 @@ block; blank cert paths → the generated defaults). Under-cursor orbit needs th
 
 - **Working:** TLS + handshake + connection status; orbit with the hit-test "view" pivot; under-mouse
   **`cursor` pivot** (daemon 0.1.57 — page userscript posts exact `#canvas` NDC; **live-verified**,
-  small residual inaccuracy; install via Copy userscript in Set up, Per-App Bindings, or
-  the cursor-pivot warning); ortho zoom (rubberband fixed); pan; control scheme
+  small residual inaccuracy; install via Copy userscript in Set up, the expanded Instructions panel,
+  Per-App Bindings, or the cursor-pivot warning); ortho zoom (rubberband fixed); pan; control scheme
   (screen_center/object/origin/selection/cursor, free/turntable, zoom modes — no `camera`: Onshape
   is orthographic, so turn-in-place degenerates to an image slide and the method is skipped).
 - **Needs a feel/sign pass on hardware:** orbit/pan/zoom directions and magnitudes (`*_SIGN`,

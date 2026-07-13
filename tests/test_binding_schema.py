@@ -23,7 +23,8 @@ def test_all_apps_have_twist_config_and_zoom_target_config(isolated_config):
     for key, app in cfg.data["apps"].items():
         assert app["advanced"]["twist_action"] in APP_BINDING_PROFILES[key].twist_actions
         assert app["bindings"]["scheme"]["zoom_mode"] == "default"
-        assert APP_BINDING_PROFILES[key].supports("screen_hold")
+        assert APP_BINDING_PROFILES[key].supports("orbit_hold")
+        assert APP_BINDING_PROFILES[key].supports("zoom_hold")
 
 
 def test_rich_profiles_get_shared_zoom_mode_and_capability_specific_fields():
@@ -37,7 +38,8 @@ def test_rich_profiles_get_shared_zoom_mode_and_capability_specific_fields():
 
 
 def test_capabilities_do_not_expose_controls_without_distinct_runtime_behavior():
-    assert all(profile.supports("screen_hold") for profile in APP_BINDING_PROFILES.values())
+    assert all(profile.supports("orbit_hold") for profile in APP_BINDING_PROFILES.values())
+    assert all(profile.supports("zoom_hold") for profile in APP_BINDING_PROFILES.values())
     # Godot remains turntable-only even though it now has distinct projection Zoom and Dolly.
     assert APP_BINDING_PROFILES["godot"].orbit_styles == ("turntable",)
     assert APP_BINDING_PROFILES["godot"].twist_actions == ("zoom", "dolly", "none")

@@ -157,7 +157,8 @@ class App:
             adv["host_baseline"] = host_baseline_payload(key)
             adv["selection_overrides_pivot"] = bool(
                 appcfg.get("selection_overrides_pivot", True))
-            adv["pivot_hold_sec"] = appcfg.get("screen_center_pivot_hold_sec", 0.5)
+            adv["orbit_hold_sec"] = appcfg.get("orbit_pivot_hold_sec", 0.5)
+            adv["zoom_hold_sec"] = appcfg.get("zoom_cursor_hold_sec", 0.5)
             adv["level_horizon_on_entry"] = effective_level_horizon(
                 self.config.data["general"], appcfg)
             adv["orbit_pivot_fallbacks"] = fallbacks
@@ -180,7 +181,8 @@ class App:
                 orbit_pivot_fallbacks=fallbacks,
                 level_horizon_on_entry=effective_level_horizon(
                     self.config.data["general"], swcfg))
-            self.sw_driver.set_pivot_hold(swcfg.get("screen_center_pivot_hold_sec", 0.5))
+            self.sw_driver.set_pivot_hold(swcfg.get("orbit_pivot_hold_sec", 0.5))
+            self.sw_driver.set_zoom_hold(swcfg.get("zoom_cursor_hold_sec", 0.5))
         if self.onshape_bridge is not None:
             oncfg = self.config.data["apps"].get("onshape") or {}
             self.onshape_bridge.set_scheme(
@@ -189,7 +191,8 @@ class App:
                 orbit_pivot_fallbacks=fallbacks,
                 level_horizon_on_entry=effective_level_horizon(
                     self.config.data["general"], oncfg))
-            self.onshape_bridge.set_pivot_hold(oncfg.get("screen_center_pivot_hold_sec", 0.5))
+            self.onshape_bridge.set_pivot_hold(oncfg.get("orbit_pivot_hold_sec", 0.5))
+            self.onshape_bridge.set_zoom_hold(oncfg.get("zoom_cursor_hold_sec", 0.5))
 
     def _app_rate(self, key):
         """Effective viewport/flush rate (Hz) for app `key`: its per-app override, or the global

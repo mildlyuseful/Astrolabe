@@ -123,8 +123,8 @@ Each non-empty frame, on the worker thread:
 2. **Freeze the viewport** (`EnableGraphicsUpdate = False`) for the whole frame (§8.7).
 3. Apply **orbit**, then **pan**, then **zoom** — each in its own `try/except` so one failing COM
    call is logged once (`_warn_once`) and skipped without killing the others (§8.8).
-4. If a pan or zoom happened, **drop the held `screen_center` pivot** (`_orbit_pivot = None`) so it
-   re-raycasts next orbit (§8.6).
+4. If a pan or zoom happened, **drop the held orbit pivot** (`_orbit_pivot = None`) so it
+   re-raycasts next orbit (§8.6). Pan preserves the independent To Cursor zoom target.
 5. **Resume** graphics + one `GraphicsRedraw2()` (§8.7).
 
 Pan (`_apply_pan`): add `PAN_SIGN * delta * PAN_SCALE` to the tracked `Translation3` and SET it.
@@ -149,7 +149,7 @@ one — see `config.effective_scheme`). **Five pivot modes**, all built on §4's
   selection points reported by `ISelectionMgr.GetSelectionPoint2` when available.
 - **`screen_center`** — hold the **screen-centre point at the true surface depth** under the crosshair, found
   by a raycast (§7). Captured once and **held** through a gesture; recomputed only after the view is
-  idle ≥ `screen_center_pivot_hold_sec` (default 0.5 s, per-app `set_pivot_hold`) or when a pan/zoom moves it.
+  idle ≥ `orbit_pivot_hold_sec` (default 0.5 s, per-app `set_pivot_hold`) or when a pan/zoom moves it.
 - **`cursor`** — hold the surface point under the **mouse cursor** — the same raycast as `screen_center`,
   aimed through the cursor pixel instead of the screen centre (§7.5). Same capture-once-and-hold; a
   miss / off-view cursor continues through the configured global chain.
@@ -259,9 +259,9 @@ verified** at 125 % display scaling:
 Because both the transform and the client rect are re-read each capture, moving/resizing/maximizing
 the SW window needs no extra bookkeeping — the mapping is **resize-resistant** by construction.
 
-`to_cursor` **zoom** uses the same `_cursor_pivot` into a separate per-gesture slot (`_zoom_pivot`,
-reset on orbit/pan), then rides the existing "hold a point fixed while zooming" recenter that
-`to_object` already implemented (§5). A miss falls back to `to_center`.
+`to_cursor` **zoom** uses the same `_cursor_pivot` into a separate slot (`_zoom_pivot`) controlled by
+`zoom_cursor_hold_sec`. Pan preserves it; orbit invalidates it. A surface miss synthesizes a point
+on the cursor ray at the current view depth, so To Cursor does not silently become To Center.
 
 The remaining un-verified item is purely the **feel** while a human orbits (the geometry is proven
 exact); the row-alignment guard is a defensive check for a transform convention we haven't seen
@@ -326,7 +326,7 @@ This is the messiest history; the current design is the resolution of several ro
   The user suspected a discrete rotate/translate integration error — **there isn't one.**
 - **Real cause of perceived drift:** a **stale** `screen_center` pivot. After a pan, the screen-centre point
   changes, but a held pivot wasn't updated → the next orbit swung about the old point. **Fix:** drop
-  the held pivot on **any pan/zoom** (in `_flush`), and recapture after idle ≥ `screen_center_pivot_hold_sec`.
+  the held pivot on **any pan/zoom** (in `_flush`), and recapture after idle ≥ `orbit_pivot_hold_sec`.
 - **"Orbit gets stuck on `screen_center` when I switch to `object`":** `set_scheme` didn't release the held
   pivot. **Fix:** `set_scheme` sets `_orbit_pivot = None`.
 - **Capture the pivot ONCE per gesture and HOLD it.** Re-computing the screen-centre pivot every frame
@@ -459,7 +459,7 @@ channel goes the wrong way.**
 | `_RAY_PUSH` | `4.0` | ray origin pushback (× bbox diagonal) — starts outside the model |
 | `_RAY_BBOX_MARGIN` | `0.10` | accept a hit only within bbox + N× diagonal |
 | `_CURSOR_XF_ALIGN_TOL` | `0.05` | `cursor` pivot: how far `Transform`'s in-plane rows may drift from the camera axes before the mapping is distrusted (§7.5) |
-| `DEFAULT_PIVOT_HOLD` | `0.5` | `screen_center`/`cursor` pivot re-capture idle threshold (per-app `screen_center_pivot_hold_sec`) |
+| `DEFAULT_PIVOT_HOLD` | `0.5` | orbit pivot re-capture idle threshold (per-app `orbit_pivot_hold_sec`) |
 | `DEFAULT_FLUSH_HZ` | `30` | flush/refresh rate (per-app `rate_hz`; `0` ⇒ global `bridge.rate_hz`) |
 | `_VIEW_TTL` | `1.0` | view-handle revalidation period (also the liveness probe) |
 | `_OBJ_CACHE_TTL` | `0.5` | bbox cache lifetime |
@@ -547,11 +547,12 @@ back independently via `ScreenToClient` + the `Transform` inverse — returned e
   quaternion, `_variant`).
 - **`app.py`** — constructs `self.sw_driver = SolidWorksDriver(self._on_sw_connection_changed, ...)`;
   routes `solidworks` frames in `_nav_sink`; pushes rate (`_apply_rates`) and scheme + pivot-hold
-  (`_apply_schemes` → `set_scheme` + `set_pivot_hold`); merges status in
+  (`_apply_schemes` → `set_scheme` + `set_pivot_hold` + `set_zoom_hold`); merges status in
   `_on_sw_connection_changed`/`_refresh_connected_apps`; `start()`/`stop()` lifecycle. SolidWorks is
   matched as the foreground app by the **process name `sldworks`** (`_APP_PROC_HINTS`).
 - **`config.py`** — the `solidworks` app uses the shared `_app()` shape: `rate_hz` (0 ⇒ global),
-  `screen_center_pivot_hold_sec` (0.5), and `bindings.scheme` (per-app override, `"default"` inherits general).
+  `orbit_pivot_hold_sec` (0.5), `zoom_cursor_hold_sec` (0.5), and `bindings.scheme` (per-app override,
+  `"default"` inherits general).
   The general default scheme is `pivot=screen_center, style=free, zoom=to_center`.
 - **`integrations.py`** — `detect_solidworks` (globs `SLDWORKS.exe`) and `setup_solidworks` (verify SW
   + pywin32, mark enabled; **no add-in to copy**). SolidWorks is **not** in the add-in copy/update set.

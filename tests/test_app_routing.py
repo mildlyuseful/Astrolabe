@@ -29,18 +29,20 @@ def _bare_app():
     app.broker.submit = lambda *a: app.broker.calls.append(a)
     app.broker.set_rate = lambda hz: app.broker.rates.append(hz)
     app.broker.set_scheme = lambda **kw: app.broker.schemes.append(kw)
-    app.sw_driver = SimpleNamespace(calls=[], rates=[], schemes=[], holds=[])
+    app.sw_driver = SimpleNamespace(calls=[], rates=[], schemes=[], holds=[], zoom_holds=[])
     app.sw_driver.submit = lambda *a: app.sw_driver.calls.append(a)
     app.sw_driver.set_rate = lambda hz: app.sw_driver.rates.append(hz)
     app.sw_driver.set_scheme = lambda **kw: app.sw_driver.schemes.append(kw)
     app.sw_driver.set_pivot_hold = lambda s: app.sw_driver.holds.append(s)
+    app.sw_driver.set_zoom_hold = lambda s: app.sw_driver.zoom_holds.append(s)
     app.onshape_bridge = None                   # Onshape bridge not configured in these routing tests
     app.config = SimpleNamespace(data={
         "active_app": "fusion360",
         "bridge": {"rate_hz": 30},
         "general": {"scheme": {"orbit_pivot": "screen_center", "orbit_style": "free", "zoom_mode": "to_center"}},
         "apps": {
-            "solidworks": dict(rate_hz=60, screen_center_pivot_hold_sec=0.75,
+            "solidworks": dict(rate_hz=60, orbit_pivot_hold_sec=0.75,
+                               zoom_cursor_hold_sec=1.25,
                                bindings=_scheme(pivot="object", zoom="to_object")),
             "autocad": dict(rate_hz=45, bindings=_scheme(pivot="origin", style="turntable")),
             "sketchup": dict(rate_hz=0, bindings=_scheme()),

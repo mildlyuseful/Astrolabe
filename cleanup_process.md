@@ -511,6 +511,31 @@ Completed:
   passed; AutoCAD 2026 Release build succeeded with its pre-existing WindowsBase warning and no
   errors. All host-specific interaction changes still need normal in-host smoke testing.
 
+### Final cleanup follow-up — independent orbit/zoom holds and shipped defaults
+
+- Replaced the overloaded per-app hold with **Pivot hold** (`orbit_pivot_hold_sec`) in the Orbit
+  section and **Zoom hold** (`zoom_cursor_hold_sec`) in Pan / Zoom. Zoom hold applies only to To
+  Cursor; pan preserves its target, while pan/zoom invalidate the independent orbit pivot.
+- Applied the split lifecycle in every integration. Onshape now retains a cursor-zoom target across
+  accidental pan input and recasts only when Zoom hold expires. AutoCAD clears its orbit pivot on
+  pan without clearing the zoom target.
+- Fixed AutoCAD's remaining stationary-cursor failure: clearing the held pivot was not enough
+  because `Editor.PointMonitor` only refreshed its cached WCS sample when the physical mouse moved.
+  The plugin now reprojects that sample into the post-navigation camera basis, so the next orbit
+  raycasts the new scene under an unmoved cursor.
+- Added `trackball_daemon/default_profiles.json` as the validated, packaged developer source for
+  every General and per-app shipped default. `host_profiles.json` remains exclusively for immutable
+  host alignment; normal user config and Reset to defaults use the new file.
+- Added **Copy userscript…** to Onshape's expanded 3D Apps Instructions panel, in addition to the
+  existing setup and Per-App Bindings entry points.
+- Config version: 8. Versions: daemon 0.1.73; Blender 0.1.22; FreeCAD 0.1.13; Fusion 0.1.24;
+  SketchUp 0.2.13; Unreal 0.2.13; Unity 0.1.15; Godot 0.1.12; Rhino 0.1.18;
+  AutoCAD 0.3.15.
+- Verification: `pytest -q` — 393 passed; Python compileall and scoped `git diff --check` passed;
+  AutoCAD NavMath console suite passed; AutoCAD 2026 Release build succeeded with its pre-existing
+  WindowsBase warning and no errors. AutoCAD and Onshape interaction behavior still need their
+  normal in-host smoke tests. Changes are uncommitted pending user direction.
+
 ## Handoff rules
 
 - Work only on the first `[~]` step; do not start later steps in the same checkpoint.

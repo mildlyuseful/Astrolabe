@@ -36,6 +36,10 @@ class FakeConn:
         self.misses = misses
         self._selection_ext = selection_ext
         self._selection_empty = selection_empty
+        self._affine = ob._encode_affine(
+            (0.0, 0.0, 10.0), (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+        self._txn = 0
         self.writes = []
 
     def read(self, prop, ttl=0.0):
@@ -47,13 +51,21 @@ class FakeConn:
             return self._selection_ext
         if prop == "selection.empty":
             return self._selection_empty
+        if prop == "view.affine":
+            return self._affine
+        if prop == "view.perspective":
+            return False
         return None
 
     def write(self, prop, value):
         self.writes.append((prop, value))
+        if prop == "view.affine":
+            self._affine = value
 
     def write_best_effort(self, prop, value):
         self.writes.append((prop, value))
+        if prop == "view.affine":
+            self._affine = value
 
     def _rpc(self, method, args):
         assert method == "self:read" and args == ["hit.lookat"]
@@ -403,6 +415,43 @@ def test_zoom_to_cursor_miss_synthesizes_cursor_depth(bridge, monkeypatch):
     monkeypatch.setattr(bridge, "_hit_cursor", lambda *a: None)
     assert bridge._zoom_target(conn, {"zm": "to_cursor", "sel_override": False}, *camera) == \
         (2.0, -0.5, 0.0)
+
+
+def test_pan_clears_orbit_pivot_but_preserves_cursor_zoom_target(bridge, monkeypatch):
+    bridge.set_scheme("cursor", "turntable", "to_cursor")
+    bridge.set_zoom_hold(0.75)
+    bridge._held_pivot = (1.0, 2.0, 3.0)
+    bridge._held_zoom_pivot = (4.0, 5.0, 6.0)
+    bridge._held_zoom_resolved = True
+    conn = FakeConn()
+    monkeypatch.setattr(
+        bridge, "_zoom_target",
+        lambda *args: (_ for _ in ()).throw(AssertionError("pan/held zoom must not recast")))
+
+    bridge._navigate(conn, (0.0, 0.0, 0.0, 0.1, 0.0, 0.0), idle=9.0)
+    assert bridge._held_pivot is None
+    assert bridge._held_zoom_pivot == (4.0, 5.0, 6.0)
+    assert bridge._held_zoom_resolved is True
+
+    bridge._navigate(conn, (0.0, 0.0, 0.0, 0.0, 0.0, 0.1), idle=0.2)
+    assert bridge._held_zoom_pivot == (4.0, 5.0, 6.0)
+
+
+def test_cursor_zoom_recasts_only_after_zoom_hold_expires(bridge, monkeypatch):
+    bridge.set_scheme("cursor", "turntable", "to_cursor")
+    bridge.set_zoom_hold(0.5)
+    bridge._held_zoom_pivot = (1.0, 1.0, 1.0)
+    bridge._held_zoom_resolved = True
+    conn = FakeConn()
+    calls = []
+    monkeypatch.setattr(bridge, "_zoom_target",
+                        lambda *args: calls.append(True) or (9.0, 8.0, 7.0))
+
+    bridge._navigate(conn, (0.0, 0.0, 0.0, 0.0, 0.0, 0.1), idle=0.49)
+    assert calls == []
+    bridge._navigate(conn, (0.0, 0.0, 0.0, 0.0, 0.0, 0.1), idle=0.51)
+    assert calls == [True]
+    assert bridge._held_zoom_pivot == (9.0, 8.0, 7.0)
 
 
 def test_userscript_mentions_endpoint_and_canvas():

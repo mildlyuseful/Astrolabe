@@ -417,10 +417,10 @@ def _app(enabled=False):
         # Per-app viewport refresh / flush rate (Hz) sent to this CAD app. 0 = use the global
         # bridge.rate_hz default. Lets each app run at its own rate (e.g. SolidWorks at 60).
         "rate_hz": 0,
-        # Screen Center only: seconds the view must be still before its raycast is recomputed.
-        # Holds the pivot steady during a gesture; re-settles to
-        # the current centre after a pause. (SolidWorks driver; other apps recompute per frame.)
-        "screen_center_pivot_hold_sec": 0.5,
+        # Independent idle gaps for orbit pivots and under-cursor zoom targets. Pan invalidates
+        # only the orbit pivot; cursor zoom retains its target until zoom_cursor_hold_sec expires.
+        "orbit_pivot_hold_sec": 0.5,
+        "zoom_cursor_hold_sec": 0.5,
         # When True and something is selected, orbit (and supported to_cursor zoom paths) use the
         # selection centre instead of the designated pivot. Every integration consumes this setting;
         # it is deep-merged onto existing configs without a CONFIG_VERSION bump.
@@ -484,7 +484,7 @@ def _sketchup_app():
     return a
 
 
-CONFIG_VERSION = 7
+CONFIG_VERSION = 8
 
 DEFAULTS = {
     "version": CONFIG_VERSION,
@@ -546,22 +546,10 @@ DEFAULTS = {
 # navigation profile never disables an app or forgets an installed add-in version.
 # level_horizon_on_entry is listed but absent from every shipped profile, so a reset REMOVES the
 # per-app override and the app follows the General checkbox again.
-APP_PROFILE_FIELDS = ("rate_hz", "screen_center_pivot_hold_sec",
+APP_PROFILE_FIELDS = ("rate_hz", "orbit_pivot_hold_sec", "zoom_cursor_hold_sec",
                       "selection_overrides_pivot", "level_horizon_on_entry",
                       "bindings", "advanced")
-_DEFAULT_APP_PROFILES = MappingProxyType({
-    key: {field: copy.deepcopy(value) for field, value in app.items()
-          if field in APP_PROFILE_FIELDS}
-    for key, app in DEFAULTS["apps"].items()
-})
 DEFAULT_PROFILE_KEYS = tuple(DEFAULTS["apps"])
-
-
-def default_app_profile(app_key):
-    """A detached full navigation profile suitable for an atomic per-app reset."""
-    if app_key not in _DEFAULT_APP_PROFILES:
-        raise KeyError(app_key)
-    return copy.deepcopy(_DEFAULT_APP_PROFILES[app_key])
 
 
 def _deep_merge(base, override):
@@ -573,6 +561,52 @@ def _deep_merge(base, override):
         else:
             out[k] = v
     return out
+
+
+DEFAULT_PROFILE_PATH = Path(__file__).with_name("default_profiles.json")
+
+
+def load_default_profiles(path=DEFAULT_PROFILE_PATH):
+    """Load the developer-editable shipped user defaults, separate from host alignment."""
+    try:
+        raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"cannot load shipped default profiles from {path}: {exc}") from exc
+    if not isinstance(raw, dict) or raw.get("schema") != 1:
+        raise ValueError("default_profiles.json must use schema 1")
+    general = raw.get("general")
+    common = raw.get("common")
+    overrides = raw.get("profiles")
+    if not isinstance(general, dict) or set(general) != set(DEFAULTS["general"]):
+        raise ValueError("default profile general settings must contain the complete General suite")
+    if not isinstance(common, dict) or set(common) != set(APP_PROFILE_FIELDS):
+        raise ValueError("default profile common settings must contain every app profile field")
+    if not isinstance(overrides, dict) or set(overrides) != set(DEFAULT_PROFILE_KEYS):
+        raise ValueError("default profile app suite mismatch")
+    profiles = {}
+    for key in DEFAULT_PROFILE_KEYS:
+        override = overrides[key]
+        if not isinstance(override, dict) or not set(override).issubset(APP_PROFILE_FIELDS):
+            raise ValueError(f"default profile {key} override contains unsupported fields")
+        profile = _deep_merge(common, override)
+        # null means this app inherits the General checkbox rather than saving an override.
+        if profile.get("level_horizon_on_entry") is None:
+            profile.pop("level_horizon_on_entry", None)
+        profiles[key] = profile
+    return copy.deepcopy(general), MappingProxyType(profiles)
+
+
+_SHIPPED_GENERAL, _DEFAULT_APP_PROFILES = load_default_profiles()
+DEFAULTS["general"] = copy.deepcopy(_SHIPPED_GENERAL)
+for _app_key, _profile in _DEFAULT_APP_PROFILES.items():
+    DEFAULTS["apps"][_app_key].update(copy.deepcopy(_profile))
+
+
+def default_app_profile(app_key):
+    """A detached full navigation profile suitable for an atomic per-app reset."""
+    if app_key not in _DEFAULT_APP_PROFILES:
+        raise KeyError(app_key)
+    return copy.deepcopy(_DEFAULT_APP_PROFILES[app_key])
 
 
 class Config:
@@ -687,7 +721,7 @@ class Config:
             for app in self.data["apps"].values():
                 _rename_pivot(app.get("bindings", {}).get("scheme"))
                 if "view_pivot_hold_sec" in app:
-                    app["screen_center_pivot_hold_sec"] = app.pop("view_pivot_hold_sec")
+                    app["orbit_pivot_hold_sec"] = app.pop("view_pivot_hold_sec")
                 invert = app.get("advanced", {}).get("invert")
                 if isinstance(invert, dict) and "viewpoint" in invert:
                     invert["camera"] = _deep_merge(
@@ -726,6 +760,13 @@ class Config:
                         app[field] = copy.deepcopy(profile[field])
                     else:
                         app.pop(field, None)
+            changed = True
+        if from_version < 8:
+            # v8 separates orbit-pivot and cursor-zoom gesture lifetimes. Preserve the old orbit
+            # value, add the shipped zoom hold, and remove the obsolete screen-center-only name.
+            for app in self.data["apps"].values():
+                if "screen_center_pivot_hold_sec" in app:
+                    app["orbit_pivot_hold_sec"] = app.pop("screen_center_pivot_hold_sec")
             changed = True
         self.data["version"] = CONFIG_VERSION
         return changed

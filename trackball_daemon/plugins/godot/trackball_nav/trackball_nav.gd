@@ -1,7 +1,7 @@
 @tool
 extends EditorPlugin
 
-const ADDIN_VERSION := "0.1.11"
+const ADDIN_VERSION := "0.1.12"
 const DEFAULT_PORT := 47900
 const PIVOT_HOLD_IDLE := 0.5
 const OBJ_CACHE_SEC := 0.5
@@ -167,7 +167,8 @@ func _apply(frame: Dictionary, idle: float) -> void:
 		twist_action = "none"
 	var pan_scales := bool(adv.get("pan_scales_with_distance", true))
 	var zoom_style := str(adv.get("zoom_style", "dolly"))
-	var pivot_hold := clampf(float(adv.get("pivot_hold_sec", PIVOT_HOLD_IDLE)), 0.0, 10.0)
+	var orbit_hold := clampf(float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE)), 0.0, 10.0)
+	var zoom_hold := clampf(float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE)), 0.0, 10.0)
 	var sel_override := bool(adv.get("selection_overrides_pivot", true))
 	var pivot_candidates = adv.get("orbit_pivot_candidates", [op])
 	if typeof(pivot_candidates) != TYPE_ARRAY:
@@ -198,14 +199,14 @@ func _apply(frame: Dictionary, idle: float) -> void:
 		changed = _apply_walk(cam, o, p, z, walk_speed)
 	else:
 		changed = _apply_orbit(camera, cam, o, p, z, op, style, zm, twist_action, zoom_style,
-			lock_h, pan_scales, idle, pivot_hold, sel_override, pivot_candidates)
+			lock_h, pan_scales, idle, orbit_hold, zoom_hold, sel_override, pivot_candidates)
 	if changed:
 		_write_cam(camera, cam)
 
 
 func _apply_orbit(camera: Camera3D, cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float,
 		op: String, _style: String, zm: String, twist_action: String, zoom_style: String,
-		_lock_h: bool, pan_scales: bool, idle: float, pivot_hold: float, sel_override: bool,
+		_lock_h: bool, pan_scales: bool, idle: float, orbit_hold: float, zoom_hold: float, sel_override: bool,
 		pivot_candidates: Array) -> bool:
 	if absf(o.x) > 1e-12 or absf(o.y) > 1e-12 or absf(o.z) > 1e-12:
 		var twist := o.z
@@ -222,7 +223,7 @@ func _apply_orbit(camera: Camera3D, cam: TrackballNavCamera.Cam, o: Vector3, p: 
 				_gesture_pivot = null
 			did = true
 		if absf(orbit_o.x) > 1e-12 or absf(orbit_o.y) > 1e-12:
-			var pivot = _orbit_pivot(op, cam, idle, pivot_hold, sel_override, pivot_candidates)
+			var pivot = _orbit_pivot(op, cam, idle, orbit_hold, sel_override, pivot_candidates)
 			if pivot == null:
 				return did
 			_focus_dist = TrackballNavCamera.clamp_dist((cam.location - pivot).length())
@@ -234,15 +235,13 @@ func _apply_orbit(camera: Camera3D, cam: TrackballNavCamera.Cam, o: Vector3, p: 
 	if absf(p.x) > 1e-12 or absf(p.y) > 1e-12:
 		_gesture_invalid = true
 		_gesture_pivot = null
-		_zoom_gesture_pivot = null
-		_zoom_gesture_resolved = false
 		TrackballNavCamera.pan(cam, p.x, p.y,
 			_focus_dist if pan_scales else TrackballNavCamera.DIST_DEFAULT)
 		return true
 	if absf(z) > 1e-12:
 		_gesture_invalid = true
 		_gesture_pivot = null
-		var toward = _zoom_toward(camera, cam, zm, idle, pivot_hold, sel_override)
+		var toward = _zoom_toward(camera, cam, zm, idle, zoom_hold, sel_override)
 		if zoom_style == "zoom":
 			_projection_zoom(camera, cam, z, toward)
 		else:

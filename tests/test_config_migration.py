@@ -134,7 +134,7 @@ def test_v4_disambiguates_pivots_in_schemes_fallbacks_and_advanced(isolated_conf
     assert blender["bindings"]["scheme"]["orbit_pivot"] == "camera"
     assert blender["advanced"]["invert"]["camera"]["pitch"] is True
     assert set(blender["advanced"]["invert"]["camera"]) == {"pitch", "yaw", "roll"}
-    assert blender["screen_center_pivot_hold_sec"] == 0.75
+    assert blender["orbit_pivot_hold_sec"] == 0.75
     assert "view_pivot_hold_sec" not in blender
 
 
@@ -174,7 +174,7 @@ def test_v5_adds_identity_global_and_action_axis_routing(isolated_config):
         },
     }), encoding="utf-8")
     cfg = Config().load()
-    assert cfg.data["version"] == CONFIG_VERSION == 7
+    assert cfg.data["version"] == CONFIG_VERSION == 8
     assert cfg.data["general"]["axis_orientation"] == {
         "source": [0, 1, 2], "invert": [False, False, False]}
     assert cfg.data["apps"]["blender"]["advanced"]["axis_source"]["walk"] == {
@@ -192,3 +192,20 @@ def test_axis_normalizers_validate_global_permutation_but_allow_action_duplicate
     routed = normalize_action_axis_sources({"walk": {"forward": 2, "vertical": 2}})
     assert routed["walk"]["forward"] == routed["walk"]["vertical"] == 2
     assert set(routed) == set(DEFAULT_ACTION_AXIS_SOURCE)
+
+
+def test_v8_renames_old_pivot_hold_and_adds_independent_zoom_hold(isolated_config):
+    d = isolated_config / "TrackballDaemon"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "config.json").write_text(json.dumps({
+        "version": 7,
+        "apps": {
+            "autocad": {"screen_center_pivot_hold_sec": 1.25},
+        },
+    }), encoding="utf-8")
+
+    cfg = Config().load()
+    autocad = cfg.data["apps"]["autocad"]
+    assert autocad["orbit_pivot_hold_sec"] == 1.25
+    assert autocad["zoom_cursor_hold_sec"] == 0.5
+    assert "screen_center_pivot_hold_sec" not in autocad

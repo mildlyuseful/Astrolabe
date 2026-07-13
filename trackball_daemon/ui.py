@@ -642,6 +642,13 @@ class SettingsWindow:
                 copy_status.set("Copy failed")
 
         ttk.Button(copy_row, text="Copy instructions", command=copy_instructions).pack(side="left")
+        if appdef.key == "onshape":
+            ttk.Button(
+                copy_row,
+                text="Copy userscript…",
+                command=lambda: self._show_onshape_userscript_dialog(
+                    title="Onshape — copy userscript", copy_on_open=True),
+            ).pack(side="left", padx=(8, 0))
         ttk.Label(copy_row, textvariable=copy_status, foreground="#1a7f37").pack(
             side="left", padx=8)
 
@@ -930,11 +937,16 @@ class SettingsWindow:
             self._bool_row(parent, "Pan scales with view distance",
                            adv + ("pan_scales_with_distance",),
                            hint="Scale movement with camera distance for consistent on-screen travel.")
-        elif field == "screen_hold":
+        elif field == "orbit_hold":
             self._entry_row(parent, "Pivot hold (s)",
-                            ("apps", app_key, "screen_center_pivot_hold_sec"),
-                            hint="Idle gap that ends a pivot gesture. The next Screen Center or Under "
-                                 "Cursor motion resolves a new target.")
+                            ("apps", app_key, "orbit_pivot_hold_sec"),
+                            hint="Idle gap that ends an orbit gesture. Pan immediately clears the "
+                                 "orbit pivot so the next orbit resolves a new target.")
+        elif field == "zoom_hold":
+            self._entry_row(parent, "Zoom hold (s)",
+                            ("apps", app_key, "zoom_cursor_hold_sec"),
+                            hint="Idle gap before To Cursor zoom resolves a new target. Pan retains "
+                                 "this target. To Center and To Object do not use this setting.")
         elif field == "dynamic_clip":
             self._bool_row(parent, "Override Unity Dynamic Clipping",
                            adv + ("override_dynamic_clip",),

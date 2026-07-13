@@ -1,4 +1,4 @@
 {
-  "version": "0.1.14",
-  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.14: reliable held pivots and empty-space To Cursor depth."
+  "version": "0.1.15",
+  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.15: independent orbit/zoom holds."
 }

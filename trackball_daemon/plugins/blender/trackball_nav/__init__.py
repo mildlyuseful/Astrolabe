@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 21),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 22),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.21"                   # 0.1.21: cursor-depth zoom + explicit invalidation
+ADDIN_VERSION = "0.1.22"                   # 0.1.22: independent orbit/zoom holds
                                            # 0.1.18: shared Zoom mode targets + twist zoom/dolly
                                            # 0.1.17: level horizon on fixed-horizon mode entry
                                            # (adv.level_horizon_on_entry; issue #2).
@@ -68,7 +68,7 @@ FLY_MOVE = 1.0
 WALK_MOVE = 1.0
 
 DIST_MIN, DIST_MAX = 1e-3, 1e6  # view_distance clamp (Blender's own range is wide)
-PIVOT_HOLD_IDLE = 0.5           # fallback; daemon supplies adv.pivot_hold_sec
+PIVOT_HOLD_IDLE = 0.5           # fallback for adv.orbit_hold_sec / adv.zoom_hold_sec
 
 _DEFAULT_PORT = 47900
 
@@ -525,7 +525,8 @@ def _apply_orbit(win, rv, region, o, frame, adv, idle):
     twist_action = adv.get("twist_action", "roll")
     op = frame.get("op", "camera")
     zm = frame.get("zm", "to_center")
-    hold_sec = max(0.0, min(10.0, float(adv.get("pivot_hold_sec", PIVOT_HOLD_IDLE))))
+    orbit_hold_sec = max(0.0, min(10.0, float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE))))
+    zoom_hold_sec = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
     pitch = o[0] * ORBIT_SCALE[0]
     yaw = o[1] * ORBIT_SCALE[1]
     twist = o[2] * ORBIT_SCALE[2]
@@ -536,10 +537,10 @@ def _apply_orbit(win, rv, region, o, frame, adv, idle):
             roll = twist                           # direction set by the per-mode invert (upstream)
         elif twist_action == "zoom":
             _zoom(rv, twist * float((adv.get("host_baseline") or {}).get("zoom", 1.0)),
-                  _zoom_pivot(zm, rv, region, win, adv, idle, hold_sec))
+                  _zoom_pivot(zm, rv, region, win, adv, idle, zoom_hold_sec))
         elif twist_action == "dolly":
             _dolly(rv, twist * float((adv.get("host_baseline") or {}).get("zoom", 1.0)),
-                   _zoom_pivot(zm, rv, region, win, adv, idle, hold_sec))
+                    _zoom_pivot(zm, rv, region, win, adv, idle, zoom_hold_sec))
         # "none" (or roll-while-locked): ignore twist
 
     if pitch or yaw or roll:
@@ -548,7 +549,7 @@ def _apply_orbit(win, rv, region, o, frame, adv, idle):
         pivot = _orbit_pivot(
             op, rv, region, idle, win,
             sel_override=bool(adv.get("selection_overrides_pivot", True)),
-            candidates=adv.get("orbit_pivot_candidates") or [op], hold_sec=hold_sec)
+            candidates=adv.get("orbit_pivot_candidates") or [op], hold_sec=orbit_hold_sec)
         _zoom_gesture.update({"pivot": None, "resolved": False})
         if pivot is not None:
             _apply_world_rotation(rv, R, pivot)
@@ -707,7 +708,7 @@ def _apply(target, frame, idle):
 
     o, p, z = _apply_action_routing(nav_mode, op, o, p, z, adv)
     o, p, z = _apply_host_baseline(nav_mode, o, p, z, adv)
-    hold_sec = max(0.0, min(10.0, float(adv.get("pivot_hold_sec", PIVOT_HOLD_IDLE))))
+    zoom_hold_sec = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
 
     if nav_mode == "fly":
         _apply_fly(rv, o, p, z, adv)
@@ -725,9 +726,8 @@ def _apply(target, frame, idle):
         elif p[0] or p[1]:
             _pan(rv, p[0], p[1], bool(adv.get("pan_scales_with_distance", True)))
             _gesture.update({"pivot": None, "invalid": True})
-            _zoom_gesture.update({"pivot": None, "resolved": False})
         elif z:
-            pivot = _zoom_pivot(zm, rv, region, _win, adv, idle, hold_sec)
+            pivot = _zoom_pivot(zm, rv, region, _win, adv, idle, zoom_hold_sec)
             if adv.get("zoom_style", "zoom") == "dolly":
                 _dolly(rv, z, pivot)
             else:
