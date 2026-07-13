@@ -1,8 +1,5 @@
-"""SolidWorks integration registry: no-file COM setup, detection status, and the fact that
+"""SolidWorks integration registry: no-file COM setup and the fact that
 it is deliberately NOT an add-in (so auto_update never touches it)."""
-import sys
-
-import pytest
 
 from trackball_daemon import integrations
 from trackball_daemon.config import Config
@@ -42,12 +39,3 @@ def test_setup_fails_when_solidworks_absent(isolated_config, monkeypatch):
     assert ok is False
     assert "not found" in msg.lower()
     assert cfg.data["apps"]["solidworks"]["enabled"] is False
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")
-def test_status_line_reflects_detection(monkeypatch):
-    appdef = integrations.APPS_BY_KEY["solidworks"]
-    monkeypatch.setattr(appdef, "detect", lambda: r"C:\fake\SLDWORKS.exe")
-    assert "detected" in integrations.status_line(appdef).lower()
-    monkeypatch.setattr(appdef, "detect", lambda: None)
-    assert integrations.status_line(appdef) == "not detected"

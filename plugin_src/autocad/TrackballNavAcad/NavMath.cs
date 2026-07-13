@@ -1,7 +1,7 @@
 // NavMath -- pure camera math for the GS (GraphicsSystem) transport.
 //
 // The GS view is a full camera (position/target/up/fieldWidth/fieldHeight), so every nav op --
-// including free-orbit ROLL (encoded in the up vector) and perspective zoom (a dolly) -- is one
+// including free-orbit ROLL (encoded in the up vector), lens zoom, and camera dolly -- is one
 // SetView call. This file is compiled verbatim into the live probe assemblies (TbProbeGs3) so the
 // math that ships is exactly the math that was verified against a running AutoCAD.
 using System;
@@ -57,18 +57,21 @@ namespace TrackballNav
         // d = {ox, oy, oz, px, py, z} (the broker frame, already daemon-scaled); signs/scales are
         // the caller's tuning constants.
         //
-        // Pivots (both optional; the null defaults are the pre-0.3.0 behaviour exactly):
+        // Pivots are optional; null preserves target-centered camera behavior:
         //   orbitPivot -- orbit rigidly about this WORLD point instead of the camera target: the
         //                 target rotates around it too, so the point keeps its screen position
         //                 (the "cursor" scheme -- the point under the mouse stays put).
-        //   zoomPivot  -- parallel zoom keeps this WORLD point's screen position fixed by sliding
-        //                 the target toward it ("to_cursor"). Perspective zoom is a dolly toward
-        //                 the target; holding an off-axis point fixed there would need an
-        //                 off-axis dolly -- not supported, it falls back to the plain dolly.
+        //   zoomPivot  -- zoom keeps this WORLD point's screen position fixed by scaling the
+        //                 target and eye about it ("to_object" / "to_cursor"). This works in
+        //                 both parallel and perspective projections.
+        //   levelOnEntry -- one-shot transition flag: rebuild a LEVELED up before applying this
+        //                 frame. Ordinary turntable frames pass false and preserve the established
+        //                 horizon; this is never a continuous auto-level operation.
         public static CamState Apply(CamState c, double[] d, string style,
                                      double[] orbitSign, double panSignX, double panSignY,
                                      double panScale, double zoomSign, double zoomScale,
-                                     Point3d? orbitPivot = null, Point3d? zoomPivot = null)
+                                     Point3d? orbitPivot = null, Point3d? zoomPivot = null,
+                                     bool levelOnEntry = false, string zoomStyle = "zoom")
         {
             var dir = c.Pos - c.Tgt;                     // target -> camera (out of the screen)
             double dist = dir.Length;
@@ -78,6 +81,15 @@ namespace TrackballNav
             var right = up.CrossProduct(dir);            // screen-right (right-handed basis)
             right = right.Length < 1e-9 ? Vector3d.XAxis : right.GetNormal();
             var tgt = c.Tgt;
+            if (style == "turntable" && levelOnEntry)
+            {
+                var lvlRight = WorldUp.CrossProduct(dir);
+                if (lvlRight.Length > 1e-9)
+                {
+                    right = lvlRight.GetNormal();
+                    up = dir.CrossProduct(right).GetNormal();
+                }
+            }
 
             // --- orbit about the target (or, when orbitPivot is given, about that point) -------
             double vx = orbitSign[0] * d[0], vy = orbitSign[1] * d[1], vz = orbitSign[2] * d[2];
@@ -90,11 +102,7 @@ namespace TrackballNav
                     m = Matrix3d.Rotation(vy, WorldUp, Point3d.Origin)
                       * Matrix3d.Rotation(vx, right, Point3d.Origin);
                     dir = dir.TransformBy(m).GetNormal();
-                    var lvlRight = WorldUp.CrossProduct(dir);
-                    if (lvlRight.Length > 1e-9)          // keep the horizon level
-                        up = dir.CrossProduct(lvlRight.GetNormal()).GetNormal();
-                    else
-                        up = up.TransformBy(m).GetNormal();   // straight top/bottom: follow
+                    up = up.TransformBy(m).GetNormal();       // preserve established horizon
                 }
                 else                                     // free: composed camera-space axis;
                 {                                        // the -dir component IS the roll
@@ -127,23 +135,41 @@ namespace TrackballNav
                 tgt += right * (panSignX * d[3] * f) + up * (panSignY * d[4] * f);
             }
 
-            // --- zoom (parallel: shrink the field; perspective: dolly toward the target) ------
+            // --- zoom/dolly ------------------------------------------------------------------
+            // Zoom changes the projection field in either projection. Dolly moves the eye along
+            // its optical axis; as in AutoCAD's native camera model, that changes magnification
+            // only in perspective (parallel cameras have no distance-based perspective scale).
             double fw = c.Fw, fh = c.Fh;
             if (d[5] != 0)
             {
                 double factor = 1.0 + zoomSign * d[5] * zoomScale;
                 if (factor > 1e-3)
                 {
-                    if (c.Persp) dist /= factor;         // factor > 1 zooms IN
+                    if (zoomStyle == "dolly")
+                    {
+                        if (c.Persp && zoomPivot.HasValue)
+                        {
+                            // Scale the target and eye about P. Reconstructing Pos below from the
+                            // adjusted target and distance preserves the camera basis while P stays
+                            // at the same screen coordinate.
+                            var P = zoomPivot.Value;
+                            tgt = P + (tgt - P) / factor;
+                        }
+                        dist /= factor;                 // factor > 1 dollies IN
+                    }
                     else
                     {
                         fw /= factor; fh /= factor;
                         if (zoomPivot.HasValue)
                         {
-                            // keep P's screen position fixed: its offset from the optical axis
-                            // must shrink by the same 1/factor the field does
+                            // Narrowing the field magnifies the right/up offsets by factor. Shift
+                            // the optical axis toward P by (1 - 1/factor) of its lateral offset so
+                            // P stays at the same screen coordinate. Its depth is intentionally
+                            // unchanged; this is a lens/field zoom, not a dolly.
                             var P = zoomPivot.Value;
-                            tgt = P + (tgt - P) / factor;
+                            var lateral = right * (P - tgt).DotProduct(right)
+                                        + up * (P - tgt).DotProduct(up);
+                            tgt += lateral * (1.0 - 1.0 / factor);
                         }
                     }
                 }
@@ -168,6 +194,37 @@ namespace TrackballNav
         public static Point3d AtViewDepth(Point3d onRay, Vector3d viewDirUnit, Point3d depthPoint)
         {
             return onRay + viewDirUnit * (depthPoint - onRay).DotProduct(viewDirUnit);
+        }
+
+        // Keep a PointMonitor sample on the same screen-relative ray after the camera moves.
+        // PointMonitor only fires when the physical mouse moves, so retaining its raw WCS point
+        // across a trackball pan would make the next "fresh" cursor ray use the OLD view. Express
+        // the sample on the old target plane as fractions of the old field, then rebuild it on the
+        // new target plane/basis. The result is deliberately only a ray seed, never a depth hit.
+        public static Point3d ReprojectScreenSample(Point3d sample, CamState before, CamState after)
+        {
+            static (Vector3d dir, Vector3d right, Vector3d up) Basis(CamState c)
+            {
+                var rawDir = c.Pos - c.Tgt;
+                var dir = rawDir.Length < 1e-12 ? WorldUp : rawDir.GetNormal();
+                var up = c.Up.Length < 1e-12 ? Vector3d.YAxis : c.Up.GetNormal();
+                var right = up.CrossProduct(dir);
+                right = right.Length < 1e-12 ? Vector3d.XAxis : right.GetNormal();
+                up = dir.CrossProduct(right).GetNormal();
+                return (dir, right, up);
+            }
+
+            var oldBasis = Basis(before);
+            var oldPlane = AtViewDepth(sample, oldBasis.dir, before.Tgt);
+            var offset = oldPlane - before.Tgt;
+            double nx = Math.Abs(before.Fw) < 1e-12 ? 0.0
+                : offset.DotProduct(oldBasis.right) / before.Fw;
+            double ny = Math.Abs(before.Fh) < 1e-12 ? 0.0
+                : offset.DotProduct(oldBasis.up) / before.Fh;
+            var newBasis = Basis(after);
+            return after.Tgt
+                + newBasis.right * (nx * after.Fw)
+                + newBasis.up * (ny * after.Fh);
         }
 
         // True when `p` lies inside the drawing extents grown by `marginFrac` of their diagonal.

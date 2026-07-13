@@ -1,10 +1,8 @@
-"""BLE / data-ingestion layer -- UNCHANGED behavior.
+"""BLE scan/connect/subscribe/reconnect loop.
 
-This is the original cube_test.py ble_loop, byte-for-byte in control flow (scan ->
-connect -> subscribe -> hold -> reconnect, same timeouts/sleeps). The only difference is
-that the device name/address/characteristic are read from get_params() at the top of each
-iteration (instead of module constants), so a config edit takes effect on the next
-reconnect. The notification callback and the protocol are untouched.
+Device identity and the characteristic UUID are refreshed from ``get_params`` before each
+connection attempt, so config edits take effect on reconnect. Packet interpretation belongs to the
+notification callback rather than this transport layer.
 """
 import asyncio
 import threading

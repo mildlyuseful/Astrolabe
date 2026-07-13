@@ -25,21 +25,13 @@ import traceback
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.4"          # 0.1.4: scheme values renamed (pointer->cursor,
-                                 # cursor->selection, to_pointer->to_cursor; daemon config v3).
-                                 # reported in the hello handshake (shown in the daemon's tray); keep
-                                 # in sync with version.json. 0.1.1: pan scale fix (was ~100x too
-                                 # small). 0.1.2: orbit scale 0.5->1.0 (true 1:1; was half-speed from
-                                 # copying Blender's RegionView3D halving). 0.1.3: "pointer" orbit
-                                 # pivot + "to_pointer" zoom (orbit/zoom about the surface under the
-                                 # MOUSE POINTER, via a passive SoLocation2Event observer). Bump so
-                                 # auto_update re-copies.
+ADDIN_VERSION = "0.1.13"         # keep in sync with version.json
 _DEFAULT_PORT = 47900
 STARTUP_DELAY_MS = 1500          # defer boot so the GUI is fully up (FreeCAD.GuiUp race)
 PUMP_MS = 11                     # ~90 Hz main-thread queue drain
-PIVOT_HOLD_IDLE = 0.35           # s without frames that ends a gesture -> re-raycast "view" pivot
+PIVOT_HOLD_IDLE = 0.5            # fallback for adv.orbit_hold_sec / adv.zoom_hold_sec
 OBJ_CACHE_SEC = 0.5              # object bounding-box centre cache lifetime
-BBOX_MARGIN = 0.10               # accept a "view" hit inside the model bbox grown by this * diagonal
+BBOX_MARGIN = 0.10               # accept a Screen Center hit inside bbox + this * diagonal
 CURSOR_HOOK_CHECK_SEC = 0.5         # how often the pump re-checks the cursor observer's view binding
 CURSOR_Y_FLIP = False           # SoLocation2Event.getPosition() and getObjectInfo() both use Coin's
                                  # BOTTOM-left pixel origin, so the cached pixel feeds getObjectInfo
@@ -56,11 +48,14 @@ _QtCore = None
 _QT_FLAVOUR = "?"
 _host = "?"
 
-# "view"/"cursor" pivot: raycast the surface under the screen centre / mouse cursor ONCE per
+# `screen_center`/`cursor`: raycast under the viewport center / mouse cursor once per
 # gesture and HOLD it, so that point stays put while orbiting. Invalidated on pan/zoom or after an
 # idle gap.
 _gesture = {"t": 0.0, "pivot": None}
 _zoom_gesture = {"pivot": None}   # "to_cursor" zoom's own per-gesture hold (reset on orbit/pan)
+# Fixed-horizon transition tracker: None until the first frame so startup in turntable does not
+# level the view; only a real free->turntable switch does.
+_horizon = {"fixed": None}
 _obj_cache = {"t": 0.0, "center": None, "bbox": None}
 _last_scheme = {"v": None}
 
@@ -195,22 +190,68 @@ def _obj_bbox(obj):
     return None
 
 
+def _is_nested_geo_object(obj):
+    """True when ``obj`` is geometrically owned by a Part/Body container.
+
+    A nested feature's Shape.BoundBox is in the container's local coordinates, while the top-level
+    container exposes the correctly transformed aggregate shape. Including both is what pulled the
+    project bounds toward the origin for placed Parts/Bodies.
+    """
+    try:
+        return obj.getParentGeoFeatureGroup() is not None
+    except Exception:
+        return False
+
+
+def _bbox_limits(obj, world=False):
+    """Return an object's bbox as ``(min_xyz, max_xyz)``.
+
+    Top-level Shape/Mesh bounds already include their placement. For a selected nested feature,
+    apply only its parent-container transform so selection pivots use world coordinates too.
+    """
+    b = _obj_bbox(obj)
+    if b is None:
+        return None
+    try:
+        if not b.isValid():
+            return None
+    except Exception:
+        pass
+    lo = (float(b.XMin), float(b.YMin), float(b.ZMin))
+    hi = (float(b.XMax), float(b.YMax), float(b.ZMax))
+    if not world or not _is_nested_geo_object(obj):
+        return lo, hi
+    try:
+        import FreeCAD as App
+        parent_placement = obj.getGlobalPlacement() * obj.Placement.inverse()
+        points = []
+        for x in (lo[0], hi[0]):
+            for y in (lo[1], hi[1]):
+                for z in (lo[2], hi[2]):
+                    p = parent_placement.multVec(App.Vector(x, y, z))
+                    points.append((float(p.x), float(p.y), float(p.z)))
+        return (tuple(min(p[i] for p in points) for i in range(3)),
+                tuple(max(p[i] for p in points) for i in range(3)))
+    except Exception:
+        return lo, hi
+
+
 def _doc_object_bbox(doc):
     """Aggregate (center, (min,max)) over every object with a bounding box, or (None, None)."""
     mn = [None, None, None]
     mx = [None, None, None]
     found = False
     for obj in getattr(doc, "Objects", []) or []:
-        b = _obj_bbox(obj)
-        if b is None:
+        # App::Part / PartDesign::Body already expose a transformed aggregate Shape. Their child
+        # features expose local-space bounds and must not be unioned a second time.
+        if _is_nested_geo_object(obj):
             continue
-        try:
-            if not b.isValid():
-                continue
-        except Exception:
-            pass
+        limits = _bbox_limits(obj)
+        if limits is None:
+            continue
+        lo3, hi3 = limits
         found = True
-        for i, (lo, hi) in enumerate(((b.XMin, b.XMax), (b.YMin, b.YMax), (b.ZMin, b.ZMax))):
+        for i, (lo, hi) in enumerate(zip(lo3, hi3)):
             mn[i] = lo if mn[i] is None else min(mn[i], lo)
             mx[i] = hi if mx[i] is None else max(mx[i], hi)
     if not found:
@@ -247,16 +288,16 @@ def _screen_center_pivot(view, bbox):
     except Exception:
         info = None
     if not info:
-        _log_rl("vpivot", "view-pivot: nothing under screen centre -> object-centre fallback")
+        _log_rl("vpivot", "screen-center-pivot: nothing under screen centre -> fallback chain")
         return None
     try:
         p = (float(info["x"]), float(info["y"]), float(info["z"]))
     except Exception:
         return None
     if not _in_bbox(p, bbox):
-        _log_rl("vpivot", "view-pivot: hit outside model bbox -> object-centre fallback")
+        _log_rl("vpivot", "screen-center-pivot: hit outside model bbox -> fallback chain")
         return None
-    _log_rl("vpivot", "view-pivot: surface hit -> (%.2f,%.2f,%.2f)" % p)
+    _log_rl("vpivot", "screen-center-pivot: surface hit -> (%.2f,%.2f,%.2f)" % p)
     return p
 
 
@@ -332,6 +373,24 @@ def _cursor_pivot(view, bbox):
     return p
 
 
+def _cursor_depth_point(view):
+    """FreeCAD's focal-plane unprojection for empty-space To Cursor zoom."""
+    px = _cursor["px"]
+    if px is None:
+        return None
+    x, y = px
+    if CURSOR_Y_FLIP:
+        try:
+            y = int(view.getSize()[1]) - y
+        except Exception:
+            pass
+    try:
+        point = view.getPoint((int(x), int(y)))
+        return (float(point[0]), float(point[1]), float(point[2]))
+    except Exception:
+        return None
+
+
 def _selection_center(doc):
     """Mean of the bounding-box centres of the current selection, or None."""
     try:
@@ -341,52 +400,62 @@ def _selection_center(doc):
         return None
     pts = []
     for obj in sel:
-        b = _obj_bbox(obj)
-        if b is not None:
-            c = b.Center
-            pts.append((c.x, c.y, c.z))
+        limits = _bbox_limits(obj, world=True)
+        if limits is not None:
+            lo, hi = limits
+            pts.append(tuple((lo[i] + hi[i]) * 0.5 for i in range(3)))
     if not pts:
         return None
     n = float(len(pts))
     return (sum(p[0] for p in pts) / n, sum(p[1] for p in pts) / n, sum(p[2] for p in pts) / n)
 
 
-def _orbit_pivot(op, view, doc, camera, idle):
-    """Resolve the orbit pivot for the scheme `op`. Everything falls back to the model centre,
-    then the camera look-at, so orbit always has a sane pivot."""
+def _orbit_pivot(op, view, doc, camera, idle, sel_override=True, candidates=None,
+                 hold_sec=PIVOT_HOLD_IDLE):
+    """Resolve the selected method followed by the daemon-expanded global candidate chain."""
+    selected = _selection_center(doc) if sel_override and op != "camera" else None
+    if selected is not None:
+        return selected
+    if _gesture["pivot"] is not None and idle <= hold_sec:
+        return _gesture["pivot"]
     center, bbox = _object_center(doc)
-    if op == "origin":
-        return (0.0, 0.0, 0.0)
-    if op == "view":
-        if _gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _screen_center_pivot(view, bbox)
-            if _gesture["pivot"] is None:
-                _gesture["pivot"] = center
-        return _gesture["pivot"] if _gesture["pivot"] is not None else cammath.look_at(camera)
-    if op == "cursor":
-        if _gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _cursor_pivot(view, bbox)
-            if _gesture["pivot"] is None:
-                _gesture["pivot"] = center
-        return _gesture["pivot"] if _gesture["pivot"] is not None else cammath.look_at(camera)
-    if op == "selection":
-        return _selection_center(doc) or center or cammath.look_at(camera)
-    # "object" and unknowns -> model centre
-    return center if center is not None else cammath.look_at(camera)
+    legacy = candidates is None
+    for method in (candidates if candidates is not None else [op, "object"]):
+        if method == "origin":
+            point = (0.0, 0.0, 0.0)
+        elif method == "screen_center":
+            point = _screen_center_pivot(view, bbox)
+        elif method == "cursor":
+            point = _cursor_pivot(view, bbox)
+        elif method == "selection":
+            point = _selection_center(doc)
+        elif method == "object":
+            point = center
+        else:                                      # camera / cursor_3d unsupported in FreeCAD
+            continue
+        if point is not None:
+            _gesture["pivot"] = point
+            return point
+    return cammath.look_at(camera) if legacy else None
 
 
-def _zoom_pivot(zm, view, doc, idle):
+def _zoom_pivot(zm, view, doc, idle, sel_override=True, hold_sec=PIVOT_HOLD_IDLE):
     if zm == "to_object":
         center, _bb = _object_center(doc)
         return center                      # may be None -> zoom about the look-at
     if zm == "to_cursor":
+        if sel_override:
+            selected = _selection_center(doc)
+            if selected is not None:
+                return selected
         # Keep the surface point under the MOUSE POINTER fixed on screen while zooming
         # (cammath.zoom already holds an off-centre pivot). Same per-gesture hold as the orbit
         # pivot, in its own slot so orbit/zoom gestures don't clobber each other's pivot.
-        if _zoom_gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
+        if _zoom_gesture["pivot"] is None or idle > hold_sec:
             _center, bbox = _object_center(doc)
-            _zoom_gesture["pivot"] = _cursor_pivot(view, bbox)
-        return _zoom_gesture["pivot"]      # None (miss/no cursor) -> zoom about the look-at
+            _zoom_gesture["pivot"] = (_cursor_pivot(view, bbox) or
+                                        _cursor_depth_point(view))
+        return _zoom_gesture["pivot"]
     return None                            # to_center -> look-at (screen centre)
 
 
@@ -399,9 +468,14 @@ def _apply(view, frame, idle):
     o = frame.get("o", [0.0, 0.0, 0.0])
     p = frame.get("p", [0.0, 0.0])
     z = float(frame.get("z", 0.0))
-    op = frame.get("op", "view")
+    op = frame.get("op", "screen_center")
     style = frame.get("os", "free")
     zm = frame.get("zm", "to_center")
+    adv = frame.get("adv") or {}
+    sel_override = bool(adv.get("selection_overrides_pivot", True))
+    pivot_candidates = adv.get("orbit_pivot_candidates") or [op]
+    orbit_hold = max(0.0, min(10.0, float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE))))
+    zoom_hold = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
 
     sig = (op, style, zm)
     if sig != _last_scheme["v"]:
@@ -413,22 +487,37 @@ def _apply(view, frame, idle):
     camera, node = _read_camera(view)
 
     changed = False
+    # Level ONCE when the style transitions free->turntable: remove existing roll
+    # instead of locking the tilted horizon. Transitions only -- prev None (fresh add-on) never
+    # levels, and ordinary turntable frames never re-level.
+    fixed = (style == "turntable")
+    prev = _horizon["fixed"]
+    _horizon["fixed"] = fixed
+    if fixed and prev is False and bool(adv.get("level_horizon_on_entry", True)):
+        if cammath.level_horizon(camera):
+            _log("horizon: leveled on turntable entry")
+            changed = True
     if o[0] or o[1] or o[2]:
         _log_rl("rx_orbit", "rx orbit o=(%.4f,%.4f,%.4f) op=%s os=%s" % (o[0], o[1], o[2], op, style))
         _zoom_gesture["pivot"] = None            # view rotates -> next zoom re-raycasts its pivot
-        pivot = _orbit_pivot(op, view, doc, camera, idle)
+        pivot = _orbit_pivot(op, view, doc, camera, idle, sel_override=sel_override,
+                             candidates=pivot_candidates, hold_sec=orbit_hold)
+        if pivot is None:
+            if changed:                      # deliver the entry-leveling even though the
+                _write_camera(view, node, camera)   # pivot chain produced no orbit frame
+            return
         cammath.orbit(camera, o, style == "turntable", pivot)
         changed = True
     elif p[0] or p[1]:
         _log_rl("rx_pan", "rx pan p=(%.4f,%.4f)" % (p[0], p[1]))
         _gesture["pivot"] = None                 # view moved -> next orbit re-raycasts its pivot
-        _zoom_gesture["pivot"] = None
         cammath.pan(camera, p[0], p[1])
         changed = True
     elif z:
         _log_rl("rx_zoom", "rx zoom z=%.4f zm=%s" % (z, zm))
         _gesture["pivot"] = None
-        cammath.zoom(camera, z, _zoom_pivot(zm, view, doc, idle))
+        cammath.zoom(camera, z, _zoom_pivot(zm, view, doc, idle, sel_override=sel_override,
+                                            hold_sec=zoom_hold))
         changed = True
 
     if changed:

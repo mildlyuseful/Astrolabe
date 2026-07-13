@@ -18,8 +18,7 @@
 //
 //   2. Editor.GetCurrentView()/SetCurrentView (fallback: paper space, GS failure): works
 //      everywhere but regens EVERY call (~5-7 ms/frame with real entities) -- smooth-ish motion,
-//      per-frame regeneration. This was the v0.1.x primary until the user noticed the model still
-//      regenerating each frame; the WorldDraw counter confirmed it.
+//      per-frame regeneration. WorldDraw measurements confirmed why this is fallback-only.
 //
 // This assembly is NETLOADed into acad.exe by the daemon. It connects to the trackball daemon's
 // nav broker (127.0.0.1:47900 -- the same socket protocol as the Fusion/Blender/FreeCAD/Unreal
@@ -57,37 +56,30 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.4";   // keep in sync with the csproj <Version>
-                                                       // 0.3.4: AabbNearHit always uses the near
-                                                       // face (tEnter) — UCS-plane samples inside
-                                                       // a solid no longer return interior points.
-                                                       // 0.3.3: cursor pivot — nearest of all
-                                                       // GetPickedEntities (front solid, not
-                                                       // paths[0]); Fusion-style expanding
-                                                       // ray-AABB on plane miss (2D Wireframe).
-                                                       // 0.3.2: cursor pivot — 2D-wireframe OOB
-                                                       // fallback (reproject plane hits to view
-                                                       // depth; freeze PointMonitor mid-gesture;
-                                                       // AABB near-face for solids).
-                                                       // 0.3.1: scheme values renamed (pointer->cursor,
-                                                       // to_pointer->to_cursor; daemon config v3).
-                                                       // 0.3.0: "pointer" orbit pivot + "to_pointer"
-                                                       // zoom (orbit/zoom about the point under the
-                                                       // mouse, cached by an Editor.PointMonitor)
+        public const string PluginVersion = "0.3.15";  // keep in sync with bundled version metadata
         const string BrokerHost = "127.0.0.1";
         const int BrokerPort = 47900;
 
-        // --- baseline signs/scales (live-tune; the daemon's per-app bindings scale on top) -----
+        // Host baseline moved to daemon config v6; plugin camera math is deliberately neutral.
         static readonly double[] OrbitSign = { 1.0, 1.0, 1.0 };  // pitch(x), yaw(y), roll(z)
-        const double PanSignX = -1.0, PanSignY = 1.0;  // target moves opposite the scene shift
-        const double PanScale = 0.5;      // pan delta -> fraction of the view height
-        const double ZoomSign = 1.0, ZoomScale = 0.5;
+        const double PanSignX = 1.0, PanSignY = 1.0;
+        const double PanScale = 1.0;
+        const double ZoomSign = 1.0, ZoomScale = 1.0;
         const int TimerMs = 10;           // UI-thread drain cadence (~100 Hz ceiling)
-        const int CommitIdleMs = 180;     // gesture considered over after this much frame silence
+        const int DefaultPivotHoldMs = 500;
 
         readonly object _lock = new object();
         readonly double[] _acc = new double[6];
-        string _opPivot = "view", _oStyle = "free", _zMode = "to_center";
+        string _opPivot = "screen_center", _oStyle = "free", _zMode = "to_center";
+        string _zoomStyle = "zoom";
+        int _pivotHoldMs = DefaultPivotHoldMs;
+        int _zoomHoldMs = DefaultPivotHoldMs;
+        bool _selectionOverrides = true;
+        bool _levelHorizon = true;        // level once when entering turntable (adv.level_horizon_on_entry;
+                                          // false = the current tilt rides along instead)
+        bool? _horizonFixed = null;       // first frame establishes state; it is not a transition
+        bool _levelPending = false;       // consumed once by the next UI-thread navigation tick
+        List<string> _pivotCandidates = new List<string> { "screen_center" };
         volatile bool _stop;
         volatile bool _connected;
         Thread _sockThread;
@@ -119,8 +111,7 @@ namespace TrackballNav
         bool _regenInFlight;               // REGEN queued/executing: navigation is HELD until it
                                            // finishes -- REGEN rebuilds the kernel's views, and
                                            // driving a GS view across that is a native access
-                                           // violation (v0.2.3 crashed AutoCAD exactly this way;
-                                           // AVs are not catchable from managed code)
+                                           // violation; AVs are not catchable from managed code
         DateTime _regenFiredAt;
         Document _regenWatchDoc;
         static volatile bool s_gsBroken;   // any GS failure -> legacy transport for the session
@@ -132,8 +123,9 @@ namespace TrackballNav
         // an active object snap > the picked entity's depth along the view ray > the raw
         // ComputedPoint (which lies on the UCS construction plane, NOT the 3D surface).
         // _ptrOnEntity = true when the cache used an osnap / picked-entity depth (false = plane
-        // point — CapturePointerPivot reprojects it to the view-target depth so 2D Wireframe
-        // mid-face hovers don't go OOB on oblique views).
+        // point — only the cursor's construction-plane projection, NOT a target.
+        // CapturePointerPivot then walks the strict expanding ray for a real surface and
+        // otherwise reports a MISS so the configured fallback chain continues).
         Document _pmDoc;                   // doc whose Editor.PointMonitor we're subscribed to
         bool _ptrValid;
         bool _ptrOnEntity;
@@ -141,10 +133,11 @@ namespace TrackballNav
         DateTime _ptrAt;
 
         // "cursor"/"to_cursor" per-gesture holds: captured at the first orbit/zoom frame of a
-        // gesture from the pointer cache (null = no/off-model cursor point -> plain target orbit),
-        // then HELD so the pivot never chases a moving target. A pan/zoom frame invalidates the
-        // orbit hold (the view moved under the cursor); orbit/pan invalidate the zoom hold; a
-        // gesture end (EndGesture) resets both.
+        // gesture from the pointer cache. A missing surface target makes orbit continue through
+        // its configured chain; to_cursor zoom first synthesizes a pointer-depth target and uses
+        // centered zoom only if that is also unavailable.
+        // then HELD so the pivot never chases a moving target. Pan/zoom invalidate orbit; orbit
+        // invalidates cursor zoom. Pan deliberately preserves cursor zoom across mixed input.
         Point3d? _heldOrbitPivot; bool _heldOrbitSet;
         Point3d? _heldZoomPivot;  bool _heldZoomSet;
 
@@ -391,6 +384,39 @@ namespace TrackballNav
                         if (root.TryGetProperty("op", out var op)) _opPivot = op.GetString();
                         if (root.TryGetProperty("os", out var os)) _oStyle = os.GetString();
                         if (root.TryGetProperty("zm", out var zm)) _zMode = zm.GetString();
+                        if (root.TryGetProperty("adv", out var adv) &&
+                            adv.ValueKind == JsonValueKind.Object)
+                        {
+                            if (adv.TryGetProperty("selection_overrides_pivot", out var sel) &&
+                                (sel.ValueKind == JsonValueKind.True || sel.ValueKind == JsonValueKind.False))
+                                _selectionOverrides = sel.GetBoolean();
+                            if (adv.TryGetProperty("level_horizon_on_entry", out var lvl) &&
+                                (lvl.ValueKind == JsonValueKind.True || lvl.ValueKind == JsonValueKind.False))
+                                _levelHorizon = lvl.GetBoolean();
+                            if (adv.TryGetProperty("zoom_style", out var zoomStyle) &&
+                                zoomStyle.ValueKind == JsonValueKind.String)
+                                _zoomStyle = zoomStyle.GetString() == "dolly" ? "dolly" : "zoom";
+                            if (adv.TryGetProperty("orbit_hold_sec", out var hold) &&
+                                hold.ValueKind == JsonValueKind.Number)
+                                _pivotHoldMs = (int)(Math.Clamp(hold.GetDouble(), 0.0, 10.0) * 1000.0);
+                            if (adv.TryGetProperty("zoom_hold_sec", out var zoomHold) &&
+                                zoomHold.ValueKind == JsonValueKind.Number)
+                                _zoomHoldMs = (int)(Math.Clamp(zoomHold.GetDouble(), 0.0, 10.0) * 1000.0);
+                            if (adv.TryGetProperty("orbit_pivot_candidates", out var chain) &&
+                                chain.ValueKind == JsonValueKind.Array)
+                            {
+                                var parsed = new List<string>();
+                                foreach (var item in chain.EnumerateArray())
+                                    if (item.ValueKind == JsonValueKind.String) parsed.Add(item.GetString());
+                                if (parsed.Count > 0) _pivotCandidates = parsed;
+                            }
+                        }
+                        bool fixedHorizon = _oStyle == "turntable";
+                        if (fixedHorizon && _horizonFixed == false && _levelHorizon)
+                            _levelPending = true;
+                        else if (!fixedHorizon || !_levelHorizon)
+                            _levelPending = false;
+                        _horizonFixed = fixedHorizon;
                     }
                 }
             }
@@ -424,7 +450,10 @@ namespace TrackballNav
                 }
             }
             double[] delta = null;
-            string style, opv, zmv;
+            string style, opv, zmv, zoomStyle;
+            List<string> pivotCandidates;
+            bool selectionOverrides, levelOnEntry;
+            int pivotHoldMs, zoomHoldMs;
             lock (_lock)
             {
                 if (_acc[0] != 0 || _acc[1] != 0 || _acc[2] != 0 ||
@@ -432,10 +461,18 @@ namespace TrackballNav
                 {
                     delta = (double[])_acc.Clone();
                     Array.Clear(_acc, 0, 6);
+                    levelOnEntry = _levelPending;
+                    _levelPending = false;
                 }
+                else levelOnEntry = false;
                 style = _oStyle;
                 opv = _opPivot;
                 zmv = _zMode;
+                zoomStyle = _zoomStyle;
+                pivotHoldMs = _pivotHoldMs;
+                zoomHoldMs = _zoomHoldMs;
+                selectionOverrides = _selectionOverrides;
+                pivotCandidates = new List<string>(_pivotCandidates);
             }
             // watchdog: if the REGEN's CommandEnded never arrives, un-wedge navigation
             if (_regenInFlight && (DateTime.UtcNow - _regenFiredAt).TotalSeconds > 2.0)
@@ -444,7 +481,8 @@ namespace TrackballNav
             if (delta == null)
             {
                 // gesture over? sync the driven camera into the DB exactly once
-                if (_gsActive && (DateTime.UtcNow - _lastFrameAt).TotalMilliseconds > CommitIdleMs)
+                if (_gsActive && (DateTime.UtcNow - _lastFrameAt).TotalMilliseconds >
+                    Math.Max(pivotHoldMs, zoomHoldMs))
                     EndGesture(commit: true);
                 else if (_regenPending && !_gsActive && !_regenInFlight)
                     FireDeferredRegen();
@@ -493,8 +531,13 @@ namespace TrackballNav
 
             try
             {
-                if (s_gsBroken || !TryApplyGs(doc, delta, style, opv, zmv))
-                    Apply(doc, delta, style);          // legacy fallback (regens per frame;
+                double idleMs = _gsActive
+                    ? (DateTime.UtcNow - _lastFrameAt).TotalMilliseconds
+                    : double.PositiveInfinity;
+                if (s_gsBroken || !TryApplyGs(doc, delta, style, opv, zmv, zoomStyle, selectionOverrides,
+                                              pivotCandidates, idleMs, pivotHoldMs, zoomHoldMs,
+                                              levelOnEntry))
+                    Apply(doc, delta, style, levelOnEntry, zoomStyle); // legacy fallback (regens per frame;
                                                        // no pointer pivot -- view-centre orbit)
                 _lastFrameAt = DateTime.UtcNow;
                 Interlocked.Increment(ref _framesApplied);
@@ -640,8 +683,11 @@ namespace TrackballNav
         // Depth of one entity along the view ray through onPlane. Curves: projected closest
         // point (accepted when within `radius` of the ray). Everything else: AABB near-face
         // (thickened by `radius` for the expanding aperture search). id must be top-level.
+        // `strict` drops the radius-0 bbox-centre depth synthesis: only a real (radius-
+        // thickened) ray/AABB intersection counts. Both screen_center and the cursor's expanding
+        // ray use it; the known picked-entity path may use the default depth salvage.
         static Point3d? EntityRayDepth(Transaction tr, ObjectId id, Point3d onPlane,
-                                       Vector3d viewDirUnit, double radius)
+                                       Vector3d viewDirUnit, double radius, bool strict = false)
         {
             try
             {
@@ -660,9 +706,14 @@ namespace TrackballNav
                 try { ext = ent.GeometricExtents; }
                 catch { return null; }                 // no extents (lights, cameras, …)
                 if (radius <= 0.0)
-                    return NavMath.AabbNearHit(onPlane, viewDirUnit, ext.MinPoint, ext.MaxPoint)
-                        ?? NavMath.AtViewDepth(onPlane, viewDirUnit,
+                {
+                    var near = NavMath.AabbNearHit(onPlane, viewDirUnit,
+                                                   ext.MinPoint, ext.MaxPoint);
+                    if (near.HasValue || strict)
+                        return near;
+                    return NavMath.AtViewDepth(onPlane, viewDirUnit,
                                ext.MinPoint + (ext.MaxPoint - ext.MinPoint) * 0.5);
+                }
                 return NavMath.AabbNearHitThick(onPlane, viewDirUnit,
                                                 ext.MinPoint, ext.MaxPoint, radius);
             }
@@ -674,7 +725,7 @@ namespace TrackballNav
         // at gesture capture -- not per mouse move. Fracs of VIEWSIZE / field height.
         static readonly double[] s_apertureFracs = { 0.0, 0.02, 0.05, 0.10, 0.20 };
 
-        Point3d? ExpandRayDepth(Point3d onPlane, Vector3d viewDirUnit)
+        Point3d? ExpandRayDepth(Point3d onPlane, Vector3d viewDirUnit, bool strict = false)
         {
             try
             {
@@ -699,7 +750,7 @@ namespace TrackballNav
                         double bestScore = double.NegativeInfinity;
                         foreach (ObjectId id in ms)
                         {
-                            var hit = EntityRayDepth(tr, id, onPlane, viewDirUnit, radius);
+                            var hit = EntityRayDepth(tr, id, onPlane, viewDirUnit, radius, strict);
                             if (!hit.HasValue)
                                 continue;
                             double score = NavMath.CameraDepthScore(hit.Value, viewDirUnit);
@@ -735,64 +786,49 @@ namespace TrackballNav
             catch { depthPoint = SysPt("TARGET"); }
         }
 
-        // The held "cursor" pivot: the cached cursor point, validated against the drawing
-        // extents grown by 10% of their diagonal. Plane misses first try an expanding
-        // model-space ray (2D Wireframe mid-face / near-edge); failing that, reproject to
-        // view-target depth. null only when there is no cache, or the point is still
-        // off-model after salvage.
+        // The held "cursor" pivot: the cached cursor point when it lies ON an entity (osnap /
+        // picked depth), else a STRICT expanding model-space ray through the cursor — that
+        // recovers 2D Wireframe mid-face / near-edge, where faces never pick. Construction-plane
+        // or view-depth synthesis is deliberately excluded: hovering empty space is a MISS and
+        // returns null so the configured fallback chain continues, the same actual-target-or-
+        // fall-through contract as screen_center and the other hosts' ray pivots. Both paths
+        // stay validated against the drawing extents grown by 10% of their diagonal.
         Point3d? CapturePointerPivot()
         {
             if (!_ptrValid)
             {
-                LogRL("ptr-none", "pointer pivot: no cursor point cached yet -> target orbit");
+                LogRL("ptr-none", "pointer pivot: no cursor point cached yet -> next candidate");
                 return null;
             }
             var p = _ptrPoint;
             try
             {
-                PivotViewBasis(out var vd, out var depth);
+                PivotViewBasis(out var vd, out _);
                 var mn = SysPt("EXTMIN");
                 var mx = SysPt("EXTMAX");
-                bool oob = !NavMath.InsideGrownExtents(p, mn, mx);
 
                 if (!_ptrOnEntity)
                 {
-                    // Expanding aperture (Fusion-style): recover a real surface when the
+                    // Plane sample = only the cursor's screen position, not a target. Expanding
+                    // aperture (Fusion-style, strict): recover a real surface when the
                     // PointMonitor aperture was empty -- the common 2D Wireframe mid-face case.
-                    var expanded = ExpandRayDepth(p, vd);
-                    if (expanded.HasValue && NavMath.InsideGrownExtents(expanded.Value, mn, mx))
+                    var expanded = ExpandRayDepth(p, vd, strict: true);
+                    if (!expanded.HasValue
+                        || !NavMath.InsideGrownExtents(expanded.Value, mn, mx))
                     {
-                        LogRL("ptr-expand",
-                              $"pointer pivot: expanding ray hit -> "
-                              + $"({expanded.Value.X:0.###},{expanded.Value.Y:0.###},{expanded.Value.Z:0.###})");
-                        p = expanded.Value;
-                        oob = false;
+                        LogRL("ptr-miss",
+                              "pointer pivot: nothing under the cursor -> next candidate");
+                        return null;
                     }
-                    else
-                    {
-                        var fixedPt = NavMath.AtViewDepth(p, vd, depth);
-                        LogRL("ptr-plane",
-                              "pointer pivot: plane/empty hit -> view-depth under cursor");
-                        p = fixedPt;
-                        oob = !NavMath.InsideGrownExtents(p, mn, mx);
-                    }
+                    LogRL("ptr-expand",
+                          $"pointer pivot: expanding ray hit -> "
+                          + $"({expanded.Value.X:0.###},{expanded.Value.Y:0.###},{expanded.Value.Z:0.###})");
+                    p = expanded.Value;
                 }
-                else if (oob)
-                {
-                    var fixedPt = NavMath.AtViewDepth(p, vd, depth);
-                    if (NavMath.InsideGrownExtents(fixedPt, mn, mx))
-                    {
-                        LogRL("ptr-reproj",
-                              "pointer pivot: entity sample OOB -> reprojected to view depth");
-                        p = fixedPt;
-                        oob = false;
-                    }
-                }
-
-                if (oob)
+                else if (!NavMath.InsideGrownExtents(p, mn, mx))
                 {
                     LogRL("ptr-oob",
-                          "pointer pivot: cursor point outside the drawing extents -> target orbit");
+                          "pointer pivot: entity sample outside the drawing extents -> next candidate");
                     return null;
                 }
             }
@@ -802,8 +838,52 @@ namespace TrackballNav
             return p;
         }
 
+        Point3d? CapturePointerDepthPoint()
+        {
+            if (!_ptrValid) return null;
+            try
+            {
+                PivotViewBasis(out var viewDir, out var targetDepth);
+                return NavMath.AtViewDepth(_ptrPoint, viewDir, targetDepth);
+            }
+            catch { return null; }
+        }
+
+        // The held "screen_center" pivot: the first surface under the viewport CENTRE — the
+        // same expanding model-space ray the cursor pivot uses, aimed through the view centre
+        // instead of the mouse, but STRICT: no construction-plane or view-depth synthesis.
+        // Nothing under the centre returns null so the configured chain continues (parity
+        // with Fusion/SolidWorks/Onshape screen_center). Held per gesture like the others.
+        Point3d? CaptureScreenCenterPivot()
+        {
+            try
+            {
+                PivotViewBasis(out var vd, out var centre);   // centre = a point ON the view axis
+                var hit = ExpandRayDepth(centre, vd, strict: true);
+                if (hit.HasValue)
+                {
+                    var mn = SysPt("EXTMIN");
+                    var mx = SysPt("EXTMAX");
+                    if (NavMath.InsideGrownExtents(hit.Value, mn, mx))
+                    {
+                        LogRL("sc-hit", $"screen-center pivot: ({hit.Value.X:0.###},"
+                              + $"{hit.Value.Y:0.###},{hit.Value.Z:0.###}) held for the gesture");
+                        return hit;
+                    }
+                }
+            }
+            catch (System.Exception ex) { LogOnce("sc-capture", ex); }
+            LogRL("sc-miss",
+                  "screen-center pivot: no surface under the viewport centre -> next candidate");
+            return null;
+        }
+
         // --- the GS transport: live kernel view, regen-free (docs 8.15) -------------------------
-        bool TryApplyGs(Document doc, double[] d, string style, string opv, string zmv)
+        bool TryApplyGs(Document doc, double[] d, string style, string opv, string zmv,
+                        string zoomStyle,
+                        bool selectionOverrides, List<string> pivotCandidates,
+                        double idleMs, int orbitHoldMs, int zoomHoldMs,
+                        bool levelOnEntry = false)
         {
             try
             {
@@ -845,28 +925,74 @@ namespace TrackballNav
                         LogOnce("gs-clobber",
                                 new System.Exception("GS view externally reset mid-gesture (self-healed from shadow)"));
                 }
-                // "cursor"/"to_cursor": resolve the held pivots (capture once, hold; see the
-                // field comments). Perspective to_cursor falls back to the plain dolly.
+                // Resolve held orbit/zoom pivots once per gesture (capture once, then hold).
                 bool hasOrbit = d[0] != 0 || d[1] != 0 || d[2] != 0;
                 bool hasPan = d[3] != 0 || d[4] != 0;
                 bool hasZoom = d[5] != 0;
                 Point3d? orbitPivot = null, zoomPivot = null;
-                if (hasOrbit && opv == "cursor")
+                if (hasPan || (hasOrbit && idleMs > orbitHoldMs))
                 {
-                    if (!_heldOrbitSet) { _heldOrbitPivot = CapturePointerPivot(); _heldOrbitSet = true; }
+                    _heldOrbitSet = false;
+                    _heldOrbitPivot = null;
+                }
+                if (hasZoom && zmv == "to_cursor" && idleMs > zoomHoldMs)
+                {
+                    _heldZoomSet = false;
+                    _heldZoomPivot = null;
+                }
+                if (hasOrbit && !_heldOrbitSet)
+                {
+                    _heldOrbitPivot = ResolveOrbitPivot(doc, opv, selectionOverrides,
+                                                        pivotCandidates);
+                    _heldOrbitSet = true;
+                }
+                if (hasOrbit)
                     orbitPivot = _heldOrbitPivot;
-                }
-                if (hasZoom && zmv == "to_cursor" && !_cam.Persp)
+                if (hasOrbit && !orbitPivot.HasValue)
                 {
-                    if (!_heldZoomSet) { _heldZoomPivot = CapturePointerPivot(); _heldZoomSet = true; }
-                    zoomPivot = _heldZoomPivot;
+                    if (!levelOnEntry)
+                        return true;                   // configured chain exhausted: no hidden target
+                    d = (double[])d.Clone();           // still deliver the one-time level write
+                    d[0] = d[1] = d[2] = 0.0;
+                    hasOrbit = false;
                 }
+                if (hasZoom && zmv == "to_object")
+                    _heldZoomPivot = CaptureDrawingCenter();
+                if (hasZoom && zmv == "to_cursor" && !_heldZoomSet)
+                {
+                    _heldZoomPivot = selectionOverrides ? CaptureSelectionCenter(doc) : null;
+                    if (!_heldZoomPivot.HasValue)
+                        _heldZoomPivot = CapturePointerPivot() ?? CapturePointerDepthPoint();
+                    _heldZoomSet = true;
+                }
+                if (hasZoom && (zmv == "to_object" || zmv == "to_cursor"))
+                    zoomPivot = _heldZoomPivot;
+                var camBefore = _cam;
                 _cam = NavMath.Apply(_cam, d, style, OrbitSign, PanSignX, PanSignY,
-                                     PanScale, ZoomSign, ZoomScale, orbitPivot, zoomPivot);
+                                     PanScale, ZoomSign, ZoomScale, orbitPivot, zoomPivot,
+                                     levelOnEntry, zoomStyle);
+                if (_ptrValid && (hasOrbit || hasPan || hasZoom))
+                {
+                    // PointMonitor does not fire while the mouse is stationary (and is frozen
+                    // during a GS gesture). Move its screen-ray seed with the camera so a pan can
+                    // invalidate the orbit pivot and immediately raycast the NEW scene under the
+                    // same cursor, without requiring a mouse jog. Any cached entity depth belongs
+                    // to the old view and must not be reused as an actual hit.
+                    _ptrPoint = NavMath.ReprojectScreenSample(_ptrPoint, camBefore, _cam);
+                    _ptrOnEntity = false;
+                }
                 NavMath.Write(_gsView, _cam);
                 _gsView.Update();                      // repaint from the kernel cache: NO regen
-                if (hasPan || hasZoom) _heldOrbitSet = false;   // view moved under the cursor ->
-                if (hasOrbit || hasPan) _heldZoomSet = false;   // the next orbit/zoom re-captures
+                if (hasPan || hasZoom)                         // view moved under the cursor ->
+                {
+                    _heldOrbitSet = false;
+                    _heldOrbitPivot = null;
+                }
+                if (hasOrbit)                                  // next cursor zoom re-captures
+                {
+                    _heldZoomSet = false;
+                    _heldZoomPivot = null;
+                }
                 return true;
             }
             catch (System.Exception ex)
@@ -876,6 +1002,92 @@ namespace TrackballNav
                 EndGesture(commit: false);
                 return false;
             }
+        }
+
+        static Point3d? CaptureSelectionCenter(Document doc)
+        {
+            try
+            {
+                var selected = doc.Editor.SelectImplied();
+                if (selected.Status != PromptStatus.OK || selected.Value == null)
+                    return null;
+                bool found = false;
+                double minX = 0, minY = 0, minZ = 0, maxX = 0, maxY = 0, maxZ = 0;
+                using (var tr = doc.TransactionManager.StartOpenCloseTransaction())
+                {
+                    foreach (var id in selected.Value.GetObjectIds())
+                    {
+                        try
+                        {
+                            var ent = tr.GetObject(id, OpenMode.ForRead, false) as Entity;
+                            if (ent == null) continue;
+                            var ext = ent.GeometricExtents;
+                            if (!found)
+                            {
+                                minX = ext.MinPoint.X; minY = ext.MinPoint.Y; minZ = ext.MinPoint.Z;
+                                maxX = ext.MaxPoint.X; maxY = ext.MaxPoint.Y; maxZ = ext.MaxPoint.Z;
+                                found = true;
+                            }
+                            else
+                            {
+                                minX = Math.Min(minX, ext.MinPoint.X);
+                                minY = Math.Min(minY, ext.MinPoint.Y);
+                                minZ = Math.Min(minZ, ext.MinPoint.Z);
+                                maxX = Math.Max(maxX, ext.MaxPoint.X);
+                                maxY = Math.Max(maxY, ext.MaxPoint.Y);
+                                maxZ = Math.Max(maxZ, ext.MaxPoint.Z);
+                            }
+                        }
+                        catch { /* erased/non-geometric entity: skip it */ }
+                    }
+                    tr.Commit();
+                }
+                return found
+                    ? new Point3d((minX + maxX) * 0.5, (minY + maxY) * 0.5, (minZ + maxZ) * 0.5)
+                    : (Point3d?)null;
+            }
+            catch { return null; }
+        }
+
+        Point3d? ResolveOrbitPivot(Document doc, string opv, bool selectionOverrides,
+                                   List<string> candidates)
+        {
+            var selected = selectionOverrides && opv != "camera"
+                ? CaptureSelectionCenter(doc) : null;
+            if (selected.HasValue)
+                return selected;
+            foreach (var method in candidates)
+            {
+                Point3d? point = null;
+                switch (method)
+                {
+                    case "camera": point = _cam.Pos; break;
+                    case "screen_center": point = CaptureScreenCenterPivot(); break;
+                    case "origin": point = Point3d.Origin; break;
+                    case "object": point = CaptureDrawingCenter(); break;
+                    case "selection": point = CaptureSelectionCenter(doc); break;
+                    case "cursor": point = CapturePointerPivot(); break;
+                }
+                if (point.HasValue) return point;
+            }
+            return null;
+        }
+
+        static Point3d? CaptureDrawingCenter()
+        {
+            try
+            {
+                var mn = SysPt("EXTMIN");
+                var mx = SysPt("EXTMAX");
+                var diagonal = mx - mn;
+                if (mx.X < mn.X || mx.Y < mn.Y || mx.Z < mn.Z ||
+                    diagonal.Length < 1e-12 || diagonal.Length > 1e18)
+                    return null;
+                return new Point3d((mn.X + mx.X) * 0.5,
+                                   (mn.Y + mx.Y) * 0.5,
+                                   (mn.Z + mx.Z) * 0.5);
+            }
+            catch { return null; }
         }
 
         // Is the viewport in the "2D Wireframe" visual style? There the 2D pipeline PRESENTS and
@@ -912,8 +1124,7 @@ namespace TrackballNav
         //    back) + UpdateTiledViewportsInDatabase. ZERO WorldDraws measured live (docs 8.15).
         //  - 2D Wireframe: build a ViewTableRecord from the SHADOW and push it through the classic
         //    ed.SetCurrentView while the current view still holds the OLD camera -- that is the
-        //    one path that rebuilds the 2D projected display list (v0.1.x did it per frame; this
-        //    does it ONCE per gesture -- docs 8.16).
+        //    one path that rebuilds the 2D projected display list, and it runs ONCE per gesture.
         // A single commit failure can be transient (doc closed mid-gesture) -- the next gesture
         // just re-seeds from the DB; only a RELIABLY failing commit demotes to the legacy path.
         int _commitFailures;
@@ -947,8 +1158,8 @@ namespace TrackballNav
                         // into the EXISTING *Active VPORT record(s), then IMMEDIATELY re-apply
                         // them with UpdateTiledViewportsFromDatabase. The pairing matters:
                         //  - UpdateTiledViewportsInDatabase ERASES+RECREATES the records ->
-                        //    dangling kernel view -> AV next gesture (the v0.2.5 crash);
-                        //  - field writes left UN-applied -> the same AV (the v0.2.7 crash);
+                        //    dangling kernel view -> AV next gesture;
+                        //  - field writes left UN-applied -> the same AV;
                         //  - write + FromDatabase: the record is the SOURCE, so the record, the
                         //    editor view, and the display all agree -- and native wheel zoom
                         //    (which consults the record; the cause of the wireframe snap-back)
@@ -1158,12 +1369,18 @@ namespace TrackballNav
         }
 
         // --- legacy fallback: per-frame Editor.SetCurrentView (regens every call) ---------------
-        void Apply(Document doc, double[] d, string style)
+        void Apply(Document doc, double[] d, string style, bool levelOnEntry = false,
+                   string zoomStyle = "zoom")
         {
             var ed = doc.Editor;
             using (var vtr = ed.GetCurrentView())
             {
                 bool changed = false;
+                if (style == "turntable" && levelOnEntry && Math.Abs(vtr.ViewTwist) > 1e-12)
+                {
+                    vtr.ViewTwist = 0.0;
+                    changed = true;
+                }
                 if (d[0] != 0 || d[1] != 0 || d[2] != 0)
                 {
                     OrbitView(vtr, d[0], d[1], d[2], style);
@@ -1184,9 +1401,14 @@ namespace TrackballNav
                     double factor = 1.0 + ZoomSign * d[5] * ZoomScale;
                     if (factor > 1e-3)
                     {
-                        vtr.Height /= factor;         // factor > 1 zooms IN
-                        vtr.Width /= factor;
-                        changed = true;
+                        // ViewTableRecord has field dimensions but no writable camera distance.
+                        // Preserve real Dolly semantics: the legacy path can only render Zoom.
+                        if (zoomStyle == "zoom")
+                        {
+                            vtr.Height /= factor;     // factor > 1 zooms IN
+                            vtr.Width /= factor;
+                            changed = true;
+                        }
                     }
                 }
                 if (changed)
@@ -1196,7 +1418,7 @@ namespace TrackballNav
 
         // Rotate the view direction about the camera axes. free = composed camera-space axis, with
         // roll applied to the writable ViewTwist; turntable = yaw about WORLD Z + pitch about
-        // camera-right, twist pinned level.
+        // camera-right. Entry leveling is handled once by Apply; ordinary frames preserve twist.
         void OrbitView(ViewTableRecord vtr, double ox, double oy, double oz, string style)
         {
             var dir = vtr.ViewDirection.GetNormal();          // target -> camera (out of screen)
@@ -1215,7 +1437,6 @@ namespace TrackballNav
                 var m = Matrix3d.Rotation(vy, NavMath.WorldUp, Point3d.Origin)
                       * Matrix3d.Rotation(vx, right, Point3d.Origin);
                 newDir = dir.TransformBy(m);
-                vtr.ViewTwist = 0.0;                           // turntable keeps the horizon level
             }
             else                                               // free
             {

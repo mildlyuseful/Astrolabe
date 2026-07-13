@@ -18,24 +18,13 @@ Conventions (VERIFIED live against FreeCAD 1.1 / Coin3D -- see docs/apps/freecad
 """
 import math
 
-# --- baseline sign/scale (the add-on's intrinsic feel). The daemon's Per-App Bindings
-#     (gain 1.0 == this baseline) scale from here and the Invert checkboxes flip further, so
-#     DO NOT also scale/invert in the daemon. SIGNS ARE STARTING GUESSES -- calibrate live with
-#     the trackball (docs/apps/freecad.md "Live calibration"). ----------------------
-ORBIT_SCALE = (1.0, 1.0, 1.0)   # (pitch o[0] about right, yaw o[1] about up, twist o[2] about fwd).
-                                # 1.0 = rotate the view by the FULL broker angle, so Sensitivity 1.0 is
-                                # a true 1:1 ball->view orbit (matches the --debug cube AND the other
-                                # eye+target camera apps: Fusion/SolidWorks/Onshape all use magnitude
-                                # 1.0). NOTE: do NOT copy Blender's 0.5 here -- that halving is specific
-                                # to Blender's RegionView3D and made FreeCAD orbit at half speed.
-PAN_SIGN = (-1.0, 1.0)          # pan along (camera-right, camera-up)
-PAN_SCALE = 0.14                # broker pan delta * on-screen view height -> world units. Matches the
-                                # Fusion add-in's proven baseline (the daemon sends the SAME pan deltas
-                                # to every app), so panning feels like Fusion's; tune via the per-app
-                                # Pan gain. (An earlier 0.0015 here made pan ~100x too small => "pan
-                                # does nothing" -- the daemon DOES emit pan frames on Shift, output.py.)
-ZOOM_SCALE = 0.25               # broker zoom delta -> fraction of view size per frame
-ZOOM_SIGN = 1.0                 # twist -> zoom direction (positive twist zooms IN)
+# The daemon's packaged profile applies the immutable FreeCAD host baseline before broker output. Pure camera
+# math is neutral so the developer correction cannot be applied twice.
+ORBIT_SCALE = (1.0, 1.0, 1.0)
+PAN_SIGN = (1.0, 1.0)
+PAN_SCALE = 1.0
+ZOOM_SCALE = 1.0
+ZOOM_SIGN = 1.0
 WORLD_UP = (0.0, 0.0, 1.0)      # FreeCAD is Z-up; turntable azimuth axis
 
 
@@ -65,6 +54,12 @@ def v_len(a):
 def v_normalize(a):
     n = v_len(a)
     return (a[0] / n, a[1] / n, a[2] / n) if n > 1e-12 else (0.0, 0.0, 0.0)
+
+
+def v_cross(a, b):
+    return (a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0])
 
 
 # ---------------------------------------------------------------------------------------
@@ -106,6 +101,26 @@ def q_axis_angle(axis, angle):
         return (0.0, 0.0, 0.0, 1.0)
     s = math.sin(angle * 0.5) / n
     return (axis[0] * s, axis[1] * s, axis[2] * s, math.cos(angle * 0.5))
+
+
+def q_from_axes(right, up, back):
+    """Camera-local -> world quaternion (x,y,z,w) from an orthonormal basis: world directions of
+    the camera's local +X (right), +Y (up), +Z (back). Shepperd's method on the column matrix."""
+    m00, m01, m02 = right[0], up[0], back[0]
+    m10, m11, m12 = right[1], up[1], back[1]
+    m20, m21, m22 = right[2], up[2], back[2]
+    t = m00 + m11 + m22
+    if t > 0.0:
+        s = math.sqrt(t + 1.0) * 2.0
+        return q_normalize(((m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25 * s))
+    if m00 >= m11 and m00 >= m22:
+        s = math.sqrt(1.0 + m00 - m11 - m22) * 2.0
+        return q_normalize((0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s))
+    if m11 >= m22:
+        s = math.sqrt(1.0 + m11 - m00 - m22) * 2.0
+        return q_normalize(((m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s))
+    s = math.sqrt(1.0 + m22 - m00 - m11) * 2.0
+    return q_normalize(((m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s))
 
 
 # ---------------------------------------------------------------------------------------
@@ -191,6 +206,22 @@ def apply_world_rotation(cam, R, pivot):
 def orbit(cam, o, turntable, pivot):
     """Apply an orbit step: rotate about `pivot` (None -> about the eye / look-around)."""
     apply_world_rotation(cam, orbit_R(cam, o[0], o[1], o[2], turntable), pivot)
+
+
+def level_horizon(cam):
+    """Remove existing roll: rebuild the orientation so camera-right is horizontal (perpendicular
+    to WORLD_UP) while the view direction is unchanged. position and focalDistance are untouched,
+    so the eye AND the look-at stay put -- only the roll goes. Returns False in the degenerate
+    straight-up/straight-down view, where roll is
+    indistinguishable from yaw and leveling is undefined (turntable has the same singularity)."""
+    _r, _u, fwd, _b = axes(cam)
+    right = v_cross(fwd, WORLD_UP)
+    if v_len(right) < 1e-6:
+        return False
+    right = v_normalize(right)
+    up = v_cross(right, fwd)
+    cam.orientation = list(q_from_axes(right, up, v_scale(fwd, -1.0)))
+    return True
 
 
 def pan(cam, px, py):

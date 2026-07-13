@@ -7,9 +7,6 @@ monkeypatched to a fake path so these run deterministically on any machine/CI; t
 config + Mod dir are isolated into a temp APPDATA by the `isolated_config` fixture.
 """
 import json
-import sys
-
-import pytest
 
 from trackball_daemon import integrations
 from trackball_daemon.config import Config
@@ -20,7 +17,7 @@ _FAKE_021 = r"C:\Program Files\FreeCAD 0.21\bin\FreeCAD.exe"
 
 def test_freecad_is_a_bundled_addin():
     assert "freecad" in integrations.ADDIN_KEYS
-    assert integrations.bundled_addin_version("freecad") == "0.1.4"
+    assert integrations.bundled_addin_version("freecad") == "0.1.13"
     assert integrations.APPS_BY_KEY["freecad"].setup is integrations.install_freecad
 
 
@@ -47,13 +44,13 @@ def test_install_copies_addon_and_enables(isolated_config, monkeypatch):
     assert ok is True
     fc = cfg.data["apps"]["freecad"]
     assert fc["installed"] is True and fc["enabled"] is True
-    assert fc["addin_version"] == "0.1.4"
+    assert fc["addin_version"] == "0.1.13"
     dest = integrations.freecad_user_mod_dir()
     # the whole add-on must be copied -- both Init files (FreeCAD needs Init.py to load the Mod),
     # the logic module, the pure-math module, and the version manifest.
     for name in ("Init.py", "InitGui.py", "tbnav_freecad.py", "tbnav_camera.py", "version.json"):
         assert (dest / name).exists(), f"missing {name}"
-    assert integrations.installed_addin_version("freecad") == "0.1.4"
+    assert integrations.installed_addin_version("freecad") == "0.1.13"
 
 
 def test_install_fails_when_freecad_absent(isolated_config, monkeypatch):
@@ -102,12 +99,3 @@ def test_auto_update_skips_when_not_installed(isolated_config, monkeypatch):
     cfg = Config().load()
     # never installed -> auto_update must not touch it (installed version is None)
     assert all(key != "freecad" for key, _old, _new in integrations.auto_update(cfg))
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")
-def test_status_line_reflects_detection(monkeypatch):
-    appdef = integrations.APPS_BY_KEY["freecad"]
-    monkeypatch.setattr(appdef, "detect", lambda: _FAKE_11)
-    assert "detected" in integrations.status_line(appdef).lower()
-    monkeypatch.setattr(appdef, "detect", lambda: None)
-    assert integrations.status_line(appdef) == "not detected"

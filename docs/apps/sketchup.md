@@ -4,12 +4,11 @@ The SketchUp side of Trackball Daemon is a **Ruby socket extension**. It runs in
 Desktop (Pro/Studio), connects to the daemon's localhost nav broker, and drives the active view's
 explicit eye/target/up camera. SketchUp for Web is not supported because it has no local Ruby hook.
 
-Verified live on this machine against **SketchUp 2026.2.243**, bundled **Ruby 3.2.2**, add-on
-`0.2.0`, daemon `0.1.38`. The API probe and production self-test were run from *Extensions →
-Developer → Ruby Console*. The production add-on also completed its broker hello; `daemon.log`
-reported the loaded SketchUp build through its versioned hello. Add-on **0.2.2** adds the under-mouse
-`cursor` pivot (§5.5); its offline pixel→pivot math is self-tested, but the live Win32 cursor→
-viewport mapping is **not yet GUI-verified** (SketchUp computer-control access was declined).
+The camera model was originally verified live against SketchUp 2026.2.243 with its bundled Ruby.
+The API probe and production self-test run from *Extensions → Developer → Ruby Console*. Current
+code versions come from the two `ADDIN_VERSION` constants, `version.json`, and
+`trackball_daemon.__version__`; do not maintain a snapshot here. Live Win32 cursor-to-viewport
+verification remains tracked in [`TODO.md`](../../TODO.md).
 
 ## 1. File map
 
@@ -94,19 +93,21 @@ Official API references: [Camera](https://ruby.sketchup.com/Sketchup/Camera.html
 
 ## 4. Navigation model
 
-The broker has already applied per-app sensitivity/gain and generic invert. `camera.rb` contains
-only SketchUp's baseline orientation/feel:
+The daemon sends SketchUp's immutable correction in `advanced['host_baseline']`; `camera.rb` applies
+it after mode-specific user routing. Its camera constants are deliberately neutral:
 
 ```ruby
-ORBIT_SCALE = [-1.0, -1.0, 1.0] # full-angle eye-camera orbit; signs need hardware feel check
-PAN_SIGN = [-1.0, -1.0]
-PAN_SCALE = 0.14                 # fraction of visible view span
+ORBIT_SCALE = [1.0, 1.0, 1.0]
+PAN_SIGN = [1.0, 1.0]
+PAN_SCALE = 1.0
 ZOOM_SIGN = 1.0
-ZOOM_SCALE = 0.25
-FLY_MOVE = 0.5
-WALK_MOVE = 0.5
+ZOOM_SCALE = 1.0
+FLY_MOVE = 1.0
+WALK_MOVE = 1.0
 WORLD_UP = Geom::Vector3d.new(0, 0, 1)
 ```
+
+The shipped factors are documented in [`../default_profiles.md`](../default_profiles.md).
 
 - **Free orbit:** compose pitch/yaw/twist about the frame-start camera right/up/forward axes with
   `Geom::Transformation.rotation(pivot, axis, radians)`. Transform eye, target, and up, then rebuild
@@ -122,7 +123,7 @@ WORLD_UP = Geom::Vector3d.new(0, 0, 1)
   object centre stays fixed. Factors and eye-target distance are clamped so the eye never crosses
   the target.
 
-### Viewpoint, fly, and walk (`0.2.0`)
+### Camera, fly, and walk (`0.2.0`)
 
 SketchUp now consumes the same additive broker `adv` shape used by Blender/Unreal:
 
@@ -132,16 +133,22 @@ SketchUp now consumes the same additive broker `adv` shape used by Blender/Unrea
   "lock_horizon": false,
   "fly_speed": 1.0,
   "walk_speed": 1.0,
+  "axis_source": {
+    "orbit": {"pitch":0,"yaw":1,"twist":2,"pan_x":0,"pan_y":1,"zoom":2},
+    "camera": {"pitch":0,"yaw":1,"roll":2},
+    "fly": {"pitch":0,"yaw":1,"bank":2,"forward":1,"strafe":0,"vertical":2},
+    "walk": {"pitch":0,"yaw":1,"forward":1,"strafe":0,"vertical":2}
+  },
   "invert": {
     "orbit": {"pitch":false,"yaw":false,"twist":false,"pan_x":false,"pan_y":false,"zoom":false},
-    "viewpoint": {"pitch":false,"yaw":false,"roll":true},
+    "camera": {"pitch":false,"yaw":false,"roll":true},
     "fly": {"pitch":false,"yaw":false,"bank":true,"forward":false,"strafe":false,"vertical":false},
     "walk": {"pitch":false,"yaw":false,"forward":false,"strafe":false,"vertical":false}
   }
 }
 ```
 
-- **Viewpoint** is an orbit pivot, not a separate mode: rotate target/up about `cam.eye`, leaving the
+- **Camera** is an orbit pivot, not a separate mode: rotate target/up about `cam.eye`, leaving the
   eye and focal distance fixed. Its pitch/yaw/roll inversions are independent; pan/zoom share the
   Orbit group, matching Blender.
 - **Fly look** also rotates about the eye but is unconstrained and uses twist as bank. Shift channels
@@ -151,25 +158,30 @@ SketchUp now consumes the same additive broker `adv` shape used by Blender/Unrea
   world Z. Shift movement projects right/forward onto world XY; twist moves vertically along Z.
 - `lock_horizon` forces external-pivot free orbit through the same turntable/horizon rebuild.
 
-The generic per-app invert remains default-off underneath; the SketchUp UI exposes the richer
-per-mode invert groups instead. This is deliberate: the same broker pan axis means screen pan in
-Orbit, thrust in Fly, and ground-forward in Walk, so direction choices belong in the Ruby extension
-where the active mode is known.
+Entering Turntable, Lock Horizon, or Walk from a roll-capable state optionally levels the horizon
+once. The transition keeps eye, target, focal distance, and any active orbit point fixed; ordinary
+fixed-mode frames do not repeatedly level.
+
+The generic per-app invert remains default-off underneath; the SketchUp UI exposes richer per-mode
+source and invert controls instead. Rotation actions select X/Y/Z from `orbit`; movement actions
+select X/Y/Z from `(pan.x, pan.y, zoom)`. This belongs in the Ruby extension because the same broker
+channel means screen pan in Orbit, thrust in Fly, and ground-forward in Walk.
 
 ## 5. Pivots and the live raytest
 
 - `origin` → `ORIGIN`
-- `viewpoint` → camera eye (turn in place)
+- `camera` → camera eye (turn in place)
 - `object` → `model.bounds.center`
-- `selection` → object centre
-- `view` → surface under the viewport **centre**, else object centre
+- `selection` → aggregate bounds centre of the current `model.selection`
+- `screen_center` → surface under the viewport **centre**; a miss continues the global chain
 - `cursor` → surface under the **mouse cursor** (add-on 0.2.2) — the same `pickray`/`raytest` as
-  `view`, aimed through the live cursor pixel instead of the centre. See §5.5.
+  `screen_center`, aimed through the live cursor pixel instead of the centre. See §5.5.
 
-Both `view` and `cursor` share `held_raycast_pivot`: the hit is captured once and **held** through
-the orbit gesture, reacquired after pan/zoom or 0.35 s idle (so the pivot never chases the moving
-surface), and validated only inside `model.bounds` expanded by 10% of its diagonal — else the
-object centre.
+Both `screen_center` and `cursor` share the orbit gesture target: a real hit is held for
+`orbit_hold_sec`, reacquired after invalidation/idle, and validated against model bounds. A rejected
+orbit hit continues the configured chain rather than using a hidden object-center fallback. To
+Cursor zoom uses the independent `zoom_hold_sec`; an empty-space miss synthesizes a cursor-ray point
+at the current target/model depth.
 
 The live Ruby Console probe created a temporary box, aimed the camera at it, and verified:
 
@@ -199,15 +211,15 @@ times the logical viewport size. The fraction is **DPI-scale-free** — `client_
 cancels the logical-vs-physical factor — so unlike the SolidWorks driver this needs **no** per-monitor
 DPI handling. A stray window is rejected: it must sit under SketchUp's foreground frame
 (`GetAncestor(GA_ROOT) == GetForegroundWindow`) **and** share the viewport's aspect ratio, and the
-mapped pixel must land in-range; the raytest's bbox validation catches anything left; any miss falls
-back to the object centre.
+mapped pixel must land in-range; the raytest's bbox validation catches anything left. Orbit misses
+continue the configured chain.
 
 > **⚠ NEEDS LIVE-GUI VERIFY.** SketchUp computer-control access was declined this session, so the
 > tracker is implemented to the API and unit-tested only for the offline pixel→pivot math
 > (`sketchup_nav_selftest.rb` feeds a synthetic pixel). A GUI pass must confirm (1) `WindowFromPoint`
 > over the drawing area returns the GL window whose client rect **is** the viewport (origin at its
 > top-left, no inset), and (2) the pivot lands under the cursor while orbiting. If (1) is off, the
-> aspect gate + bbox validation degrade to the object-centre fallback rather than mispivoting. Run
+> aspect gate + bbox validation continue through the configured chain rather than mispivoting. Run
 > `TrackballNav::CursorTracker.selftest` in the Ruby Console, hover a face, and read the add-on log to
 > check the reported viewport pixel. (This is the one app in the series verified only offline — the
 > two halves each rest on a proven primitive: `pickray`/`raytest` is live-verified, and the
@@ -255,8 +267,8 @@ load '<repo>/tools/sketchup_nav_selftest.rb'  # use your checkout's absolute pat
 ```
 
 The self-test creates a temporary box inside an abortable operation and currently performs 28 live
-assertions: the original orbit/pan/zoom/raycast checks plus viewpoint eye/focal hold, independent
-viewpoint pitch reversal, fly look/move/vector preservation, fly-forward inversion, walk horizon
+assertions: the original orbit/pan/zoom/raycast checks plus camera eye/focal hold, independent
+camera pitch reversal, fly look/move/vector preservation, fly-forward inversion, walk horizon
 lock, ground-plane walk movement, and — new in 0.2.2 — the **`cursor` pivot** (a synthetic
 off-centre pixel raycasts a *different* surface point than the centre, nil pixel yields no pivot,
 and a held cursor pivot stays rigid vs the eye through an orbit). It writes
@@ -272,15 +284,15 @@ Verified on this machine:
 
 - live camera/accessor/rotation/redraw/timer/socket probe: pass;
 - production Ruby module load from the repo: pass;
-- viewpoint/fly/walk production self-test (23 checks): pass;
+- camera/fly/walk production self-test (23 checks): pass;
 - broker hello observed by the running daemon with the loaded add-on version: pass;
 - production Ruby Console self-test: pass;
 - automatic loader from the real Plugins directory: pass (fresh normal launch produced a new
   `start` log and daemon handshake after selecting the blank template);
 - **`cursor` pivot offline math (synthetic pixel): pass in the self-test; the live Win32 cursor→
   viewport mapping (`cursor.rb`) is UN-verified (SketchUp access declined) — see §5.5;**
-- physical trackball sign/feel calibration: TODO. The magnitudes follow the established eye-camera
-  baselines, but the baseline direction signs remain a live hardware pass.
+- physical trackball sign/feel and the current interaction matrix remain in `TODO.md`. Intrinsic
+  corrections belong in `host_profiles.json`, not Ruby camera constants.
 
 ## 8. Gotchas
 

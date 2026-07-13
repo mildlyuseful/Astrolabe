@@ -8,9 +8,6 @@ to a fake engine tree under tmp_path so these run deterministically on any machi
 config dir is isolated into a temp APPDATA by the `isolated_config` fixture.
 """
 import json
-import sys
-
-import pytest
 
 from trackball_daemon import integrations
 from trackball_daemon.config import Config
@@ -31,7 +28,7 @@ def _patch_unreal(monkeypatch, exe):
 
 def test_unreal_is_a_bundled_addin():
     assert "unreal" in integrations.ADDIN_KEYS
-    assert integrations.bundled_addin_version("unreal") == "0.2.4"
+    assert integrations.bundled_addin_version("unreal") == "0.2.13"
     assert integrations.APPS_BY_KEY["unreal"].setup is integrations.install_unreal
 
 
@@ -53,7 +50,7 @@ def test_install_copies_plugin_and_enables(isolated_config, tmp_path, monkeypatc
     assert ok is True
     u = cfg.data["apps"]["unreal"]
     assert u["installed"] is True and u["enabled"] is True
-    assert u["addin_version"] == "0.2.4"
+    assert u["addin_version"] == "0.2.13"
     dest = integrations.unreal_plugin_dir()
     # the whole plugin must be copied: the .uplugin descriptor, the version manifest the daemon
     # reads, and the Content/Python payload Unreal auto-runs.
@@ -63,7 +60,7 @@ def test_install_copies_plugin_and_enables(isolated_config, tmp_path, monkeypatc
         assert (dest / "Content" / "Python" / name).exists(), f"missing {name}"
     uplugin = (dest / "TrackballNav.uplugin").read_text(encoding="utf-8")
     assert "GeoReferencing" in uplugin          # under-cursor orbit Half A
-    assert integrations.installed_addin_version("unreal") == "0.2.4"
+    assert integrations.installed_addin_version("unreal") == "0.2.13"
 
 
 def test_install_fails_when_unreal_absent(isolated_config, monkeypatch):
@@ -136,14 +133,3 @@ def test_auto_update_skips_when_not_installed(isolated_config, tmp_path, monkeyp
     cfg = Config().load()
     # never installed -> auto_update must not touch it (installed version is None)
     assert all(key != "unreal" for key, _old, _new in integrations.auto_update(cfg))
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")
-def test_status_line_reflects_detection(monkeypatch):
-    appdef = integrations.APPS_BY_KEY["unreal"]
-    monkeypatch.setattr(
-        appdef, "detect",
-        lambda: r"C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe")
-    assert "detected" in integrations.status_line(appdef).lower()
-    monkeypatch.setattr(appdef, "detect", lambda: None)
-    assert integrations.status_line(appdef) == "not detected"

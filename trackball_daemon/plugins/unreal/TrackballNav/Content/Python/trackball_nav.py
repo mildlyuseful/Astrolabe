@@ -28,16 +28,9 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.4"          # 0.2.4: selection_overrides_pivot (adv) — when True and actors are
-                                 # selected, orbit/to_cursor use the selection centre instead of the
-                                 # designated view/cursor/origin pivot; when False, raycasts ignore
-                                 # the selection bbox gate.
-                                 # 0.2.3: under-mouse "cursor" orbit + "to_cursor" zoom via
-                                 # GeoReferencingEditorBPLibrary (Half A) + line_trace (Half B).
-                                 # 0.2.2: cursor investigated + PARKED (no viewport mouse in Python).
-                                 # Keep in sync with version.json AND TrackballNav.uplugin VersionName.
+ADDIN_VERSION = "0.2.13"         # keep in sync with version.json and TrackballNav.uplugin
 _DEFAULT_PORT = 47900
-PIVOT_HOLD_IDLE = 0.35           # s without frames that ends a gesture -> re-raycast view/cursor pivots
+PIVOT_HOLD_IDLE = 0.5            # fallback for adv.orbit_hold_sec / adv.zoom_hold_sec
 OBJ_CACHE_SEC = 0.5              # selection bounding-box centre cache lifetime
 BBOX_MARGIN = 0.10               # accept a hit inside the model bbox grown by this * diagonal
 TRACE_BIG = 1.0e7               # cm: raycast length along camera forward / deprojected ray
@@ -50,12 +43,17 @@ _reader_thread = None
 _tick_handle = None
 _host = "?"
 _subsystem = None                # cached UnrealEditorSubsystem (None => use EditorLevelLibrary)
+_level_subsystem = None          # LevelEditorSubsystem owns per-viewport FOV
 
-# "view"/"cursor" orbit: raycast ONCE per gesture and HOLD the hit, so the surface point stays put
+# `screen_center`/`cursor`: raycast once per gesture and hold the hit so the surface stays put
 # while orbiting. Invalidated on pan/zoom or after an idle gap.
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
 _zoom_gesture = {"pivot": None}  # "to_cursor" zoom's own per-gesture hold (reset on orbit/pan)
 _obj_cache = {"t": 0.0, "center": None, "bbox": None}
+_scene_cache = {"t": 0.0, "center": None}
+# Fixed-horizon transition tracker: None until the first frame so startup in a fixed mode does not
+# level the view; only a real free->fixed switch does.
+_horizon = {"fixed": None}
 _focus = {"dist": cammath.DIST_DEFAULT}   # eye->focus distance (cm), scales pan/zoom; updated on orbit
 _last_scheme = {"v": None}
 _georef_logged = {"missing": False}      # one-shot warn if GeoReferencing Python type is absent
@@ -118,6 +116,61 @@ def _ues():
         except Exception:
             _subsystem = None
     return _subsystem
+
+
+def _les():
+    global _level_subsystem
+    if _level_subsystem is None:
+        try:
+            _level_subsystem = unreal.get_editor_subsystem(unreal.LevelEditorSubsystem)
+        except Exception:
+            _level_subsystem = None
+    return _level_subsystem
+
+
+def _viewport_fov():
+    sub = _les()
+    if sub is None:
+        return None
+    try:
+        key = sub.get_active_viewport_config_key()
+        getter = getattr(sub, "get_level_viewport_fov", None) or \
+            getattr(sub, "get_level_viewport_field_of_view", None)
+        result = getter(key) if getter is not None else None
+        values = result if isinstance(result, tuple) else (result,)
+        return next((float(v) for v in values
+                     if isinstance(v, (int, float)) and not isinstance(v, bool) and 1.0 < v < 179.0), None)
+    except Exception:
+        return None
+
+
+def _set_viewport_fov(value):
+    sub = _les()
+    if sub is None:
+        return False
+    try:
+        key = sub.get_active_viewport_config_key()
+        setter = getattr(sub, "set_level_viewport_fov", None) or \
+            getattr(sub, "set_level_viewport_field_of_view", None)
+        if setter is None:
+            return False
+        setter(float(value), key)
+        return True
+    except Exception as exc:
+        _log_rl("fov", "viewport FOV update failed; using dolly (%s)" % exc)
+        return False
+
+
+def _apply_lens_zoom(cam, z, toward=None):
+    old_fov = _viewport_fov()
+    if old_fov is None:
+        return False
+    old_location = list(cam.location)
+    new_fov = cammath.lens_zoom(cam, z, old_fov, toward)
+    if _set_viewport_fov(new_fov):
+        return True
+    cam.location = old_location
+    return False
 
 
 def _get_camera_info():
@@ -210,6 +263,40 @@ def _selected_actors():
             return []
 
 
+def _all_actors():
+    try:
+        return unreal.get_editor_subsystem(unreal.EditorActorSubsystem).get_all_level_actors()
+    except Exception:
+        try:
+            return unreal.EditorLevelLibrary.get_all_level_actors()
+        except Exception:
+            return []
+
+
+def _scene_center():
+    """Center of the aggregate level-actor bounds, excluding actors with no spatial extent."""
+    now = time.time()
+    if _scene_cache["center"] is not None and now - _scene_cache["t"] < OBJ_CACHE_SEC:
+        return _scene_cache["center"]
+    mn = [None, None, None]
+    mx = [None, None, None]
+    for actor in _all_actors() or []:
+        try:
+            origin, extent = actor.get_actor_bounds(False)
+            oe = ((origin.x, extent.x), (origin.y, extent.y), (origin.z, extent.z))
+            if max(abs(v[1]) for v in oe) <= 1e-6:
+                continue
+        except Exception:
+            continue
+        for i, (o, e) in enumerate(oe):
+            lo, hi = o - e, o + e
+            mn[i] = lo if mn[i] is None else min(mn[i], lo)
+            mx[i] = hi if mx[i] is None else max(mx[i], hi)
+    center = None if mn[0] is None else tuple((mn[i] + mx[i]) * 0.5 for i in range(3))
+    _scene_cache.update(t=now, center=center)
+    return center
+
+
 def _selection_center():
     """Median of the selected actors' bounding-box centres (cm), with the aggregate bbox, or
     (None, None). Cached ~OBJ_CACHE_SEC."""
@@ -288,7 +375,7 @@ def _trace_ray(origin, direction, bbox, log_key, msg_hit, msg_miss):
             world, start, end, unreal.TraceTypeQuery.TRACE_TYPE_QUERY1, False, [],
             unreal.DrawDebugTrace.NONE, True)
     except Exception:
-        _log_rl(log_key, "line_trace_single FAILED -> selection/forward fallback")
+        _log_rl(log_key, "line_trace_single FAILED -> continue configured chain")
         return None
     if not hit:
         _log_rl(log_key, msg_miss)
@@ -304,11 +391,11 @@ def _trace_ray(origin, direction, bbox, log_key, msg_hit, msg_miss):
 def _screen_center_pivot(cam, bbox):
     """Raycast the editor world down the camera forward axis (screen centre) to the first surface,
     validated against the selection bbox. Editor traces are finicky (collision/visibility) -> any
-    miss/failure returns None and the caller falls back to the selection/forward point."""
+    miss/failure returns None and the resolver continues through the configured candidate chain."""
     return _trace_ray(
         cam.location, cam.forward, bbox, "vpivot",
-        "view-pivot: surface hit -> (%.1f,%.1f,%.1f)",
-        "view-pivot: nothing under screen centre -> selection/forward fallback")
+        "screen-center-pivot: surface hit -> (%.1f,%.1f,%.1f)",
+        "screen-center-pivot: nothing under screen centre -> continue configured chain")
 
 
 def _cursor_screen_ray():
@@ -319,7 +406,7 @@ def _cursor_screen_ray():
     stock UE Python that exposes the *level-editor* viewport mouse / cursor ray
     (`GCurrentLevelEditingViewportClient->GetCursorWorldLocationFromMousePos`). It returns
     focused=False when the viewport widget lacks Slate focus (Details panel, Content Browser, …)
-    — call sites must fall back rather than invent a desktop-cursor hack.
+    — call sites report the method unavailable rather than invent a desktop-cursor hack.
 
     Prefers ``get_viewport_cursor_information`` (pixel + world ray in one call). Falls back to
     ``get_viewport_cursor_location`` + ``UnrealEditorSubsystem.screen_to_world``. Returns
@@ -377,13 +464,27 @@ def _cursor_pivot(bbox):
     ray = _cursor_screen_ray()
     if ray is None:
         _log_rl("cpivot", "cursor-pivot: no viewport mouse (click the level viewport, or "
-                "GeoReferencing unavailable) -> selection/forward fallback")
+                "GeoReferencing unavailable) -> continue configured chain")
         return None
     _px, origin, direction = ray
     return _trace_ray(
         origin, direction, bbox, "cpivot",
         "cursor-pivot: surface hit -> (%.1f,%.1f,%.1f)",
-        "cursor-pivot: nothing under cursor -> selection/forward fallback")
+        "cursor-pivot: nothing under cursor -> continue configured chain")
+
+
+def _cursor_depth_point():
+    """Point on the cursor ray at the current focus depth, for empty-space To Cursor zoom."""
+    ray = _cursor_screen_ray()
+    if ray is None:
+        return None
+    _px, origin, direction = ray
+    n = cammath.v_len(direction)
+    if n < 1e-9:
+        return None
+    direction = tuple(v / n for v in direction)
+    return tuple(origin[i] + direction[i] * cammath._clamp_dist(_focus["dist"])
+                 for i in range(3))
 
 
 def _forward_point(cam):
@@ -395,52 +496,52 @@ def _forward_point(cam):
             cam.location[2] + cam.forward[2] * d)
 
 
-def _orbit_pivot(op, cam, idle, sel_override=True):
+def _orbit_pivot(op, cam, idle, sel_override=True, candidates=None,
+                 hold_sec=PIVOT_HOLD_IDLE):
     """Resolve the orbit pivot (a world point) for scheme ``op``, or None to turn in place about the
     eye (free-fly). When ``sel_override`` and actors are selected, the selection centre wins over
     view/cursor/origin (the designated pivot). Otherwise raycasts ignore the selection bbox gate
-    and miss falls back to a forward point — selection no longer steals the pivot."""
-    if op == "viewpoint":                    # Blender-style: orbit about the EYE = turn in place
-        return None
+    and failures continue through the daemon-expanded global candidate chain."""
     center, bbox = _selection_center()
-    if op in ("object", "selection"):
-        # "selection" historically meant a Blender-style 3D cursor; Unreal has none -> object centre.
-        return center if center is not None else _forward_point(cam)
-    if sel_override and center is not None:
+    if sel_override and op != "camera" and center is not None:
         return center
-    # Designated pivot path (no selection override, or nothing selected).
     ray_bbox = bbox if sel_override else None   # bbox gate only matters when override is on
-    if op == "origin":
-        return (0.0, 0.0, 0.0)
-    if op == "view":
-        if _gesture["pivot"] is None or _gesture["invalid"] or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _screen_center_pivot(cam, ray_bbox)
-            if _gesture["pivot"] is None:
-                _gesture["pivot"] = _forward_point(cam)
-            _gesture["invalid"] = False
+    if _gesture["pivot"] is not None and not _gesture["invalid"] and idle <= hold_sec:
         return _gesture["pivot"]
-    if op == "cursor":
-        # Under-mouse surface: GeoReferencing Half A + line_trace Half B, held per gesture like "view".
-        if _gesture["pivot"] is None or _gesture["invalid"] or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _cursor_pivot(ray_bbox)
-            if _gesture["pivot"] is None:
-                _gesture["pivot"] = _forward_point(cam)
+    legacy = candidates is None
+    for method in (candidates if candidates is not None else [op]):
+        if method == "camera":
+            point = tuple(cam.location)
+        elif method == "origin":
+            point = (0.0, 0.0, 0.0)
+        elif method == "screen_center":
+            point = _screen_center_pivot(cam, ray_bbox)
+        elif method == "cursor":
+            point = _cursor_pivot(ray_bbox)
+        elif method == "object":
+            point = _scene_center()
+        elif method == "selection":
+            point = center
+        else:
+            continue
+        if point is not None:
+            _gesture["pivot"] = point
             _gesture["invalid"] = False
-        return _gesture["pivot"]
-    return _forward_point(cam)               # unknown -> a sane orbit point in front of the camera
+            return point
+    return _forward_point(cam) if legacy else None
 
 
-def _zoom_toward(zm, idle=0.0, sel_override=True):
+def _zoom_toward(zm, idle=0.0, sel_override=True, hold_sec=PIVOT_HOLD_IDLE):
     """World point to dolly toward, or None for a straight-forward dolly."""
     center, bbox = _selection_center()
     if zm == "to_object":
-        return center                        # may be None -> dolly straight along forward
+        return _scene_center()                # may be None -> dolly straight along forward
     if zm == "to_cursor":
         if sel_override and center is not None:
             return center
-        if _zoom_gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
+        if _zoom_gesture["pivot"] is None or idle > hold_sec:
             ray_bbox = bbox if sel_override else None
-            _zoom_gesture["pivot"] = _cursor_pivot(ray_bbox)   # None on miss -> forward dolly
+            _zoom_gesture["pivot"] = _cursor_pivot(ray_bbox) or _cursor_depth_point()
         return _zoom_gesture["pivot"]
     return None                              # to_center -> dolly along forward
 
@@ -453,36 +554,80 @@ def _sgn(flag):
     return -1.0 if flag else 1.0
 
 
-def _apply_inverts(nav_mode, op, o, p, z, inv):
-    """Per-mode, per-axis direction flips (config advanced.invert.<mode>.<axis>). Applied HERE, in the
-    add-on, not in the daemon -- the same physical channel means different things per mode (ball
-    forward/back is orbit pan-Y but fly/walk forward), so independent inverts are only possible once
-    the mode is known. "viewpoint" gets its own rotation inverts and shares orbit's pan/zoom inverts.
-    Mirrors the Blender add-on exactly."""
+def _routed(values, sources, inversions, action, default):
+    """One independently routed action from a 3-axis semantic input vector."""
+    try:
+        source = int(sources.get(action, default))
+    except (TypeError, ValueError):
+        source = default
+    if source not in (0, 1, 2):
+        source = default
+    return values[source] * _sgn(inversions.get(action))
+
+
+def _apply_action_routing(nav_mode, op, o, p, z, adv):
+    """Per-mode X/Y/Z source selection plus direction inversion.
+
+    Rotation actions select from ``o``; shifted movement actions select from ``(p.x, p.y, z)``.
+    This keeps mode semantics independent and permits mappings such as Walk Forward <- Z (twist).
+    """
+    inv = adv.get("invert") or {}
+    axes = adv.get("axis_source") or {}
+    rotation = list(o)
+    movement = [p[0], p[1], z]
     if nav_mode == "fly":
         f = inv.get("fly", {})
-        o = [o[0] * _sgn(f.get("pitch")), o[1] * _sgn(f.get("yaw")), o[2] * _sgn(f.get("bank"))]
-        p = [p[0] * _sgn(f.get("strafe")), p[1] * _sgn(f.get("forward"))]
-        z = z * _sgn(f.get("vertical"))
+        a = axes.get("fly", {})
+        o = [_routed(rotation, a, f, "pitch", 0), _routed(rotation, a, f, "yaw", 1),
+             _routed(rotation, a, f, "bank", 2)]
+        p = [_routed(movement, a, f, "strafe", 0),
+             _routed(movement, a, f, "forward", 1)]
+        z = _routed(movement, a, f, "vertical", 2)
     elif nav_mode == "walk":
         w = inv.get("walk", {})
-        o = [o[0] * _sgn(w.get("pitch")), o[1] * _sgn(w.get("yaw")), o[2]]
-        p = [p[0] * _sgn(w.get("strafe")), p[1] * _sgn(w.get("forward"))]
-        z = z * _sgn(w.get("vertical"))
+        a = axes.get("walk", {})
+        o = [_routed(rotation, a, w, "pitch", 0), _routed(rotation, a, w, "yaw", 1), rotation[2]]
+        p = [_routed(movement, a, w, "strafe", 0),
+             _routed(movement, a, w, "forward", 1)]
+        z = _routed(movement, a, w, "vertical", 2)
     else:                                            # orbit
         ob = inv.get("orbit", {})
-        if op == "viewpoint":
-            vp = inv.get("viewpoint", {})
-            o = [o[0] * _sgn(vp.get("pitch")), o[1] * _sgn(vp.get("yaw")), o[2] * _sgn(vp.get("roll"))]
+        oa = axes.get("orbit", {})
+        if op == "camera":
+            vp = inv.get("camera", {})
+            va = axes.get("camera", {})
+            o = [_routed(rotation, va, vp, "pitch", 0), _routed(rotation, va, vp, "yaw", 1),
+                 _routed(rotation, va, vp, "roll", 2)]
         else:
-            o = [o[0] * _sgn(ob.get("pitch")), o[1] * _sgn(ob.get("yaw")), o[2] * _sgn(ob.get("twist"))]
-        p = [p[0] * _sgn(ob.get("pan_x")), p[1] * _sgn(ob.get("pan_y"))]
-        z = z * _sgn(ob.get("zoom"))
+            o = [_routed(rotation, oa, ob, "pitch", 0), _routed(rotation, oa, ob, "yaw", 1),
+                 _routed(rotation, oa, ob, "twist", 2)]
+        p = [_routed(movement, oa, ob, "pan_x", 0),
+             _routed(movement, oa, ob, "pan_y", 1)]
+        z = _routed(movement, oa, ob, "zoom", 2)
     return o, p, z
 
 
-def _apply_orbit(cam, o, p, z, op, style, zm, twist_action, lock, pan_scales, idle,
-                 sel_override=True):
+def _apply_host_baseline(nav_mode, twist_action, o, p, z, adv):
+    baseline = adv.get("host_baseline") or {}
+    orbit = baseline.get("orbit", [1.0, 1.0, 1.0])
+    pan = baseline.get("pan", [1.0, 1.0])
+    zoom = float(baseline.get("zoom", 1.0))
+    move = float(baseline.get("move", 1.0))
+    if nav_mode == "orbit":
+        twist_factor = zoom if twist_action in ("zoom", "dolly") else float(orbit[2])
+        o = [o[0] * float(orbit[0]), o[1] * float(orbit[1]), o[2] * twist_factor]
+        p = [p[i] * float(pan[i]) for i in range(2)]
+        z *= zoom
+    else:
+        o = [o[i] * float(orbit[i]) for i in range(3)]
+        p = [v * move for v in p]
+        z *= move
+    return o, p, z
+
+
+def _apply_orbit(cam, o, p, z, op, style, zm, twist_action, zoom_style, lock, pan_scales, idle,
+                 sel_override=True, pivot_candidates=None, orbit_hold=PIVOT_HOLD_IDLE,
+                 zoom_hold=PIVOT_HOLD_IDLE):
     """ORBIT mode: orbit (with twist routed by twist_action), pan, or dolly. Exactly one channel is
     non-zero per frame (the daemon gates them on Shift)."""
     if o[0] or o[1] or o[2]:
@@ -494,12 +639,18 @@ def _apply_orbit(cam, o, p, z, op, style, zm, twist_action, lock, pan_scales, id
             if twist_action == "roll" and not lock:
                 orbit_o[2] = twist                   # keep twist in the orbit rotation (rolls/banks)
             elif twist_action in ("zoom", "dolly"):
-                cammath.dolly(cam, twist, _focus["dist"])
+                if twist_action == "zoom" and _apply_lens_zoom(cam, twist):
+                    pass
+                else:
+                    cammath.dolly(cam, twist, _focus["dist"])
                 _gesture["invalid"] = True
                 did = True
             # "none" (or roll while horizon-locked): twist ignored
         if orbit_o[0] or orbit_o[1] or orbit_o[2]:
-            pivot = _orbit_pivot(op, cam, idle, sel_override=sel_override)
+            pivot = _orbit_pivot(op, cam, idle, sel_override=sel_override,
+                                 candidates=pivot_candidates or [op], hold_sec=orbit_hold)
+            if pivot is None:
+                return did
             if pivot is not None:
                 _focus["dist"] = cammath._clamp_dist(
                     cammath.v_len(cammath.v_sub(tuple(cam.location), pivot)))
@@ -509,15 +660,17 @@ def _apply_orbit(cam, o, p, z, op, style, zm, twist_action, lock, pan_scales, id
         return did
     if p[0] or p[1]:
         _log_rl("rx_pan", "rx pan p=(%.4f,%.4f)" % (p[0], p[1]))
-        _gesture["invalid"] = True                   # view moved -> next orbit re-raycasts its pivot
-        _zoom_gesture["pivot"] = None
+        _gesture.update({"pivot": None, "invalid": True})
         cammath.pan(cam, p[0], p[1], _focus["dist"] if pan_scales else cammath.DIST_DEFAULT)
         return True
     if z:
         _log_rl("rx_zoom", "rx zoom z=%.4f zm=%s" % (z, zm))
-        _gesture["invalid"] = True
-        cammath.dolly(cam, z, _focus["dist"],
-                       _zoom_toward(zm, idle, sel_override=sel_override))
+        _gesture.update({"pivot": None, "invalid": True})
+        toward = _zoom_toward(zm, idle, sel_override=sel_override, hold_sec=zoom_hold)
+        if zoom_style == "zoom" and _apply_lens_zoom(cam, z, toward):
+            pass
+        else:
+            cammath.dolly(cam, z, _focus["dist"], toward)
         return True
     return False
 
@@ -532,7 +685,7 @@ def _apply_fly(cam, o, p, z, adv):
     if p[0] or p[1] or z:
         _log_rl("rx_pan", "rx fly-move p=(%.4f,%.4f) z=%.4f" % (p[0], p[1], z))
         cammath.fly_move(cam, p, z, _focus["dist"], adv.get("fly_speed", 1.0))
-        _gesture["invalid"] = True
+        _gesture.update({"pivot": None, "invalid": True})
         _zoom_gesture["pivot"] = None
         return True
     return False
@@ -548,7 +701,7 @@ def _apply_walk(cam, o, p, z, adv):
     if p[0] or p[1] or z:
         _log_rl("rx_pan", "rx walk-move p=(%.4f,%.4f) z=%.4f" % (p[0], p[1], z))
         cammath.walk_move(cam, p, z, _focus["dist"], adv.get("walk_speed", 1.0))
-        _gesture["invalid"] = True
+        _gesture.update({"pivot": None, "invalid": True})
         _zoom_gesture["pivot"] = None
         return True
     return False
@@ -562,34 +715,55 @@ def _apply(info, frame, idle):
     o = list(frame.get("o", [0.0, 0.0, 0.0]))
     p = list(frame.get("p", [0.0, 0.0]))
     z = float(frame.get("z", 0.0))
-    op = frame.get("op", "view")
+    op = frame.get("op", "screen_center")
     style = frame.get("os", "free")
     zm = frame.get("zm", "to_center")
     adv = frame.get("adv") or {}
     nav_mode = adv.get("nav_mode", "orbit")
     lock = bool(adv.get("lock_horizon", False))
     twist_action = adv.get("twist_action", "roll")
+    zoom_style = adv.get("zoom_style", "dolly")
     pan_scales = bool(adv.get("pan_scales_with_distance", True))
     sel_override = bool(adv.get("selection_overrides_pivot", True))
+    orbit_hold = max(0.0, min(10.0, float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE))))
+    zoom_hold = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
 
-    sig = (nav_mode, op, style, zm, twist_action, lock, sel_override)
+    sig = (nav_mode, op, style, zm, twist_action, zoom_style, lock, sel_override)
     if sig != _last_scheme["v"]:
         _last_scheme["v"] = sig
-        _log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s horizon=%s sel_override=%s" % sig)
+        _log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s pan_zoom=%s horizon=%s sel_override=%s" % sig)
 
-    # Per-mode direction inverts (applied here, like Blender -- see _apply_inverts).
-    o, p, z = _apply_inverts(nav_mode, op, o, p, z, adv.get("invert") or {})
+    o, p, z = _apply_action_routing(nav_mode, op, o, p, z, adv)
+    o, p, z = _apply_host_baseline(nav_mode, twist_action, o, p, z, adv)
 
     cam = _read_camera(info)
+
+    # Level ONCE when the effective mode transitions into a fixed-horizon mode (turntable orbit,
+    # lock-horizon, or walk) and the daemon's toggle is on. Transitions only -- prev
+    # None (fresh session) never levels, and ordinary fixed-mode frames never re-level.
+    fixed = (nav_mode == "walk") or (
+        nav_mode == "orbit" and (style == "turntable" or lock))
+    prev = _horizon["fixed"]
+    _horizon["fixed"] = fixed
+    leveled = False
+    if fixed and prev is False and bool(adv.get("level_horizon_on_entry", True)):
+        leveled = cammath.level_horizon(cam)
+        if leveled:
+            _log("horizon: leveled on fixed-horizon mode entry (nav=%s style=%s)"
+                 % (nav_mode, style))
+
     if nav_mode == "fly":
         changed = _apply_fly(cam, o, p, z, adv)
     elif nav_mode == "walk":
         changed = _apply_walk(cam, o, p, z, adv)
     else:                                            # orbit
-        changed = _apply_orbit(cam, o, p, z, op, style, zm, twist_action, lock, pan_scales, idle,
-                               sel_override=sel_override)
+        changed = _apply_orbit(cam, o, p, z, op, style, zm, twist_action, zoom_style,
+                               lock, pan_scales, idle,
+                               sel_override=sel_override,
+                               pivot_candidates=adv.get("orbit_pivot_candidates") or [op],
+                               orbit_hold=orbit_hold, zoom_hold=zoom_hold)
 
-    if changed:
+    if changed or leveled:
         _write_camera(cam)
         _log_rl("applied", "applied nav=%s op=%s pos=(%.1f,%.1f,%.1f) dist=%.0f"
                 % (nav_mode, op, cam.location[0], cam.location[1], cam.location[2], _focus["dist"]))

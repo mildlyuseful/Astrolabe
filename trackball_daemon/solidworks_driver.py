@@ -43,7 +43,7 @@ each frame is a handful of COM calls -- not the slow/fragile manual-transform re
   * IPartDoc.GetPartBox / IAssemblyDoc.GetBox -- model bounding box (orbit pivot + zoom-to-object);
         both need _FlagAsMethod under late-bound dispatch.
   * IModelDocExtension.SelectByRay + ISelectionMgr.GetSelectionPoint2 -- screen-centre raycast for the
-        'view' pivot (true surface depth under the crosshair). GOTCHAS (verified live): SelectByRay's
+        'screen_center' pivot (first surface under the viewport center). GOTCHAS: SelectByRay's
         Tol arg must be a VT_I4 INTEGER (a double silently selects nothing); the count method is
         GetSelectedObjectCount2 (not 'GetSelectionCount'); it mutates the selection set (save/restore).
 
@@ -55,18 +55,19 @@ re-read), is what lets the orbit pan to hold an arbitrary pivot every frame and 
 Control scheme (mirrors the broker / Fusion add-in via set_scheme) -- all applied for SolidWorks:
   * orbit PIVOT:
       origin             -> rotate ONLY about the world origin, ZERO view translation (the original feel).
-      object / selection -> hold the model bounding-box CENTRE (a fixed point -> exact).
-      view            -> hold the SCREEN-CENTRE point at the TRUE surface depth under the crosshair,
+      object             -> hold the model bounding-box CENTRE (a fixed point -> exact).
+      selection          -> hold the selected entities' aggregate centre when available.
+      screen_center   -> hold the first surface hit under the viewport center,
                          found by a screen-centre raycast (SelectByRay; like SW's own middle-drag orbit),
-                         falling back to the object-centre depth when the ray misses. Captured once and
-                         HELD; recomputed only after the view is idle >= _pivot_hold_sec (set_pivot_hold,
+                         Captured once and HELD; recomputed after the view is idle >=
+                         _pivot_hold_sec (set_pivot_hold,
                          default 0.5 s) OR when a pan/zoom moves it -- so it never chases a moving target.
       cursor          -> hold the surface point under the MOUSE CURSOR: GetCursorPos ->
                          ScreenToClient(GetViewHWnd) -> invert IModelView.Transform (the model->
                          CLIENT-relative PHYSICAL-pixel transform; the worker thread is made DPI
                          aware so the cursor px match) -> the in-plane (a, b) offsets -> the SAME
-                         SelectByRay raycast as 'view', aimed through the cursor. Same
-                         capture+hold; misses fall back to the object centre. (The IMouse
+                         SelectByRay raycast as 'screen_center', aimed through the cursor. Same
+                         capture+hold; misses continue through the configured chain. (The IMouse
                          event-sink route was rejected: see the design note at _cursor_pivot.)
     Holding the pivot pans by dT = Scale2*((col_before - col_after).pivot), which exactly compensates
     the rotation (held point stays put to ~1e-16 -- no discrete-order error). Switching the pivot
@@ -86,6 +87,7 @@ import math
 import threading
 import time
 
+from .config import orbit_pivot_candidates
 from .util import get_logger
 
 # pywin32 is Windows-only and optional. Import guarded so the daemon still runs (with this
@@ -103,26 +105,22 @@ except Exception:                       # pragma: no cover - exercised only with
 # --- tuning: SolidWorks' intrinsic axis orientation + baseline sensitivity ----------------
 # Mirrors the tuning block at the top of the Fusion add-in. The nav-delta contract feeds
 # (ox,oy,oz) = orbit about (camera right, up, forward) in radians, (px,py) = pan, zoom = zoom;
-# values arrive already scaled by the active app's bindings. Defaults below were refined from
-# on-hardware testing but signs/magnitudes may still want per-feel tweaks.
+# values arrive with the immutable SolidWorks host baseline and user bindings already composed.
 #
 # orbit: rotation is about the CAMERA axes (right/up/forward), transformed into model space per
 # frame via the view's Orientation3 -- so it tracks the current view instead of the global axes.
-# ORBIT_SIGN flips each channel's direction. Defaults mirror the Fusion add-in's ORBIT_SCALE
-# (X/Y inverted) as the best-guess starting point; flip any axis that spins the wrong way.
-ORBIT_SIGN = (-1.0, -1.0, 1.0)    # (ox=pitch about right, oy=yaw about up, oz=roll about forward)
+# Camera math stays neutral so the daemon-owned correction cannot be applied twice.
+ORBIT_SIGN = (1.0, 1.0, 1.0)
 # turntable azimuth axis: SolidWorks is Y-up, so world up is +Y in model space (verified live --
 # at every view the camera-up column is Y-dominant, and yawing about (0,1,0) keeps verticals vertical).
 WORLD_UP = (0.0, 1.0, 0.0)
 # pan: IModelView.TranslateBy moves the view by a vector in METERS along the graphics-area
-# screen X,Y axes -- already screen-relative (do NOT divide by Scale2). PAN_SCALE is the main
-# magnitude knob (raise if pan is too slow, lower if it flies off); PAN_SIGN flips each axis.
-PAN_SIGN = (1.0, -1.0)
-PAN_SCALE = 0.2
+# screen X,Y axes -- already screen-relative (do NOT divide by Scale2).
+PAN_SIGN = (1.0, 1.0)
+PAN_SCALE = 1.0
 # zoom: IModelView.ZoomByFactor zooms about the view CENTER, so the model no longer drifts
-# off-screen the way the old Scale2 approach did. factor > 1 zooms in; ZOOM_SIGN flips that and
-# ZOOM_SCALE sets how aggressive each frame is.
-ZOOM_SCALE = 0.5
+# off-screen the way the old Scale2 approach did. factor > 1 zooms in.
+ZOOM_SCALE = 1.0
 ZOOM_SIGN = 1.0
 # Force a viewport redraw each frame. The native view methods may already repaint when driven
 # from automation; if motion stays visible with this False, leaving it False lifts the refresh
@@ -132,6 +130,7 @@ FORCE_REDRAW = True
 DEFAULT_FLUSH_HZ = 30.0
 _RETRY_PERIOD = 2.0           # seconds between attach attempts while SolidWorks isn't running
 _OBJ_CACHE_TTL = 0.5         # seconds to cache the model bounding-box centre (recomputed lazily)
+_SELECTION_CACHE_TTL = 0.15  # avoid a selection-manager COM round-trip on every orbit frame
 # Out-of-process COM reads are expensive (~17-20 ms each for ActiveDoc/ActiveView/Translation3,
 # measured live), so the worker caches the model/view handles + the view's Translation3/Scale2 and
 # re-validates them only every _VIEW_TTL. That re-fetch doubles as the liveness probe (a closed app
@@ -139,17 +138,16 @@ _OBJ_CACHE_TTL = 0.5         # seconds to cache the model bounding-box centre (r
 # view change. Caching these is what makes an object-centred orbit (which must also pan every frame
 # to hold the pivot) as smooth as the old origin-only orbit.
 _VIEW_TTL = 1.0
-# "view" orbit pivot: seconds the view must be idle (no orbit/pan/zoom) before the screen-centre
+# "screen_center" orbit pivot: seconds the view must be idle before the viewport-center
 # pivot is recomputed. Holds it steady through a gesture and re-settles to the current centre after
 # a pause -- recomputing it every frame chases a moving target and drifts. Overridable per app.
 DEFAULT_PIVOT_HOLD = 0.5
 
-# "view" pivot raycast: instead of pinning the screen-centre point at the OBJECT-CENTRE depth (which
-# makes the model swing when that depth != the surface you're looking at), shoot a ray down the
+# "screen_center" pivot raycast: find the first surface under the viewport center by shooting down
 # screen-centre optical axis with IModelDocExtension.SelectByRay and pin the pivot at the TRUE
 # surface depth under the crosshair -- exactly what SolidWorks' own middle-drag orbit does. Runs
 # ONCE per gesture (then the pivot is held), so its few extra COM calls don't affect steady-state.
-VIEW_PIVOT_RAYCAST = True
+SCREEN_CENTER_PIVOT_RAYCAST = True
 # Aperture (cylinder radius) sweep as a fraction of the bbox diagonal: start precise (the pierced
 # centre surface) and grow x3 to catch thin/edge features when the exact centre is in a gap. The
 # FIRST radius that yields a valid hit wins (smallest = most accurate). We use the bbox diagonal as
@@ -227,6 +225,25 @@ def _rodrigues(u, theta, p):
             pz * c + cz * s + uz * k)
 
 
+def _level_horizon_command(right, back, world_up=WORLD_UP):
+    """SolidWorks RotateAboutAxis command that takes camera-right to the leveled horizontal.
+    Returns None when already level or at the straight-up/down singularity."""
+    leveled_right = (world_up[1] * back[2] - world_up[2] * back[1],
+                     world_up[2] * back[0] - world_up[0] * back[2],
+                     world_up[0] * back[1] - world_up[1] * back[0])
+    n = math.sqrt(sum(v * v for v in leveled_right))
+    if n < 1e-6:
+        return None
+    leveled_right = tuple(v / n for v in leveled_right)
+    cross = (right[1] * leveled_right[2] - right[2] * leveled_right[1],
+             right[2] * leveled_right[0] - right[0] * leveled_right[2],
+             right[0] * leveled_right[1] - right[1] * leveled_right[0])
+    sin_phi = sum(cross[i] * back[i] for i in range(3))
+    cos_phi = sum(leveled_right[i] * right[i] for i in range(3))
+    phi = math.atan2(sin_phi, cos_phi)
+    return None if abs(phi) < 1e-9 else -phi
+
+
 def _safe_box(model, method, arg):
     """model bounding box via `method`(arg), or None. Both GetPartBox (parts) and GetBox
     (assemblies) need _FlagAsMethod under late-bound dispatch. Never raises."""
@@ -248,6 +265,7 @@ class SolidWorksDriver:
         self._lock = threading.Lock()
         self._acc = [0.0] * 6
         self._stop = threading.Event()
+        self._enabled = threading.Event()                    # explicit setup/Enabled gate
         self._period = 1.0 / self._clamp_rate(rate_hz)       # flush/refresh interval
         self._thread = None
         self._connected = False
@@ -256,11 +274,12 @@ class SolidWorksDriver:
         self._warned = set()                                  # one-time logs for failing ops
         # Control scheme (orbit pivot / orbit style / zoom mode), set live via set_scheme. Mirrors
         # NavBroker; a dict ref-swap is atomic, so the worker reads it lock-free each flush.
-        self._scheme = {"op": "view", "os": "free", "zm": "to_center"}
+        self._scheme = {"op": "screen_center", "os": "free", "zm": "to_center", "sel_override": True}
         # COM handles -- created and used ONLY on the worker thread.
         self._swApp = None
         self._mathUtil = None
         self._box_cache = (0.0, None)                         # (monotonic_ts, bbox 6-tuple or None)
+        self._selection_cache = (None, 0.0, None)             # (selmgr, monotonic_ts, centre)
         # Cached view state (worker thread only) -- see _VIEW_TTL. _model/_view are re-validated
         # periodically; _trans/_scale are tracked across our own sets so we avoid re-reading them.
         self._model = None
@@ -268,22 +287,31 @@ class SolidWorksDriver:
         self._trans = None                                    # tracked Translation3 [x,y,z] or None
         self._scale = None                                    # tracked Scale2 or None
         self._view_ts = 0.0                                   # last re-validate time (monotonic)
-        # IModelDocExtension / ISelectionMgr handles for the 'view' pivot raycast (SelectByRay /
+        # IModelDocExtension / ISelectionMgr handles for the 'screen_center' raycast (SelectByRay /
         # GetSelectionPoint2). Cached + method-flagged alongside the view; None when unavailable.
         self._ext = None
         self._selmgr = None
         # the graphics window's HWND (view.GetViewHWnd), tracked with the view handles -- the
         # 'cursor' pivot's is-the-cursor-over-this-view gate (WindowFromPoint must return it).
         self._view_hwnd = None
-        # "view"/"cursor" orbit pivot held across a gesture: captured when orbit resumes after the
+        # "screen_center"/"cursor" pivot held across a gesture: captured when orbit resumes after the
         # view has been idle for >= _pivot_hold_sec, then held (so it doesn't chase a moving
         # target). origin orbit takes NO pivot (pure rotation, zero translation).
         self._orbit_pivot = None
+        self._orbit_pivot_resolved = False
+        self._orbit_pivot_found = False
         # "to_cursor" zoom's own held pivot (reset on orbit/pan and by set_scheme).
         self._zoom_pivot = None
         self._pivot_hold_sec = DEFAULT_PIVOT_HOLD
+        self._zoom_hold_sec = DEFAULT_PIVOT_HOLD
         self._last_activity_t = 0.0                           # monotonic time of the last orbit/pan/zoom
         self._rl = {}                                         # rate-limited info-log timestamps
+        # _horizon_fixed is None until the first set_scheme, so starting in turntable never levels.
+        # Only a real free->turntable switch queues _level_pending; the worker applies it on the
+        # next flush because COM access remains worker-thread-only.
+        self._level_horizon = True
+        self._horizon_fixed = None
+        self._level_pending = False
 
     @staticmethod
     def _clamp_rate(hz):
@@ -297,33 +325,56 @@ class SolidWorksDriver:
         """Live-update the flush/viewport-refresh rate (Hz). Applied on the next flush."""
         self._period = 1.0 / self._clamp_rate(hz)
 
-    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode):
+    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True,
+                   orbit_pivot_fallbacks=None, level_horizon_on_entry=True):
         """Set the control scheme applied on the next flush. Parallels NavBroker.set_scheme so
         app._apply_schemes() drives SolidWorks the same way it drives the socket add-ons.
-          orbit_pivot: origin | object | view | selection | cursor
+          orbit_pivot: camera | screen_center | cursor | selection | object | origin
               origin    -> rotate about the model origin, no view translation (the original behaviour);
               object    -> rotate about the model bounding-box centre;
-              view      -> rotate about the screen-centre point at the true surface depth (raycast; held);
-              selection -> falls back to object (bounding-box centre);
+              screen_center -> rotate about the first surface under the viewport center (held);
+              selection -> mean of selected-entity points when available;
               cursor    -> rotate about the surface point under the MOUSE CURSOR (the same
                            SelectByRay machinery aimed through the cursor pixel -- _cursor_pivot;
-                           held per gesture); misses / unmappable cursor fall back to object.
+                           held per gesture); misses / unmappable cursor continue the chain.
           orbit_style: free | turntable
           zoom_mode:   to_center | to_object | to_cursor   (to_cursor = zoom about the surface
                        point under the mouse cursor, held per gesture; a miss falls back to
                        to_center)"""
-        self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode}
+        self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode,
+                        "sel_override": bool(selection_overrides_pivot)}
+        if orbit_pivot_fallbacks is not None:
+            self._scheme["fallbacks"] = list(orbit_pivot_fallbacks)
+        # A free->turntable switch queues one horizon-leveling pass,
+        # applied by the worker on the next flush. Leaving turntable cancels a queued pass.
+        self._level_horizon = bool(level_horizon_on_entry)
+        fixed = (orbit_style == "turntable")
+        if fixed and self._horizon_fixed is False and self._level_horizon:
+            self._level_pending = True
+        elif not fixed or not self._level_horizon:
+            self._level_pending = False
+        self._horizon_fixed = fixed
+        self._selection_cache = (None, 0.0, None)
         self._orbit_pivot = None             # drop any held pivot so a pivot switch takes effect now
+        self._orbit_pivot_resolved = False
+        self._orbit_pivot_found = False
         self._zoom_pivot = None
 
     def set_pivot_hold(self, sec):
-        """Seconds the view must be idle before the 'view' orbit pivot is recomputed (see
+        """Seconds the view must be idle before the 'screen_center' pivot is recomputed (see
         DEFAULT_PIVOT_HOLD). Clamped to [0, 10]; 0 recomputes every orbit start."""
         try:
             sec = float(sec)
         except (TypeError, ValueError):
             sec = DEFAULT_PIVOT_HOLD
         self._pivot_hold_sec = min(10.0, max(0.0, sec))
+
+    def set_zoom_hold(self, sec):
+        try:
+            sec = float(sec)
+        except (TypeError, ValueError):
+            sec = DEFAULT_PIVOT_HOLD
+        self._zoom_hold_sec = min(10.0, max(0.0, sec))
 
     # --- producer side (BLE thread) -- only accumulates, never blocks / touches COM ------
     def submit(self, ox, oy, oz, px, py, zoom):
@@ -352,6 +403,13 @@ class SolidWorksDriver:
     def stop(self):
         self._stop.set()
 
+    def set_enabled(self, enabled):
+        """Gate COM attachment behind the app's explicit Enabled/setup state."""
+        if enabled:
+            self._enabled.set()
+        else:
+            self._enabled.clear()
+
     # --- worker thread (owns COM) --------------------------------------------------------
     def _run(self):
         pythoncom.CoInitialize()
@@ -361,6 +419,12 @@ class SolidWorksDriver:
             while not self._stop.is_set():
                 cycle_start = time.monotonic()
                 period = self._period               # re-read each loop so set_rate() applies live
+                if not self._enabled.is_set():
+                    if self._swApp is not None:
+                        self._handle_drop()
+                    self._drain()
+                    self._sleep_remainder(cycle_start, period)
+                    continue
                 if self._swApp is None:
                     if cycle_start - last_attach >= _RETRY_PERIOD:
                         last_attach = cycle_start
@@ -407,6 +471,7 @@ class SolidWorksDriver:
         self._swApp = swApp
         self._mathUtil = self._get_mathutil(swApp)  # pan disabled (only) if this fails
         self._box_cache = (0.0, None)               # fresh attach -> recompute the bounding box
+        self._selection_cache = (None, 0.0, None)
         self._invalidate_view()                     # fresh attach -> re-fetch view + tracked state
         self._warned.clear()                        # let the first failure of each op log again
         try:
@@ -473,6 +538,7 @@ class SolidWorksDriver:
         self._swApp = None
         self._mathUtil = None
         self._box_cache = (0.0, None)
+        self._selection_cache = (None, 0.0, None)
         self._invalidate_view()
         self._set_connected(False)
 
@@ -523,6 +589,12 @@ class SolidWorksDriver:
         # This both kills the jitter AND cuts ~1 repaint/frame (measured ~185->116 ms on a heavy part).
         frozen = self._set_graphics_update(view, False)
         try:
+            if self._level_pending:
+                self._level_pending = False
+                try:
+                    self._apply_level_horizon(view)
+                except Exception as exc:
+                    self._warn_once("level_horizon", exc)
             if ox or oy or oz:
                 try:
                     self._apply_orbit(view, ox, oy, oz, scheme, model, idle)
@@ -539,9 +611,11 @@ class SolidWorksDriver:
                 except Exception as exc:
                     self._warn_once("zoom", exc)
             if px or py or zoom:
-                self._orbit_pivot = None            # pan/zoom move the screen centre -> the 'view'/
+                self._orbit_pivot = None            # pan/zoom move the viewport center -> the
+                self._orbit_pivot_resolved = False
+                self._orbit_pivot_found = False
                 #                                     'cursor' pivot must recompute on the next orbit
-            if ox or oy or oz or px or py:
+            if ox or oy or oz:
                 self._zoom_pivot = None             # view rotated/moved under the cursor -> the
                 #                                     'to_cursor' zoom pivot re-raycasts next zoom
         finally:
@@ -581,17 +655,17 @@ class SolidWorksDriver:
             self._view_hwnd = int(view.GetViewHWnd)  # over-this-view gate); None if unavailable
         except Exception:
             self._view_hwnd = None
-        self._ext, self._selmgr = self._get_pick_handles(model)   # for the 'view' pivot raycast
+        self._ext, self._selmgr = self._get_pick_handles(model)   # screen-center raycast handles
         self._view_ts = now
         return model, view
 
     @staticmethod
     def _get_pick_handles(model):
-        """Fetch + method-flag IModelDocExtension and ISelectionMgr for the 'view' pivot raycast
+        """Fetch + method-flag IModelDocExtension and ISelectionMgr for the screen-center raycast
         (SelectByRay / GetSelectionPoint2). Both need _FlagAsMethod under late-bound dispatch; note
         the count method is GetSelectedObjectCount2 -- 'GetSelectionCount' is NOT a resolvable name
         on this dispatch (verified live). Returns (ext, selmgr), or (None, None) if unavailable
-        (then the raycast is skipped and the 'view' pivot falls back to the object-centre depth)."""
+        (then Screen Center is unavailable and the configured fallback chain continues)."""
         try:
             ext = model.Extension
             selmgr = model.SelectionManager
@@ -602,6 +676,41 @@ class SolidWorksDriver:
         except Exception:
             return None, None
 
+    def _apply_level_horizon(self, view):
+        """Remove existing roll on turntable entry: rotate the view about the camera
+        forward axis (Orientation3 column 2) until camera-right is horizontal (perpendicular to
+        WORLD_UP), then pan so the screen-centre point keeps its exact screen position -- the same
+        RotateAboutAxis + dT compensation the orbit path uses. Scale2 (zoom) and the view depth
+        are untouched. Skipped in the degenerate straight-up/straight-down view, where roll is
+        indistinguishable from yaw (same singularity as turntable itself)."""
+        ad = view.Orientation3.ArrayData
+        c0 = (ad[0], ad[3], ad[6])                  # camera right (model space)
+        c1 = (ad[1], ad[4], ad[7])                  # camera up
+        c2 = (ad[2], ad[5], ad[8])                  # camera forward (out of screen)
+        command = _level_horizon_command(c0, c2)
+        if command is None:
+            return
+        phi = -command                              # geometric c0 -> leveled-right rotation
+        # RotateAboutAxis(angle) leaves the new columns at _rodrigues(axis, -angle, col) (see
+        # _apply_orbit), so commanding -phi lands c0 exactly on lr.
+        view.RotateAboutAxis(command, 0.0, 0.0, 0.0, c2[0], c2[1], c2[2])
+        self._info_rl("level", "solidworks: horizon leveled on turntable entry (roll %.4f rad)" % phi)
+        if self._mathUtil is None or self._trans is None or not self._scale:
+            return
+        # Hold the screen-centre point p = a*c0 + b*c1 (its c2 depth component is invariant under
+        # a roll about c2, so any depth gives the same dT).
+        s, t = self._scale, self._trans
+        a = -t[0] / s
+        b = -t[1] / s
+        p = (a * c0[0] + b * c1[0], a * c0[1] + b * c1[1], a * c0[2] + b * c1[2])
+        n0 = _rodrigues(c2, phi, c0)                # predicted post-rotation columns (== lr)
+        n1 = _rodrigues(c2, phi, c1)
+        dtx = s * ((c0[0] - n0[0]) * p[0] + (c0[1] - n0[1]) * p[1] + (c0[2] - n0[2]) * p[2])
+        dty = s * ((c1[0] - n1[0]) * p[0] + (c1[1] - n1[1]) * p[1] + (c1[2] - n1[2]) * p[2])
+        new_t = (t[0] + dtx, t[1] + dty, t[2])
+        view.Translation3 = self._mkvec(*new_t)
+        self._trans = list(new_t)
+
     def _apply_orbit(self, view, ox, oy, oz, scheme, model, idle):
         """Orbit by ONE RotateAboutAxis. SolidWorks ignores its point arg and pivots about the model
         ORIGIN, leaving Translation3/Scale2 untouched (verified live), so to rotate about anything
@@ -610,14 +719,14 @@ class SolidWorksDriver:
         Pivot modes:
           origin          -> rotate ONLY (no pan): the original behaviour -- the model spins about the
                              world origin with ZERO view translation.
-          object / selection -> hold the model bounding-box CENTRE (a fixed point, so it's exact
-                             every frame; no per-entity selection pivot over COM yet).
-          view            -> hold the SCREEN-CENTRE point. Captured once and HELD through the gesture
+          object          -> hold the model bounding-box centre.
+          selection       -> hold the selected entities' aggregate centre when available.
+          screen_center   -> hold the first surface hit under the viewport center through the gesture
                              (recomputed only after the view is idle >= _pivot_hold_sec, or when a pan/
                              zoom invalidates it -- see _flush), so it never chases a moving target.
           cursor          -> hold the surface point under the MOUSE CURSOR (_cursor_pivot: the same
                              SelectByRay raycast aimed through the cursor pixel), same capture+hold
-                             as 'view'; a miss / unmappable cursor falls back to the object centre
+                             as 'screen_center'; a miss continues through the fallback chain
                              for the rest of the gesture.
 
         The pan that holds the pivot is dT = Scale2*((col_before - col_after).pivot) with the
@@ -653,21 +762,30 @@ class SolidWorksDriver:
             return
 
         op = scheme["op"]
-        if op == "origin":
-            pivot = None                            # rotate only, no pan
-        elif op == "view":
-            if self._orbit_pivot is None or idle >= self._pivot_hold_sec:
-                self._orbit_pivot = self._view_pivot(c0, c1, c2, model)   # capture + hold
-            pivot = self._orbit_pivot
-        elif op == "cursor":
-            # the surface point under the MOUSE CURSOR, captured once + held like 'view';
-            # unmappable cursor / ray miss -> the object centre for the rest of the gesture
-            if self._orbit_pivot is None or idle >= self._pivot_hold_sec:
-                self._orbit_pivot = (self._cursor_pivot(view, c0, c1, c2, model)
-                                     or self._object_center(model))
-            pivot = self._orbit_pivot
-        else:                          # object / selection -> bounding-box centre (fixed point)
-            pivot = self._object_center(model)
+        if not self._orbit_pivot_resolved or idle >= self._pivot_hold_sec:
+            self._orbit_pivot_resolved = True
+            self._orbit_pivot_found = False
+            self._orbit_pivot = None
+            selected = (self._selection_center(self._selmgr)
+                        if scheme.get("sel_override", True) and op != "camera" else None)
+            if selected is not None:
+                self._orbit_pivot = selected
+                self._orbit_pivot_found = True
+            else:
+                fallbacks = scheme.get("fallbacks")
+                methods = (orbit_pivot_candidates(op, fallbacks) if fallbacks is not None
+                           else orbit_pivot_candidates(op, ["object", "origin"]))
+                for method in methods:
+                    found, candidate = self._resolve_orbit_pivot_method(
+                        method, view, c0, c1, c2, model)
+                    if found:
+                        self._orbit_pivot = candidate
+                        self._orbit_pivot_found = True
+                        break
+        pivot = self._orbit_pivot
+
+        if not self._orbit_pivot_found:
+            return
 
         view.RotateAboutAxis(angle, 0.0, 0.0, 0.0, ax, ay, az)   # pivots about origin
 
@@ -684,24 +802,40 @@ class SolidWorksDriver:
         view.Translation3 = self._mkvec(*new_t)
         self._trans = list(new_t)                   # keep the tracked Translation3 in sync
 
-    def _view_pivot(self, c0, c1, c2, model):
-        """The model point currently at the screen centre -- the pivot held by a 'view' orbit gesture.
+    def _resolve_orbit_pivot_method(self, method, view, c0, c1, c2, model):
+        """Return (resolved, point). Origin deliberately resolves to ``point=None``."""
+        if method == "origin":
+            return True, None
+        if method == "screen_center":
+            point = self._screen_center_pivot(c0, c1, c2, model)
+        elif method == "cursor":
+            point = self._cursor_pivot(view, c0, c1, c2, model)
+        elif method == "selection":
+            point = self._selection_center(self._selmgr)
+        elif method == "object":
+            point = self._object_center(model)
+        else:                                      # camera / cursor_3d unsupported here
+            return False, None
+        return point is not None, point
+
+    def _screen_center_pivot(self, c0, c1, c2, model):
+        """The first model surface under the viewport center for a `screen_center` gesture.
         Its in-plane position is the screen centre; its DEPTH along the optical axis is the TRUE surface
         depth under the crosshair from a screen-centre raycast (SelectByRay), matching SolidWorks' own
-        middle-drag orbit. Falls back to the object-centre depth when the ray misses or raycasting is
-        off/unavailable (the old behaviour). None if the view scale/translation aren't known yet."""
+        middle-drag orbit. Returns None on a miss/unavailable raycast so the configured global chain
+        decides what comes next."""
         if not self._scale or self._trans is None:
             return None
         box = self._object_box(model)
         center = self._box_center(box)
+        if not SCREEN_CENTER_PIVOT_RAYCAST or box is None or center is None:
+            return None
         a = -self._trans[0] / self._scale           # in-plane screen-centre offset (Scale2*(col.P)+T=0)
         b = -self._trans[1] / self._scale
         obj_depth = (c2[0] * center[0] + c2[1] * center[1] + c2[2] * center[2]) if center else 0.0
-        depth = obj_depth
-        if VIEW_PIVOT_RAYCAST and box is not None:
-            rd = self._raycast_depth(model, c0, c1, c2, a, b, obj_depth, box)
-            if rd is not None:                      # true surface depth under the crosshair
-                depth = rd
+        depth = self._raycast_depth(model, c0, c1, c2, a, b, obj_depth, box)
+        if depth is None:
+            return None
         return (a * c0[0] + b * c1[0] + depth * c2[0],
                 a * c0[1] + b * c1[1] + depth * c2[1],
                 a * c0[2] + b * c1[2] + depth * c2[2])
@@ -713,7 +847,7 @@ class SolidWorksDriver:
         hit is validated against the bounding box (+margin) to reject bogus values; among the hits at a
         radius we take the one nearest the viewer (largest c2.hit). SelectByRay mutates the selection
         set, so we SAVE/clear/RESTORE the user's selection around it. Fully guarded -- any failure
-        returns None and the 'view' pivot keeps the object-centre depth. Runs once per orbit gesture."""
+        returns None and the global resolver continues with its next method. Runs once per gesture."""
         ext, selmgr = self._ext, self._selmgr
         if ext is None or selmgr is None:
             return None
@@ -796,7 +930,7 @@ class SolidWorksDriver:
         ScreenToClient return PHYSICAL pixels (matching IModelView.Transform). Thread-local
         (SetThreadDpiAwarenessContext, Win10 1607+), so it never affects the daemon's Tk UI thread.
         Best-effort: if unavailable the cursor pivot still works when the process is already DPI
-        aware, else it maps in logical px and the 'view'/'object' pivots are unaffected."""
+        aware, else it maps in logical px and the `screen_center`/`object` pivots are unaffected."""
         try:
             import ctypes
             # DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 == (HANDLE)-4
@@ -837,7 +971,7 @@ class SolidWorksDriver:
 
     def _cursor_screen_ab(self, view, c0, c1):
         """The mouse cursor as the in-plane model-space offsets (a, b) along camera right/up --
-        the coordinates _view_pivot/_raycast_depth already speak -- or None when the cursor can't
+        the coordinates _screen_center_pivot/_raycast_depth already speak -- or None when the cursor can't
         be mapped. Inverts IModelView.Transform from the cursor's CLIENT px (see the design note):
         a point on the cursor ray satisfies row_i . P = (client_px_i - t_i)/s, and row0/row1 align
         with +/-c0 and +/-c1 (the sign is resolved per capture, so no baked-in y-flip constant).
@@ -866,14 +1000,14 @@ class SolidWorksDriver:
         return (a, b)
 
     def _cursor_pivot(self, view, c0, c1, c2, model):
-        """The model point under the MOUSE CURSOR: the same SelectByRay raycast as the 'view'
-        pivot, aimed through the cursor's (a, b) instead of the screen centre's. Returns a model
-        point, or None (unmappable cursor / no box / ray miss) -> the caller falls back to the
-        object centre. Runs once per orbit gesture (then the pivot is held)."""
+        """The model point under the MOUSE CURSOR: the same SelectByRay raycast as `screen_center`,
+        aimed through the cursor's (a, b) instead of the viewport center. Returns a model
+        point, or None (unmappable cursor / no box / ray miss), allowing the configured chain to
+        continue. Runs once per orbit gesture (then the resolved pivot is held)."""
         ab = self._cursor_screen_ab(view, c0, c1)
         if ab is None:
             self._info_rl("cursor-pivot", "solidworks: cursor not over the viewport "
-                                          "(or unmapped) -> object-centre fallback")
+                                          "(or unmapped) -> fallback chain")
             return None
         a, b = ab
         box = self._object_box(model)
@@ -883,13 +1017,24 @@ class SolidWorksDriver:
         obj_depth = (c2[0] * center[0] + c2[1] * center[1] + c2[2] * center[2]) if center else 0.0
         depth = self._raycast_depth(model, c0, c1, c2, a, b, obj_depth, box)
         if depth is None:
-            self._info_rl("cursor-pivot", "solidworks: nothing under the cursor -> "
-                                          "object-centre fallback")
+            self._info_rl("cursor-pivot", "solidworks: nothing under the cursor -> fallback chain")
             return None
         self._info_rl("cursor-pivot", "solidworks: cursor pivot held at (%.4f, %.4f, %.4f)"
                       % (a * c0[0] + b * c1[0] + depth * c2[0],
                          a * c0[1] + b * c1[1] + depth * c2[1],
                          a * c0[2] + b * c1[2] + depth * c2[2]))
+        return (a * c0[0] + b * c1[0] + depth * c2[0],
+                a * c0[1] + b * c1[1] + depth * c2[1],
+                a * c0[2] + b * c1[2] + depth * c2[2])
+
+    def _cursor_depth_point(self, view, c0, c1, c2, model):
+        """Empty-space To Cursor target at the model-center depth on the cursor ray."""
+        ab = self._cursor_screen_ab(view, c0, c1)
+        center = self._object_center(model)
+        if ab is None or center is None:
+            return None
+        a, b = ab
+        depth = c2[0] * center[0] + c2[1] * center[1] + c2[2] * center[2]
         return (a * c0[0] + b * c1[0] + depth * c2[0],
                 a * c0[1] + b * c1[1] + depth * c2[1],
                 a * c0[2] + b * c1[2] + depth * c2[2])
@@ -938,15 +1083,19 @@ class SolidWorksDriver:
         zm = scheme["zm"]
         center = None
         can_hold = self._mathUtil is not None and self._trans is not None and self._scale
-        if zm == "to_object":
-            center = self._object_center(model)
-        elif zm == "to_cursor" and can_hold:
-            if self._zoom_pivot is None or idle >= self._pivot_hold_sec:
-                ad = view.Orientation3.ArrayData
-                self._zoom_pivot = self._cursor_pivot(
-                    view, (ad[0], ad[3], ad[6]), (ad[1], ad[4], ad[7]),
-                    (ad[2], ad[5], ad[8]), model)
-            center = self._zoom_pivot               # None (miss) -> plain to_center zoom
+        if zm == "to_cursor" and scheme.get("sel_override", True):
+            center = self._selection_center(self._selmgr)
+        if center is None:
+            if zm == "to_object":
+                center = self._object_center(model)
+            elif zm == "to_cursor" and can_hold:
+                if self._zoom_pivot is None or idle >= self._zoom_hold_sec:
+                    ad = view.Orientation3.ArrayData
+                    c0 = (ad[0], ad[3], ad[6]); c1 = (ad[1], ad[4], ad[7])
+                    c2 = (ad[2], ad[5], ad[8])
+                    self._zoom_pivot = (self._cursor_pivot(view, c0, c1, c2, model) or
+                                        self._cursor_depth_point(view, c0, c1, c2, model))
+                center = self._zoom_pivot           # None (miss) -> plain to_center zoom
         if center is not None and can_hold:
             ad = view.Orientation3.ArrayData
             c0 = (ad[0], ad[3], ad[6]); c1 = (ad[1], ad[4], ad[7])
@@ -964,6 +1113,41 @@ class SolidWorksDriver:
             self._view_ts = 0.0                      # -> resync tracked state on the next flush
 
     # --- selection save/restore around the raycast (so we don't disturb the user's work) --
+    def _selection_center(self, selmgr):
+        """Mean of the current selection points in model space, or None.
+
+        SolidWorks' late-bound COM surface does not expose one uniform bounding-box API across
+        faces, edges, features, bodies, and components. ``GetSelectionPoint2`` is available for all
+        of them and is already the live-verified point source used by the raycast path, so averaging
+        those points gives a stable selection pivot without mutating the user's selection.
+        """
+        if selmgr is None:
+            return None
+        now = time.monotonic()
+        cached_mgr, cached_at, cached_center = self._selection_cache
+        if selmgr is cached_mgr and now - cached_at < _SELECTION_CACHE_TTL:
+            return cached_center
+        try:
+            n = int(selmgr.GetSelectedObjectCount2(-1))
+        except Exception:
+            self._selection_cache = (selmgr, now, None)
+            return None
+        points = []
+        for i in range(1, n + 1):
+            try:
+                p = selmgr.GetSelectionPoint2(i, -1)
+                if p is not None and len(p) >= 3:
+                    points.append((float(p[0]), float(p[1]), float(p[2])))
+            except Exception:
+                pass
+        if not points:
+            self._selection_cache = (selmgr, now, None)
+            return None
+        count = float(len(points))
+        center = tuple(sum(p[axis] for p in points) / count for axis in range(3))
+        self._selection_cache = (selmgr, now, center)
+        return center
+
     @staticmethod
     def _save_selection(selmgr):
         """Snapshot the current selection (entity dispatches) so the raycast can restore it. Returns

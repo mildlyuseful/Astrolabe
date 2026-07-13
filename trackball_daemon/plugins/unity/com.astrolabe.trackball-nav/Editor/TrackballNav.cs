@@ -15,9 +15,9 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.6";
+        const string AddinVersion = "0.1.15";  // keep in sync with package and version metadata
         const int DefaultPort = 47900;
-        const float PivotHoldIdle = 0.35f;
+        const float PivotHoldIdle = 0.5f;
         const float ObjCacheSec = 0.5f;
         const float SceneExtentCacheSec = 1.5f;
         const float BboxMargin = 0.10f;
@@ -39,6 +39,9 @@ namespace Astrolabe.TrackballNav
         static Vector3? _objCenter;
         static Bounds? _objBbox;
         static string _lastScheme;
+        // Fixed-horizon transition tracker: null until the first frame, so startup in a fixed mode
+        // does not level the view; only a real free->fixed switch does.
+        static bool? _horizonFixed;
         static Vector2 _sceneMouseGui;   // last Scene GUI mouse (top-left origin)
         static bool _hasSceneMouse;
         static Ray _cursorRay;           // world ray under the mouse (from GUIPointToWorldRay)
@@ -52,6 +55,15 @@ namespace Astrolabe.TrackballNav
         static float _pivotExtentMult = DefaultPivotExtentMult;
         static double _sceneExtentT;
         static float _sceneExtentR = 10f;
+        static Bounds? _sceneBounds;
+        static bool _sceneExtentValid;
+
+        struct ProjectionZoom
+        {
+            public bool Active;
+            public bool Orthographic;
+            public float Value;
+        }
 
         static TrackballNav()
         {
@@ -291,7 +303,7 @@ namespace Astrolabe.TrackballNav
         static void RefreshSceneExtentIfNeeded()
         {
             double now = EditorApplication.timeSinceStartup;
-            if (now - _sceneExtentT < SceneExtentCacheSec) return;
+            if (_sceneExtentValid && now - _sceneExtentT < SceneExtentCacheSec) return;
             _sceneExtentT = now;
             Bounds? agg = null;
             try
@@ -315,6 +327,8 @@ namespace Astrolabe.TrackballNav
                 }
             }
             catch { /* ignore */ }
+            _sceneBounds = agg;
+            _sceneExtentValid = true;
             if (agg.HasValue)
                 _sceneExtentR = Mathf.Max(agg.Value.extents.magnitude, 0.1f);
             else
@@ -331,6 +345,12 @@ namespace Astrolabe.TrackballNav
         {
             RefreshSceneExtentIfNeeded();
             return MaxPivotDistanceCached();
+        }
+
+        static Vector3? SceneCenter()
+        {
+            RefreshSceneExtentIfNeeded();
+            return _sceneBounds.HasValue ? _sceneBounds.Value.center : (Vector3?)null;
         }
 
         static bool TryRendererHit(GameObject go, Ray ray, out Vector3 point)
@@ -460,27 +480,31 @@ namespace Astrolabe.TrackballNav
             var o = MiniJson.Vec3(frame, "o");
             var p = MiniJson.Vec2(frame, "p");
             float z = MiniJson.Float(frame, "z");
-            string op = MiniJson.Str(frame, "op", "view");
+            string op = MiniJson.Str(frame, "op", "screen_center");
             string style = MiniJson.Str(frame, "os", "free");
             string zm = MiniJson.Str(frame, "zm", "to_center");
             var adv = MiniJson.Obj(frame, "adv") ?? new System.Collections.Generic.Dictionary<string, object>();
             string navMode = MiniJson.Str(adv, "nav_mode", "orbit");
             bool lockHorizon = MiniJson.Bool(adv, "lock_horizon");
             string twistAction = MiniJson.Str(adv, "twist_action", "roll");
+            string zoomStyle = MiniJson.Str(adv, "zoom_style", "dolly");
             bool panScales = MiniJson.Bool(adv, "pan_scales_with_distance", true);
             bool selOverride = MiniJson.Bool(adv, "selection_overrides_pivot", true);
+            var pivotCandidates = MiniJson.StringList(adv, "orbit_pivot_candidates", op);
             float flySpeed = MiniJson.Float(adv, "fly_speed", 1f);
             float walkSpeed = MiniJson.Float(adv, "walk_speed", 1f);
-            var invert = MiniJson.Obj(adv, "invert") ?? new System.Collections.Generic.Dictionary<string, object>();
+            float orbitHold = Mathf.Clamp(MiniJson.Float(adv, "orbit_hold_sec", PivotHoldIdle), 0f, 10f);
+            float zoomHold = Mathf.Clamp(MiniJson.Float(adv, "zoom_hold_sec", PivotHoldIdle), 0f, 10f);
 
-            var sig = $"{navMode}|{op}|{style}|{zm}|{twistAction}|{lockHorizon}|{selOverride}|{MiniJson.Bool(adv, "override_dynamic_clip", true)}";
+            var sig = $"{navMode}|{op}|{style}|{zm}|{twistAction}|{zoomStyle}|{lockHorizon}|{selOverride}|{MiniJson.Bool(adv, "override_dynamic_clip", true)}";
             if (sig != _lastScheme)
             {
                 _lastScheme = sig;
-                Log($"scheme: nav={navMode} pivot={op} style={style} zoom={zm} twist={twistAction} horizon={lockHorizon} sel_override={selOverride} override_dyn_clip={MiniJson.Bool(adv, "override_dynamic_clip", true)}");
+                Log($"scheme: nav={navMode} pivot={op} style={style} zoom={zm} twist={twistAction} pan_zoom={zoomStyle} horizon={lockHorizon} sel_override={selOverride} override_dyn_clip={MiniJson.Bool(adv, "override_dynamic_clip", true)}");
             }
 
-            ApplyInverts(navMode, op, ref o, ref p, ref z, invert);
+            ApplyActionRouting(navMode, op, ref o, ref p, ref z, adv);
+            ApplyHostBaseline(navMode, twistAction, ref o, ref p, ref z, adv);
 
             // SceneView.size is a fit-sphere radius, NOT eye→pivot distance.
             // Real distance is sv.cameraDistance (= size/sin(fov/2) in perspective).
@@ -494,17 +518,36 @@ namespace Astrolabe.TrackballNav
             var cam = TrackballNavCamera.FromSceneView(sv.pivot, sv.rotation, eyeDist);
             _focusDist = eyeDist;
 
+            // Level ONCE when the effective mode transitions into a fixed-horizon mode (turntable
+            // orbit, lock-horizon, or walk) and the daemon's toggle is on. Transitions
+            // only: ordinary fixed-mode frames never re-level.
+            bool fixedHorizon = navMode == "walk" ||
+                (navMode == "orbit" && (style == "turntable" || lockHorizon));
+            bool leveled = false;
+            if (fixedHorizon && _horizonFixed == false &&
+                MiniJson.Bool(adv, "level_horizon_on_entry", true))
+            {
+                leveled = TrackballNavCamera.LevelHorizon(ref cam);
+                if (leveled) Log($"horizon: leveled on fixed-horizon mode entry (nav={navMode} style={style})");
+            }
+            _horizonFixed = fixedHorizon;
+
             bool changed;
+            var projectionZoom = new ProjectionZoom();
             if (navMode == "fly")
                 changed = ApplyFly(ref cam, o, p, z, flySpeed);
             else if (navMode == "walk")
                 changed = ApplyWalk(ref cam, o, p, z, walkSpeed);
             else
-                changed = ApplyOrbit(ref cam, o, p, z, op, style, zm, twistAction, lockHorizon, panScales, idle, selOverride, sv);
+                changed = ApplyOrbit(ref cam, o, p, z, op, style, zm, twistAction, zoomStyle,
+                    lockHorizon, panScales, idle, orbitHold, zoomHold, selOverride, pivotCandidates, sv,
+                    ref projectionZoom);
 
-            if (!changed) return;
+            if (!changed && !leveled) return;
             TrackballNavCamera.ToSceneView(cam, _focusDist, out var pivot, out var rot, out _);
             WriteSceneView(sv, pivot, rot, _focusDist);
+            if (projectionZoom.Active)
+                ApplyProjectionZoom(sv, projectionZoom, _focusDist);
             sv.Repaint();
         }
 
@@ -599,8 +642,10 @@ namespace Astrolabe.TrackballNav
         }
 
         static bool ApplyOrbit(ref TrackballNavCamera.Cam cam, Vector3 o, Vector2 p, float z,
-            string op, string style, string zm, string twistAction, bool lockHorizon,
-            bool panScales, float idle, bool selOverride, SceneView sv)
+            string op, string style, string zm, string twistAction, string zoomStyle,
+            bool lockHorizon, bool panScales, float idle, float orbitHold, float zoomHold, bool selOverride,
+            System.Collections.Generic.List<string> pivotCandidates, SceneView sv,
+            ref ProjectionZoom projectionZoom)
         {
             if (Mathf.Abs(o.x) > 1e-12f || Mathf.Abs(o.y) > 1e-12f || Mathf.Abs(o.z) > 1e-12f)
             {
@@ -610,16 +655,23 @@ namespace Astrolabe.TrackballNav
                 if (Mathf.Abs(twist) > 1e-12f)
                 {
                     if (twistAction == "roll" && !lockHorizon) orbitO.z = twist;
-                    else if (twistAction == "zoom" || twistAction == "dolly")
+                    else if (twistAction == "zoom")
+                    {
+                        projectionZoom = PrepareProjectionZoom(sv, ref cam, twist, null);
+                        if (orbitO.sqrMagnitude <= 1e-24f) { _gestureInvalid = true; _gesturePivot = null; }
+                        did = projectionZoom.Active;
+                    }
+                    else if (twistAction == "dolly")
                     {
                         ApplyDolly(ref cam, twist, null);
-                        _gestureInvalid = true;
+                        if (orbitO.sqrMagnitude <= 1e-24f) { _gestureInvalid = true; _gesturePivot = null; }
                         did = true;
                     }
                 }
                 if (Mathf.Abs(orbitO.x) > 1e-12f || Mathf.Abs(orbitO.y) > 1e-12f || Mathf.Abs(orbitO.z) > 1e-12f)
                 {
-                    var pivot = OrbitPivot(op, cam, idle, selOverride, sv);
+                    var pivot = OrbitPivot(op, cam, idle, orbitHold, selOverride, pivotCandidates, sv);
+                    if (!pivot.HasValue) return did;
                     if (pivot.HasValue)
                     {
                         float d = (cam.Location - pivot.Value).magnitude;
@@ -642,14 +694,19 @@ namespace Astrolabe.TrackballNav
             if (Mathf.Abs(p.x) > 1e-12f || Mathf.Abs(p.y) > 1e-12f)
             {
                 _gestureInvalid = true;
-                _zoomGesturePivot = null;
+                _gesturePivot = null;
                 TrackballNavCamera.Pan(ref cam, p.x, p.y, panScales ? _focusDist : TrackballNavCamera.DistDefault);
                 return true;
             }
             if (Mathf.Abs(z) > 1e-12f)
             {
                 _gestureInvalid = true;
-                ApplyDolly(ref cam, z, ZoomToward(zm, idle, selOverride, sv));
+                _gesturePivot = null;
+                var toward = ZoomToward(zm, idle, zoomHold, selOverride, sv);
+                if (zoomStyle == "zoom")
+                    projectionZoom = PrepareProjectionZoom(sv, ref cam, z, toward);
+                else
+                    ApplyDolly(ref cam, z, toward);
                 return true;
             }
             return false;
@@ -667,6 +724,53 @@ namespace Astrolabe.TrackballNav
             // Prefer distance along view forward (eye→pivot); fall back to Euclidean if sideways.
             float dist = along > 1e-4f ? along : toLook.magnitude;
             _focusDist = TrackballNavCamera.ClampDist(dist);
+        }
+
+        static ProjectionZoom PrepareProjectionZoom(SceneView sv, ref TrackballNavCamera.Cam cam,
+            float z, Vector3? toward)
+        {
+            float factor = Mathf.Clamp(1f - TrackballNavCamera.ZoomSign * z * TrackballNavCamera.ZoomScale,
+                                       0.05f, 20f);
+            float ratio = factor;
+            var result = new ProjectionZoom { Active = true, Orthographic = sv.orthographic };
+            if (sv.orthographic)
+                result.Value = Mathf.Clamp(sv.size * factor, TrackballNavCamera.DistMin * 0.01f, MaxSceneSize);
+            else
+            {
+                float oldFov = 60f;
+                try { oldFov = sv.cameraSettings.fieldOfView; } catch { /* use default */ }
+                float oldTan = Mathf.Tan(Mathf.Clamp(oldFov, 5f, 170f) * 0.5f * Mathf.Deg2Rad);
+                float newTan = Mathf.Clamp(oldTan * factor,
+                    Mathf.Tan(2.5f * Mathf.Deg2Rad), Mathf.Tan(85f * Mathf.Deg2Rad));
+                result.Value = 2f * Mathf.Atan(newTan) * Mathf.Rad2Deg;
+                ratio = newTan / oldTan;
+            }
+            if (toward.HasValue)
+            {
+                var offset = toward.Value - cam.Location;
+                var planar = cam.Right * Vector3.Dot(offset, cam.Right) +
+                             cam.Up * Vector3.Dot(offset, cam.Up);
+                cam.Location += planar * (1f - ratio);
+            }
+            return result;
+        }
+
+        static void ApplyProjectionZoom(SceneView sv, ProjectionZoom zoom, float eyeDist)
+        {
+            if (zoom.Orthographic)
+            {
+                sv.size = zoom.Value;
+                return;
+            }
+            try
+            {
+                var settings = sv.cameraSettings;
+                settings.fieldOfView = zoom.Value;
+                sv.cameraSettings = settings;
+                sv.size = Mathf.Clamp(eyeDist * Mathf.Sin(zoom.Value * 0.5f * Mathf.Deg2Rad),
+                    TrackballNavCamera.DistMin * 0.01f, MaxSceneSize);
+            }
+            catch (Exception e) { Log($"projection zoom failed: {e.Message}"); }
         }
 
         static bool ApplyFly(ref TrackballNavCamera.Cam cam, Vector3 o, Vector2 p, float z, float speed)
@@ -703,53 +807,52 @@ namespace Astrolabe.TrackballNav
             return false;
         }
 
-        static Vector3? OrbitPivot(string op, TrackballNavCamera.Cam cam, float idle, bool selOverride, SceneView sv)
+        static Vector3? OrbitPivot(string op, TrackballNavCamera.Cam cam, float idle, float holdSec,
+            bool selOverride, System.Collections.Generic.List<string> candidates, SceneView sv)
         {
-            if (op == "viewpoint") return null;
             SelectionCenter(out var center, out var bbox);
-            if (op == "object" || op == "selection")
-                return center ?? ForwardPoint(cam);
-            if (selOverride && center.HasValue) return center;
-            if (op == "origin") return Vector3.zero;
-            if (op == "view")
-            {
-                if (!_gesturePivot.HasValue || _gestureInvalid || idle > PivotHoldIdle)
-                {
-                    _gesturePivot = ScreenCenterPivot(cam, selOverride ? bbox : null) ?? ForwardPoint(cam);
-                    _gestureInvalid = false;
-                }
+            if (selOverride && op != "camera" && center.HasValue) return center;
+            if (_gesturePivot.HasValue && !_gestureInvalid && idle <= holdSec)
                 return _gesturePivot;
-            }
-            if (op == "cursor")
+            foreach (var method in candidates)
             {
-                if (!_gesturePivot.HasValue || _gestureInvalid || idle > PivotHoldIdle)
+                Vector3? point = null;
+                if (method == "camera") point = cam.Location;
+                else if (method == "origin") point = Vector3.zero;
+                else if (method == "object") point = SceneCenter();
+                else if (method == "selection") point = center;
+                else if (method == "screen_center")
+                    point = ScreenCenterPivot(cam, selOverride ? bbox : null);
+                else if (method == "cursor")
                 {
                     EnsureCursorHit(sv);
-                    var hit = CursorPivot(selOverride ? bbox : null);
-                    if (!hit.HasValue)
-                        LogCursorMiss("orbit");
-                    _gesturePivot = hit ?? ForwardPoint(cam);
-                    _gestureInvalid = false;
+                    point = CursorPivot(selOverride ? bbox : null);
+                    if (!point.HasValue) LogCursorMiss("orbit");
                 }
-                return _gesturePivot;
+                if (point.HasValue)
+                {
+                    _gesturePivot = point;
+                    _gestureInvalid = false;
+                    return point;
+                }
             }
-            return ForwardPoint(cam);
+            return null;
         }
 
-        static Vector3? ZoomToward(string zm, float idle, bool selOverride, SceneView sv)
+        static Vector3? ZoomToward(string zm, float idle, float holdSec, bool selOverride, SceneView sv)
         {
             SelectionCenter(out var center, out var bbox);
-            if (zm == "to_object") return center;
+            if (zm == "to_object") return SceneCenter();
             if (zm == "to_cursor")
             {
                 if (selOverride && center.HasValue) return center;
-                if (!_zoomGesturePivot.HasValue || idle > PivotHoldIdle)
+                if (!_zoomGesturePivot.HasValue || idle > holdSec)
                 {
                     EnsureCursorHit(sv);
                     var hit = CursorPivot(selOverride ? bbox : null);
                     if (!hit.HasValue)
                         LogCursorMiss("zoom");
-                    _zoomGesturePivot = hit;
+                    _zoomGesturePivot = hit ?? CursorDepthPoint();
                 }
                 return _zoomGesturePivot;
             }
@@ -788,12 +891,19 @@ namespace Astrolabe.TrackballNav
             return _cursorHit;
         }
 
+        static Vector3? CursorDepthPoint()
+        {
+            if (!_hasCursorRay) return null;
+            var direction = _cursorRay.direction.normalized;
+            return _cursorRay.origin + direction * TrackballNavCamera.ClampDist(_focusDist);
+        }
+
         static void LogCursorMiss(string why)
         {
             double now = EditorApplication.timeSinceStartup;
             if (now - _lastCursorMissLog < 1.0) return;
             _lastCursorMissLog = now;
-            Log($"cursor-pivot: nothing under cursor ({_sceneMouseGui.x:F0},{_sceneMouseGui.y:F0}) → view/forward fallback ({why})");
+            Log($"cursor-pivot: nothing under cursor ({_sceneMouseGui.x:F0},{_sceneMouseGui.y:F0}) → fallback chain ({why})");
         }
 
         static bool InBbox(Vector3 p, Bounds b)
@@ -855,40 +965,84 @@ namespace Astrolabe.TrackballNav
 
         static float Sgn(bool flag) => flag ? -1f : 1f;
 
-        static void ApplyInverts(string navMode, string op, ref Vector3 o, ref Vector2 p, ref float z,
-            System.Collections.Generic.Dictionary<string, object> inv)
+        static float Routed(Vector3 values, System.Collections.Generic.Dictionary<string, object> sources,
+            System.Collections.Generic.Dictionary<string, object> inversions, string action, int defaultAxis)
         {
+            int source = (int)MiniJson.Float(sources, action, defaultAxis);
+            if (source < 0 || source > 2) source = defaultAxis;
+            return values[source] * Sgn(MiniJson.Bool(inversions, action));
+        }
+
+        static void ApplyActionRouting(string navMode, string op, ref Vector3 o, ref Vector2 p, ref float z,
+            System.Collections.Generic.Dictionary<string, object> adv)
+        {
+            var inv = MiniJson.Obj(adv, "invert") ?? new System.Collections.Generic.Dictionary<string, object>();
+            var axes = MiniJson.Obj(adv, "axis_source") ?? new System.Collections.Generic.Dictionary<string, object>();
+            Vector3 rotation = o;
+            Vector3 movement = new Vector3(p.x, p.y, z);
             if (navMode == "fly")
             {
                 var f = MiniJson.Obj(inv, "fly") ?? new System.Collections.Generic.Dictionary<string, object>();
-                o = new Vector3(o.x * Sgn(MiniJson.Bool(f, "pitch")), o.y * Sgn(MiniJson.Bool(f, "yaw")),
-                    o.z * Sgn(MiniJson.Bool(f, "bank")));
-                p = new Vector2(p.x * Sgn(MiniJson.Bool(f, "strafe")), p.y * Sgn(MiniJson.Bool(f, "forward")));
-                z *= Sgn(MiniJson.Bool(f, "vertical"));
+                var a = MiniJson.Obj(axes, "fly") ?? new System.Collections.Generic.Dictionary<string, object>();
+                o = new Vector3(Routed(rotation, a, f, "pitch", 0), Routed(rotation, a, f, "yaw", 1),
+                    Routed(rotation, a, f, "bank", 2));
+                p = new Vector2(Routed(movement, a, f, "strafe", 0),
+                    Routed(movement, a, f, "forward", 1));
+                z = Routed(movement, a, f, "vertical", 2);
             }
             else if (navMode == "walk")
             {
                 var w = MiniJson.Obj(inv, "walk") ?? new System.Collections.Generic.Dictionary<string, object>();
-                o = new Vector3(o.x * Sgn(MiniJson.Bool(w, "pitch")), o.y * Sgn(MiniJson.Bool(w, "yaw")), o.z);
-                p = new Vector2(p.x * Sgn(MiniJson.Bool(w, "strafe")), p.y * Sgn(MiniJson.Bool(w, "forward")));
-                z *= Sgn(MiniJson.Bool(w, "vertical"));
+                var a = MiniJson.Obj(axes, "walk") ?? new System.Collections.Generic.Dictionary<string, object>();
+                o = new Vector3(Routed(rotation, a, w, "pitch", 0), Routed(rotation, a, w, "yaw", 1), rotation.z);
+                p = new Vector2(Routed(movement, a, w, "strafe", 0),
+                    Routed(movement, a, w, "forward", 1));
+                z = Routed(movement, a, w, "vertical", 2);
             }
             else
             {
                 var ob = MiniJson.Obj(inv, "orbit") ?? new System.Collections.Generic.Dictionary<string, object>();
-                if (op == "viewpoint")
+                var oa = MiniJson.Obj(axes, "orbit") ?? new System.Collections.Generic.Dictionary<string, object>();
+                if (op == "camera")
                 {
-                    var vp = MiniJson.Obj(inv, "viewpoint") ?? new System.Collections.Generic.Dictionary<string, object>();
-                    o = new Vector3(o.x * Sgn(MiniJson.Bool(vp, "pitch")), o.y * Sgn(MiniJson.Bool(vp, "yaw")),
-                        o.z * Sgn(MiniJson.Bool(vp, "roll")));
+                    var vp = MiniJson.Obj(inv, "camera") ?? new System.Collections.Generic.Dictionary<string, object>();
+                    var va = MiniJson.Obj(axes, "camera") ?? new System.Collections.Generic.Dictionary<string, object>();
+                    o = new Vector3(Routed(rotation, va, vp, "pitch", 0),
+                        Routed(rotation, va, vp, "yaw", 1), Routed(rotation, va, vp, "roll", 2));
                 }
                 else
                 {
-                    o = new Vector3(o.x * Sgn(MiniJson.Bool(ob, "pitch")), o.y * Sgn(MiniJson.Bool(ob, "yaw")),
-                        o.z * Sgn(MiniJson.Bool(ob, "twist")));
+                    o = new Vector3(Routed(rotation, oa, ob, "pitch", 0),
+                        Routed(rotation, oa, ob, "yaw", 1), Routed(rotation, oa, ob, "twist", 2));
                 }
-                p = new Vector2(p.x * Sgn(MiniJson.Bool(ob, "pan_x")), p.y * Sgn(MiniJson.Bool(ob, "pan_y")));
-                z *= Sgn(MiniJson.Bool(ob, "zoom"));
+                p = new Vector2(Routed(movement, oa, ob, "pan_x", 0),
+                    Routed(movement, oa, ob, "pan_y", 1));
+                z = Routed(movement, oa, ob, "zoom", 2);
+            }
+        }
+
+        static void ApplyHostBaseline(string navMode, string twistAction, ref Vector3 o, ref Vector2 p,
+            ref float z, System.Collections.Generic.Dictionary<string, object> adv)
+        {
+            var baseline = MiniJson.Obj(adv, "host_baseline") ?? new System.Collections.Generic.Dictionary<string, object>();
+            Vector3 orbit = MiniJson.Vec3(baseline, "orbit");
+            Vector2 pan = MiniJson.Vec2(baseline, "pan");
+            float zoom = MiniJson.Float(baseline, "zoom", 1f);
+            float move = MiniJson.Float(baseline, "move", 1f);
+            if (orbit == Vector3.zero) orbit = Vector3.one;
+            if (pan == Vector2.zero) pan = Vector2.one;
+            if (navMode == "orbit")
+            {
+                float twistFactor = (twistAction == "zoom" || twistAction == "dolly") ? zoom : orbit.z;
+                o = new Vector3(o.x * orbit.x, o.y * orbit.y, o.z * twistFactor);
+                p = new Vector2(p.x * pan.x, p.y * pan.y);
+                z *= zoom;
+            }
+            else
+            {
+                o = Vector3.Scale(o, orbit);
+                p *= move;
+                z *= move;
             }
         }
 
@@ -941,6 +1095,18 @@ namespace Astrolabe.TrackballNav
             if (v is bool b) return b;
             if (v is string s) return s == "true" || s == "True" || s == "1";
             try { return Convert.ToBoolean(v); } catch { return def; }
+        }
+
+        public static System.Collections.Generic.List<string> StringList(
+            System.Collections.Generic.Dictionary<string, object> d, string key, string fallback)
+        {
+            var result = new System.Collections.Generic.List<string>();
+            if (d != null && d.TryGetValue(key, out var v) &&
+                v is System.Collections.Generic.List<object> values)
+                foreach (var item in values)
+                    if (item != null) result.Add(item.ToString());
+            if (result.Count == 0) result.Add(fallback);
+            return result;
         }
 
         public static Vector3 Vec3(System.Collections.Generic.Dictionary<string, object> d, string key)

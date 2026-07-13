@@ -4,7 +4,7 @@ the nav transports (broker / SolidWorks / Onshape / AutoCAD loader).
 Threading model (Windows):
   * main thread       -> hidden Tk root + mainloop (owns all GUI; window shown/hidden on demand)
   * tray thread       -> pystray icon loop (menu callbacks marshalled to Tk via root.after)
-  * ble thread        -> asyncio BLE loop (unchanged data path)
+  * ble thread        -> asyncio BLE loop and packet-boundary focus routing
   * broker threads    -> NavBroker accept + sender (streams frames to the socket add-ons)
   * SolidWorks worker -> its own CoInitialize'd COM thread (in-process driver)
   * AutoCAD worker    -> its own CoInitialize'd COM thread (plugin loader; delivery only)
@@ -19,7 +19,9 @@ import tkinter as tk
 from . import integrations
 from .autocad_driver import AutoCADPluginLoader
 from .ble import start_ble_thread
-from .config import Config, effective_scheme
+from .config import (Config, compose_advanced_with_host_baseline, effective_level_horizon,
+                     effective_scheme, host_baseline_payload,
+                     normalize_orbit_pivot_fallbacks, orbit_pivot_candidates)
 from .navbroker import NavBroker
 from .onshape_bridge import OnshapeBridge
 from .output import OutputEngine
@@ -29,6 +31,9 @@ from .tray import TrayController
 from .ui import SettingsWindow
 from .util import get_logger
 from .winfocus import foreground_process_name
+
+
+_NO_PACKET_APP = object()
 
 
 class App:
@@ -84,9 +89,10 @@ class App:
         self.connected_apps = []
         self._last_apps_pushed = None
         self._engine_app = None
+        self._packet_app_key = _NO_PACKET_APP
         self._last_scheme_pushed = None
 
-    # --- BLE wiring (unchanged data path) -----------------------------------------
+    # --- BLE wiring and packet-boundary routing -----------------------------------
     def get_ble_params(self):
         d = self.config.data["device"]
         return d["name"], d.get("address", ""), d["char_uuid"]
@@ -104,8 +110,23 @@ class App:
 
     def on_config_changed(self):
         self.engine.apply_config()
+        self._apply_service_gates()
         self._apply_rates()
         self._apply_schemes()
+
+    def _service_allowed(self, key):
+        """Sensitive in-process services require both successful setup and Enabled=true."""
+        cfg = self.config.data.get("apps", {}).get(key) or {}
+        return bool(cfg.get("installed") and cfg.get("enabled"))
+
+    def _apply_service_gates(self):
+        """Keep host attachment/listener side effects behind explicit per-app setup consent."""
+        if self.sw_driver is not None:
+            self.sw_driver.set_enabled(self._service_allowed("solidworks"))
+        if self.onshape_bridge is not None:
+            self.onshape_bridge.set_enabled(self._service_allowed("onshape"))
+        if self.acad_loader is not None:
+            self.acad_loader.set_enabled(self._service_allowed("autocad"))
 
     def _effective_scheme(self, key):
         g = self.config.data["general"].get("scheme", {})
@@ -120,6 +141,8 @@ class App:
     def _apply_schemes(self):
         """Push each CAD app's effective control scheme to its driver. Mirrors _apply_rates:
         the broker gets the focused socket app's scheme; the SW driver gets SolidWorks'."""
+        fallbacks = normalize_orbit_pivot_fallbacks(
+            self.config.data.get("general", {}).get("orbit_pivot_fallbacks"))
         if self.broker is not None:
             key = self._engine_app
             if not key or key in self._broker_excluded_keys():
@@ -134,25 +157,46 @@ class App:
             # selection_overrides_pivot lives on the app root (all apps) and is folded into adv so
             # every socket add-on can read one place — Fusion/etc. still ignore unknown keys.
             appcfg = self.config.data["apps"].get(key) or {}
-            adv = appcfg.get("advanced")
-            if adv is not None or "selection_overrides_pivot" in appcfg:
-                adv = dict(adv or {})
-                adv["selection_overrides_pivot"] = bool(
-                    appcfg.get("selection_overrides_pivot", True))
+            adv = compose_advanced_with_host_baseline(key, appcfg.get("advanced"))
+            adv["host_baseline"] = host_baseline_payload(key)
+            adv["selection_overrides_pivot"] = bool(
+                appcfg.get("selection_overrides_pivot", True))
+            adv["orbit_hold_sec"] = appcfg.get("orbit_pivot_hold_sec", 0.5)
+            adv["zoom_hold_sec"] = appcfg.get("zoom_cursor_hold_sec", 0.5)
+            adv["level_horizon_on_entry"] = effective_level_horizon(
+                self.config.data["general"], appcfg)
+            adv["orbit_pivot_fallbacks"] = fallbacks
+            adv["orbit_pivot_candidates"] = orbit_pivot_candidates(
+                scheme["orbit_pivot"], fallbacks)
             self.broker.set_scheme(**scheme, advanced=adv)
             nav = (adv or {}).get("nav_mode")
-            sig = (key, scheme["orbit_pivot"], scheme["orbit_style"], scheme["zoom_mode"], nav)
+            sig = (key, scheme["orbit_pivot"], scheme["orbit_style"], scheme["zoom_mode"], nav,
+                   tuple(fallbacks))
             if sig != self._last_scheme_pushed:
                 self._last_scheme_pushed = sig
                 self.log.info("scheme -> %s: pivot=%s style=%s zoom=%s nav=%s"
                               % (key, scheme["orbit_pivot"], scheme["orbit_style"],
                                  scheme["zoom_mode"], nav))
         if self.sw_driver is not None:
-            self.sw_driver.set_scheme(**self._effective_scheme("solidworks"))
             swcfg = self.config.data["apps"].get("solidworks") or {}
-            self.sw_driver.set_pivot_hold(swcfg.get("view_pivot_hold_sec", 0.5))
+            self.sw_driver.set_scheme(
+                **self._effective_scheme("solidworks"),
+                selection_overrides_pivot=bool(swcfg.get("selection_overrides_pivot", True)),
+                orbit_pivot_fallbacks=fallbacks,
+                level_horizon_on_entry=effective_level_horizon(
+                    self.config.data["general"], swcfg))
+            self.sw_driver.set_pivot_hold(swcfg.get("orbit_pivot_hold_sec", 0.5))
+            self.sw_driver.set_zoom_hold(swcfg.get("zoom_cursor_hold_sec", 0.5))
         if self.onshape_bridge is not None:
-            self.onshape_bridge.set_scheme(**self._effective_scheme("onshape"))
+            oncfg = self.config.data["apps"].get("onshape") or {}
+            self.onshape_bridge.set_scheme(
+                **self._effective_scheme("onshape"),
+                selection_overrides_pivot=bool(oncfg.get("selection_overrides_pivot", True)),
+                orbit_pivot_fallbacks=fallbacks,
+                level_horizon_on_entry=effective_level_horizon(
+                    self.config.data["general"], oncfg))
+            self.onshape_bridge.set_pivot_hold(oncfg.get("orbit_pivot_hold_sec", 0.5))
+            self.onshape_bridge.set_zoom_hold(oncfg.get("zoom_cursor_hold_sec", 0.5))
 
     def _app_rate(self, key):
         """Effective viewport/flush rate (Hz) for app `key`: its per-app override, or the global
@@ -220,16 +264,36 @@ class App:
             return None
         return key
 
-    def _nav_sink(self, ox, oy, oz, px, py, zoom):
-        # Called on the BLE thread. Stream only when a supported, enabled app is focused.
-        key = self._active_app_key()
-        if key is None:
-            return
+    def _activate_nav_app(self, key):
+        """Switch mappings/rate/scheme before transforming the focused app's next packet."""
         if key != self._engine_app:               # drive each app with its own bindings + rate
             self._engine_app = key
             self.engine.set_active_bindings(key)
             self._apply_rates()
             self._apply_schemes()
+
+    def _handle_ble_packet(self, data):
+        """Choose one focused app for both mapping and routing of this complete BLE packet."""
+        key = self._active_app_key()
+        if key is not None:
+            self._activate_nav_app(key)
+        previous = getattr(self, "_packet_app_key", _NO_PACKET_APP)
+        self._packet_app_key = key
+        try:
+            self.engine.handle_packet(bytes(data))
+        finally:
+            self._packet_app_key = previous
+
+    def _nav_sink(self, ox, oy, oz, px, py, zoom):
+        # Called synchronously by _handle_ble_packet after that method selected the app whose
+        # mapping produced these values. Direct callers (including tests/debug helpers) fall back
+        # to a fresh foreground lookup.
+        key = getattr(self, "_packet_app_key", _NO_PACKET_APP)
+        if key is _NO_PACKET_APP:
+            key = self._active_app_key()
+        if key is None:
+            return
+        self._activate_nav_app(key)
         if key == "onshape":                      # browser bridge (NL-Proxy emulation), not the broker
             self.onshape_bridge.submit(ox, oy, oz, px, py, zoom)
         elif key == "solidworks":                 # external COM automation, not the socket broker
@@ -283,9 +347,13 @@ class App:
         except OSError:
             pass
         self.broker.start()
-        self.sw_driver.start()                     # attaches to SolidWorks if/when it's running
-        self.onshape_bridge.start()                # serves the NL-Proxy endpoint for Onshape
-        self.acad_loader.start()                   # NETLOADs the AutoCAD plugin if/when it's running
+        # Workers may exist while disabled, but their gates prevent COM enumeration, certificate
+        # creation, socket binding, TRUSTEDPATHS edits, and NETLOAD until setup has succeeded and
+        # Enabled is checked. Config changes update these gates live.
+        self._apply_service_gates()
+        self.sw_driver.start()
+        self.onshape_bridge.start()
+        self.acad_loader.start()
 
         # One-click-free add-in refresh: re-copy any installed add-in the daemon now ships a
         # newer version of (e.g. this release's viewport-refresh fix). Takes effect on the
@@ -293,7 +361,9 @@ class App:
         for key, old, new in integrations.auto_update(self.config):
             self.log.info(f"updated {key} add-in {old} -> {new} (restart {key} to apply)")
 
-        notify_cb = lambda sender, data: self.engine.handle_packet(bytes(data))
+        def notify_cb(sender, data):
+            self._handle_ble_packet(data)
+
         start_ble_thread(self.get_ble_params, notify_cb, self.set_status, self.stop_event)
 
         if self.debug:

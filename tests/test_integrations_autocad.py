@@ -1,9 +1,9 @@
-"""AutoCAD integration registry: the bundled NETLOAD plugin is a first-class add-in (install/
-update copies DLL + version.json into the runtime dir; the COM driver NETLOADs it on attach and
-stays the fallback). Locked-DLL updates are STAGED, not failed."""
-import sys
+"""AutoCAD integration registry and bundled NETLOAD-plugin installation behavior.
 
-import pytest
+The daemon's COM loader delivers the in-process plugin; navigation itself uses the broker. Only an
+existing DLL blocked by a Windows sharing/lock violation is reported as a staged update.
+"""
+from pathlib import Path
 
 from trackball_daemon import integrations
 from trackball_daemon.config import Config
@@ -36,16 +36,81 @@ def test_install_copies_plugin_and_manifest(isolated_config, monkeypatch):
 def test_locked_dll_stages_the_update(isolated_config, monkeypatch):
     cfg = Config().load()
     monkeypatch.setattr(integrations, "detect_autocad", lambda: r"C:\fake\acad.exe")
+    runtime = integrations._acad_runtime_plugin_dir()
+    runtime.mkdir(parents=True, exist_ok=True)
+    (runtime / "TrackballNavAcad.dll").write_bytes(b"loaded old plugin")
+    (runtime / "version.json").write_text('{"version": "0.0.1"}', encoding="utf-8")
 
     def locked_copy(src, dst):
-        raise OSError("locked by acad.exe")
+        exc = PermissionError("locked by acad.exe")
+        exc.winerror = 32
+        raise exc
 
     monkeypatch.setattr(integrations.shutil, "copy2", locked_copy)
     appdef = integrations.APPS_BY_KEY["autocad"]
     ok, msg = integrations.install(appdef, cfg)
     assert ok is True                                    # staged, not failed
     assert "STAGED" in msg and "next time" in msg.lower()
-    assert integrations.installed_addin_version("autocad") is None
+    assert integrations.installed_addin_version("autocad") == "0.0.1"
+    assert cfg.data["apps"]["autocad"]["installed"] is True
+    assert integrations.auto_update(cfg) == []       # do not claim the locked runtime copy changed
+
+
+def test_existing_plugin_with_non_lock_write_failure_is_not_staged(isolated_config, monkeypatch):
+    cfg = Config().load()
+    monkeypatch.setattr(integrations, "detect_autocad", lambda: r"C:\fake\acad.exe")
+    runtime = integrations._acad_runtime_plugin_dir()
+    runtime.mkdir(parents=True, exist_ok=True)
+    (runtime / "TrackballNavAcad.dll").write_bytes(b"old plugin")
+
+    def denied_copy(src, dst):
+        exc = PermissionError("directory access denied")
+        exc.winerror = 5
+        raise exc
+
+    monkeypatch.setattr(integrations.shutil, "copy2", denied_copy)
+
+    ok, msg = integrations.install(integrations.APPS_BY_KEY["autocad"], cfg)
+
+    assert ok is False
+    assert "could not copy" in msg.lower() and "access denied" in msg.lower()
+    assert cfg.data["apps"]["autocad"]["installed"] is False
+
+
+def test_first_install_copy_failure_is_not_reported_as_staged(isolated_config, monkeypatch):
+    cfg = Config().load()
+    monkeypatch.setattr(integrations, "detect_autocad", lambda: r"C:\fake\acad.exe")
+
+    def denied_copy(src, dst):
+        raise OSError("access denied")
+
+    monkeypatch.setattr(integrations.shutil, "copy2", denied_copy)
+
+    ok, msg = integrations.install(integrations.APPS_BY_KEY["autocad"], cfg)
+
+    assert ok is False
+    assert "could not copy" in msg.lower() and "access denied" in msg.lower()
+    assert cfg.data["apps"]["autocad"]["installed"] is False
+    assert cfg.data["apps"]["autocad"]["enabled"] is False
+
+
+def test_missing_bundled_dll_fails_honestly(isolated_config, monkeypatch):
+    cfg = Config().load()
+    monkeypatch.setattr(integrations, "detect_autocad", lambda: r"C:\fake\acad.exe")
+    original = integrations._bundled_addin
+
+    def missing_dll(*parts):
+        if parts[-1] == "TrackballNavAcad.dll":
+            return isolated_config / "missing-TrackballNavAcad.dll"
+        return original(*parts)
+
+    monkeypatch.setattr(integrations, "_bundled_addin", missing_dll)
+
+    ok, msg = integrations.install(integrations.APPS_BY_KEY["autocad"], cfg)
+
+    assert ok is False
+    assert "missing from this build" in msg.lower()
+    assert cfg.data["apps"]["autocad"]["installed"] is False
 
 
 def test_update_available_via_manifest(isolated_config, monkeypatch):
@@ -87,10 +152,21 @@ def test_autocad_in_default_config(isolated_config):
     assert ac["bindings"]["scheme"]["orbit_pivot"] == "default"   # shared _app() shape
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")
-def test_status_line_reflects_detection(monkeypatch):
-    appdef = integrations.APPS_BY_KEY["autocad"]
-    monkeypatch.setattr(appdef, "detect", lambda: r"C:\fake\acad.exe")
-    assert "detected" in integrations.status_line(appdef).lower()
-    monkeypatch.setattr(appdef, "detect", lambda: None)
-    assert integrations.status_line(appdef) == "not detected"
+def test_autocad_plugin_consumes_advanced_settings_and_all_generic_pivots():
+    source = (Path(__file__).parents[1] / "plugin_src" / "autocad" /
+              "TrackballNavAcad" / "Plugin.cs").read_text(encoding="utf-8")
+    assert 'TryGetProperty("selection_overrides_pivot"' in source
+    assert 'TryGetProperty("level_horizon_on_entry"' in source
+    assert 'TryGetProperty("zoom_style"' in source
+    assert 'TryGetProperty("orbit_hold_sec"' in source
+    assert 'TryGetProperty("zoom_hold_sec"' in source
+    assert "CaptureSelectionCenter(doc)" in source
+    assert 'case "origin": point = Point3d.Origin;' in source
+    assert 'case "object":' in source and "CaptureDrawingCenter()" in source
+    assert "NavMath.ReprojectScreenSample(_ptrPoint, camBefore, _cam)" in source
+    assert "_ptrOnEntity = false;" in source
+    assert "if (hasPan || (hasOrbit && idleMs > orbitHoldMs))" in source
+    assert "if (hasOrbit)                                  // next cursor zoom re-captures" in source
+    frame_parser = source[source.index("void HandleFrame"):source.index("// --- UI-thread timer")]
+    assert "_horizonFixed = fixedHorizon" in frame_parser
+    assert "_levelPending = true" in frame_parser

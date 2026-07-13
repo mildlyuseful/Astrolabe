@@ -45,8 +45,12 @@ class FakeShape:
 
 
 class FakeObj:
-    def __init__(self, bb):
+    def __init__(self, bb, parent=None):
         self.Shape = FakeShape(bb)
+        self._parent = parent
+
+    def getParentGeoFeatureGroup(self):
+        return self._parent
 
 
 class FakeDoc:
@@ -91,6 +95,14 @@ CENTER_HIT = (7.0, 8.0, 9.0)
 
 def _view_both_hits():
     return FakeView(size=(800, 600), hits={PTR_PX: _hit(*PTR_HIT), CENTER_PX: _hit(*CENTER_HIT)})
+
+
+def test_document_bbox_ignores_nested_local_space_features():
+    container = FakeObj(FakeBB((100, 200, 300), (110, 220, 330)))
+    child = FakeObj(FakeBB((0, 0, 0), (10, 20, 30)), parent=container)
+    center, bbox = fc._doc_object_bbox(FakeDoc([container, child]))
+    assert center == (105.0, 210.0, 315.0)
+    assert bbox == ((100.0, 200.0, 300.0), (110.0, 220.0, 330.0))
 
 
 @pytest.fixture(autouse=True)
@@ -221,13 +233,13 @@ def test_cursor_pivot_y_flip_path():
 
 
 # --- _orbit_pivot op=="cursor": per-gesture hold + fallbacks ------------------------------
-def test_orbit_pivot_cursor_differs_from_view():
+def test_orbit_pivot_cursor_differs_from_screen_center():
     view = _view_both_hits()
     fc._cursor.update(px=PTR_PX)
     p_ptr = fc._orbit_pivot("cursor", view, DOC, _ortho_cam(), idle=10.0)
     fc._gesture.update(pivot=None)            # fresh gesture for the other scheme
-    p_view = fc._orbit_pivot("view", view, DOC, _ortho_cam(), idle=10.0)
-    assert p_ptr == PTR_HIT and p_view == CENTER_HIT and p_ptr != p_view
+    p_center = fc._orbit_pivot("screen_center", view, DOC, _ortho_cam(), idle=10.0)
+    assert p_ptr == PTR_HIT and p_center == CENTER_HIT and p_ptr != p_center
 
 
 def test_orbit_pivot_cursor_holds_for_the_gesture():
@@ -267,6 +279,22 @@ def test_orbit_pivot_cursor_last_resort_is_look_at():
     empty_doc = FakeDoc([])                   # no model -> no centre either
     c = _ortho_cam()
     assert fc._orbit_pivot("cursor", view, empty_doc, c, idle=10.0) == cam.look_at(c)
+
+
+def test_selection_override_wins_and_can_be_disabled(monkeypatch):
+    monkeypatch.setattr(fc, "_selection_center", lambda _doc: (2.0, 3.0, 4.0))
+    c = _ortho_cam()
+    view = _view_both_hits()
+    assert fc._orbit_pivot("origin", view, DOC, c, idle=10.0,
+                           sel_override=True) == (2.0, 3.0, 4.0)
+    assert fc._orbit_pivot("origin", view, DOC, c, idle=10.0,
+                           sel_override=False) == (0.0, 0.0, 0.0)
+
+
+def test_designated_selection_works_when_override_is_off(monkeypatch):
+    monkeypatch.setattr(fc, "_selection_center", lambda _doc: (6.0, 7.0, 8.0))
+    assert fc._orbit_pivot("selection", _view_both_hits(), DOC, _ortho_cam(), idle=10.0,
+                           sel_override=False) == (6.0, 7.0, 8.0)
 
 
 # --- _zoom_pivot zm=="to_cursor" ----------------------------------------------------------

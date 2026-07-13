@@ -5,8 +5,9 @@ Daemon: the architecture, the verified Coin camera model, and the FreeCAD-specif
 real live debugging. FreeCAD is a **socket add-on** integration (like Fusion/Blender), not an
 in-process driver (SolidWorks/Onshape). Read this before touching the add-on.
 
-Verified live on the dev machine: **FreeCAD 1.1.1**, PySide6, Coin3D/pivy. Add-on `0.1.4`, daemon
-`__version__` `0.1.44`.
+The camera model and bootstrap were originally verified live on FreeCAD 1.1.1 with PySide6 and
+Coin3D/pivy. Current code versions come from `ADDIN_VERSION`, `version.json`, and
+`trackball_daemon.__version__`; do not maintain a version snapshot here.
 
 ---
 
@@ -29,7 +30,7 @@ then either let the daemon's `auto_update` re-copy it on next launch, or call
 
 Live end-to-end without hardware: run a `NavBroker` yourself, write `%APPDATA%\TrackballDaemon\
 bridge.json`, launch FreeCAD with the add-on installed, and `broker.submit(...)` some orbit deltas —
-watch `%APPDATA%\TrackballDaemon\freecad_addin.log` for `boot` / `rx orbit` / `view-pivot` / `applied`
+watch `%APPDATA%\TrackballDaemon\freecad_addin.log` for `boot` / `rx orbit` / `screen-center-pivot` / `applied`
 lines. (That is exactly how this integration was verified; the daemon's BLE path isn't needed.)
 
 ---
@@ -80,9 +81,9 @@ Routing is **entirely generic** — `app.py::_APP_PROC_HINTS` already had `"free
 change was needed**; FreeCAD is selected when the foreground process is `freecad.exe` and the app is
 enabled. (Verified by `tests/test_app_routing.py::test_freecad_routes_to_broker`.)
 
-**Contract:** the daemon already scaled o/p/z (per-app sensitivity/gain + the generic invert). The
-add-on only bakes a **baseline sign/scale** (`ORBIT_SCALE`/`PAN_*`/`ZOOM_*` in `tbnav_camera.py`) +
-the scheme. Don't re-scale in both places.
+**Contract:** the daemon composes FreeCAD's immutable host alignment with the saved user mapping
+before broker output. `tbnav_camera.py` is deliberately neutral to prevent double application. See
+[`../default_profiles.md`](../default_profiles.md).
 
 ---
 
@@ -127,27 +128,36 @@ view.redraw()                               # force a repaint (needed when drive
 
 - **Pivots** (`scheme.orbit_pivot`): `origin` → (0,0,0); `object` → aggregate model bbox centre
   (Part `Shape.BoundBox` ∪ Mesh `Mesh.BoundBox`, cached ~0.5 s); `selection` → mean of the **selection**
-  bbox centres (`Gui.Selection.getSelection()`), falling back to the object centre; `view` → the
+  bbox centres (`Gui.Selection.getSelection()`); `screen_center` → the
   surface under the **screen centre** via `view.getObjectInfo((w/2, h/2))`, validated against the
-  model bbox (+10 % of its diagonal) and **held for the whole gesture** (re-raycast on pan/zoom or
-  after a ~0.35 s idle gap); `cursor` → the surface under the **live MOUSE CURSOR**:
+  model bbox and held for the configured orbit gesture (re-raycast on pan/zoom or after
+  `orbit_hold_sec`); `cursor` → the surface under the **live MOUSE CURSOR**:
   a passive `SoLocation2Event` observer on the active view caches the last viewport pixel
   (`_cursor_event_cb`, re-bound to the current view every 0.5 s by the pump via
   `_ensure_cursor_hook`), and `_cursor_pivot` feeds that pixel to the SAME `getObjectInfo` pick,
-  bbox validation, and per-gesture hold as `view`. Everything ultimately falls back to the model
-  centre, then the camera look-at, so orbit always has a sane pivot. (`view`/`cursor` is FreeCAD's
+  bbox validation, and per-gesture hold as `screen_center`. Unavailable methods continue through the
+  configured global chain. (`screen_center`/`cursor` is FreeCAD's
   *easiest* raycast of the apps — `getObjectInfo` does the pick and hands back world coords; no ray
-  construction needed.)
+  construction needed.) Add-on 0.1.5 applies `selection_overrides_pivot`: a non-empty selection
+  wins over the designated orbit/to-cursor pivot; disabling it restores the requested pivot.
+  Add-on 0.1.6 excludes nested Part/Body child bounds from the project aggregate because those are
+  local-space duplicates of the correctly placed container Shape; this prevents placed models from
+  pulling the computed object centre back toward the origin.
 - **Orbit style** (`scheme.orbit_style`): `free` (rotate about the camera's own right/up/fwd, twist
   allowed) or `turntable` (yaw about WORLD Z + pitch about camera-right, **roll dropped** so the
   horizon stays level).
 - **Zoom mode** (`scheme.zoom_mode`): `to_center` (about the look-at) / `to_object` (about the model
   centre) / `to_cursor` (about the surface under the mouse cursor — the same
-  `_cursor_pivot` raycast with its own per-gesture hold `_zoom_gesture`, so the point under the
-  cursor stays put on screen while zooming; a miss falls back to the look-at).
+  `_cursor_pivot` raycast with its own hold `_zoom_gesture`, so the point under the cursor stays put
+  on screen while zooming; a miss synthesizes a cursor-ray point at the current focal/model depth).
 
-`config.apps.freecad` is the lean generic shape (`_app()`); there is **no** Blender-style `advanced`
-block.
+`orbit_hold_sec` and `zoom_hold_sec` are independent. Pan/zoom invalidate the orbit pivot; pan
+preserves the cursor-zoom target; orbit invalidates it. Entering Turntable from Free optionally
+levels the horizon once while preserving position, focal point, focal distance, and the active
+pivot. A world-up singularity is skipped.
+
+FreeCAD uses the lean capability profile: it has the shared `advanced` values such as Twist action
+and holds, but no Blender-style mode-specific Orbit/Fly/Walk action tree.
 
 ---
 
@@ -222,8 +232,8 @@ with plain `python` — **no FreeCAD needed at all** (a step better than Blender
    **no** `.heightAngle`; perspective is the reverse. Decide with `view.getCameraType()` (or
    `hasattr`) and only touch the field that exists. FreeCAD defaults to **orthographic**.
 8. **`getObjectInfo` returns `None` off-model** (and a dict with `'x'/'y'/'z'` on a hit) → validate
-   against the model bbox and fall back to the object centre; **hold the pivot per gesture** (don't
-   re-raycast every frame — it chases a moving target).
+   against the model bbox and continue through the configured chain on failure; **hold the resolved
+   pivot per gesture** (don't re-raycast every frame — it chases a moving target).
 9. **PySide flavour:** FreeCAD 1.1 ships **PySide6** (and a `from PySide import QtCore` shim that also
    works). The add-on tries PySide6 → PySide2 → the shim.
 10. **Two interpreters → two reload rules.** A change to the add-on (`tbnav_*.py`) needs **FreeCAD
@@ -263,7 +273,7 @@ Everything in §4 came from two throwaway probes driven against live FreeCAD 1.1
 
 The **end-to-end** path was proven by running a real `NavBroker`, installing the add-on, launching
 FreeCAD with a box, and submitting orbit/pan/zoom bursts: the log showed `boot: pivy.coin loaded` →
-`scheme: …` → `rx orbit … view-pivot: surface hit → (…)` → `applied op=view ortho=True pos=(…)`, and
+`scheme: …` → `rx orbit … screen-center-pivot: surface hit → (…)` → `applied op=screen_center ortho=True pos=(…)`, and
 the camera orientation measurably changed. Pan and zoom land the same way (`rx pan` / `rx zoom` →
 `applied`, no errors).
 
@@ -320,11 +330,9 @@ the camera orientation measurably changed. Pan and zoom land the same way (`rx p
   a bump; versioned vs flat Mod-dir resolution; detection). `python -m pytest tests -q` is green.
 - **Live (the only thing tests can't cover):** install via the daemon's **Set up**, run the daemon,
   open a FreeCAD 3D view, switch to 3D mode, focus FreeCAD, and use the trackball. Lean on
-  `%APPDATA%\TrackballDaemon\freecad_addin.log` (`scheme:` / `rx orbit|pan|zoom` / `view-pivot` /
-  `applied`). **Sign/scale calibration** (`ORBIT_SCALE` etc. in `tbnav_camera.py`) is the one item
-  that wants a real trackball — the magnitudes follow Blender's verified 1:1 reasoning, but the
-  **direction signs are best-guess defaults**; flip with the per-app Invert checkboxes or the
-  constants.
+  `%APPDATA%\TrackballDaemon\freecad_addin.log` (`scheme:` / `rx orbit|pan|zoom` / `screen-center-pivot` /
+  `applied`). Suite alignment lives in `host_profiles.json`; use neutral user settings during a
+  live sign/scale pass and transfer host corrections there, never into camera-math constants.
 
 ---
 
@@ -332,7 +340,7 @@ the camera orientation measurably changed. Pan and zoom land the same way (`rx p
 
 - **Log:** `%APPDATA%\TrackballDaemon\freecad_addin.log` (rate-limited). Key lines: `boot:` (loaded +
   PySide flavour + FreeCAD version), `scheme:` (op/os/zm received), `rx orbit|pan|zoom` (which channel
-  arrived — distinguishes a daemon/Shift issue from an add-on issue), `view-pivot: surface hit|…
+  arrived — distinguishes a daemon/Shift issue from an add-on issue), `screen-center-pivot: surface hit|…
   fallback`, `applied` (the camera actually changed). The tray's `Apps: freecad v…` confirms the
   hello handshake.
 - ~~True cursor-pixel pivot~~ — **DONE in add-on 0.1.3** as the under-mouse orbit pivot +
@@ -340,9 +348,9 @@ the camera orientation measurably changed. Pan and zoom land the same way (`rx p
   `cursor`/`to_cursor` in add-on 0.1.4 / daemon config v3, when the old `cursor` value became
   `selection`). Known limitation: no "mouse left the viewport" signal
   (Gotcha #14) — the last in-viewport pixel is used, bounded by the bbox validation.
-- **Deferred / not done:** **discrete view ops** (Frame Selected, axis snaps) need a button-event
-  channel the broker doesn't have yet.
-- **Verify-live items:** the per-axis **sign/scale** defaults; perspective-camera feel (FreeCAD
-  defaults to ortho, so the persp path is lightly exercised live); the **human-feel pass** on the
-  `cursor` pivot (hover + orbit with the physical trackball — the event chain itself is verified,
-  §9).
+- **`camera` (turn-in-place) is unsupported** — the add-on's
+  resolver skips it like `cursor_3d` and the configured chain continues (a `camera` primary keeps
+  its selection-override exemption). FreeCAD's Coin camera is an eye+orientation model, so a real
+  turn-in-place is implementable. Camera parity and the current live-verification matrix are tracked
+  in [`TODO.md`](../../TODO.md), including perspective feel, nested world-space bounds, horizon
+  entry, independent holds, and the physical under-cursor pass.

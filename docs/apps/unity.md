@@ -1,7 +1,7 @@
 # Unity navigation — maintainer's guide
 
 Socket add-on for the **Unity Editor Scene view** (not Play / Game view). Same NavBroker
-protocol as Unreal/Blender. Add-on `0.1.6`.
+protocol as Unreal/Blender.
 
 ## Layout
 
@@ -32,11 +32,26 @@ you to open a project and Set up again. Manual: copy the staged folder into
 
 ## Controls (Unreal/Blender parity)
 
-Orbit / fly / walk, pivots (`viewpoint`, `view`, `cursor`, `object`, `origin`), free/turntable,
-`twist_action`, `selection_overrides_pivot`, `to_cursor` zoom. Under-cursor stores a world ray on
+Orbit / fly / walk, pivots (`camera`, `screen_center`, `cursor`, `selection`, `object`, `origin`),
+free/turntable, `twist_action`, `selection_overrides_pivot`, and To Cursor zoom. Model Center uses
+aggregate scene bounds and is distinct from the current selection. Under-cursor stores a world ray on
 mouse move via `HandleUtility.GUIPointToWorldRay`, then hits with Physics / own mesh triangle
 tests (AABB fallback). Re-cast from the update pump. Never uses `PlaceObject` or
 `IntersectRayMesh` (missing on some Editor builds).
+
+Orbit ray misses continue the configured global chain. Empty-space To Cursor zoom synthesizes a
+point on the cursor ray at the tracked focus depth. Orbit and cursor-zoom targets have independent
+hold settings: pan invalidates the orbit pivot but preserves the zoom target, and view rotation
+invalidates the zoom target.
+
+Per-mode `advanced.axis_source` and `advanced.invert` route every Orbit/Camera/Fly/Walk action from
+X/Y/Z independently. Rotation actions use `o`; shifted movement actions use `(p.x,p.y,z)`. The
+identity/default map is behavior-neutral, while mappings such as Walk Forward ← Z make twist drive
+forward.
+
+**Pan-mode zoom:** Zoom changes `SceneView.CameraSettings.fieldOfView` in perspective or
+`SceneView.size` in orthographic mode. Dolly changes the eye-to-pivot distance. An object/cursor
+target stays at the same screen position in either path.
 
 **Distance math:** `SceneView.size` is a fit-sphere radius, not eye→pivot distance. Navigation
 uses `cameraDistance` (`size / sin(fov/2)` in perspective) and writes size back by scaling
@@ -47,9 +62,16 @@ uses `cameraDistance` (`size / sin(fov/2)` in perspective) and writes size back 
 `advanced.override_dynamic_clip` (default on) forces it off and installs fixed near/far while
 navigating; turning the toggle off restores Dynamic Clipping.
 
-**Pivot extent:** `advanced.pivot_extent_mult` (default `8`) caps under-cursor / auto-depth
+**Pivot extent:** `advanced.pivot_extent_mult` (default `8`) caps under-cursor / screen-center
 pivots at `scene_AABB_radius × mult` from the camera. Hits beyond that (e.g. near the horizon)
 are rejected so the view does not rocket away.
+
+**Fixed-horizon entry:** moving from a rolled Free/Orbit/Fly state into Turntable, Lock Horizon, or
+Walk optionally removes roll once through `TrackballNavCamera.LevelHorizon`. Location, forward
+direction, focus distance, and pivot remain stable; the first frame only establishes state.
+
+Intrinsic signs/scales arrive in `adv.host_baseline` and are applied after mode-specific routing.
+Keep `TrackballNavCamera.cs` neutral and tune suite alignment in `host_profiles.json`.
 
 ## Logs
 
@@ -57,5 +79,5 @@ are rejected so the view does not rocket away.
 
 ## Reload
 
-Edit scripts → Unity recompiles (domain reload). Version bump: `package.json` + `version.json`
-(+ comment in `TrackballNav.cs` AddinVersion).
+Edit scripts → Unity recompiles (domain reload). Keep the code/package version marker and
+`version.json` synchronized. Live checks are tracked in [`TODO.md`](../../TODO.md).

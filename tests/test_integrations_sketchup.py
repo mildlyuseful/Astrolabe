@@ -5,9 +5,7 @@ The real licensed application is never launched by these tests. Install paths an
 isolated with monkeypatch + the shared isolated_config fixture.
 """
 import json
-import sys
-
-import pytest
+from pathlib import Path
 
 from trackball_daemon import integrations
 from trackball_daemon.config import Config
@@ -23,7 +21,7 @@ def _patch_sketchup(monkeypatch, exes):
 
 def test_sketchup_is_a_bundled_addin():
     assert "sketchup" in integrations.ADDIN_KEYS
-    assert integrations.bundled_addin_version("sketchup") == "0.2.2"
+    assert integrations.bundled_addin_version("sketchup") == "0.2.13"
     assert integrations.APPS_BY_KEY["sketchup"].setup is integrations.install_sketchup
 
 
@@ -50,12 +48,12 @@ def test_install_copies_loader_and_addon_to_all_years(isolated_config, monkeypat
     assert "2024" in msg and "2026" in msg
     su = cfg.data["apps"]["sketchup"]
     assert su["installed"] is True and su["enabled"] is True
-    assert su["addin_version"] == "0.2.2"
+    assert su["addin_version"] == "0.2.13"
     for addon in integrations.sketchup_addon_dirs():
         assert (addon.parent / "trackball_nav_loader.rb").exists()
         for name in ("main.rb", "camera.rb", "version.json"):
             assert (addon / name).exists(), f"missing {name} in {addon}"
-    assert integrations.installed_addin_version("sketchup") == "0.2.2"
+    assert integrations.installed_addin_version("sketchup") == "0.2.13"
 
 
 def test_install_fails_when_sketchup_absent(isolated_config, monkeypatch):
@@ -88,7 +86,7 @@ def test_auto_update_recopies_on_version_bump(isolated_config, monkeypatch):
     assert integrations.update_available("sketchup") is True
     updated = integrations.auto_update(cfg)
     assert any(key == "sketchup" for key, _old, _new in updated)
-    assert integrations.installed_addin_version("sketchup") == "0.2.2"
+    assert integrations.installed_addin_version("sketchup") == "0.2.13"
 
 
 def test_auto_update_skips_when_not_installed(isolated_config, monkeypatch):
@@ -103,10 +101,18 @@ def test_sketchup_in_default_config(isolated_config):
     assert cfg.data["apps"]["sketchup"]["enabled"] is False
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")
-def test_status_line_reflects_detection(monkeypatch):
-    appdef = integrations.APPS_BY_KEY["sketchup"]
-    monkeypatch.setattr(appdef, "detect", lambda: _FAKE_2026)
-    assert "detected" in integrations.status_line(appdef).lower()
-    monkeypatch.setattr(appdef, "detect", lambda: None)
-    assert integrations.status_line(appdef) == "not detected"
+def test_sketchup_extension_consumes_selection_override():
+    source = (Path(__file__).parents[1] / "trackball_daemon" / "plugins" / "sketchup" /
+              "trackball_nav" / "camera.rb").read_text(encoding="utf-8")
+    assert "advanced.fetch('selection_overrides_pivot', true)" in source
+    assert "def selection_center(model)" in source
+    assert "selected = selection_center(model)" in source
+
+
+def test_sketchup_extension_consumes_shared_zoom_and_twist_controls():
+    source = (Path(__file__).parents[1] / "trackball_daemon" / "plugins" / "sketchup" /
+              "trackball_nav" / "camera.rb").read_text(encoding="utf-8")
+    assert "advanced['twist_action']" in source
+    assert "advanced['zoom_style']" in source
+    assert "def zoom_pivot(" in source
+    assert "camera.fov =" in source

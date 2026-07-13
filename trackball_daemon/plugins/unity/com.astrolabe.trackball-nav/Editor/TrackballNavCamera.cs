@@ -8,13 +8,13 @@ namespace Astrolabe.TrackballNav
 {
     internal static class TrackballNavCamera
     {
-        public static readonly Vector3 OrbitScale = new Vector3(2f, 2f, 2f);
+        public static readonly Vector3 OrbitScale = Vector3.one; // daemon supplies host baseline
         public static readonly Vector3 OrbitSign = new Vector3(1f, 1f, 1f);
-        public static readonly Vector2 PanSign = new Vector2(1f, -1f);
-        public const float PanScale = 0.14f;
+        public static readonly Vector2 PanSign = Vector2.one;
+        public const float PanScale = 1f;
         public const float ZoomSign = 1f;
-        public const float ZoomScale = 0.25f;
-        public const float MoveScale = 0.5f;
+        public const float ZoomScale = 1f;
+        public const float MoveScale = 1f;
         public static readonly Vector3 WorldUp = Vector3.up;
         public const float DistDefault = 10f;
         public const float DistMin = 0.01f;
@@ -55,6 +55,21 @@ namespace Astrolabe.TrackballNav
             float n = axis.magnitude;
             if (n < 1e-12f || Mathf.Abs(angle) < 1e-15f) return v;
             return Quaternion.AngleAxis(angle * Mathf.Rad2Deg, axis / n) * v;
+        }
+
+        // Remove existing roll: rebuild Right/Up so camera-right is horizontal (perpendicular to
+        // WorldUp) while Forward is unchanged. The eye stays put, so the focus distance and the
+        // synthesised orbit point (Location + Forward*dist) are preserved -- only the roll goes.
+        // False in the degenerate straight-up/
+        // straight-down view, where roll is indistinguishable from yaw.
+        public static bool LevelHorizon(ref Cam cam)
+        {
+            var right = Vector3.Cross(WorldUp, cam.Forward);   // Unity: right = up x forward
+            if (right.magnitude < 1e-6f) return false;
+            right.Normalize();
+            cam.Right = right;
+            cam.Up = Vector3.Cross(cam.Forward, right).normalized;
+            return true;
         }
 
         static void RotateFrame(ref Cam cam, Vector3 axis, float angle, Vector3? pivot)

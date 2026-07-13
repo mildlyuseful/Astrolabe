@@ -6,13 +6,13 @@
 extends RefCounted
 class_name TrackballNavCamera
 
-const ORBIT_SCALE := Vector3(2.0, 2.0, 2.0)
+const ORBIT_SCALE := Vector3.ONE # daemon supplies host baseline in frame.adv
 const ORBIT_SIGN := Vector3(1.0, 1.0, 1.0)
-const PAN_SIGN := Vector2(1.0, -1.0)
-const PAN_SCALE := 0.14
+const PAN_SIGN := Vector2.ONE
+const PAN_SCALE := 1.0
 const ZOOM_SIGN := 1.0
-const ZOOM_SCALE := 0.25
-const MOVE_SCALE := 0.5
+const ZOOM_SCALE := 1.0
+const MOVE_SCALE := 1.0
 const WORLD_UP := Vector3(0.0, 1.0, 0.0)
 const DIST_DEFAULT := 10.0
 const DIST_MIN := 0.01

@@ -1,13 +1,10 @@
 # Blender navigation — maintainer's handoff guide
 
-This is the **"what you can't see by reading the code"** document for the Blender side of the
-Trackball Daemon: the architecture, the non-obvious gotchas, and the full history of problems we hit
-and how/why we solved them. If you just want the design catalog (every nav mode, the
-generic-scheme↔Blender reconciliation, the verified Blender-API facts), read its companion
-[`blender_design.md`](blender_design.md). This file is the one to read **first** when taking over.
+This is the Blender-side architecture, design-rationale, API-gotcha, and verification guide. Read
+it before changing the add-on.
 
-Current versions at handoff: **add-on `0.1.9`**, daemon `__version__` `0.1.19`, Blender on the dev
-machine **5.1.1**.
+Do not copy a version snapshot into this guide. The current markers are `bl_info`, `ADDIN_VERSION`,
+and `version.json`, and the daemon version is `trackball_daemon.__version__`.
 
 ---
 
@@ -38,7 +35,7 @@ trip everyone up.
 The daemon streams orbit/pan/zoom deltas from the BLE trackball over a localhost TCP socket (the
 "nav broker"). A **Blender add-on** (`trackball_nav`) connects to that broker and drives the active 3D
 viewport. Unlike the Fusion/SolidWorks integrations (which target a CAD eye+look-at camera), Blender
-is a first-class, feature-rich target: trackball **orbit** (free/turntable, 5 pivots), **pan/zoom/
+is a first-class, feature-rich target: trackball **orbit** (free/turntable, seven pivots), **pan/zoom/
 dolly/roll**, **fly** and **walk** first-person modes, **camera-view** driving, per-mode/per-axis
 direction inverts, and an in-viewport hotkey to switch modes.
 
@@ -56,11 +53,11 @@ socket-reader + main-thread-marshal shape — but much larger because Blender do
 | `trackball_daemon/plugins/blender/startup/trackball_nav_startup.py` | Auto-enable shim. Copied into Blender's `scripts/startup/`; enables the add-on on every launch (the analogue of Fusion's "Run on Startup"). |
 | `trackball_daemon/navbroker.py` | `NavBroker`: localhost TCP, newline-JSON frames. Carries the optional additive `"adv"` object (Blender's extra settings). |
 | `trackball_daemon/app.py` | `App._apply_schemes` pushes the control scheme + Blender's `advanced` block to the broker; `_nav_sink` routes the focused app's frames. |
-| `trackball_daemon/config.py` | `_DEFAULT_BLENDER_ADVANCED`, `_DEFAULT_BLENDER_INVERT`, `_blender_app()`. The single source of truth. |
+| `trackball_daemon/config.py` + `default_profiles.json` | Validation/migrations plus shipped General and neutral Blender user defaults. |
 | `trackball_daemon/integrations.py` | `install_blender` (multi-version copy + startup shim), the `_ADDINS["blender"]` registry entry, version readers, `auto_update`. |
-| `trackball_daemon/ui.py` | The Tkinter UI. The **merged** Blender section lives under *Per-App Bindings → blender* (`_blender_bindings_fields`), and the bindings tab is scrollable. |
+| `trackball_daemon/binding_schema.py` | The ordered per-app settings contract. Blender enables its supported shared and rich-action fields here. |
+| `trackball_daemon/ui.py` | The Tkinter UI. One declarative renderer builds every host section under *Per-App Bindings*; the tab is scrollable. |
 | `tools/blender_nav_*.py` | Headless test scripts (math / integration / socket probes). Not part of the shipped package. |
-| `docs/apps/blender_design.md` | Design rationale: full mode catalog, scheme reconciliation, verified Blender-API facts. |
 
 The daemon process and the add-on are **two different Python interpreters** (daemon Python vs Blender's
 bundled Python). They only talk over the broker socket. This split is the source of half the gotchas.
@@ -83,10 +80,10 @@ BLE trackball
   → _apply(...)  (resolves the target VIEW_3D, applies the delta to its RegionView3D, tag_redraw)
 ```
 
-Key contract: **the daemon already scales** o/p/z (per-app sensitivity/gain + the *generic* invert in
-`output.py`). The add-on only bakes in a **baseline sign/scale** (`ORBIT_SCALE`, `PAN_SCALE`, …) and
-the **scheme/advanced** behavior. Do not re-scale in both places. (The Blender-specific *per-mode*
-inverts are the exception — they live in the add-on, see §5.4 and Gotcha #6.)
+Key contract: the daemon applies global physical orientation and the saved user layer, then sends
+Blender's immutable host correction in `adv.host_baseline`. The add-on applies that correction after
+mode-specific action routing. Its camera-math constants are neutral so the baseline is never
+double-applied. See [`../default_profiles.md`](../default_profiles.md).
 
 ---
 
@@ -118,12 +115,13 @@ under the mouse," because a timer callback has no live mouse position (see Gotch
    does nothing" reports; see Solved Problem #2/#6).
 5. **Camera-view exit**: if the viewport is showing the camera and lock-camera is off, switch to
    `PERSP` so edits are visible (Solved Problem #2).
-6. **Per-mode invert**: flip o/p/z per `advanced.invert.<mode>` (see §5.4).
-7. **Dispatch** by nav mode → `_apply_fly` / `_apply_walk` / orbit (`_apply_orbit` / `_pan` /
+6. **Per-mode action routing**: select and user-invert o/p/z per `advanced` (see §5.4).
+7. **Host alignment**: apply `advanced.host_baseline` after the action is known.
+8. **Dispatch** by nav mode → `_apply_fly` / `_apply_walk` / orbit (`_apply_orbit` / `_pan` /
    `_zoom`/`_dolly`).
-8. **Camera-lock**: if in camera view *and* lock-camera is on, drive `scene.camera.matrix_world`.
-9. **`applied ...` diagnostic** (did the view actually change? perspective/area/rotΔ/locΔ).
-10. `area.tag_redraw()`.
+9. **Camera-lock**: if in camera view *and* lock-camera is on, drive `scene.camera.matrix_world`.
+10. **`applied ...` diagnostic** (did the view actually change? perspective/area/rotΔ/locΔ).
+11. `area.tag_redraw()`.
 
 ### 4.4 The math helpers (pure; testable headless)
 `_view_axes`, `_eye`, `_orbit_R`, `_apply_world_rotation`, `_pan`, `_zoom`, `_dolly`, `_roll`,
@@ -140,8 +138,8 @@ then `view_location = pivot + R @ (view_location - pivot)` so the eye rotates ri
 The `cursor` pivot orbits about the surface **under the mouse** (a SpaceMouse's "rotation center =
 cursor"). Two halves, like the other apps:
 - **Half B (the raycast) — solid, headless-tested.** `region_2d_to_origin_3d` + `region_2d_to_vector_3d`
-  + `scene.ray_cast` already unproject *any* region pixel; `_raycast_center` was refactored into
-  `_raycast_pixel(rv, region, x, y)` (+ a thin centre wrapper). `scene.ray_cast` returns only real
+  + `scene.ray_cast` already unproject *any* region pixel; `_raycast_screen_center` delegates to
+  `_raycast_pixel(rv, region, x, y)`. `scene.ray_cast` returns only real
   geometry hits (no sentinel), so no bbox gate is needed. The integration probe raycasts an arbitrary
   pixel (centre hits the cube, a corner misses) headlessly.
 - **Half A (the live mouse) — the architectural friction.** Blender has no on-demand mouse getter
@@ -150,7 +148,8 @@ cursor"). Two halves, like the other apps:
   `as_pointer()` on every `MOUSEMOVE`, and returns `{'PASS_THROUGH'}` so it **never consumes events**
   (normal select/orbit/draw are untouched). The timer maps the cache into the target region on demand:
   `_region_pixel_from_window` (pure: `mouse - region.x/y`, in-range check) → `_raycast_cursor`. Off the
-  viewport / over empty space / not cached yet → **selection-median fallback**.
+  viewport / over empty space / not cached yet → orbit method unavailable; continue the global
+  chain. To Cursor zoom instead synthesizes a point at the current view depth.
 - **Lifecycle friction (real, documented, handled).** A modal operator (a) **can't be invoked from the
   restricted `register()` context** → deferred via a `0.2 s` timer; (b) is **cancelled on file load** →
   a `@persistent` `load_post` handler restarts it (and `_tracker["gen"]` supersedes any straggler so
@@ -162,7 +161,7 @@ cursor"). Two halves, like the other apps:
   `_cursor` → `_raycast_cursor` path with a synthetic cached position (centre hits the cube, off-region
   → None), and an end-to-end `op="cursor"` orbit that moves `view_location`. **Un-verified (needs the
   GUI):** that the modal operator actually receives `MOUSEMOVE` and tracks the live cursor while
-  orbiting, and its lifecycle across real file loads. To verify live: set Orbit around = *Under Cursor
+  orbiting, and its lifecycle across real file loads. To verify live: set Orbit pivot = *Under Cursor
   (mouse)*, hover different faces while orbiting, and watch `blender_addin.log` for the
   `under-cursor hit @px(...)` line. Alternative Half A (not taken): Win32 `GetCursorPos` mapped via the
   Blender window's screen rect — but Blender doesn't expose the window's screen origin, so it'd need
@@ -179,34 +178,42 @@ cursor"). Two halves, like the other apps:
   (ball-forward = thrust, ball-sideways = strafe, twist = rise/fall).
 - **walk**: like fly but horizon-locked look (no bank) and horizontal-plane movement.
 
-### 5.2 Pivots (`scheme.orbit_pivot`, relabelled "Orbit around" in the UI)
-`viewpoint` → the **eye** (turn in place — see Solved Problem #5); `view` → **auto-depth** raycast
-under the screen centre (held per gesture); `cursor` → **under-mouse** raycast (auto-depth under the
-*mouse*, held per gesture; needs the modal mouse tracker — see §4.5 / Gotcha #4 — with a
-selection-median fallback); `object` → selection median; `cursor_3d` → 3D cursor; `origin` → world
-origin; unknown → `view_location` (Blender default). `viewpoint` is a Blender-only value added to the
-generic `orbit_pivot` enum. `view` and `cursor` **share the one per-gesture hold slot** (`_gesture`),
-which is fine because only one pivot is active at a time.
+Entering Turntable, Lock Horizon, or Walk from a free-roll state optionally calls `_level_horizon`
+once. It removes roll while keeping the forward direction, location, distance, and active pivot.
+`advanced.level_horizon_on_entry` controls the transition; the first frame establishes state and is
+not treated as an entry. Ordinary fixed-mode frames do not repeatedly level the view.
 
-### 5.3 Baseline constants (top of the add-on — tune here, not in the daemon)
-| Const | Meaning / why |
+### 5.2 Pivots (`scheme.orbit_pivot`, labelled "Orbit pivot" in the UI)
+`camera` → the **eye** (turn in place — see Solved Problem #5); `screen_center` → screen-center
+raycast; `cursor` → under-mouse raycast via the modal tracker (§4.5); `selection` → current selection
+median; `object` → aggregate scene-bounds center; `cursor_3d` → 3D cursor; `origin` → world origin.
+Unknown or unavailable methods are skipped by the configured candidate chain. Screen Center and
+Under Cursor share the orbit-gesture slot because only one orbit pivot is active. To Cursor zoom has
+a separate held target and timeout. `selection_overrides_pivot` applies to external pivots; Camera
+remains true turn-in-place.
+
+### 5.3 Immutable host baseline
+
+Blender's intrinsic signs/scales live in `host_profiles.json`, not editable add-on constants. The
+add-on camera math is neutral and `adv.host_baseline` is the only source of suite alignment. Do not
+copy the numeric profile into this document; inspect the packaged JSON or
+[`../default_profiles.md`](../default_profiles.md). Runtime constants that remain local include:
+
+| Const | Meaning |
 |---|---|
-| `ORBIT_SCALE = (0.5,0.5,0.5)` | pitch/yaw/twist baseline. **0.5 makes daemon Sensitivity 1.0 a true 1:1 orbit** — the dual-sensor device reports ~2× the physical angle (Solved Problem #3). |
-| `PAN_SIGN`, `PAN_SCALE=0.5` | pan direction + feel (× view_distance when `pan_scales_with_distance`). |
-| `ZOOM_SCALE=0.5`, `ZOOM_SIGN` | zoom factor per delta. |
-| `DOLLY_SCALE=0.5` | dolly distance per delta (× view_distance). |
-| `FLY_MOVE`, `WALK_MOVE = 0.5` | fly/walk move scale. Floored at `view_distance≥1` (`_move_scale`) so movement never vanishes up close (Solved Problem #6). |
-| `PIVOT_HOLD_IDLE=0.35` | seconds of no frames that ends a gesture → re-raycast the auto-depth pivot. |
+| `PIVOT_HOLD_IDLE` | compatibility fallback when a frame lacks daemon-supplied orbit/zoom holds. |
 | `_TIMER_INTERVAL=1/90` | main-thread poll rate. |
 | `_DEFAULT_PORT=47900` | broker port fallback if `bridge.json` is missing. |
 
-### 5.4 Per-mode, per-axis inverts (`advanced.invert`)
-Structure: `invert.{orbit,viewpoint,fly,walk}.<axis>`. Applied **in the add-on**, in `_apply`, just
-before the dispatch — because the same physical channel means different things per mode (ball
-forward/back is *orbit pan-Y* but *fly/walk forward*), so a single invert set can't flip one without
-the other (Gotcha #6, Solved Problem #4/#8). Defaults bake in the "inside-out" roll fix:
-`viewpoint.roll` and `fly.bank` start **on** so first-person roll matches external-pivot orbit.
-`viewpoint` shares orbit's pan/zoom inverts. This **replaced** the old single `invert_viewpoint_roll`
+### 5.4 Per-mode action routing (`advanced.axis_source` + `advanced.invert`)
+Each action under `{orbit,camera,fly,walk}` selects source X/Y/Z and has its own invert. Routing is
+applied **in the add-on**, in `_apply_action_routing`, just before dispatch because the active mode
+can also be changed by Blender's local shortcut. Rotation actions select from `o`; shifted movement
+actions select from `(p.x,p.y,z)`. Thus Walk Forward can select Z (twist) without changing Orbit.
+Defaults reproduce the old fixed wiring. The immutable host baseline bakes in the "inside-out" fix
+for `camera.roll` and `fly.bank`; the saved user defaults are neutral/off, and the wire value is
+baseline XOR user preference.
+`camera` shares orbit's pan/zoom routes. This **replaced** the old single `invert_camera_roll`
 flag — that key is now ignored if present in an old config.
 
 > The *generic* per-app invert (`bindings.invert` orbit/pan/zoom, applied in `output.py`) is **hidden
@@ -226,20 +233,21 @@ from inside Blender, independent of broker/`nav_mode`-delivery timing.
 ## 6. Configuration reference (`apps.blender` in the JSON config)
 - `bindings.*` — generic per-app: `orbit.sensitivity`, `pan.gain`, `zoom.gain`, `zoom.dominance`,
   `toggle` ("shift"/"none"), and `scheme` (`orbit_pivot`/`orbit_style`/`zoom_mode`). Blender defaults
-  `scheme.orbit_pivot` to `"viewpoint"`. `bindings.invert` exists but is unused for Blender (see §5.4).
+  `scheme.orbit_pivot` to `"camera"`. `bindings.invert` exists but is unused for Blender (see §5.4).
 - `advanced.*` — Blender-only: `nav_mode`, `lock_horizon`, `twist_action`, `zoom_style`,
-  `zoom_to_mouse`, `lock_camera_to_view`, `pan_scales_with_distance`, `fly_speed`, `walk_speed`, and
-  the per-mode `invert` block.
-- `rate_hz`, `view_pivot_hold_sec` — per-app rate and the auto-depth hold.
+  shared `bindings.scheme.zoom_mode`, `lock_camera_to_view`, `pan_scales_with_distance`, `fly_speed`, `walk_speed`, and
+  the per-mode `axis_source` and `invert` blocks.
+- `rate_hz`, `orbit_pivot_hold_sec`, `zoom_cursor_hold_sec` — per-app rate, orbit-pivot hold,
+  and the independent To Cursor zoom hold.
 
-Everything is **additive + deep-merged** (`config._deep_merge`), so new keys appear on existing
-configs automatically — **no `CONFIG_VERSION` bump** when adding Blender options. Caveat: deep-merge
-never *removes* keys, so retired keys (e.g. `invert_viewpoint_roll`) linger harmlessly on old configs.
+Everything is deep-merged with shipped defaults, so new additive keys appear on existing configs.
+Historical semantic changes are handled by the versioned migrations in `config.py`; do not add a
+migration for a merely additive field. Explicit cleanup removes known retired keys where necessary.
 
-How `advanced` reaches the add-on: `App._apply_schemes` attaches `advanced` (a **live reference** to
-the config dict) to the broker scheme on every push, `NavBroker._build_frame` serialises it as `"adv"`
-**only when non-None**, and the add-on reads `frame["adv"]`. Settings therefore take effect on the
-**next motion frame** (they only matter while moving).
+How `advanced` reaches the add-on: `App._apply_schemes` builds a detached payload for the selected
+broker app, folds in host alignment and shared controls, and gives it to the broker.
+`NavBroker._build_frame` serializes it as `"adv"`; the add-on reads `frame["adv"]`. Settings take
+effect on the next motion frame.
 
 ---
 
@@ -283,7 +291,8 @@ the config dict) to the broker scheme on every push, `NavBroker._build_frame` se
    `Event.mouse_*` exists **only inside a modal operator**; `Window` has cursor *setters* only
    (`cursor_warp`/`cursor_set`). So the **under-mouse `cursor` pivot** needs the passive modal mouse
    tracker (§4.5). *Viewport-under-the-cursor targeting* (`_resolve_target` picking the hovered area)
-   and true *zoom-to-mouse* are still not done — they'd need the same tracker wired into those paths.
+   *Viewport-under-the-cursor targeting* is still not done; that is separate from the implemented
+   Under Cursor orbit and To Cursor zoom paths.
 5. **You cannot drive Blender's *native* Walk/Fly.** `view3d.walk`/`view3d.fly` are modal operators
    that read the mouse/keyboard directly and ignore our `RegionView3D` edits — the whole reason the
    add-on DIYs fly/walk. Tell users to use the daemon's Mode / the Alt+\` toggle, **not** Blender's
@@ -291,9 +300,10 @@ the config dict) to the broker scheme on every push, `NavBroker._build_frame` se
 6. **Per-mode inverts must be in the add-on, not the daemon.** The daemon doesn't know the nav mode;
    the same channel maps to different actions per mode. So Blender's direction flips are applied in
    `_apply` (and shipped over `adv`), not folded into `output.py`'s generic invert.
-7. **`adv` delivery is "always-attach," not focus-gated.** `_apply_schemes` attaches Blender's
-   `advanced` to the broker scheme regardless of which app is focused (other add-ins ignore unknown
-   keys). This was deliberate — focus-gating it dropped `nav_mode` updates (Solved Problem #1).
+7. **`adv` is per selected broker app.** `_apply_schemes` attaches Blender's payload when Blender is
+   the selected socket host and preserves that host across temporary focus loss so a settings edit
+   still reaches it. Never reintroduce the historical always-Blender payload; it cannot coexist with
+   the other rich integrations.
 8. **Operator class name must match its `bl_idname`.** `bl_idname="trackball_nav.cycle_mode"` requires
    the class to be `TRACKBALL_NAV_OT_cycle_mode` (CATEGORY + `_OT_` + name). Blender 5.1 registered a
    mismatched name with only a console warning, which masked the bug — watch for that.
@@ -318,27 +328,27 @@ the config dict) to the broker scheme on every push, `NavBroker._build_frame` se
 These were all found via live trackball testing; the fixes are in the code but the *reasoning* isn't.
 
 1. **Fly/Walk wouldn't engage — add-on stayed in orbit (`nav=orbit` in the log).**
-   *Root cause:* `_apply_schemes` only attached Blender's `advanced` (which carries `nav_mode`) when
-   Blender happened to be the focused app at push time — fragile timing, so `nav_mode` updates were
-   dropped. *Fix:* always-attach `advanced` to the broker scheme (Gotcha #7). Also why the Alt+\`
-   override exists (§5.5) — it bypasses delivery entirely.
+   *Root cause:* early focus timing dropped the payload carrying `nav_mode`. The first repair always
+   attached Blender settings, which became wrong after other rich integrations arrived. The current
+   design retains the selected broker app across temporary focus loss and builds that app's own
+   payload (Gotcha #7). Alt+\` remains a useful host-local override.
 2. **"Nothing moves, Shift does nothing," yet the log showed frames arriving and `_apply` running.**
    *Root cause:* the viewport was in **Camera view**, where Blender ignores `rv` edits (Gotcha #3).
    *Fix:* navigating now exits camera view to perspective (unless lock-camera is on). The
    `applied persp=…->… rotD=… locD=…` diagnostic was added to diagnose exactly this.
 3. **Orbit felt 2× too fast at Sensitivity 1.0.**
    *Root cause:* the add-on rotates the view by exactly the broker delta (measured gain 1.000), and the
-   **dual-sensor device reports ~2× the physical angle.** *Fix:* `ORBIT_SCALE = 0.5` so Sensitivity 1.0
-   is a true 1:1 ball→view orbit. Pan/zoom kept their feel-based scales.
-4. **Twist-roll felt inverted in fly/walk/viewpoint vs object orbit.**
+   **dual-sensor device reports ~2× the physical angle.** *Fix:* the immutable Blender host baseline
+   uses orbit factor `0.5`, so Sensitivity 1.0 is a true 1:1 ball→view orbit.
+4. **Twist-roll felt inverted in fly/walk/camera vs object orbit.**
    *Root cause:* the world-space roll is the *same* sign everywhere, but rolling **inside-out**
    (first-person / about the eye) *feels* opposite to rolling **outside-in** (about an external pivot).
-   *Fix:* default-invert `viewpoint.roll` + `fly.bank`. Later generalised to the full per-mode invert
+   *Fix:* default-invert `camera.roll` + `fly.bank`. Later generalised to the full per-mode invert
    set (Problem #8).
-5. **"Viewpoint" orbit swung around a seemingly arbitrary point instead of turning the camera.**
+5. **"Camera" orbit swung around a seemingly arbitrary point instead of turning the camera.**
    *Root cause:* it orbited `view_location`, which sits far in front after any fly/look or at a large
-   view distance. *Fix:* the `viewpoint` pivot now rotates about the **eye** — "turn the camera in
-   place." (`view`/`object`/`cursor_3d`/`origin` still orbit external points.)
+   view distance. *Fix:* the `camera` pivot now rotates about the **eye** — "turn the camera in
+   place." (`screen_center`/`object`/`cursor_3d`/`origin` still orbit external points.)
 6. **Shift-to-move did nothing in fly/walk.**
    *Two root causes:* (a) the camera-view bug (#2); (b) the mapping/scale — pushing the ball forward
    *strafed vertically* and movement was scaled purely by `view_distance` (→ ~0 when zoomed in close).
@@ -348,10 +358,10 @@ These were all found via live trackball testing; the fixes are in the code but t
    *Constraint:* can't drive Blender's native modal (Gotcha #5). *Fix:* the Alt+\` operator/override
    (§5.5) — switches the *trackball's* mode locally.
 8. **User wanted granular control over every direction (e.g. invert walk-forward without touching
-   orbit) and the 3 viewpoint axes, not just roll; and the two Blender tabs were confusing.**
+   orbit) and the 3 camera axes, not just roll; and the two Blender tabs were confusing.**
    *Fix:* the per-mode/per-axis `invert` structure (§5.4), and **merged** the separate "Blender
-   Advanced" tab into *Per-App Bindings → blender* (now scrollable). The old `invert_viewpoint_roll`
-   flag was replaced by `invert.viewpoint.roll` + `invert.fly.bank`.
+   Advanced" tab into *Per-App Bindings → blender* (now scrollable). The old `invert_camera_roll`
+   flag was replaced by `invert.camera.roll` + `invert.fly.bank`.
 
 ---
 
@@ -366,19 +376,20 @@ These were all found via live trackball testing; the fixes are in the code but t
   `_apply_schemes` wiring, regressions). `tests/test_blender_nav_wiring.py` is the Blender-specific one.
 - **Live (only thing not coverable headless):** open Blender, run the daemon, focus a 3D viewport,
   switch to 3D mode, and use the trackball. Use `blender_addin.log` (see §12) and Blender's F3 reload
-  to iterate. Sign/feel calibration (`ORBIT_SCALE` etc.) needs a real trackball.
+  to iterate. Host-baseline sign/feel calibration needs a real trackball.
 
 ---
 
 ## 11. How to make common changes
 
-- **Add a Blender option:** add it to `_DEFAULT_BLENDER_ADVANCED` (config), read it from `adv` in the
-  add-on, expose it in `_blender_bindings_fields` (ui). Deep-merge means no version migration. Bump the
-  add-on version (3 places) if the add-on changed. Restart daemon + F3.
-- **Add an invertible axis:** add the key to the right mode in `_DEFAULT_BLENDER_INVERT`, apply it in
-  the `_apply` per-mode invert block, add a checkbox to the relevant `_invert_row` in ui.
-- **Change feel/calibration:** edit the baseline constants at the top of the add-on (§5.3). Don't add a
-  second scale in the daemon.
+- **Add a Blender option:** add its shipped value to `default_profiles.json`, validate/normalize it
+  in `config.py` where needed, read it from `adv` in the add-on, and expose it through Blender's
+  capability profile in `binding_schema.py`. A merely additive field needs no version migration.
+  Bump the add-on's three markers if its code changed; restart daemon and reload scripts.
+- **Add an invertible axis:** add the key to the shipped advanced profile and action schema, apply it
+  in `_apply_action_routing`, and expose it through the declarative binding profile.
+- **Change suite alignment:** edit Blender's packaged `host_profiles.json` entry (§5.3), update
+  the baseline tests/docs, and bump the daemon/add-on contract versions.
 - **Ship a new add-on build:** bump `bl_info["version"]` + `ADDIN_VERSION` + `version.json`; the
   daemon's `auto_update` re-copies on next launch (compares `version.json`).
 
@@ -390,13 +401,11 @@ These were all found via live trackball testing; the fixes are in the code but t
   `scheme: nav=…` (what mode/options the add-on received), `rx orbit/pan/zoom …` (which channel is
   arriving — distinguishes daemon/Shift issues from add-on issues), `applied persp=…->… rotD=… locD=…`
   (did the view actually change, and where). The daemon log shows `scheme -> blender: … blender_nav=…`.
-- **Deferred / not done:**
-  - **Discrete view ops** (Frame Selected, axis snaps, 15° steps) — need a *button-event* channel the
-    broker doesn't have yet (it streams only continuous o/p/z; buttons are on-device HID). Clean hooks
-    exist but nothing fires them.
-  - **"Under the cursor" targeting & true zoom-to-mouse** (the under-mouse `cursor` pivot) — need a live mouse position a timer can't
-    get (Gotcha #4); we use the active view / screen centre.
+- **Known limitations:**
+  - **Viewport-under-the-cursor selection** in multi-viewport layouts. Under Cursor orbit and To
+    Cursor zoom are implemented, but `_resolve_target` still chooses the active/largest `VIEW_3D`.
   - **Walk gravity/teleport** — not implemented (no physics step); walk is horizon-locked look +
     horizontal move only.
-- **Verify-live items:** camera-lock feel; sign/scale calibration of every axis (the per-mode invert
-  defaults are best-guesses for this device).
+- **Verify-live items:** passive mouse tracking and file-load restart, camera-lock feel,
+  fixed-horizon entry, independent holds, and sign/scale feel. Track the current matrix in
+  `TODO.md`.

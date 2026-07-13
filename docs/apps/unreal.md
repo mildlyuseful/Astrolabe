@@ -6,11 +6,9 @@ and the Unreal-specific gotchas that would otherwise cost real debugging. Unreal
 add-on** integration (like Fusion/Blender/FreeCAD), not an in-process driver. Read this before
 touching the add-on.
 
-Verified live on the dev machine: **Unreal Engine 5.8** (`5.8.0-55116800+++UE5+Release-5.8`), the
-built-in **Python Editor Script Plugin**. Add-on `0.2.4` (Blender-parity scheme: orbit/fly/walk,
-viewpoint pivot, twist action, lock-horizon, per-mode inverts; under-mouse `cursor` orbit /
-`to_cursor` zoom via Epic's stock **GeoReferencing** editor BPLibrary — gotcha #13;
-`selection_overrides_pivot` — gotcha #14).
+The camera/API model was originally verified against Unreal Engine 5.8 and the built-in Python
+Editor Script Plugin. Current versions come from `ADDIN_VERSION`, `version.json`, the `.uplugin`, and
+`trackball_daemon.__version__`; do not maintain a snapshot here.
 
 ---
 
@@ -83,7 +81,7 @@ Unreal's bundled Python). They only talk over the broker socket.
 ```
 BLE trackball → output.py (per-app sensitivity/sign + Shift gating) → App._nav_sink
   → (focused app == unreal, enabled) → NavBroker.submit  (accumulate; flush one coalesced frame/Hz)
-        frame = {"o":[ox,oy,oz], "p":[px,py], "z":zoom, "op":…, "os":…, "zm":…  (+ Blender-only "adv", IGNORED)}
+        frame = {"o":[ox,oy,oz], "p":[px,py], "z":zoom, "op":…, "os":…, "zm":…, "adv":{…}}
   ──────────────────── localhost TCP ────────────────────
   → add-on reader thread (background; newline-JSON → queue.Queue)
   → Slate post-tick pump _pump(delta)  (MAIN/game thread; drains the queue)
@@ -95,10 +93,10 @@ needed change), and `_nav_sink`'s else-branch sends every non-SolidWorks/non-Ons
 broker. Unreal is selected when the foreground process is `UnrealEditor.exe`/`UE4Editor.exe` and the
 app is enabled. (Verified by `tests/test_app_routing.py::test_unreal_routes_to_broker`.)
 
-**Contract:** the daemon already scaled o/p/z (per-app sensitivity/gain + the generic invert). The
-add-on only bakes a **baseline sign/scale** (`ORBIT_*`/`PAN_*`/`ZOOM_*` in `tbnav_unreal_camera.py`)
-+ the scheme. Don't re-scale in both places. The add-on reads only `o/p/z/op/os/zm` and **ignores**
-the Blender-only `adv` key (like the Fusion add-in).
+**Contract:** the daemon sends Unreal's immutable correction in `adv.host_baseline`; the add-on
+applies it after mode-specific user action routing. `tbnav_unreal_camera.py` is deliberately neutral
+and `adv` is part of Unreal's supported wire contract. See
+[`../default_profiles.md`](../default_profiles.md).
 
 ---
 
@@ -150,12 +148,12 @@ sub.set_level_viewport_camera_info(unreal.Vector(*loc), new_rot)
 
 The Unreal add-on carries the **same rich scheme as Blender** (an additive `"adv"` object on each
 broker frame — see §5.1), interpreted for the editor's free-fly camera. `config.apps.unreal` uses
-`_unreal_app()` (the lean shape **plus** a Blender-style `advanced` block).
+the shared shipped profile plus Unreal's rich `advanced` action block.
 
 - **Nav mode** (`advanced.nav_mode`): `orbit` | `fly` | `walk` — the daemon dropdown (or the toggle).
   - **orbit**: un-shifted ball orbits about the pivot; Shift → pan/zoom. Twist is routed by
-    `advanced.twist_action` (`roll` | `zoom` | `dolly` | `none`; for Unreal `zoom` == `dolly` since the
-    camera has no view-distance). `advanced.lock_horizon` forces turntable (horizon stays level).
+    `advanced.twist_action` (`roll` | `zoom` | `dolly` | `none`). Zoom changes the active level
+    viewport FOV; Dolly moves the camera. `advanced.lock_horizon` forces turntable.
   - **fly**: un-shifted ball = **free look that BANKS on twist**; Shift+ball = **6DOF move along the
     camera's own axes** (forward dives/climbs with pitch, vertical along camera-up). `advanced.fly_speed`.
   - **walk**: un-shifted ball = **horizon-locked look** (no bank, twist dropped); Shift+ball = **move
@@ -163,36 +161,42 @@ broker frame — see §5.1), interpreted for the editor's free-fly camera. `conf
   - **fly ≠ walk** (verified): they only coincide when the camera is level and you don't twist. The
     two real differences are (a) banking on look, (b) 3D-along-look vs horizontal-plane movement. Kept
     as separate modes for Blender parity.
-- **Pivots** (`scheme.orbit_pivot`): `viewpoint` → the **eye** (turn the camera in place / free-fly);
-  `origin` → (0,0,0); `object` → median of the **selected actors'** bounding-box centres
-  (`EditorActorSubsystem.get_selected_level_actors()` → `actor.get_actor_bounds(False)`), cached
-  ~0.5 s; `selection` → **falls back to `object`** — **Unreal has NO 3D cursor** (verified: no such Python
+- **Pivots** (`scheme.orbit_pivot`): `camera` → the **eye** (turn the camera in place / free-fly);
+  `origin` → (0,0,0); `object` → aggregate bounds center of the level's scene actors;
+  `selection` → aggregate bounds center of selected actors — **Unreal has NO 3D cursor**
+  (verified: no such Python
   API; all Blender-style `*cursor*` names are mouse/UI/gizmo, and no 3D-cursor option is shown for Unreal);
   the under-mouse `cursor` pivot (add-on **0.2.3**) raycasts the surface under the **level-viewport
   mouse** — Half A from stock `GeoReferencingEditorBPLibrary.get_viewport_cursor_information()`
   (gotcha #13), Half B `line_trace_single` along that world ray, bbox-validated and **held for the
-  gesture** like `view`; on miss / unfocused viewport it falls back to the selection centre;
-  `view` → the surface under the **screen centre** via `SystemLibrary.line_trace_single` down the
+  gesture** like `screen_center`; on miss / unfocused viewport it continues the configured chain;
+  `screen_center` → the surface under the **screen centre** via `SystemLibrary.line_trace_single` down the
   camera forward axis into the **editor world** (`sub.get_editor_world()`), validated against the
-  selection bbox and **held for the gesture** (re-raycast on pan/zoom or after a ~0.35 s idle).
-  Everything falls back through the selection centre to a **point a focus-distance ahead of the
-  camera**, then `None` (= free-fly). So orbit always has a sane behaviour, and **free-fly emerges
-  naturally** when nothing is under the cursor / selected.
+  selection bbox and **held for the gesture** (re-raycast on pan/zoom or after the configured Pivot
+  hold idle gap).
+  Every unavailable method continues through the configured global chain; `camera` is always the
+  eye. If the chain is exhausted, that orbit frame is ignored rather than inventing another pivot.
 - **Orbit style** (`scheme.orbit_style`): `free` (about the camera's own right/up/fwd, twist allowed)
   or `turntable` (yaw about WORLD Z + pitch about camera-right, **roll dropped**).
-- **Zoom mode** (`scheme.zoom_mode`): `to_center` → dolly along forward; `to_object` → dolly toward the
-  selection centre; `to_cursor` → dolly toward the under-mouse surface hit (same Geo ray + trace as
-  cursor orbit, own `_zoom_gesture` hold; miss → forward dolly).
-- **Per-mode inverts** (`advanced.invert.<orbit|viewpoint|fly|walk>.<axis>`): applied **in the add-on**
-  (like Blender, §12.9) — the same physical channel means different things per mode, so independent
-  inverts are only possible once the mode is known. Signs default **off** (best-guess, live-tune) —
-  Unlike Blender, no baked-in roll/bank inverts (settle them on the device).
+- **Zoom target** (`scheme.zoom_mode`): `to_center`, `to_object`, or `to_cursor` controls the fixed
+  point. **Pan-mode zoom** (`advanced.zoom_style`) selects native level-viewport FOV Zoom or camera
+  Dolly. Under Cursor uses the same Geo ray and an independent held target; an empty-space miss
+  synthesizes a point on that ray at the tracked focus depth.
+- **Per-mode action routes** (`advanced.axis_source` + `advanced.invert`): every action selects
+  X/Y/Z and can invert independently in the add-on, where the active mode is known. Rotation uses
+  `o`; shifted movement uses `(p.x,p.y,z)`, so twist can drive Walk Forward. Defaults preserve the
+  old wiring. Unlike Blender, no roll/bank inversion is baked in.
 - **`advanced.pan_scales_with_distance`**: pan scaled by the focus distance (zoom-stable) vs a fixed
   reference distance.
 
-Dropped vs Blender (not applicable to Unreal): `zoom_style` (zoom IS a dolly), `zoom_to_mouse` (use
-`zoom_mode`), `lock_camera_to_view` (no editor-camera-view equivalent), and the in-editor Alt+`
-mode-cycle shortcut (no equivalent editor input hook wired — use the daemon dropdown).
+Entering Turntable, Lock Horizon, or Walk from a roll-capable state optionally calls
+`cammath.level_horizon` once. It preserves location, view direction, focus distance, and the active
+pivot. The first frame establishes state; ordinary fixed-mode frames do not repeatedly level.
+
+Dropped vs Blender (not applicable to Unreal): `lock_camera_to_view` (no editor-camera-view
+equivalent), and the in-editor Alt+` mode-cycle
+shortcut (no equivalent editor input hook wired — use the daemon dropdown). Zoom targeting uses
+the shared `bindings.scheme.zoom_mode` field.
 
 ### 5.1 How the advanced block reaches the add-on
 `App._apply_schemes` attaches the **focused broker app's** `advanced` block as the frame's additive
@@ -276,21 +280,18 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
 4. **`get_level_viewport_camera_info()` returns `None`** when there's no level-editor perspective
    viewport (commandlet, or the editor not ready). The pump guards on `if not info: return`. (Headless
    it is *always* None — that's why the live camera move is the one thing tests can't cover.)
-5. **Left-handed + degrees → several sign flips vs the other apps.** The basis/round-trip math is
-   convention-safe (it uses Unreal's own helpers), but the **user-feel signs**
-   (`ORBIT_SIGN`/`PAN_SIGN`/`ZOOM_SIGN`) are **best-guess defaults** — settle each by EYE on the device
-   (Gotcha-adjacent: don't "prove" a sign with self-referential algebra).
-5b. **Orbit baseline is `ORBIT_SCALE = 2.0`, NOT 1.0.** On real hardware the default orbit felt HALF
-   of what it should be, so the baseline was doubled (verified on the device — see the 0.1.0→0.2.0
-   note). There is no hidden `0.5` anywhere in the path (firmware emits true radians; `output.py` emits
-   `recv * sensitivity`; the add-on emits `o * ORBIT_SCALE`), so `1.0` rotates by exactly the broker
-   angle = the `--debug` cube — but the *feel* wanted ~2×. Set orbit **Sensitivity 0.5** to get back
-   to the cube's literal 1:1. (This is the one place Unreal deviates from the §12.12 "eye-camera = 1.0"
-   doctrine, on purpose, by hardware observation.)
+5. **Left-handed + degrees need a host correction.** The basis/round-trip math uses Unreal's own
+   helpers and remains convention-safe; user-feel signs belong in the immutable Unreal profile and
+   should be settled by eye on the device, not inferred from self-referential algebra.
+5b. **The immutable Unreal orbit baseline is `2.0`, not `1.0`.** On real hardware the default orbit
+   felt half of what it should be, so the developer profile doubles it (verified on the device — see
+   the 0.1.0→0.2.0 note). `tbnav_unreal_camera.py` is neutral; the mode-aware add-on consumes the
+   factor from `adv.host_baseline`. Set orbit **Sensitivity 0.5** for the debug cube's literal 1:1.
 5c. **Unreal has NO 3D cursor.** Probed the whole `unreal` namespace + `LevelEditorSubsystem`/
    `EditorActorSubsystem` — there is no queryable Blender-style 3D-cursor / editor-pivot point (every
-   `*cursor*` name is the mouse cursor / a UI gizmo). So the `selection` orbit pivot **falls back to the
-   selection centre** (identical to `object`), and the daemon UI shows no 3D-cursor option for Unreal.
+   `*cursor*` name is the mouse cursor / a UI gizmo). The daemon therefore does not offer the
+   **3D Cursor** pivot for Unreal. Selection and Model Center remain distinct: Model Center uses
+   aggregate scene bounds.
 5d. **fly ≠ walk** (don't collapse them). Verified: fly look BANKS on twist and moves along the
    camera's 3D forward (dives when pitched); walk look is horizon-locked (twist dropped) and moves in
    the ground plane + world-Z. They coincide only when level and un-twisted.
@@ -298,8 +299,8 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
    **focus distance** (eye→pivot, cm) and scale pan/zoom by it, so the effective move is ~100× the
    metre-based apps without a magic constant. `PAN_SCALE`/`ZOOM_SCALE` are dimensionless ratios.
 7. **Editor-world line traces are finicky** (many editor meshes have no collision on the queried
-   channel) → the `view` pivot validates the hit and **falls back** to selection / a forward point.
-   Expect `view` to behave like `object`/free-fly in scenes without collidable geometry under the
+   channel) → the `screen_center` pivot validates the hit and continues the configured chain on miss.
+   Expect `screen_center` to behave like `object`/free-fly in scenes without collidable geometry under the
    crosshair.
 8. **No native view-distance/pivot** → orbit-about-a-pivot and zoom are **synthesised** and we manage
    the distance ourselves. There is no "set orbit pivot" API.
@@ -324,22 +325,23 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
       `get_viewport_cursor_location()` + `UnrealEditorSubsystem.screen_to_world`. Our `.uplugin` lists
       `GeoReferencing` as a dependency so enabling Trackball Nav enables it (and its SQLiteCore dep).
     - **Half B — surface hit:** `line_trace_single` along that world ray (same bbox + hold machinery as
-      `view`). `to_cursor` zoom uses the same `_cursor_pivot` with a separate `_zoom_gesture` hold.
+      `screen_center`). `to_cursor` zoom uses the same `_cursor_pivot` with a separate `_zoom_gesture` hold.
     - **Focus gate (live UX):** Epic's getter sets `focused=false` when the **viewport widget** lacks
       Slate focus (Details / Content Browser / …). Daemon focus on `UnrealEditor.exe` is not enough —
-      click the level viewport once. Unfocused / miss → selection centre → forward-point fallbacks
-      (same chain as `view`). Logged as `cursor-pivot:` in `unreal_addin.log`.
+      click the level viewport once. Unfocused / miss makes the method unavailable and resolution
+      continues from the start of the configured chain. Logged as `cursor-pivot:` in
+      `unreal_addin.log`.
     - **Rejected alternatives:** a custom Trackball C++ module; an EUW click-capturing overlay;
       `get_mouse_position_on_platform` + a calibrated viewport rect (no reliable screen origin).
-    - **Live-GUI verify still TODO:** headless stubs cover the pipeline; confirm hover+orbit feel and
-      the focus gate on a real editor + trackball.
-14. **`selection_overrides_pivot` (add-on 0.2.4).** Config key `apps.unreal.selection_overrides_pivot`
+    - Headless stubs cover the pipeline; the real-editor hover/focus pass is tracked in
+      [`TODO.md`](../../TODO.md).
+14. **`selection_overrides_pivot`.** Config key `apps.unreal.selection_overrides_pivot`
     (default **True**; deep-merged, no config-version bump). The daemon folds it into the frame's
-    `adv` object. When **True** and level actors are selected, orbit (`view` / `cursor` / `origin`)
+    `adv` object. When **True** and level actors are selected, orbit (`screen_center` / `cursor` / `origin`)
     and `to_cursor` zoom use the **selection centre** instead of the designated pivot. When
     **False**, the designated pivot is used even with a selection (raycast bbox gate disabled).
-    `object` / `selection` pivots still mean selection centre. Placeholder toggles exist for every
-    other 3D app in the UI; only Unreal applies it today.
+    Model Center and Selection remain distinct. The same selection-override contract is implemented
+    by every supported host; Unreal's bbox gate behavior is the host-specific detail here.
 
 ---
 
@@ -378,9 +380,9 @@ deferral FreeCAD made for its sign calibration).
   is green.
 - **Live (the only thing tests can't cover):** install via the daemon's **Set up** (or drop the
   plugin into a project's `Plugins/`), enable it in *Edit → Plugins* + restart, run the daemon, open a
-  level, switch to 3D mode, focus the editor, **click the level viewport**, set Orbit around =
+  level, switch to 3D mode, focus the editor, **click the level viewport**, set Orbit pivot =
   Under Cursor, and use the trackball. Lean on `%APPDATA%\TrackballDaemon\unreal_addin.log`
-  (`start:` / `scheme:` / `rx orbit|pan|zoom` / `view-pivot` / `cursor-pivot:` / `applied`).
+  (`start:` / `scheme:` / `rx orbit|pan|zoom` / `screen-center-pivot` / `cursor-pivot:` / `applied`).
   **Sign/scale calibration** (`ORBIT_SIGN`/`PAN_*`/`ZOOM_*` in `tbnav_unreal_camera.py`) still wants
   a real trackball — flip with the per-app Invert checkboxes or the constants.
 
@@ -390,14 +392,13 @@ deferral FreeCAD made for its sign calibration).
 
 - **Log:** `%APPDATA%\TrackballDaemon\unreal_addin.log` (rate-limited). Key lines: `start:` (loaded +
   engine version), `scheme:` (op/os/zm received), `rx orbit|pan|zoom` (which channel arrived —
-  distinguishes a daemon/Shift issue from an add-on issue), `view-pivot:` / `cursor-pivot:` (surface
+  distinguishes a daemon/Shift issue from an add-on issue), `screen-center-pivot:` / `cursor-pivot:` (surface
   hit or fallback — cursor needs viewport Slate focus), `applied` (the camera actually changed),
   `Play-In-Editor active` (PIE guard), `no perspective viewport` (no level/viewport open),
   `GeoReferencingEditorBPLibrary missing` (dependency not enabled). The tray's `Apps: unreal v…`
   confirms the hello handshake.
-- **Deferred / not done:** the **live GUI sign/scale calibration** (best-guess defaults); **live
-  verify** of under-cursor orbit / `to_cursor` zoom feel + focus-gate; **discrete view ops** (Frame
-  Selected, axis snaps) need a button-event channel the broker doesn't have yet.
+- The current live-GUI matrix (cursor focus, independent holds, horizon entry, signs/feel, PIE) and
+  discrete button-event work are tracked in [`TODO.md`](../../TODO.md).
 - **Install caveat:** writing the plugin into an engine `Plugins` dir needs **admin**; without it the
   daemon prints manual steps (engine dir as admin, or the project `Plugins` dir no-admin). The plugin
   must be **enabled once** per project before it loads.

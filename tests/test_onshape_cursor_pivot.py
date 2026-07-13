@@ -12,7 +12,6 @@ These tests cover the deterministic offline pieces with a fake connection:
 What it CANNOT prove (needs the live browser + userscript): that the page report lands on the
 real WebGL canvas and that Onshape's hit-test returns the surface under the mouse.
 """
-import math
 import os
 import sys
 import time
@@ -27,12 +26,19 @@ from trackball_daemon.onshape_bridge import OnshapeBridge, _PropUnsupported  # n
 
 
 class FakeConn:
-    def __init__(self, hit=None, view_ext=None, model_ext=None, misses=0):
+    def __init__(self, hit=None, view_ext=None, model_ext=None, misses=0,
+                 selection_ext=None, selection_empty=None):
         self._hit_unsupported = False
         self._hit = hit
         self._view_ext = view_ext if view_ext is not None else [-4.0, -3.0, -1.0, 4.0, 3.0, 1.0]
         self._model_ext = model_ext if model_ext is not None else [-10.0] * 3 + [10.0] * 3
         self.misses = misses
+        self._selection_ext = selection_ext
+        self._selection_empty = selection_empty
+        self._affine = ob._encode_affine(
+            (0.0, 0.0, 10.0), (1.0, 0.0, 0.0),
+            (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
+        self._txn = 0
         self.writes = []
 
     def read(self, prop, ttl=0.0):
@@ -40,13 +46,25 @@ class FakeConn:
             return self._view_ext
         if prop == "model.extents":
             return self._model_ext
+        if prop == "selection.extents":
+            return self._selection_ext
+        if prop == "selection.empty":
+            return self._selection_empty
+        if prop == "view.affine":
+            return self._affine
+        if prop == "view.perspective":
+            return False
         return None
 
     def write(self, prop, value):
         self.writes.append((prop, value))
+        if prop == "view.affine":
+            self._affine = value
 
     def write_best_effort(self, prop, value):
         self.writes.append((prop, value))
+        if prop == "view.affine":
+            self._affine = value
 
     def _rpc(self, method, args):
         assert method == "self:read" and args == ["hit.lookat"]
@@ -80,6 +98,45 @@ def _clear_page_pointer():
 
 def vclose(u, v, eps=1e-9):
     return all(abs(u[i] - v[i]) <= eps for i in range(3))
+
+
+def test_level_horizon_basis_preserves_view_direction_and_is_idempotent():
+    back = ob._v_normalize((0.4, -0.2, 0.8))
+    leveled = ob._level_horizon_basis(back)
+    assert leveled is not None
+    right, up = leveled
+    assert abs(ob._v_dot(right, ob.WORLD_UP)) < 1e-9
+    assert ob._v_dot(up, ob.WORLD_UP) > 0.0
+    assert abs(ob._v_dot(right, back)) < 1e-9
+    assert abs(ob._v_dot(up, back)) < 1e-9
+    again = ob._level_horizon_basis(back)
+    assert vclose(again[0], right) and vclose(again[1], up)
+
+
+def test_level_horizon_basis_skips_world_up_singularity():
+    assert ob._level_horizon_basis(ob.WORLD_UP) is None
+
+
+def test_onshape_turntable_uses_top_plane_normal():
+    assert ob.WORLD_UP == (0.0, 0.0, 1.0)
+
+
+def test_level_horizon_transition_queues_once_and_toggle_can_preserve_tilt(bridge):
+    bridge.set_scheme("object", "free", "to_center")
+    assert bridge._level_pending is False
+    bridge.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=True)
+    assert bridge._level_pending is True
+    bridge.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=False)
+    assert bridge._level_pending is False
+    bridge.set_scheme("object", "free", "to_center")
+    bridge.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=True)
+    assert bridge._level_pending is True
+    bridge._level_pending = False
+    bridge.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=True)
+    assert bridge._level_pending is False
+    bridge.set_scheme("object", "free", "to_center")
+    bridge.set_scheme("object", "turntable", "to_center", level_horizon_on_entry=False)
+    assert bridge._level_pending is False
 
 
 # --- _pixel_ray -------------------------------------------------------------------------------
@@ -125,6 +182,24 @@ def test_parse_pointer_body_rejects_junk():
     assert ob._parse_pointer_body(b"not-json") is None
     assert ob._parse_pointer_body(b"{}") is None
     assert ob._parse_pointer_body(b'{"ndc_x":1}') is None
+
+
+def test_local_bridge_rejects_non_onshape_web_origins():
+    assert ob._allowed_web_origin("https://cad.onshape.com") is True
+    assert ob._allowed_web_origin("https://acme.onshape.com") is True
+    assert ob._allowed_web_origin("https://127.51.68.120:8181") is True
+    assert ob._allowed_web_origin("") is True                 # direct local status-page visit
+    assert ob._allowed_web_origin("https://evil.example") is False
+    assert ob._allowed_web_origin("http://cad.onshape.com") is False
+    assert ob._allowed_web_origin("https://onshape.com.evil.example") is False
+
+
+def test_onshape_bridge_is_disabled_until_explicitly_enabled(bridge):
+    assert bridge._enabled.is_set() is False
+    bridge.set_enabled(True)
+    assert bridge._enabled.is_set() is True
+    bridge.set_enabled(False)
+    assert bridge._enabled.is_set() is False
 
 
 def test_page_pointer_ttl_and_off_canvas():
@@ -184,41 +259,205 @@ def test_hit_cursor_bbox_rejects_stray_hit(bridge):
     assert len(reads) == len(ob.HIT_APERTURES)
 
 
+def test_hit_rejects_point_outside_strict_bbox(bridge):
+    """A point just outside the model bbox but within the OLD 10%-of-diagonal margin (where
+    Onshape's fabricated no-hit points land) must be rejected so the chain continues."""
+    ob._set_page_pointer(0.0, 0.0, True)
+    conn = FakeConn(hit=[11.0, 0.0, 0.0])              # bbox is ±10 -> old margin ~3.46 accepted it
+    assert bridge._hit_cursor(conn, (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1)) is None
+
+
+class FabricatingConn(FakeConn):
+    """Simulates Onshape's real no-hit behaviour: hit.lookat is fabricated as a point ON the
+    pick ray at a fixed distance from the ray ORIGIN, so it tracks hit.lookfrom."""
+    def __init__(self, depth, **kw):
+        super().__init__(**kw)
+        self.depth = depth
+
+    def _last(self, prop):
+        for p, v in reversed(self.writes):
+            if p == prop:
+                return v
+        return None
+
+    def _rpc(self, method, args):
+        assert method == "self:read" and args == ["hit.lookat"]
+        lf, d = self._last("hit.lookfrom"), self._last("hit.direction")
+        return [lf[i] + d[i] * self.depth for i in range(3)]
+
+
+def test_hit_rejects_fabricated_origin_tracking_point(bridge):
+    """The confirmation re-cast: a fabricated at-depth point moves when the ray origin slides
+    back along the ray, so it must be rejected even when it lands inside the model bbox."""
+    ob._set_page_pointer(0.0, 0.0, True)
+    # lookfrom is (0,0,82) (eye z=50 + backoff 8*vh=32); depth 82 fabricates (0,0,0) -- dead
+    # inside the bbox, indistinguishable from a real hit without the re-cast.
+    conn = FabricatingConn(depth=82.0)
+    assert bridge._hit_cursor(conn, (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1)) is None
+
+
+def test_hit_accepts_origin_invariant_point(bridge):
+    """A real surface hit is invariant to the ray origin and passes the confirmation re-cast."""
+    ob._set_page_pointer(0.0, 0.0, True)
+    conn = FakeConn(hit=[1.0, 2.0, 5.0])               # FakeConn ignores lookfrom: origin-invariant
+    assert bridge._hit_cursor(conn, (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1)) == (1.0, 2.0, 5.0)
+
+
 # --- _pivot("cursor") -------------------------------------------------------------------------
 def test_pivot_cursor_uses_cursor_hit(bridge, monkeypatch):
     monkeypatch.setattr(bridge, "_hit_cursor", lambda *a: (1.0, 1.0, 1.0))
-    monkeypatch.setattr(bridge, "_hit_center",
+    monkeypatch.setattr(bridge, "_hit_screen_center",
                         lambda *a: (_ for _ in ()).throw(AssertionError("should not reach centre")))
-    p = bridge._pivot(FakeConn(), {"op": "cursor"}, (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    p = bridge._pivot(FakeConn(), {"op": "cursor", "fallbacks": ["screen_center", "object"]},
+                      (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
     assert p == (1.0, 1.0, 1.0)
 
 
 def test_pivot_cursor_falls_back_to_centre_then_object(bridge, monkeypatch):
     monkeypatch.setattr(bridge, "_hit_cursor", lambda *a: None)
-    monkeypatch.setattr(bridge, "_hit_center", lambda *a: (7.0, 7.0, 7.0))
-    p = bridge._pivot(FakeConn(), {"op": "cursor"}, (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    monkeypatch.setattr(bridge, "_hit_screen_center", lambda *a: (7.0, 7.0, 7.0))
+    p = bridge._pivot(FakeConn(), {"op": "cursor", "fallbacks": ["screen_center", "object"]},
+                      (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
     assert p == (7.0, 7.0, 7.0)
 
-    monkeypatch.setattr(bridge, "_hit_center", lambda *a: None)
+    monkeypatch.setattr(bridge, "_hit_screen_center", lambda *a: None)
     monkeypatch.setattr(bridge, "_object_center", lambda conn: (9.0, 9.0, 9.0))
-    p = bridge._pivot(FakeConn(), {"op": "cursor"}, (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    p = bridge._pivot(FakeConn(), {"op": "cursor", "fallbacks": ["screen_center", "object"]},
+                      (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
     assert p == (9.0, 9.0, 9.0)
 
 
-def test_pivot_view_never_touches_cursor(bridge, monkeypatch):
-    monkeypatch.setattr(bridge, "_hit_center", lambda *a: (3.0, 3.0, 3.0))
+def test_pivot_screen_center_never_touches_cursor(bridge, monkeypatch):
+    monkeypatch.setattr(bridge, "_hit_screen_center", lambda *a: (3.0, 3.0, 3.0))
     monkeypatch.setattr(bridge, "_hit_cursor",
                         lambda *a: (_ for _ in ()).throw(AssertionError("wrong path")))
-    assert bridge._pivot(FakeConn(), {"op": "view"},
+    assert bridge._pivot(FakeConn(), {"op": "screen_center"},
                          (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1)) == (3.0, 3.0, 3.0)
-    assert bridge._pivot(FakeConn(), {"op": "selection"},
-                         (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1)) == (3.0, 3.0, 3.0)
+
+
+def test_selection_override_wins_and_can_be_disabled(bridge, monkeypatch):
+    conn = FakeConn(selection_ext=[2.0, 4.0, 6.0, 6.0, 8.0, 10.0], selection_empty=False)
+    monkeypatch.setattr(bridge, "_hit_screen_center", lambda *a: (1.0, 1.0, 1.0))
+    camera = ((0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    assert bridge._pivot(conn, {"op": "screen_center", "sel_override": True},
+                         *camera) == (4.0, 6.0, 8.0)
+    assert bridge._pivot(conn, {"op": "screen_center", "sel_override": False},
+                         *camera) == (1.0, 1.0, 1.0)
+
+
+def test_camera_pivot_is_unsupported_and_skipped(bridge, monkeypatch):
+    """Onshape has no camera (turn-in-place) pivot: it is orthographic, where rotating about
+    the eye just slides the image. The method is skipped like cursor_3d, never returns the eye."""
+    eye = (2.0, 3.0, 4.0)
+    monkeypatch.setattr(bridge, "_object_center", lambda conn: (9.0, 9.0, 9.0))
+    monkeypatch.setattr(bridge, "_hit_screen_center",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("camera must not raycast")))
+    assert bridge._pivot(FakeConn(), {"op": "camera", "fallbacks": ["object"]},
+                         eye, (1, 0, 0), (0, 1, 0), (0, 0, 1)) == (9.0, 9.0, 9.0)
+    assert bridge._pivot(FakeConn(), {"op": "camera", "fallbacks": []},
+                         eye, (1, 0, 0), (0, 1, 0), (0, 0, 1)) is None
+
+
+def test_camera_primary_keeps_selection_override_exemption(bridge):
+    """Same convention as Fusion/SolidWorks/FreeCAD (where camera is also unsupported): a
+    camera primary is never hijacked by selection override -- it skips straight to the chain."""
+    conn = FakeConn(selection_ext=[2.0, 4.0, 6.0, 6.0, 8.0, 10.0], selection_empty=False)
+    assert bridge._pivot(conn, {"op": "camera", "sel_override": True, "fallbacks": ["origin"]},
+                         (0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1)) == (0.0, 0.0, 0.0)
+
+
+def test_designated_selection_works_when_override_is_off(bridge):
+    conn = FakeConn(selection_ext=[0.0, 2.0, 4.0, 2.0, 6.0, 8.0], selection_empty=False)
+    camera = ((0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    assert bridge._pivot(conn, {"op": "selection", "sel_override": False}, *camera) == (1.0, 4.0, 6.0)
+
+
+# --- zoom target parity -----------------------------------------------------------------------
+def test_zoom_to_object_uses_model_bounds_not_selection(bridge):
+    conn = FakeConn(model_ext=[-4.0, -2.0, 0.0, 8.0, 6.0, 10.0],
+                    selection_ext=[100.0, 100.0, 100.0, 110.0, 110.0, 110.0],
+                    selection_empty=False)
+    camera = ((0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    assert bridge._zoom_target(conn, {"zm": "to_object", "sel_override": True}, *camera) == \
+        (2.0, 2.0, 5.0)
+
+
+def test_zoom_to_cursor_honors_selection_override_then_real_hit(bridge, monkeypatch):
+    conn = FakeConn(selection_ext=[2.0, 4.0, 6.0, 6.0, 8.0, 10.0], selection_empty=False)
+    camera = ((0, 0, 50), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    monkeypatch.setattr(bridge, "_hit_cursor", lambda *a: (9.0, 9.0, 9.0))
+    assert bridge._zoom_target(conn, {"zm": "to_cursor", "sel_override": True}, *camera) == \
+        (4.0, 6.0, 8.0)
+    assert bridge._zoom_target(conn, {"zm": "to_cursor", "sel_override": False}, *camera) == \
+        (9.0, 9.0, 9.0)
+
+
+def test_zoom_target_math_keeps_requested_point_fixed(bridge):
+    eye, pivot = (0.0, 0.0, 10.0), (4.0, 2.0, 0.0)
+    factor = bridge._zoom_factor(0.25)
+    moved = bridge._zoom_persp(eye, (0.0, 0.0, -1.0), pivot, 0.25, hold_target=True)
+    assert vclose(moved, ob._v_add(pivot, ob._v_scale(ob._v_sub(eye, pivot), factor)))
+
+    ortho = bridge._zoom_ortho_eye(eye, (1, 0, 0), (0, 1, 0), pivot, factor)
+    # The point's view-plane offset shrinks with the extents, so its NDC coordinate is unchanged.
+    old_offset = ob._v_sub(pivot, eye)
+    new_offset = ob._v_sub(pivot, ortho)
+    assert abs(new_offset[0] - old_offset[0] * factor) < 1e-9
+    assert abs(new_offset[1] - old_offset[1] * factor) < 1e-9
+
+
+def test_zoom_to_cursor_miss_synthesizes_cursor_depth(bridge, monkeypatch):
+    ob._set_page_pointer(0.5, -0.25, True)
+    conn = FakeConn(view_ext=[-4.0, -2.0, -1.0, 4.0, 2.0, 1.0],
+                    model_ext=[-1.0, -1.0, -1.0, 1.0, 1.0, 1.0])
+    camera = ((0, 0, 10), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    monkeypatch.setattr(bridge, "_hit_cursor", lambda *a: None)
+    assert bridge._zoom_target(conn, {"zm": "to_cursor", "sel_override": False}, *camera) == \
+        (2.0, -0.5, 0.0)
+
+
+def test_pan_clears_orbit_pivot_but_preserves_cursor_zoom_target(bridge, monkeypatch):
+    bridge.set_scheme("cursor", "turntable", "to_cursor")
+    bridge.set_zoom_hold(0.75)
+    bridge._held_pivot = (1.0, 2.0, 3.0)
+    bridge._held_zoom_pivot = (4.0, 5.0, 6.0)
+    bridge._held_zoom_resolved = True
+    conn = FakeConn()
+    monkeypatch.setattr(
+        bridge, "_zoom_target",
+        lambda *args: (_ for _ in ()).throw(AssertionError("pan/held zoom must not recast")))
+
+    bridge._navigate(conn, (0.0, 0.0, 0.0, 0.1, 0.0, 0.0), idle=9.0)
+    assert bridge._held_pivot is None
+    assert bridge._held_zoom_pivot == (4.0, 5.0, 6.0)
+    assert bridge._held_zoom_resolved is True
+
+    bridge._navigate(conn, (0.0, 0.0, 0.0, 0.0, 0.0, 0.1), idle=0.2)
+    assert bridge._held_zoom_pivot == (4.0, 5.0, 6.0)
+
+
+def test_cursor_zoom_recasts_only_after_zoom_hold_expires(bridge, monkeypatch):
+    bridge.set_scheme("cursor", "turntable", "to_cursor")
+    bridge.set_zoom_hold(0.5)
+    bridge._held_zoom_pivot = (1.0, 1.0, 1.0)
+    bridge._held_zoom_resolved = True
+    conn = FakeConn()
+    calls = []
+    monkeypatch.setattr(bridge, "_zoom_target",
+                        lambda *args: calls.append(True) or (9.0, 8.0, 7.0))
+
+    bridge._navigate(conn, (0.0, 0.0, 0.0, 0.0, 0.0, 0.1), idle=0.49)
+    assert calls == []
+    bridge._navigate(conn, (0.0, 0.0, 0.0, 0.0, 0.0, 0.1), idle=0.51)
+    assert calls == [True]
+    assert bridge._held_zoom_pivot == (9.0, 8.0, 7.0)
 
 
 def test_userscript_mentions_endpoint_and_canvas():
     assert "127.51.68.120:8181/trackball/pointer" in ob._POINTER_USERSCRIPT
     assert 'getElementById("canvas")' in ob._POINTER_USERSCRIPT
     assert "getBoundingClientRect" in ob._POINTER_USERSCRIPT
+    assert "Date.now() - last.t > 400" not in ob._POINTER_USERSCRIPT
     assert ob.pointer_userscript_source() == ob._POINTER_USERSCRIPT
     steps = ob.pointer_install_instructions()
     assert "Tampermonkey" in steps and "Violentmonkey" in steps

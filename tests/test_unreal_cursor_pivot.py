@@ -131,6 +131,25 @@ def _cam():
     return tn.cammath.Camera((0.0, 0.0, 100.0), (0.0, 0.0, -1.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0))
 
 
+def test_action_axis_routing_can_make_twist_drive_walk_forward():
+    adv = {
+        "axis_source": {"walk": {
+            "pitch": 0, "yaw": 1, "forward": 2, "strafe": 0, "vertical": 1}},
+        "invert": {"walk": {"forward": True}},
+    }
+    o, p, z = tn._apply_action_routing("walk", "camera", [1.0, 2.0, 3.0],
+                                       [4.0, 5.0], 6.0, adv)
+    assert o == [1.0, 2.0, 3.0]
+    assert p == [4.0, -6.0]       # movement Z (twist) -> forward, then inverted
+    assert z == 5.0               # movement Y -> vertical
+
+
+def test_action_axis_routing_defaults_are_bit_identical():
+    o, p, z = tn._apply_action_routing("fly", "camera", [1.0, 2.0, 3.0],
+                                       [4.0, 5.0], 6.0, {})
+    assert (o, p, z) == ([1.0, 2.0, 3.0], [4.0, 5.0], 6.0)
+
+
 @pytest.fixture(autouse=True)
 def _reset():
     tn._gesture.update(t=0.0, pivot=None, invalid=True)
@@ -240,7 +259,8 @@ def test_selection_override_off_ignores_bbox_gate(monkeypatch):
 def test_selection_override_on_rejects_hit_outside_bbox_then_uses_selection(monkeypatch):
     monkeypatch.setattr(tn, "_selection_center", lambda: ((5.0, 5.0, 5.0), BBOX))
     # With override on, selection wins immediately — no raycast.
-    assert tn._orbit_pivot("view", _cam(), idle=10.0, sel_override=True) == (5.0, 5.0, 5.0)
+    assert tn._orbit_pivot("screen_center", _cam(), idle=10.0,
+                           sel_override=True) == (5.0, 5.0, 5.0)
 
 
 def test_zoom_to_cursor_honours_selection_override(monkeypatch):
@@ -256,21 +276,21 @@ def test_orbit_pivot_object_does_not_use_cursor(monkeypatch):
     assert _SystemLibrary.calls == []
 
 
-def test_zoom_toward_to_cursor_holds_and_falls_back():
+def test_zoom_toward_to_cursor_holds_and_synthesizes_empty_space_depth():
     assert tn._zoom_toward("to_cursor", idle=10.0) == PTR_HIT
     _SystemLibrary.hit = _Hit((6.0, 6.0, 6.0))
     assert tn._zoom_toward("to_cursor", idle=0.0) == PTR_HIT
     assert tn._zoom_toward("to_cursor", idle=tn.PIVOT_HOLD_IDLE + 0.01) == (6.0, 6.0, 6.0)
     tn._zoom_gesture["pivot"] = None
     _SystemLibrary.hit = None
-    assert tn._zoom_toward("to_cursor", idle=10.0) is None
+    assert tn._zoom_toward("to_cursor", idle=10.0) == (0.0, 0.0, -900.0)
 
 
 def test_zoom_toward_to_center_is_none():
     assert tn._zoom_toward("to_center", idle=10.0) is None
 
 
-def test_view_pivot_still_uses_camera_forward():
+def test_screen_center_pivot_uses_camera_forward():
     cam = _cam()
     assert tn._screen_center_pivot(cam, BBOX) == PTR_HIT
     start = _SystemLibrary.calls[0][:3]

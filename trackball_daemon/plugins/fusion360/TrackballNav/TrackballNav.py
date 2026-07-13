@@ -31,27 +31,13 @@ _reader_thread = None
 # --- tuning: Fusion's intrinsic axis orientation + baseline sensitivity. These bake in the
 #     known-good defaults; the daemon's Per-App Bindings (gain 1.0 = this baseline) scale
 #     from here, and the Invert checkboxes flip further. -------------------------------------
-ORBIT_SCALE = (-1.0, -1.0, 1.0)  # orbit X/Y inverted (o[0]=right, o[1]=up, o[2]=fwd)
-PAN_SIGN = (-1.0, -1.0)          # pan along (camera-right, camera-up); up-down negated
-PAN_SCALE = 0.14                 # broker pan delta -> fraction of view extents (baseline pan feel)
-ZOOM_SCALE = 0.25                # broker zoom delta -> fraction of view extents (baseline zoom feel)
-ZOOM_SIGN = 1.0                  # twist->zoom direction
+ORBIT_SCALE = (1.0, 1.0, 1.0)    # daemon package applies immutable Fusion host baseline
+PAN_SIGN = (1.0, 1.0)
+PAN_SCALE = 1.0
+ZOOM_SCALE = 1.0
+ZOOM_SIGN = 1.0
 
-ADDIN_VERSION = "0.1.14"         # reported in the handshake so the daemon shows the LOADED version.
-                                 # 0.1.14: scheme values renamed (pointer->cursor, cursor->selection,
-                                 # to_pointer->to_cursor) to match the daemon v3 config migration.
-                                 # 0.1.11: "pointer" orbit pivot + "to_pointer" zoom (orbit/zoom about
-                                 # the surface under the MOUSE POINTER; GetCursorPos + screenToView +
-                                 # viewToModelSpace ray -- see the POINTER PIVOT block below).
-                                 # 0.1.12: DPI fix -- GetCursorPos is PHYSICAL px but screenToView's
-                                 # INPUT is LOGICAL, so at 125% hits landed down-right of the cursor;
-                                 # now divided by the monitor's effective DPI scale.
-                                 # 0.1.13: range-check fix -- screenToView's OUTPUT is PHYSICAL
-                                 # viewport px while vp.width/height are LOGICAL, so the old bounds
-                                 # check wrongly REJECTED the right/bottom ~20% band ("fails to
-                                 # target" there, user-reported); validate against vp.size * scale
-                                 # and feed viewToModelSpace the PHYSICAL pixel unscaled. Keep in
-                                 # sync with TrackballNav.manifest.
+ADDIN_VERSION = "0.1.24"         # keep in sync with TrackballNav.manifest
 
 _last_err = {"t": 0.0, "s": ""}
 _last_scheme = {"v": None}
@@ -95,18 +81,21 @@ def _bridge_port():
 _WORLD_UP = (0.0, 0.0, 1.0)              # Fusion is Z-up; turntable azimuth axis
 _obj_cache = {"t": 0.0, "p": None}      # cached object bounding-box center (recomputed lazily)
 
-# "view" orbit pivot: instead of the camera look-at target (which sits at an arbitrary depth on the
+# `screen_center`: instead of the camera look-at target (arbitrary depth), raycast the
 # optical axis), raycast down the screen centre to the REAL surface depth under the crosshair, so the
 # thing you're looking at stays put during orbit -- like native right/middle-drag orbit. Computed ONCE
 # per gesture and HELD; re-cast only after the view moves (pan/zoom) or the gesture ends (idle).
 _gesture = {"t": 0.0, "pivot": None}    # last-frame time + held orbit pivot (Point3D | None)
 _zoom_gesture = {"pivot": None}          # "to_cursor" zoom's own held pivot (reset on orbit/pan)
-PIVOT_HOLD_IDLE = 0.35                   # s without frames that ends a gesture -> re-raycast next orbit
+# Fixed-horizon transition tracker: None until the first frame so startup in turntable does not
+# level the view; only a real free->turntable switch does.
+_horizon = {"fixed": None}
+PIVOT_HOLD_IDLE = 0.5                    # fallback for orbit/zoom hold settings
 APERTURE_FRACS = (0.03, 0.10, 0.30)      # ray thickness tried, as a fraction of the view half-height
 RAY_PUSHBACK = 8.0                       # start the ray this many half-heights behind screen-centre
 BBOX_MARGIN = 0.10                       # accept a hit inside the bbox grown by this fraction of its diag
 
-# --- CURSOR PIVOT (op == "cursor" / zm == "to_cursor"; pre-0.1.14 values "pointer"/"to_pointer"):
+# --- CURSOR PIVOT (op == "cursor" / zm == "to_cursor") ---------------------------------------
 # orbit/zoom about the surface under the
 # live MOUSE POINTER. Design decision -- Fusion's documented mouse-tracking hook is Command.mouseMove,
 # but a Command is MODAL: while active it owns clicks, and the user activating ANY other tool (or
@@ -118,18 +107,11 @@ BBOX_MARGIN = 0.10                       # accept a hit inside the bbox grown by
 # cache to go stale). If the GUI pass ever disproves the screenToView mapping, the fallbacks are the
 # _client_view_pixel window mapping below, then a Command.mouseMove cache as the last resort.
 #
-# LIVE-GUI VERIFIED over two user passes at 125% scaling (2026-07-04). Pass 1 (0.1.11): the chain
-# WORKS (tracking, per-gesture hold, fallbacks) but hits landed DOWN-RIGHT of the cursor. Pass 2
-# (0.1.12): "works very precisely", EXCEPT the right/bottom band failed to target. Fitting the
-# logged samples (view = 1.25*logical_in - physical_origin, exact across all of them) pinned the
-# full coordinate model -- see _cursor_view_pixel's docstring: screenToView takes LOGICAL screen
-# px and returns PHYSICAL viewport px; viewToModelSpace consumes PHYSICAL; vp.width/height are
-# LOGICAL. 0.1.12 fixed the input scale; 0.1.13 fixed the OUTPUT bounds check (validate against
-# vp.size * scale -- the logical bounds rejected correct physical values in the right/bottom ~20%,
-# precisely the region the 0.1.11 bug used to map off-screen). STILL TO VERIFY LIVE: the 0.1.13
-# right/bottom band re-check (hover near the right/bottom viewport edges and orbit; watch the
-# "cursor map:" line), and mixed-DPI multi-monitor setups (the range check + object-centre
-# fallback bound the damage).
+# Fusion's coordinate APIs mix units: screenToView takes LOGICAL screen pixels and returns PHYSICAL
+# viewport pixels; viewToModelSpace consumes PHYSICAL pixels; vp.width/height are LOGICAL. Divide
+# the cursor input by monitor scale, validate the output against scaled viewport bounds, and pass
+# that output to viewToModelSpace unchanged. The range check and object-centre fallback bound any
+# mixed-DPI multi-monitor mismatch.
 
 
 def _active_design():
@@ -167,6 +149,44 @@ def _object_center(fallback):
         return fallback
 
 
+def _selection_center():
+    """Aggregate world-space bounding-box centre of Fusion's active selection, or None.
+
+    ``UserInterface.activeSelections`` can contain bodies, occurrences, components, faces, sketches,
+    and proxy objects. Most expose ``boundingBox`` through the selection's ``entity``; for a
+    non-geometric entity, its documented selection point is used as a degenerate bound.
+    """
+    try:
+        ui = getattr(app, "userInterface", None)
+        selections = getattr(ui, "activeSelections", None)
+        if selections is None:
+            return None
+        mn = [None, None, None]
+        mx = [None, None, None]
+        found = False
+        for i in range(selections.count):
+            item = selections.item(i)
+            entity = getattr(item, "entity", item)
+            bb = getattr(entity, "boundingBox", None)
+            if bb is not None:
+                lo, hi = bb.minPoint, bb.maxPoint
+            else:
+                point = getattr(item, "point", None)
+                if point is None:
+                    continue
+                lo = hi = point
+            for axis, (a, b) in enumerate(((lo.x, hi.x), (lo.y, hi.y), (lo.z, hi.z))):
+                mn[axis] = a if mn[axis] is None else min(mn[axis], a)
+                mx[axis] = b if mx[axis] is None else max(mx[axis], b)
+            found = True
+        if found:
+            xyz = [(mn[i] + mx[i]) * 0.5 for i in range(3)]
+            return adsk.core.Point3D.create(xyz[0], xyz[1], xyz[2])
+    except Exception:
+        _log_rl("selc", "selection-center FAILED: " + traceback.format_exc().strip().replace("\n", " | "))
+    return None
+
+
 def _in_bbox(p, bb):
     """True if p lies within the model bbox grown by BBOX_MARGIN of its diagonal -- guards against a
     bogus/stray hit. Accepts the hit when the bbox is unavailable (can't validate)."""
@@ -182,7 +202,7 @@ def _in_bbox(p, bb):
 def _nearest_ray_hit(root, origin, direction, tol):
     """Nearest visible BRep-face hit along the ray origin + t*direction, within proximity `tol` (cm).
     Returns a cloned Point3D (safe to hold across frames) or None. Never raises -> a failed/absent
-    pick API just falls back to the object centre.
+    pick API leaves the method unavailable so the resolver can continue the configured chain.
 
     findBRepUsingRay(originPoint, rayDirection, entityType, proximityTolerance, visibleEntitiesOnly,
     hitPoints) -> ObjectCollection of faces; `hitPoints` is filled in parallel with the hit points.
@@ -209,9 +229,9 @@ def _nearest_ray_hit(root, origin, direction, tol):
 
 
 def _raycast_pivot(design, origin, d, half_h, label):
-    """Shared aperture-expanding raycast used by BOTH the screen-centre ("view") and the cursor
+    """Shared aperture-expanding raycast used by both `screen_center` and `cursor`
     pivots: try small->large ray thickness to catch thin/edge features, validate the hit against the
-    model bbox, return the nearest surface Point3D or None (-> object-centre fallback)."""
+    model bbox, return the nearest surface Point3D or None (continue the configured chain)."""
     root = design.rootComponent
     bb = root.boundingBox
     for frac in APERTURE_FRACS:
@@ -222,7 +242,7 @@ def _raycast_pivot(design, origin, d, half_h, label):
             _log_rl(label, "%s: surface hit (aperture=%.3f cm) -> (%.2f,%.2f,%.2f)"
                     % (label, frac * half_h, hit.x, hit.y, hit.z))
             return hit
-    _log_rl(label + "_miss", "%s: no surface hit -> object-centre fallback" % label)
+    _log_rl(label + "_miss", "%s: no surface hit -> fallback chain" % label)
     return None
 
 
@@ -241,7 +261,7 @@ def _screen_center_pivot(cam):
     half_h = max(cam.viewExtents * 0.5, 1e-4)          # on-screen half-extent in world units (cm)
     pb = RAY_PUSHBACK * half_h
     origin = adsk.core.Point3D.create(tgt.x - d.x * pb, tgt.y - d.y * pb, tgt.z - d.z * pb)  # behind, outside
-    return _raycast_pivot(design, origin, d, half_h, "view-pivot")
+    return _raycast_pivot(design, origin, d, half_h, "screen-center-pivot")
 
 
 def _cursor_screen_pos():
@@ -314,10 +334,8 @@ def _cursor_view_pixel(vp):
       * screenToView:      LOGICAL screen px IN -> PHYSICAL viewport px OUT
       * viewToModelSpace:  PHYSICAL viewport px IN ("works very precisely" only with these)
       * vp.width/height:   LOGICAL px
-    So: divide the physical cursor by the monitor scale for screenToView's input (the 0.1.12
-    down-right-offset fix), but range-validate its OUTPUT against vp.width*scale (0.1.13 -- the
-    logical bounds wrongly rejected the right/bottom ~20% band: exactly the region the 0.1.11 bug
-    used to map off-screen) and pass it through UNSCALED."""
+    Divide the physical cursor by the monitor scale for screenToView's input, range-validate its
+    output against vp.width*scale, and pass it through unscaled."""
     sp = _cursor_screen_pos()
     if sp is None:
         return None
@@ -352,9 +370,11 @@ def _cursor_pivot(cam):
     aimed through the cursor pixel instead of the optical axis. Ray construction: unproject the
     pixel with viewToModelSpace (its depth doesn't matter -- the point only AIMS the ray);
     perspective rays run from the eye through it, ortho rays run parallel to the view axis through
-    it (pushed back like the centre ray). Returns a Point3D or None (-> object-centre fallback)."""
+    it (pushed back like the centre ray). Returns a Point3D or None (continue the fallback chain)."""
     design = _active_design()
-    vp = app.activeViewport
+    vp = app.activeViewport if app is not None else None
+    if vp is None:
+        return None
     if design is None or not vp:
         return None
     px = _cursor_view_pixel(vp)
@@ -393,29 +413,76 @@ def _cursor_pivot(cam):
     return _raycast_pivot(design, origin, d, half_h, "cursor-pivot")
 
 
-def _orbit_pivot(op, cam, tgt, idle):
+def _cursor_depth_point(cam):
+    """Unproject the cursor to Fusion's current target-depth plane when the ray misses geometry."""
+    vp = app.activeViewport if app is not None else None
+    px = _cursor_view_pixel(vp) if vp else None
+    if px is None:
+        return None
+    try:
+        pm = vp.viewToModelSpace(adsk.core.Point2D.create(px[0], px[1]))
+        eye, tgt = cam.eye, cam.target
+        try:
+            if cam.cameraType == adsk.core.CameraTypes.OrthographicCameraType:
+                return adsk.core.Point3D.create(pm.x, pm.y, pm.z)
+        except Exception:
+            pass
+        forward = adsk.core.Vector3D.create(tgt.x - eye.x, tgt.y - eye.y, tgt.z - eye.z)
+        if forward.length < 1e-9:
+            return None
+        forward.normalize()
+        direction = adsk.core.Vector3D.create(pm.x - eye.x, pm.y - eye.y, pm.z - eye.z)
+        if direction.length < 1e-9:
+            return None
+        direction.normalize()
+        denom = direction.dotProduct(forward)
+        if abs(denom) < 1e-9:
+            return None
+        to_target = adsk.core.Vector3D.create(tgt.x - eye.x, tgt.y - eye.y, tgt.z - eye.z)
+        distance = to_target.dotProduct(forward) / denom
+        return adsk.core.Point3D.create(eye.x + direction.x * distance,
+                                        eye.y + direction.y * distance,
+                                        eye.z + direction.z * distance)
+    except Exception:
+        return None
+
+
+def _orbit_pivot(op, cam, tgt, idle, sel_override=True, candidates=None,
+                 hold_sec=PIVOT_HOLD_IDLE):
     """Pivot point for an orbit gesture:
       view            -> raycast down the screen centre to the real surface depth, computed ONCE per
                          gesture and HELD (so the point under the crosshair stays put) -- like native
                          right-drag orbit. Re-cast when the gesture ends (idle) or the view moves.
       cursor          -> raycast the surface under the LIVE MOUSE CURSOR (read fresh at gesture
-                         start), same per-gesture hold + fallbacks as `view`.
+                         start), same per-gesture hold as `screen_center`.
       object / selection -> model bounding-box centre.
-    Everything falls back to the model centre, then the view target, when nothing is available."""
-    if op == "view":
-        if _gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _screen_center_pivot(cam) or _object_center(tgt)
+    Each method may fail honestly; ``candidates`` is the daemon-expanded global chain."""
+    selected = _selection_center() if (sel_override and op != "camera") else None
+    if selected is not None:
+        return selected
+    if _gesture["pivot"] is not None and idle <= hold_sec:
         return _gesture["pivot"]
-    if op == "cursor":
-        if _gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _cursor_pivot(cam) or _object_center(tgt)
-        return _gesture["pivot"]
-    if op in ("object", "selection"):
-        return _object_center(tgt)
-    return tgt
+    legacy = candidates is None
+    for method in (candidates if candidates is not None else [op, "object"]):
+        if method == "origin":
+            point = adsk.core.Point3D.create(0.0, 0.0, 0.0)
+        elif method == "screen_center":
+            point = _screen_center_pivot(cam)
+        elif method == "cursor":
+            point = _cursor_pivot(cam)
+        elif method == "selection":
+            point = _selection_center()
+        elif method == "object":
+            point = _object_center(None)
+        else:                                      # camera / cursor_3d unsupported in Fusion
+            continue
+        if point is not None:
+            _gesture["pivot"] = point
+            return point
+    return tgt if legacy else None
 
 
-def _zoom_pivot(zm, cam, tgt, idle):
+def _zoom_pivot(zm, cam, tgt, idle, sel_override=True, hold_sec=PIVOT_HOLD_IDLE):
     # "to_object" zooms toward the model center; "to_cursor" toward the surface under the mouse
     # cursor (the zoom branch already keeps an arbitrary P fixed on screen; per-gesture hold in its
     # own slot so orbit/zoom gestures don't clobber each other's pivot, miss -> view centre);
@@ -423,10 +490,25 @@ def _zoom_pivot(zm, cam, tgt, idle):
     if zm == "to_object":
         return _object_center(tgt)
     if zm == "to_cursor":
-        if _zoom_gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
-            _zoom_gesture["pivot"] = _cursor_pivot(cam)
+        if sel_override:
+            selected = _selection_center()
+            if selected is not None:
+                return selected
+        if _zoom_gesture["pivot"] is None or idle > hold_sec:
+            _zoom_gesture["pivot"] = _cursor_pivot(cam) or _cursor_depth_point(cam)
         return _zoom_gesture["pivot"] or tgt
     return tgt
+
+
+def _zoom_geometry(eye, target, pivot, factor, style):
+    """Pure point math for pan-mode zoom. Inputs/outputs are XYZ tuples for headless tests."""
+    if style == "dolly":
+        new_eye = tuple(pivot[i] + (eye[i] - pivot[i]) * factor for i in range(3))
+        return new_eye, tuple(target), False
+    new_target = tuple(pivot[i] + (target[i] - pivot[i]) * factor for i in range(3))
+    delta = tuple(new_target[i] - target[i] for i in range(3))
+    new_eye = tuple(eye[i] + delta[i] for i in range(3))
+    return new_eye, new_target, True
 
 
 def _apply(frame):
@@ -436,13 +518,18 @@ def _apply(frame):
         o = frame.get("o", [0.0, 0.0, 0.0])
         p = frame.get("p", [0.0, 0.0])
         z = float(frame.get("z", 0.0))
-        op = frame.get("op", "view")          # orbit pivot: view | object | cursor
+        op = frame.get("op", "screen_center") # orbit pivot: screen_center | camera | object | cursor
         style = frame.get("os", "free")       # orbit style: free | turntable
         zm = frame.get("zm", "to_center")     # zoom mode:  to_center | to_object | to_cursor
-        sig = (op, style, zm)
+        adv = frame.get("adv") or {}
+        sel_override = bool(adv.get("selection_overrides_pivot", True))
+        pivot_candidates = adv.get("orbit_pivot_candidates") or [op]
+        orbit_hold = max(0.0, min(10.0, float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE))))
+        zoom_hold = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
+        sig = (op, style, zm, sel_override)
         if sig != _last_scheme["v"]:           # confirm live scheme changes are received
             _last_scheme["v"] = sig
-            _log("scheme received: pivot=%s style=%s zoom=%s" % sig)
+            _log("scheme received: pivot=%s style=%s zoom=%s sel_override=%s" % sig)
 
         vp = app.activeViewport
         if not vp:
@@ -461,6 +548,27 @@ def _apply(frame):
         true_up = right.crossProduct(fwd)
         true_up.normalize()
 
+        # Level ONCE when the style transitions free->turntable: rebuild upVector so
+        # camera-right is horizontal while eye/target (and so the view direction, distance, and
+        # any held orbit point) stay put. Transitions only -- prev None (fresh add-in) never
+        # levels, and ordinary turntable frames never re-level. Skipped in the degenerate
+        # straight-up/straight-down view, where roll is indistinguishable from yaw.
+        fixed = (style == "turntable")
+        prev = _horizon["fixed"]
+        _horizon["fixed"] = fixed
+        leveled = False
+        if fixed and prev is False and bool(adv.get("level_horizon_on_entry", True)):
+            wup = adsk.core.Vector3D.create(*_WORLD_UP)
+            lvl_right = fwd.crossProduct(wup)
+            if lvl_right.length > 1e-6:
+                lvl_right.normalize()
+                lvl_up = lvl_right.crossProduct(fwd)
+                lvl_up.normalize()
+                cam.upVector = lvl_up
+                up, right, true_up = lvl_up, lvl_right, lvl_up
+                leveled = True
+                _log("horizon: leveled on turntable entry")
+
         now = time.time()
         idle = now - _gesture["t"]            # frames only arrive during motion, so a gap = gesture end
         _gesture["t"] = now
@@ -468,7 +576,14 @@ def _apply(frame):
         if o[0] or o[1] or o[2]:
             # ---- ORBIT: rotate eye + target + up about the chosen pivot ----
             _zoom_gesture["pivot"] = None     # view rotates -> the next zoom re-raycasts its pivot
-            pivot = _orbit_pivot(op, cam, tgt, idle)
+            pivot = _orbit_pivot(op, cam, tgt, idle, sel_override=sel_override,
+                                 candidates=pivot_candidates, hold_sec=orbit_hold)
+            if pivot is None:
+                if leveled:                   # deliver the entry-leveling even though the
+                    cam.isSmoothTransition = False   # pivot chain produced no orbit frame
+                    vp.camera = cam
+                    vp.refresh()
+                return
             dpt = ((pivot.x - tgt.x) ** 2 + (pivot.y - tgt.y) ** 2 + (pivot.z - tgt.z) ** 2) ** 0.5
             _log_rl("pivot", "orbit pivot=%s |P-T|=%.3f P=(%.2f,%.2f,%.2f) target=(%.2f,%.2f,%.2f)"
                     % (op, dpt, pivot.x, pivot.y, pivot.z, tgt.x, tgt.y, tgt.z))
@@ -497,7 +612,6 @@ def _apply(frame):
         elif p[0] or p[1]:
             # ---- PAN: shift eye + target in the view plane ----
             _gesture["pivot"] = None          # view moved -> the next orbit re-raycasts its pivot
-            _zoom_gesture["pivot"] = None
             ps = cam.viewExtents * PAN_SCALE
             gx = PAN_SIGN[0] * p[0] * ps
             gy = PAN_SIGN[1] * p[1] * ps
@@ -512,20 +626,31 @@ def _apply(frame):
             cam.eye = new_eye
 
         elif z:
-            # ---- ZOOM: scale view extents, keeping the pivot point P fixed on screen ----
+            # ---- PAN-MODE ZOOM: native view-extents zoom or camera dolly ----------------
             _gesture["pivot"] = None          # view moved -> the next orbit re-raycasts its pivot
             s = 1.0 - ZOOM_SIGN * z * ZOOM_SCALE
             if s < 0.01:
                 s = 0.01
-            P = _zoom_pivot(zm, cam, tgt, idle)
-            ntgt = adsk.core.Point3D.create(P.x + (tgt.x - P.x) * s,
-                                            P.y + (tgt.y - P.y) * s,
-                                            P.z + (tgt.z - P.z) * s)
-            d = adsk.core.Vector3D.create(ntgt.x - tgt.x, ntgt.y - tgt.y, ntgt.z - tgt.z)
-            new_eye = eye.copy(); new_eye.translateBy(d)
-            cam.target = ntgt
-            cam.eye = new_eye
-            cam.viewExtents = max(1e-4, cam.viewExtents * s)
+            P = _zoom_pivot(zm, cam, tgt, idle, sel_override=sel_override, hold_sec=zoom_hold)
+            zoom_style = str(adv.get("zoom_style", "zoom"))
+            eye_xyz, target_xyz, scale_extents = _zoom_geometry(
+                (eye.x, eye.y, eye.z), (tgt.x, tgt.y, tgt.z), (P.x, P.y, P.z), s, zoom_style)
+            if zoom_style == "dolly":
+                # Move only the eye toward the chosen point. Target and viewExtents stay fixed, so
+                # this changes camera position rather than magnification.
+                new_eye = adsk.core.Point3D.create(*eye_xyz)
+                dist = ((new_eye.x - tgt.x) ** 2 + (new_eye.y - tgt.y) ** 2 +
+                        (new_eye.z - tgt.z) ** 2) ** 0.5
+                if dist > 1e-4:
+                    cam.eye = new_eye
+            else:
+                # Native zoom: scale view extents and shift eye+target so P stays fixed on screen.
+                ntgt = adsk.core.Point3D.create(*target_xyz)
+                new_eye = adsk.core.Point3D.create(*eye_xyz)
+                cam.target = ntgt
+                cam.eye = new_eye
+                if scale_extents:
+                    cam.viewExtents = max(1e-4, cam.viewExtents * s)
 
         cam.isSmoothTransition = False
         vp.camera = cam

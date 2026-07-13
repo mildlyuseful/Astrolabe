@@ -113,6 +113,35 @@ def test_orbit_roundtrip_identity():
             all(abs(c.orientation[i] + ori0[i]) < 1e-5 for i in range(4)))
 
 
+def test_level_horizon_removes_only_roll_and_is_idempotent():
+    c = _ortho_cam()
+    tilted = cam.q_axis_angle((1.0, 0.0, 0.0), 0.55)
+    fwd = cam.q_rotate(tilted, (0.0, 0.0, -1.0))
+    rolled = cam.q_axis_angle(fwd, 0.7)
+    c.orientation = list(cam.q_mul(rolled, tilted))
+    eye0, focal0 = tuple(c.position), c.focal
+    fwd0 = cam.axes(c)[2]
+
+    assert cam.level_horizon(c) is True
+    right, up, fwd1, _back = cam.axes(c)
+    assert vclose(fwd1, fwd0)
+    assert tuple(c.position) == eye0 and c.focal == focal0
+    assert abs(cam.v_dot(right, cam.WORLD_UP)) < 1e-9
+    assert cam.v_dot(up, cam.WORLD_UP) > 0.0
+
+    axes1 = cam.axes(c)
+    assert cam.level_horizon(c) is True
+    for before, after in zip(axes1, cam.axes(c)):
+        assert vclose(before, after, eps=1e-9)
+
+
+def test_level_horizon_skips_world_up_singularity():
+    c = _ortho_cam()  # looks straight down world Z
+    orientation0 = list(c.orientation)
+    assert cam.level_horizon(c) is False
+    assert c.orientation == orientation0
+
+
 # --- turntable keeps the horizon level; free orbit tilts it -----------------------------
 def test_turntable_horizon_locked():
     c = _ortho_cam()
@@ -157,8 +186,8 @@ def test_pan_moves_in_view_plane_scaled_by_size():
 def test_zoom_ortho_scales_height_to_center():
     c = _ortho_cam()
     L0 = cam.look_at(c)
-    cam.zoom(c, 1.0, None)                    # to_center -> pivot = look-at
-    s = 1.0 - cam.ZOOM_SIGN * 1.0 * cam.ZOOM_SCALE
+    cam.zoom(c, 0.25, None)                   # daemon-applied FreeCAD baseline for raw z=1
+    s = 1.0 - cam.ZOOM_SIGN * 0.25 * cam.ZOOM_SCALE
     assert abs(c.height - 20.0 * s) < 1e-6    # height scaled by s
     assert vclose(cam.look_at(c), L0, eps=1e-6)   # look-at unchanged for to_center
     assert c.height < 20.0                    # positive z zooms IN (smaller height)
@@ -171,8 +200,8 @@ def test_zoom_ortho_to_pivot_keeps_pivot_fixed():
     P = (4.0, 0.0, 0.0)
     L0 = cam.look_at(c)
     off0 = cam.v_sub(P, L0)
-    cam.zoom(c, 1.0, P)
-    s = 1.0 - cam.ZOOM_SIGN * 1.0 * cam.ZOOM_SCALE
+    cam.zoom(c, 0.25, P)
+    s = 1.0 - cam.ZOOM_SIGN * 0.25 * cam.ZOOM_SCALE
     off1 = cam.v_sub(P, cam.look_at(c))
     assert vclose(off1, cam.v_scale(off0, s), eps=1e-6)
 
@@ -180,7 +209,7 @@ def test_zoom_ortho_to_pivot_keeps_pivot_fixed():
 def test_zoom_persp_dollies_along_forward():
     c = cam.Camera(position=(0.0, 0.0, 10.0), orientation=(0.0, 0.0, 0.0, 1.0),
                    focal=10.0, height=None, height_angle=math.radians(45.0), is_ortho=False)
-    cam.zoom(c, 1.0, None)
+    cam.zoom(c, 0.25, None)
     # eye dollied along fwd=(0,0,-1): z decreases; focal reduced so look-at stays put
     assert c.position[2] < 10.0
     assert c.focal < 10.0

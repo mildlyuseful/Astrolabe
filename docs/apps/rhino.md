@@ -1,7 +1,8 @@
 # Rhino navigation — maintainer's guide
 
-Socket Python add-on for **Rhino 8** (default suite only: orbit / pan / zoom). Eye+target
-camera (`SetCameraLocations`), `ORBIT_SCALE = 1.0`. Add-on `0.1.10`.
+Socket Python add-on for **Rhino 8** (lean suite: orbit / pan / zoom). It drives an eye+target camera
+through `SetCameraLocations`. Camera math is neutral; intrinsic signs/scales live in
+`host_profiles.json` and are applied by the daemon.
 
 ## Layout
 
@@ -26,8 +27,19 @@ Restart Rhino once after Set up (or after an add-on version bump) so Python relo
 
 ## Controls (default / lean)
 
-Generic scheme only (no fly/walk/`advanced`). Pivots: `view`, `cursor`, `object`/`selection`,
-`origin`, plus `viewpoint` (turn in place). `selection_overrides_pivot` is applied.
+Lean scheme only (no fly/walk action tree). Pivots: `screen_center`, `cursor`, `selection`, `object`,
+`origin`, plus `camera` (turn in place). Model Center uses document bounds and is distinct from
+Selection. `selection_overrides_pivot` is applied.
+Pan-mode **Zoom / Dolly** calls RhinoViewport `Magnify` in lens-zoom or camera-dolly mode; when a
+zoom target is available its client point is supplied as the fixed screen coordinate.
+
+Orbit ray misses continue the configured global chain. Empty-space To Cursor zoom synthesizes a
+point on the mouse ray at the current target/document depth. Orbit and cursor-zoom targets have
+independent holds: pan invalidates only the orbit pivot and orbit invalidates the zoom target.
+
+Entering Turntable from Free optionally levels the horizon once via `tbnav_camera.level_horizon`,
+without moving eye/target or changing distance/pivot. The first frame establishes state and a
+world-up singularity is skipped.
 
 ### Under-cursor pivot
 
@@ -53,3 +65,6 @@ Misses and per-hit debug lines go to `rhino_addin.log`.
 ```
 python -m pytest tests/test_rhino_nav_math.py tests/test_integrations_rhino.py -q
 ```
+
+Startup registration, live pivot/zoom behavior, horizon entry, and sign/feel checks are tracked in
+[`TODO.md`](../../TODO.md).

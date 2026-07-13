@@ -52,9 +52,10 @@ static class Tests
         new[] { ox, oy, oz, px, py, z };
 
     static CamState Apply(CamState c, double[] d, string style,
-                          Point3d? orbitPivot = null, Point3d? zoomPivot = null) =>
+                          Point3d? orbitPivot = null, Point3d? zoomPivot = null,
+                          bool levelOnEntry = false, string zoomStyle = "zoom") =>
         NavMath.Apply(c, d, style, Sign, PanSignX, PanSignY, PanScale, ZoomSign, ZoomScale,
-                      orbitPivot, zoomPivot);
+                      orbitPivot, zoomPivot, levelOnEntry, zoomStyle);
 
     static void OrbitAboutPivotRigid(string style)
     {
@@ -89,7 +90,30 @@ static class Tests
 
     static void Main()
     {
-        // --- null pivot == the pre-0.3.0 behaviour: the target never moves on orbit ----------
+        // --- level-horizon is a one-shot transition operation, not an ordinary frame rule ------
+        {
+            var rolled = Cam();
+            var back = (rolled.Pos - rolled.Tgt).GetNormal();
+            rolled.Up = rolled.Up.TransformBy(
+                Matrix3d.Rotation(0.65, back, Point3d.Origin)).GetNormal();
+            var leveled = Apply(rolled, D(), "turntable", levelOnEntry: true);
+            CheckClose((leveled.Pos - rolled.Pos).Length, 0.0, 1e-12,
+                       "level entry: eye preserved");
+            CheckClose((leveled.Tgt - rolled.Tgt).Length, 0.0, 1e-12,
+                       "level entry: target preserved");
+            CheckClose(Basis(leveled).right.DotProduct(NavMath.WorldUp), 0.0, 1e-9,
+                       "level entry: horizon horizontal");
+            Check(leveled.Up.DotProduct(NavMath.WorldUp) > 0.0,
+                  "level entry: up remains world-up-positive");
+            var twice = Apply(leveled, D(), "turntable", levelOnEntry: true);
+            CheckClose((twice.Up - leveled.Up).Length, 0.0, 1e-12,
+                       "level entry: idempotent");
+            var preserved = Apply(rolled, D(), "turntable", levelOnEntry: false);
+            CheckClose((preserved.Up - rolled.Up).Length, 0.0, 1e-12,
+                       "level toggle off: current tilt preserved");
+        }
+
+        // --- null pivot keeps the camera target fixed during orbit ---------------------------
         {
             var c0 = Cam();
             var c1 = Apply(c0, D(0.20, 0.35, 0.10), "free");
@@ -133,13 +157,44 @@ static class Tests
             CheckClose((c1.Tgt - c0.Tgt).Length, 0.0, 1e-12, "plain zoom: target fixed");
         }
 
-        // --- perspective + zoomPivot: falls back to the plain dolly (documented limitation) ---
+        // --- perspective lens zoom: the field shrinks and P keeps its screen coordinate -------
         {
             var c0 = Cam(persp: true);
             var P = new Point3d(9.0, 1.0, 4.0);
             var c1 = Apply(c0, D(z: 0.8), "free", zoomPivot: P);
-            CheckClose((c1.Tgt - c0.Tgt).Length, 0.0, 1e-12, "persp to_cursor: target fixed (dolly)");
-            Check((c1.Pos - c1.Tgt).Length < 25.0, "persp to_cursor: dollied in");
+            double factor = 1.0 + ZoomSign * 0.8 * ZoomScale;
+            CheckClose(c1.Fh, c0.Fh / factor, 1e-12, "persp zoom: field shrinks");
+            CheckClose((c1.Pos - c1.Tgt).Length, 25.0, 1e-9,
+                       "persp zoom: camera distance preserved");
+            var b0 = Basis(c0);
+            var b1 = Basis(c1);
+            CheckClose((P - c1.Tgt).DotProduct(b1.right) / c1.Fh,
+                       (P - c0.Tgt).DotProduct(b0.right) / c0.Fh, 1e-12,
+                       "persp zoom: P screen-x fraction fixed");
+            CheckClose((P - c1.Tgt).DotProduct(b1.up) / c1.Fh,
+                       (P - c0.Tgt).DotProduct(b0.up) / c0.Fh, 1e-12,
+                       "persp zoom: P screen-y fraction fixed");
+        }
+
+        // --- perspective dolly remains a physical eye move with an unchanged projection -------
+        {
+            var c0 = Cam(persp: true);
+            var P = new Point3d(9.0, 1.0, 4.0);
+            var c1 = Apply(c0, D(z: 0.8), "free", zoomPivot: P, zoomStyle: "dolly");
+            double factor = 1.0 + ZoomSign * 0.8 * ZoomScale;
+            CheckClose(c1.Fh, c0.Fh, 1e-12, "dolly: field preserved");
+            CheckClose((P + (c0.Tgt - P) / factor - c1.Tgt).Length, 0.0, 1e-12,
+                       "dolly to_cursor: target scales about P");
+            CheckClose((P + (c0.Pos - P) / factor - c1.Pos).Length, 0.0, 1e-12,
+                       "dolly to_cursor: eye scales about P");
+        }
+
+        // --- parallel dolly moves the eye without faking magnification -------------------------
+        {
+            var c0 = Cam();
+            var c1 = Apply(c0, D(z: 0.8), "free", zoomStyle: "dolly");
+            CheckClose(c1.Fh, c0.Fh, 1e-12, "parallel dolly: field preserved");
+            Check((c1.Pos - c1.Tgt).Length < 25.0, "parallel dolly: eye moved in");
         }
 
         // --- pan is unaffected by an orbit pivot (independent channels) -----------------------
@@ -166,6 +221,23 @@ static class Tests
             var onDepth = NavMath.AtViewDepth(tgt + new Vector3d(3, -2, 0),
                                               Vector3d.ZAxis, tgt);
             CheckClose(onDepth.Z, tgt.Z, 1e-12, "AtViewDepth: top view preserves Z=target");
+        }
+
+        // --- stationary cursor: camera pan/zoom must preserve its screen-relative ray --------
+        {
+            var before = new CamState {
+                Pos = new Point3d(0, 0, 10), Tgt = Point3d.Origin,
+                Up = Vector3d.YAxis, Fw = 20, Fh = 10, Persp = false
+            };
+            var sample = new Point3d(4, -2, 100); // +20% field width, -20% field height
+            var after = new CamState {
+                Pos = new Point3d(7, 3, 13), Tgt = new Point3d(7, 3, 3),
+                Up = Vector3d.YAxis, Fw = 10, Fh = 5, Persp = false
+            };
+            var moved = NavMath.ReprojectScreenSample(sample, before, after);
+            CheckClose(moved.X, 9.0, 1e-9, "screen sample: X follows pan and field scale");
+            CheckClose(moved.Y, 2.0, 1e-9, "screen sample: Y follows pan and field scale");
+            CheckClose(moved.Z, 3.0, 1e-9, "screen sample: rebuilt on new target plane");
         }
 
         // --- InsideGrownExtents ---------------------------------------------------------------

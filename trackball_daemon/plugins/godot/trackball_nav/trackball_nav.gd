@@ -1,11 +1,10 @@
 @tool
 extends EditorPlugin
 
-const ADDIN_VERSION := "0.1.3"
+const ADDIN_VERSION := "0.1.12"
 const DEFAULT_PORT := 47900
-const PIVOT_HOLD_IDLE := 0.35
+const PIVOT_HOLD_IDLE := 0.5
 const OBJ_CACHE_SEC := 0.5
-const BBOX_MARGIN := 0.10
 const TRACE_BIG := 1.0e7
 
 var _stop := false
@@ -16,10 +15,10 @@ var _gesture_t := 0.0
 var _gesture_pivot = null
 var _gesture_invalid := true
 var _zoom_gesture_pivot = null
+var _zoom_gesture_resolved := false
 var _focus_dist := 10.0
 var _obj_cache_t := 0.0
 var _obj_center = null
-var _obj_bbox = null
 var _last_scheme := ""
 var _host := "?"
 
@@ -30,6 +29,7 @@ func _enter_tree() -> void:
 	_gesture_pivot = null
 	_gesture_invalid = true
 	_zoom_gesture_pivot = null
+	_zoom_gesture_resolved = false
 	_focus_dist = TrackballNavCamera.DIST_DEFAULT
 	_host = str(Engine.get_version_info().get("string", "?"))
 	_log("start: TrackballNav v%s (Godot %s)" % [ADDIN_VERSION, _host])
@@ -153,7 +153,7 @@ func _apply(frame: Dictionary, idle: float) -> void:
 	var o := _vec3(frame.get("o", [0, 0, 0]))
 	var p := _vec2(frame.get("p", [0, 0]))
 	var z := float(frame.get("z", 0.0))
-	var op := str(frame.get("op", "view"))
+	var op := str(frame.get("op", "screen_center"))
 	# Godot editor: turntable only (no free trackball / roll).
 	var style := "turntable"
 	var zm := str(frame.get("zm", "to_center"))
@@ -166,23 +166,29 @@ func _apply(frame: Dictionary, idle: float) -> void:
 	if twist_action == "roll":
 		twist_action = "none"
 	var pan_scales := bool(adv.get("pan_scales_with_distance", true))
+	var zoom_style := str(adv.get("zoom_style", "dolly"))
+	var orbit_hold := clampf(float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE)), 0.0, 10.0)
+	var zoom_hold := clampf(float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE)), 0.0, 10.0)
 	var sel_override := bool(adv.get("selection_overrides_pivot", true))
+	var pivot_candidates = adv.get("orbit_pivot_candidates", [op])
+	if typeof(pivot_candidates) != TYPE_ARRAY:
+		pivot_candidates = [op]
 	var fly_speed := float(adv.get("fly_speed", 1.0))
 	var walk_speed := float(adv.get("walk_speed", 1.0))
-	var invert: Dictionary = adv.get("invert", {})
-	if typeof(invert) != TYPE_DICTIONARY:
-		invert = {}
-
-	var sig := "%s|%s|%s|%s|%s|%s|%s" % [nav_mode, op, style, zm, twist_action, lock_h, sel_override]
+	var sig := "%s|%s|%s|%s|%s|%s|%s|%s" % [nav_mode, op, style, zm, twist_action, zoom_style, lock_h, sel_override]
 	if sig != _last_scheme:
 		_last_scheme = sig
-		_log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s horizon=%s sel_override=%s" % [
-			nav_mode, op, style, zm, twist_action, lock_h, sel_override])
+		_log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s pan_zoom=%s horizon=%s sel_override=%s" % [
+			nav_mode, op, style, zm, twist_action, zoom_style, lock_h, sel_override])
 
-	var inv_res := _apply_inverts(nav_mode, op, o, p, z, invert)
+	var inv_res := _apply_action_routing(nav_mode, op, o, p, z, adv)
 	o = inv_res[0]
 	p = inv_res[1]
 	z = inv_res[2]
+	var baseline_res := _apply_host_baseline(nav_mode, twist_action, o, p, z, adv)
+	o = baseline_res[0]
+	p = baseline_res[1]
+	z = baseline_res[2]
 
 	var cam := _read_cam(camera)
 	_focus_dist = TrackballNavCamera.clamp_dist(_focus_dist)
@@ -192,39 +198,54 @@ func _apply(frame: Dictionary, idle: float) -> void:
 	elif nav_mode == "walk":
 		changed = _apply_walk(cam, o, p, z, walk_speed)
 	else:
-		changed = _apply_orbit(cam, o, p, z, op, style, zm, twist_action, lock_h, pan_scales, idle, sel_override)
+		changed = _apply_orbit(camera, cam, o, p, z, op, style, zm, twist_action, zoom_style,
+			lock_h, pan_scales, idle, orbit_hold, zoom_hold, sel_override, pivot_candidates)
 	if changed:
 		_write_cam(camera, cam)
 
 
-func _apply_orbit(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float,
-		op: String, _style: String, zm: String, twist_action: String, _lock_h: bool,
-		pan_scales: bool, idle: float, sel_override: bool) -> bool:
+func _apply_orbit(camera: Camera3D, cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float,
+		op: String, _style: String, zm: String, twist_action: String, zoom_style: String,
+		_lock_h: bool, pan_scales: bool, idle: float, orbit_hold: float, zoom_hold: float, sel_override: bool,
+		pivot_candidates: Array) -> bool:
 	if absf(o.x) > 1e-12 or absf(o.y) > 1e-12 or absf(o.z) > 1e-12:
 		var twist := o.z
 		var orbit_o := Vector3(o.x, o.y, 0.0)  # never roll
 		var did := false
 		if absf(twist) > 1e-12 and twist_action in ["zoom", "dolly"]:
-			TrackballNavCamera.dolly(cam, twist, _focus_dist, null)
-			_gesture_invalid = true
+			if twist_action == "zoom":
+				_projection_zoom(camera, cam, twist, null)
+			else:
+				TrackballNavCamera.dolly(cam, twist, _focus_dist, null)
+			# A combined twist+orbit packet is one gesture. Preserve its held pivot.
+			if absf(orbit_o.x) <= 1e-12 and absf(orbit_o.y) <= 1e-12:
+				_gesture_invalid = true
+				_gesture_pivot = null
 			did = true
 		if absf(orbit_o.x) > 1e-12 or absf(orbit_o.y) > 1e-12:
-			var pivot = _orbit_pivot(op, cam, idle, sel_override)
-			if pivot != null:
-				_focus_dist = TrackballNavCamera.clamp_dist((cam.location - pivot).length())
+			var pivot = _orbit_pivot(op, cam, idle, orbit_hold, sel_override, pivot_candidates)
+			if pivot == null:
+				return did
+			_focus_dist = TrackballNavCamera.clamp_dist((cam.location - pivot).length())
 			TrackballNavCamera.orbit(cam, orbit_o, true, pivot)  # turntable only
 			_zoom_gesture_pivot = null
+			_zoom_gesture_resolved = false
 			return true
 		return did
 	if absf(p.x) > 1e-12 or absf(p.y) > 1e-12:
 		_gesture_invalid = true
-		_zoom_gesture_pivot = null
+		_gesture_pivot = null
 		TrackballNavCamera.pan(cam, p.x, p.y,
 			_focus_dist if pan_scales else TrackballNavCamera.DIST_DEFAULT)
 		return true
 	if absf(z) > 1e-12:
 		_gesture_invalid = true
-		TrackballNavCamera.dolly(cam, z, _focus_dist, _zoom_toward(zm, idle, sel_override))
+		_gesture_pivot = null
+		var toward = _zoom_toward(camera, cam, zm, idle, zoom_hold, sel_override)
+		if zoom_style == "zoom":
+			_projection_zoom(camera, cam, z, toward)
+		else:
+			TrackballNavCamera.dolly(cam, z, _focus_dist, toward)
 		return true
 	return false
 
@@ -237,7 +258,9 @@ func _apply_fly(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float, s
 	if absf(p.x) > 1e-12 or absf(p.y) > 1e-12 or absf(z) > 1e-12:
 		TrackballNavCamera.fly_move(cam, p, z, _focus_dist, speed)
 		_gesture_invalid = true
+		_gesture_pivot = null
 		_zoom_gesture_pivot = null
+		_zoom_gesture_resolved = false
 		return true
 	return false
 
@@ -249,53 +272,73 @@ func _apply_walk(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float, 
 	if absf(p.x) > 1e-12 or absf(p.y) > 1e-12 or absf(z) > 1e-12:
 		TrackballNavCamera.walk_move(cam, p, z, _focus_dist, speed)
 		_gesture_invalid = true
+		_gesture_pivot = null
 		_zoom_gesture_pivot = null
+		_zoom_gesture_resolved = false
 		return true
 	return false
 
 
-func _orbit_pivot(op: String, cam: TrackballNavCamera.Cam, idle: float, sel_override: bool):
-	if op == "viewpoint":
-		return null
-	var sel := _selection_center()
-	var center = sel[0]
-	var bbox = sel[1]
-	if op in ["object", "selection"]:
-		return center if center != null else _forward_point(cam)
-	if sel_override and center != null:
+func _orbit_pivot(op: String, cam: TrackballNavCamera.Cam, idle: float, hold_sec: float, sel_override: bool,
+		candidates: Array):
+	var center = _selection_center()
+	if sel_override and op != "camera" and center != null:
 		return center
-	if op == "origin":
-		return Vector3.ZERO
-	if op == "view":
-		if _gesture_pivot == null or _gesture_invalid or idle > PIVOT_HOLD_IDLE:
-			_gesture_pivot = _screen_center_pivot(cam, bbox if sel_override else null)
-			if _gesture_pivot == null:
-				_gesture_pivot = _forward_point(cam)
-			_gesture_invalid = false
+	if _gesture_pivot != null and not _gesture_invalid and idle <= hold_sec:
 		return _gesture_pivot
-	if op == "cursor":
-		if _gesture_pivot == null or _gesture_invalid or idle > PIVOT_HOLD_IDLE:
-			_gesture_pivot = _cursor_pivot(bbox if sel_override else null)
-			if _gesture_pivot == null:
-				_gesture_pivot = _forward_point(cam)
+	for method in candidates:
+		var point = null
+		if method == "camera":
+			point = cam.location
+		elif method == "origin":
+			point = Vector3.ZERO
+		elif method == "screen_center":
+			point = _screen_center_pivot(cam)
+		elif method == "cursor":
+			point = _cursor_pivot()
+		elif method == "object":
+			point = _scene_center()
+		elif method == "selection":
+			point = center
+		if point != null:
+			_gesture_pivot = point
 			_gesture_invalid = false
-		return _gesture_pivot
-	return _forward_point(cam)
+			return point
+	return null
 
 
-func _zoom_toward(zm: String, idle: float, sel_override: bool):
-	var sel := _selection_center()
-	var center = sel[0]
-	var bbox = sel[1]
+func _zoom_toward(camera: Camera3D, cam: TrackballNavCamera.Cam, zm: String, idle: float,
+		hold_sec: float, sel_override: bool):
+	var center = _selection_center()
 	if zm == "to_object":
-		return center
+		return _scene_center()
 	if zm == "to_cursor":
 		if sel_override and center != null:
 			return center
-		if _zoom_gesture_pivot == null or idle > PIVOT_HOLD_IDLE:
-			_zoom_gesture_pivot = _cursor_pivot(bbox if sel_override else null)
+		if not _zoom_gesture_resolved or idle > hold_sec:
+			_zoom_gesture_pivot = _cursor_pivot()
+			if _zoom_gesture_pivot == null:
+				_zoom_gesture_pivot = _cursor_depth_point(camera, cam)
+			_zoom_gesture_resolved = true
 		return _zoom_gesture_pivot
 	return null
+
+
+func _projection_zoom(camera: Camera3D, cam: TrackballNavCamera.Cam, z: float, toward) -> void:
+	var factor := clampf(1.0 - TrackballNavCamera.ZOOM_SIGN * z * TrackballNavCamera.ZOOM_SCALE,
+		0.05, 20.0)
+	var ratio := factor
+	if camera.projection == Camera3D.PROJECTION_PERSPECTIVE:
+		var old_tan := tan(deg_to_rad(clampf(camera.fov, 5.0, 170.0)) * 0.5)
+		var new_tan := clampf(old_tan * factor, tan(deg_to_rad(2.5)), tan(deg_to_rad(85.0)))
+		camera.fov = rad_to_deg(2.0 * atan(new_tan))
+		ratio = new_tan / old_tan
+	else:
+		camera.size = clampf(camera.size * factor, 0.0001, 1.0e7)
+	if toward != null:
+		var offset: Vector3 = toward - cam.location
+		var planar := cam.right * offset.dot(cam.right) + cam.up * offset.dot(cam.up)
+		cam.location += planar * (1.0 - ratio)
 
 
 func _forward_point(cam: TrackballNavCamera.Cam) -> Vector3:
@@ -303,11 +346,11 @@ func _forward_point(cam: TrackballNavCamera.Cam) -> Vector3:
 	return cam.location + cam.forward * d
 
 
-func _screen_center_pivot(cam: TrackballNavCamera.Cam, bbox):
-	return _trace_ray(cam.location, cam.forward, bbox)
+func _screen_center_pivot(cam: TrackballNavCamera.Cam):
+	return _trace_ray(cam.location, cam.forward)
 
 
-func _cursor_pivot(bbox):
+func _cursor_pivot():
 	var vp := EditorInterface.get_editor_viewport_3d(0)
 	if vp == null:
 		return null
@@ -317,10 +360,29 @@ func _cursor_pivot(bbox):
 	var mouse := vp.get_mouse_position()
 	var origin := camera.project_ray_origin(mouse)
 	var direction := camera.project_ray_normal(mouse)
-	return _trace_ray(origin, direction, bbox)
+	return _trace_ray(origin, direction)
 
 
-func _trace_ray(origin: Vector3, direction: Vector3, bbox):
+func _cursor_depth_point(camera: Camera3D, cam: TrackballNavCamera.Cam):
+	var vp := EditorInterface.get_editor_viewport_3d(0)
+	if vp == null:
+		return null
+	var mouse := vp.get_mouse_position()
+	var origin := camera.project_ray_origin(mouse)
+	var direction := camera.project_ray_normal(mouse).normalized()
+	var reference = _scene_center()
+	if reference == null:
+		reference = _forward_point(cam)
+	var denom := direction.dot(cam.forward)
+	if absf(denom) < 1e-9:
+		return null
+	var distance := (reference - origin).dot(cam.forward) / denom
+	if distance <= 1e-6:
+		distance = TrackballNavCamera.clamp_dist(_focus_dist)
+	return origin + direction * distance
+
+
+func _trace_ray(origin: Vector3, direction: Vector3):
 	var space: Node = EditorInterface.get_edited_scene_root()
 	if space == null:
 		return null
@@ -337,20 +399,13 @@ func _trace_ray(origin: Vector3, direction: Vector3, bbox):
 	var hit: Dictionary = world.direct_space_state.intersect_ray(query)
 	if hit.is_empty():
 		# Fallback: editor raycast against MeshInstance3D AABBs in the edited scene.
-		return _mesh_aabb_ray(origin, d, space, bbox)
-	var p: Vector3 = hit["position"]
-	if bbox != null and not _in_bbox(p, bbox):
-		return null
-	return p
+		return _mesh_aabb_ray(origin, d, space)
+	return hit["position"]
 
 
-func _mesh_aabb_ray(origin: Vector3, direction: Vector3, root: Node, bbox):
+func _mesh_aabb_ray(origin: Vector3, direction: Vector3, root: Node):
 	var best_t := TRACE_BIG
 	var best = null
-	_walk_meshes(root, origin, direction, best_t, best, bbox)
-	# GDScript can't pass by ref easily — reimplement inline:
-	best_t = TRACE_BIG
-	best = null
 	var stack: Array = [root]
 	while not stack.is_empty():
 		var n: Node = stack.pop_back()
@@ -361,15 +416,9 @@ func _mesh_aabb_ray(origin: Vector3, direction: Vector3, root: Node, bbox):
 			var aabb: AABB = mi.global_transform * mi.get_aabb()
 			var t: float = _aabb_ray(origin, direction, aabb)
 			if t >= 0.0 and t < best_t:
-				var p: Vector3 = origin + direction * t
-				if bbox == null or _in_bbox(p, bbox):
-					best_t = t
-					best = p
+				best_t = t
+				best = origin + direction * t
 	return best
-
-
-func _walk_meshes(_root, _o, _d, _bt, _b, _bb) -> void:
-	pass
 
 
 func _aabb_ray(origin: Vector3, direction: Vector3, aabb: AABB) -> float:
@@ -399,77 +448,136 @@ func _aabb_ray(origin: Vector3, direction: Vector3, aabb: AABB) -> float:
 	return tmin if tmin >= 0.0 else tmax
 
 
-func _selection_center() -> Array:
+func _selection_center():
 	var now := Time.get_ticks_msec() / 1000.0
 	if _obj_center != null and now - _obj_cache_t < OBJ_CACHE_SEC:
-		return [_obj_center, _obj_bbox]
+		return _obj_center
 	var nodes := EditorInterface.get_selection().get_selected_nodes()
 	if nodes.is_empty():
 		_obj_center = null
-		_obj_bbox = null
 		_obj_cache_t = now
-		return [null, null]
+		return null
 	var sum := Vector3.ZERO
 	var n := 0
-	var agg = null
 	for node in nodes:
 		if node is Node3D:
 			var p: Vector3 = (node as Node3D).global_position
-			var b := AABB(p - Vector3.ONE * 0.05, Vector3.ONE * 0.1)
 			if node is MeshInstance3D:
 				var mi := node as MeshInstance3D
-				b = mi.global_transform * mi.get_aabb()
-				p = b.get_center()
+				p = (mi.global_transform * mi.get_aabb()).get_center()
 			sum += p
 			n += 1
-			if agg == null:
-				agg = b
-			else:
-				agg = (agg as AABB).merge(b)
 	if n == 0:
 		_obj_center = null
-		_obj_bbox = null
 		_obj_cache_t = now
-		return [null, null]
+		return null
 	_obj_center = sum / float(n)
-	_obj_bbox = agg
 	_obj_cache_t = now
-	return [_obj_center, _obj_bbox]
+	return _obj_center
 
 
-func _in_bbox(p: Vector3, bbox: AABB) -> bool:
-	var grow := bbox.size.length() * BBOX_MARGIN
-	var g := bbox.grow(grow)
-	return g.has_point(p)
+func _scene_center():
+	var root: Node = EditorInterface.get_edited_scene_root()
+	if root == null:
+		return null
+	var have_bounds := false
+	var lo := Vector3.ZERO
+	var hi := Vector3.ZERO
+	var stack: Array = [root]
+	while not stack.is_empty():
+		var node: Node = stack.pop_back()
+		for child in node.get_children():
+			stack.append(child)
+		if node is MeshInstance3D:
+			var mesh := node as MeshInstance3D
+			var bounds: AABB = mesh.global_transform * mesh.get_aabb()
+			var bounds_lo := bounds.position
+			var bounds_hi := bounds.position + bounds.size
+			if not have_bounds:
+				lo = bounds_lo
+				hi = bounds_hi
+				have_bounds = true
+			else:
+				lo = Vector3(minf(lo.x, bounds_lo.x), minf(lo.y, bounds_lo.y), minf(lo.z, bounds_lo.z))
+				hi = Vector3(maxf(hi.x, bounds_hi.x), maxf(hi.y, bounds_hi.y), maxf(hi.z, bounds_hi.z))
+	return (lo + hi) * 0.5 if have_bounds else null
 
 
 func _sgn(flag: bool) -> float:
 	return -1.0 if flag else 1.0
 
 
-func _apply_inverts(nav_mode: String, op: String, o: Vector3, p: Vector2, z: float, inv: Dictionary) -> Array:
+func _routed(values: Array, sources: Dictionary, inversions: Dictionary, action: String, default: int) -> float:
+	var source := int(sources.get(action, default))
+	if source < 0 or source > 2:
+		source = default
+	return float(values[source]) * _sgn(bool(inversions.get(action, false)))
+
+
+func _apply_action_routing(nav_mode: String, op: String, o: Vector3, p: Vector2, z: float, adv: Dictionary) -> Array:
+	var inv: Dictionary = {}
+	var raw_inv = adv.get("invert", {})
+	if typeof(raw_inv) == TYPE_DICTIONARY:
+		inv = raw_inv
+	var axes: Dictionary = {}
+	var raw_axes = adv.get("axis_source", {})
+	if typeof(raw_axes) == TYPE_DICTIONARY:
+		axes = raw_axes
+	var rotation := [o.x, o.y, o.z]
+	var movement := [p.x, p.y, z]
 	if nav_mode == "fly":
 		var f: Dictionary = inv.get("fly", {})
-		o = Vector3(o.x * _sgn(bool(f.get("pitch", false))), o.y * _sgn(bool(f.get("yaw", false))),
-			o.z * _sgn(bool(f.get("bank", false))))
-		p = Vector2(p.x * _sgn(bool(f.get("strafe", false))), p.y * _sgn(bool(f.get("forward", false))))
-		z *= _sgn(bool(f.get("vertical", false)))
+		var fly_axes: Dictionary = axes.get("fly", {})
+		o = Vector3(_routed(rotation, fly_axes, f, "pitch", 0),
+			_routed(rotation, fly_axes, f, "yaw", 1), _routed(rotation, fly_axes, f, "bank", 2))
+		p = Vector2(_routed(movement, fly_axes, f, "strafe", 0),
+			_routed(movement, fly_axes, f, "forward", 1))
+		z = _routed(movement, fly_axes, f, "vertical", 2)
 	elif nav_mode == "walk":
 		var w: Dictionary = inv.get("walk", {})
-		o = Vector3(o.x * _sgn(bool(w.get("pitch", false))), o.y * _sgn(bool(w.get("yaw", false))), o.z)
-		p = Vector2(p.x * _sgn(bool(w.get("strafe", false))), p.y * _sgn(bool(w.get("forward", false))))
-		z *= _sgn(bool(w.get("vertical", false)))
+		var walk_axes: Dictionary = axes.get("walk", {})
+		o = Vector3(_routed(rotation, walk_axes, w, "pitch", 0),
+			_routed(rotation, walk_axes, w, "yaw", 1), o.z)
+		p = Vector2(_routed(movement, walk_axes, w, "strafe", 0),
+			_routed(movement, walk_axes, w, "forward", 1))
+		z = _routed(movement, walk_axes, w, "vertical", 2)
 	else:
 		var ob: Dictionary = inv.get("orbit", {})
-		if op == "viewpoint":
-			var vp: Dictionary = inv.get("viewpoint", {})
-			o = Vector3(o.x * _sgn(bool(vp.get("pitch", false))), o.y * _sgn(bool(vp.get("yaw", false))),
-				o.z * _sgn(bool(vp.get("roll", false))))
+		var orbit_axes: Dictionary = axes.get("orbit", {})
+		if op == "camera":
+			var vp: Dictionary = inv.get("camera", {})
+			var camera_axes: Dictionary = axes.get("camera", {})
+			o = Vector3(_routed(rotation, camera_axes, vp, "pitch", 0),
+				_routed(rotation, camera_axes, vp, "yaw", 1),
+				_routed(rotation, camera_axes, vp, "roll", 2))
 		else:
-			o = Vector3(o.x * _sgn(bool(ob.get("pitch", false))), o.y * _sgn(bool(ob.get("yaw", false))),
-				o.z * _sgn(bool(ob.get("twist", false))))
-		p = Vector2(p.x * _sgn(bool(ob.get("pan_x", false))), p.y * _sgn(bool(ob.get("pan_y", false))))
-		z *= _sgn(bool(ob.get("zoom", false)))
+			o = Vector3(_routed(rotation, orbit_axes, ob, "pitch", 0),
+				_routed(rotation, orbit_axes, ob, "yaw", 1),
+				_routed(rotation, orbit_axes, ob, "twist", 2))
+		p = Vector2(_routed(movement, orbit_axes, ob, "pan_x", 0),
+			_routed(movement, orbit_axes, ob, "pan_y", 1))
+		z = _routed(movement, orbit_axes, ob, "zoom", 2)
+	return [o, p, z]
+
+
+func _apply_host_baseline(nav_mode: String, twist_action: String, o: Vector3, p: Vector2,
+		z: float, adv: Dictionary) -> Array:
+	var baseline = adv.get("host_baseline", {})
+	if typeof(baseline) != TYPE_DICTIONARY:
+		return [o, p, z]
+	var orbit := _vec3(baseline.get("orbit", [1.0, 1.0, 1.0]))
+	var pan := _vec2(baseline.get("pan", [1.0, 1.0]))
+	var zoom := float(baseline.get("zoom", 1.0))
+	var move := float(baseline.get("move", 1.0))
+	if nav_mode == "orbit":
+		var twist_factor := zoom if twist_action in ["zoom", "dolly"] else orbit.z
+		o = Vector3(o.x * orbit.x, o.y * orbit.y, o.z * twist_factor)
+		p = Vector2(p.x * pan.x, p.y * pan.y)
+		z *= zoom
+	else:
+		o *= orbit
+		p *= move
+		z *= move
 	return [o, p, z]
 
 

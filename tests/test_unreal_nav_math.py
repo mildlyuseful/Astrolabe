@@ -67,17 +67,14 @@ def test_camera_rotator_roundtrip():
     assert vclose(c.forward, f2) and vclose(c.up, u2)
 
 
-# --- orbit baseline is DOUBLED for hardware feel (default felt half on the device) -----------
-def test_orbit_scale_doubled_full_angle():
-    # On real hardware the default orbit felt HALF of what it should be, so the baseline is doubled:
-    # a pure yaw of theta rotates the view by 2*theta. Guards against regressing to 1.0 (the cube's
-    # 1:1) or to Blender's RegionView3D-specific 0.5. Tune back to 1:1 via orbit Sensitivity 0.5.
-    assert cam.ORBIT_SCALE == (2.0, 2.0, 2.0)
+# --- integration camera math stays neutral; developer tuning lives outside this module ----------
+def test_camera_math_is_neutral():
+    assert cam.ORBIT_SCALE == (1.0, 1.0, 1.0)
     c = _idcam()
     theta = 0.2
     cam.orbit(c, (0.0, theta, 0.0), False, None)      # pure yaw, in place
     ang = math.atan2(c.forward[1], c.forward[0])
-    assert abs(ang - 2.0 * theta) < 1e-9              # doubled
+    assert abs(ang - theta) < 1e-9                    # camera math itself is neutral
 
 
 # --- orbit about a pivot: eye rotates rigidly about P, basis stays orthonormal -----------
@@ -112,6 +109,27 @@ def test_orbit_single_axis_roundtrip():
     cam.orbit(c, (0.0, 0.35, 0.0), False, None)
     cam.orbit(c, (0.0, -0.35, 0.0), False, None)
     assert vclose(c.forward, fwd0, 1e-9) and vclose(c.up, up0, 1e-9)
+
+
+def test_level_horizon_removes_only_roll_and_is_idempotent():
+    c = cam.Camera.from_rotator((2.0, 3.0, 4.0), 25.0, -35.0, 48.0)
+    location0, forward0 = tuple(c.location), c.forward
+
+    assert cam.level_horizon(c) is True
+    right1, up1 = c.right, c.up
+    assert tuple(c.location) == location0 and vclose(c.forward, forward0)
+    assert abs(cam.v_dot(c.right, cam.WORLD_UP)) < 1e-9
+    assert cam.v_dot(c.up, cam.WORLD_UP) > 0.0
+
+    assert cam.level_horizon(c) is True
+    assert vclose(c.right, right1, 1e-9) and vclose(c.up, up1, 1e-9)
+
+
+def test_level_horizon_skips_world_up_singularity():
+    c = cam.Camera((1, 2, 3), (0, 0, 1), (1, 0, 0), (0, 1, 0))
+    basis0 = (c.forward, c.right, c.up)
+    assert cam.level_horizon(c) is False
+    assert (c.forward, c.right, c.up) == basis0
 
 
 # --- turntable keeps the horizon level + drops twist; free orbit tilts it ----------------
@@ -181,6 +199,30 @@ def test_dolly_toward_point():
     cam.dolly(c, 1.0, 400.0, toward=(0.0, 0.0, 0.0))   # head straight down toward origin
     assert c.location[2] < 1000.0
     assert abs(c.location[0]) < 1e-9 and abs(c.location[1]) < 1e-9
+
+
+def test_lens_zoom_changes_fov_without_dollying():
+    c = _idcam()
+    eye0 = tuple(c.location)
+    new_fov = cam.lens_zoom(c, 0.2, 90.0)
+    assert new_fov < 90.0
+    assert tuple(c.location) == eye0
+
+
+def test_lens_zoom_keeps_target_screen_fraction_fixed():
+    c = _idcam()
+    target = (1000.0, 300.0, 1200.0)
+    old_eye = tuple(c.location)
+    old_fov = 90.0
+    new_fov = cam.lens_zoom(c, 0.2, old_fov, target)
+    old_tan = math.tan(math.radians(old_fov) * 0.5)
+    new_tan = math.tan(math.radians(new_fov) * 0.5)
+    before_x = cam.v_dot(cam.v_sub(target, old_eye), c.right) / old_tan
+    after_x = cam.v_dot(cam.v_sub(target, tuple(c.location)), c.right) / new_tan
+    before_y = cam.v_dot(cam.v_sub(target, old_eye), c.up) / old_tan
+    after_y = cam.v_dot(cam.v_sub(target, tuple(c.location)), c.up) / new_tan
+    assert abs(before_x - after_x) < 1e-6
+    assert abs(before_y - after_y) < 1e-6
 
 
 def test_clamp_dist_floor_and_default():

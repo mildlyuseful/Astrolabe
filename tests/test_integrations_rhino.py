@@ -1,8 +1,5 @@
 """Rhino integration registry: scripts dir install + version-gated auto_update."""
 import json
-import sys
-
-import pytest
 
 from trackball_daemon import integrations
 from trackball_daemon.config import Config
@@ -21,7 +18,7 @@ def _patch_rhino(monkeypatch, tmp_path):
 
 def test_rhino_is_a_bundled_addin():
     assert "rhino" in integrations.ADDIN_KEYS
-    assert integrations.bundled_addin_version("rhino") == "0.1.8"
+    assert integrations.bundled_addin_version("rhino") == "0.1.18"
     assert integrations.APPS_BY_KEY["rhino"].setup is integrations.install_rhino
 
 
@@ -33,12 +30,12 @@ def test_install_copies_scripts_and_enables(isolated_config, tmp_path, monkeypat
     assert ok is True
     r = cfg.data["apps"]["rhino"]
     assert r["installed"] is True and r["enabled"] is True
-    assert r["addin_version"] == "0.1.8"
+    assert r["addin_version"] == "0.1.18"
     assert (scripts / "version.json").exists()
     assert (scripts / "tbnav_rhino.py").exists()
     assert (scripts / "tbnav_camera.py").exists()
     assert (scripts / "start.py").exists()
-    assert integrations.installed_addin_version("rhino") == "0.1.8"
+    assert integrations.installed_addin_version("rhino") == "0.1.18"
     assert "startup" in msg.lower() or "restart" in msg.lower()
     # auto-register mocked True -> no copy button needed
     assert copies == []
@@ -93,13 +90,4 @@ def test_auto_update_recopies_on_version_bump(isolated_config, tmp_path, monkeyp
     assert integrations.update_available("rhino") is True
     updated = integrations.auto_update(cfg)
     assert any(key == "rhino" for key, _o, _n in updated)
-    assert integrations.installed_addin_version("rhino") == "0.1.8"
-
-
-@pytest.mark.skipif(sys.platform != "win32", reason="status detection is Windows-only")
-def test_status_line_reflects_detection(monkeypatch):
-    appdef = integrations.APPS_BY_KEY["rhino"]
-    monkeypatch.setattr(appdef, "detect", lambda: r"C:\Program Files\Rhino 8\System\Rhino.exe")
-    assert "detected" in integrations.status_line(appdef).lower()
-    monkeypatch.setattr(appdef, "detect", lambda: None)
-    assert integrations.status_line(appdef) == "not detected"
+    assert integrations.installed_addin_version("rhino") == "0.1.18"

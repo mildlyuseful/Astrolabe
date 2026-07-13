@@ -1,0 +1,161 @@
+{
+  "schema": 1,
+  "general": {
+    "default_mode": "cube",
+    "axis_orientation": {"source": [0, 1, 2], "invert": [false, false, false]},
+    "cursor": {"x_src": 1, "x_sign": 1.0, "y_src": 0, "y_sign": 1.0, "gain": 216.0},
+    "scroll": {"src": 2, "sign": 1.0, "gain": 29.0, "deadzone": 0.004, "dominance": 1.7},
+    "buttons": {"left": "left", "right": "right", "middle": "middle"},
+    "scheme": {"orbit_pivot": "screen_center", "orbit_style": "free", "zoom_mode": "to_center"},
+    "orbit_pivot_fallbacks": ["cursor_3d", "camera", "object", "origin"],
+    "level_horizon_on_entry": true
+  },
+  "common": {
+    "rate_hz": 0,
+    "orbit_pivot_hold_sec": 0.5,
+    "zoom_cursor_hold_sec": 0.5,
+    "selection_overrides_pivot": true,
+    "level_horizon_on_entry": null,
+    "bindings": {
+      "orbit": {"axis_source": [0, 1, 2], "axis_sign": [1.0, 1.0, 1.0], "sensitivity": 1.0},
+      "pan": {"x_src": 1, "x_sign": 1.0, "y_src": 0, "y_sign": -1.0, "gain": 1.0},
+      "zoom": {
+        "src": 2,
+        "sign": 1.0,
+        "gain": 1.0,
+        "deadzone": 0.004,
+        "dominance": 1.7,
+        "dist_min": 2.5,
+        "dist_max": 30.0,
+        "dist_default": 6.0
+      },
+      "toggle": "shift",
+      "invert": {"orbit": [false, false, false], "pan": [false, false], "zoom": false},
+      "scheme": {"orbit_pivot": "default", "orbit_style": "default", "zoom_mode": "default"}
+    },
+    "advanced": {"twist_action": "roll"}
+  },
+  "profiles": {
+    "blender": {
+      "bindings": {"scheme": {"orbit_pivot": "camera"}},
+      "advanced": {
+        "nav_mode": "orbit",
+        "lock_horizon": false,
+        "zoom_style": "zoom",
+        "lock_camera_to_view": false,
+        "pan_scales_with_distance": true,
+        "fly_speed": 1.0,
+        "walk_speed": 1.0,
+        "invert": {
+          "orbit": {"pitch": false, "yaw": false, "twist": false, "pan_x": false, "pan_y": false, "zoom": false},
+          "camera": {"pitch": false, "yaw": false, "roll": false},
+          "fly": {"pitch": false, "yaw": false, "bank": false, "forward": false, "strafe": false, "vertical": false},
+          "walk": {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false}
+        },
+        "axis_source": {
+          "orbit": {"pitch": 0, "yaw": 1, "twist": 2, "pan_x": 0, "pan_y": 1, "zoom": 2},
+          "camera": {"pitch": 0, "yaw": 1, "roll": 2},
+          "fly": {"pitch": 0, "yaw": 1, "bank": 2, "forward": 1, "strafe": 0, "vertical": 2},
+          "walk": {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2}
+        }
+      }
+    },
+    "freecad": {},
+    "sketchup": {
+      "advanced": {
+        "nav_mode": "orbit",
+        "lock_horizon": false,
+        "zoom_style": "dolly",
+        "fly_speed": 1.0,
+        "walk_speed": 1.0,
+        "invert": {
+          "orbit": {"pitch": false, "yaw": false, "twist": false, "pan_x": false, "pan_y": false, "zoom": false},
+          "camera": {"pitch": false, "yaw": false, "roll": false},
+          "fly": {"pitch": false, "yaw": false, "bank": false, "forward": false, "strafe": false, "vertical": false},
+          "walk": {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false}
+        },
+        "axis_source": {
+          "orbit": {"pitch": 0, "yaw": 1, "twist": 2, "pan_x": 0, "pan_y": 1, "zoom": 2},
+          "camera": {"pitch": 0, "yaw": 1, "roll": 2},
+          "fly": {"pitch": 0, "yaw": 1, "bank": 2, "forward": 1, "strafe": 0, "vertical": 2},
+          "walk": {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2}
+        }
+      }
+    },
+    "unreal": {
+      "advanced": {
+        "nav_mode": "orbit",
+        "lock_horizon": false,
+        "zoom_style": "dolly",
+        "pan_scales_with_distance": true,
+        "fly_speed": 1.0,
+        "walk_speed": 1.0,
+        "invert": {
+          "orbit": {"pitch": false, "yaw": false, "twist": false, "pan_x": false, "pan_y": false, "zoom": false},
+          "camera": {"pitch": false, "yaw": false, "roll": false},
+          "fly": {"pitch": false, "yaw": false, "bank": false, "forward": false, "strafe": false, "vertical": false},
+          "walk": {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false}
+        },
+        "axis_source": {
+          "orbit": {"pitch": 0, "yaw": 1, "twist": 2, "pan_x": 0, "pan_y": 1, "zoom": 2},
+          "camera": {"pitch": 0, "yaw": 1, "roll": 2},
+          "fly": {"pitch": 0, "yaw": 1, "bank": 2, "forward": 1, "strafe": 0, "vertical": 2},
+          "walk": {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2}
+        }
+      }
+    },
+    "unity": {
+      "advanced": {
+        "nav_mode": "orbit",
+        "lock_horizon": false,
+        "zoom_style": "dolly",
+        "pan_scales_with_distance": true,
+        "fly_speed": 1.0,
+        "walk_speed": 1.0,
+        "invert": {
+          "orbit": {"pitch": false, "yaw": false, "twist": false, "pan_x": false, "pan_y": false, "zoom": false},
+          "camera": {"pitch": false, "yaw": false, "roll": false},
+          "fly": {"pitch": false, "yaw": false, "bank": false, "forward": false, "strafe": false, "vertical": false},
+          "walk": {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false}
+        },
+        "axis_source": {
+          "orbit": {"pitch": 0, "yaw": 1, "twist": 2, "pan_x": 0, "pan_y": 1, "zoom": 2},
+          "camera": {"pitch": 0, "yaw": 1, "roll": 2},
+          "fly": {"pitch": 0, "yaw": 1, "bank": 2, "forward": 1, "strafe": 0, "vertical": 2},
+          "walk": {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2}
+        },
+        "override_dynamic_clip": true,
+        "pivot_extent_mult": 8.0
+      }
+    },
+    "godot": {
+      "bindings": {"scheme": {"orbit_style": "turntable"}},
+      "advanced": {
+        "nav_mode": "orbit",
+        "lock_horizon": true,
+        "twist_action": "zoom",
+        "zoom_style": "dolly",
+        "pan_scales_with_distance": true,
+        "fly_speed": 1.0,
+        "walk_speed": 1.0,
+        "invert": {
+          "orbit": {"pitch": false, "yaw": false, "twist": false, "pan_x": false, "pan_y": false, "zoom": false},
+          "camera": {"pitch": false, "yaw": false, "roll": false},
+          "fly": {"pitch": false, "yaw": false, "bank": false, "forward": false, "strafe": false, "vertical": false},
+          "walk": {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false}
+        },
+        "axis_source": {
+          "orbit": {"pitch": 0, "yaw": 1, "twist": 2, "pan_x": 0, "pan_y": 1, "zoom": 2},
+          "camera": {"pitch": 0, "yaw": 1, "roll": 2},
+          "fly": {"pitch": 0, "yaw": 1, "bank": 2, "forward": 1, "strafe": 0, "vertical": 2},
+          "walk": {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2}
+        }
+      }
+    },
+    "rhino": {"advanced": {"zoom_style": "dolly"}},
+    "fusion360": {"advanced": {"zoom_style": "zoom"}},
+    "solidworks": {},
+    "onshape": {},
+    "autocad": {"advanced": {"zoom_style": "zoom"}}
+  }
+}

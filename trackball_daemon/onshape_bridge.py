@@ -51,7 +51,9 @@ import subprocess
 import sys
 import threading
 import time
+from urllib.parse import urlsplit
 
+from .config import orbit_pivot_candidates
 from .paths import user_config_dir
 from .util import get_logger
 
@@ -78,18 +80,34 @@ NLPROXY_VERSION = "1.4.8.21486"
 # WAMP WELCOME server-ident. Free-form (the real proxy sends a 3Dconnexion copyright string; the
 # spacenav-ws bridge sends its own and Onshape accepts it), so we send a clear, honest one.
 WELCOME_IDENT = "NLProxy v%s (Trackball Daemon bridge)" % NLPROXY_VERSION
+_MAX_HTTP_BODY = 16 * 1024
 
-# --- tuning: baseline sign/scale + scene orientation (mirrors the Fusion add-in / SW driver) ----
+
+def _allowed_web_origin(origin):
+    """Only Onshape pages (or this bridge's own status page) may call the local service."""
+    if not origin:
+        return True                              # direct address-bar/status-page request
+    try:
+        parsed = urlsplit(origin)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme != "https":
+            return False
+        return (host == "onshape.com" or host.endswith(".onshape.com") or
+                host == BRIDGE_HOST)
+    except Exception:
+        return False
+
+# --- neutral camera math + scene orientation ---------------------------------------------------
 # The nav-delta contract feeds (ox,oy,oz) = orbit about (camera right, up, forward) in radians,
-# (px,py) = pan, zoom = zoom; values ARRIVE ALREADY SCALED by the active app's bindings. These bake
-# in the baseline feel and are expected to need a sign/up-axis pass once live (see notes doc).
-ORBIT_SIGN = (-1.0, -1.0, 1.0)    # (ox=pitch about right, oy=yaw about up, oz=roll about forward)
-# turntable azimuth axis. Onshape's scene up may be Y or Z -- VERIFY live (only affects turntable:
-# toggle it and watch whether verticals stay vertical). (0,1,0) = Y-up (WebGL convention) as a start.
-WORLD_UP = (0.0, 1.0, 0.0)
-PAN_SIGN = (1.0, -1.0)            # pan along (camera-right, camera-up); up negated like the add-in
-PAN_SCALE = 0.14                  # pan delta -> fraction of the view half-extent (Fusion baseline)
-ZOOM_SCALE = 0.25                 # zoom delta -> fraction (perspective: dolly; ortho: extent scale)
+# (px,py) = pan, zoom = zoom. OutputEngine already composes the immutable Onshape baseline with
+# user bindings, so this implementation stays neutral.
+ORBIT_SIGN = (1.0, 1.0, 1.0)
+# Onshape's Top plane normal is world +Z. Turntable yaw and one-time horizon leveling must both use
+# it; +Y is the Front-plane normal and produced a horizon parallel to Front instead of Top.
+WORLD_UP = (0.0, 0.0, 1.0)
+PAN_SIGN = (1.0, 1.0)
+PAN_SCALE = 1.0
+ZOOM_SCALE = 1.0
 ZOOM_SIGN = 1.0                   # twist -> zoom direction
 
 # view.affine layout. False = the ROW-vector layout real ONSHAPE emits (verified live: the last
@@ -99,18 +117,27 @@ ZOOM_SIGN = 1.0                   # twist -> zoom direction
 # pan ever come out transposed or coupled against a different app, flip this.
 AFFINE_TRANSLATION_IN_COLUMN = False
 
-# "view"/"selection"/"cursor" orbit pivot uses Onshape's navlib hit-test: raycast a screen point
+# `screen_center`/`selection`/`cursor` use Onshape's navlib hit-test to raycast a screen point
 # and pivot about the first surface hit (like Onshape's own right-click orbit). These are the ray
 # aperture (cone diameter) as fractions of the view half-extent, tried smallest-first -- a narrow
-# ray, widening until something is hit. If none hit at the widest, we fall back to the model
-# centre (i.e. model orbit). Onshape does the actual raycast; we just set the ray + read the result.
+# ray, widening until something is hit. If none hit at the widest, the method is unavailable and
+# the configured chain continues. Onshape does the actual raycast; we set the ray and read the result.
 HIT_APERTURES = (0.03, 0.1, 0.3)
+# Onshape never signals a miss: on a no-hit it FABRICATES hit.lookat as a point on the pick ray at
+# roughly the scene's distance from the camera. Two guards keep that from becoming an orbit pivot
+# (the method must instead be unavailable so the configured chain continues): _valid_hit only
+# accepts points essentially inside the model bbox, and _hit_ray re-casts the same ray from further
+# back and requires the same world point (a real surface is invariant to the ray origin; a
+# fabricated at-depth point tracks it). _CONFIRM_BACKOFF is the extra origin slide and _CONFIRM_TOL
+# the agreement tolerance, both as fractions of the view half-extent.
+_CONFIRM_BACKOFF = 4.0
+_CONFIRM_TOL = 1e-3
 
 # Under-cursor orbit: the page reports the pointer as a fraction of #canvas (exact DOM
 # getBoundingClientRect). A tiny userscript POSTs that to /trackball/pointer on this bridge.
 # view.extents' aspect does NOT match the canvas pixel aspect (verified live: ~0.98 vs ~1.72),
 # so we never derive canvas size from extents. See docs/apps/onshape.md §8.14.
-_POINTER_TTL = 0.75          # seconds; stale page reports are ignored (fall back to centre)
+_POINTER_TTL = 0.75          # seconds; stale page reports make Under Cursor unavailable
 
 # Verbose diagnostics: set TB_ONSHAPE_DEBUG=1 to log focus changes, each gesture's camera
 # read/write, and any CALLERROR -- off by default so normal runs don't spam the log.
@@ -125,11 +152,11 @@ except ValueError:
 
 DEFAULT_FLUSH_HZ = 30.0
 _RPC_TIMEOUT = 2.0           # seconds to wait for a client's reply to a self:read/self:update
-_MOTION_IDLE = 0.35          # seconds of no motion before we end the gesture (motion=false)
+_MOTION_IDLE = 0.5           # fallback; configured per app by set_pivot_hold
 _PERSP_TTL = 1.0             # cache view.perspective this long (it changes rarely)
 _OBJ_TTL = 0.5              # cache model.extents (orbit/zoom pivot) this long
 _EXT_TTL = 0.2              # cache view.extents (pan/zoom scale) this long
-_TGT_TTL = 0.3              # cache view.target ("view" pivot) this long
+_TGT_TTL = 0.3              # cache view.target this long
 # --- WAMP v1 message-type tags (JSON arrays [TYPE, ...]) ---------------------------------------
 class _WAMP:
     WELCOME = 0
@@ -179,6 +206,16 @@ def _v_cross(a, b):
 def _v_normalize(a):
     n = _v_len(a)
     return (a[0] / n, a[1] / n, a[2] / n) if n > 1e-12 else (0.0, 0.0, 1.0)
+
+
+def _level_horizon_basis(back, world_up=WORLD_UP):
+    """Return leveled (right, up) for an unchanged camera-back vector, or None at the
+    straight-up/down singularity. Pure helper shared by runtime and headless tests."""
+    right = _v_cross(world_up, back)
+    if _v_len(right) < 1e-6:
+        return None
+    right = _v_normalize(right)
+    return right, _v_normalize(_v_cross(back, right))
 
 
 def _rodrigues(u, theta, p):
@@ -457,14 +494,23 @@ class _OnshapeConn:
             if b":" in ln:
                 k, v = ln.split(b":", 1)
                 headers[k.decode("latin-1").strip().lower()] = v.decode("latin-1").strip()
-        origin = headers.get("origin", "*")
+        origin = headers.get("origin", "")
         path_only = path.split("?", 1)[0]
+
+        # A trusted loopback certificate would otherwise let an arbitrary web page talk to this
+        # local WAMP service. Reject non-Onshape browser origins before CORS or WebSocket upgrade.
+        if not _allowed_web_origin(origin):
+            self._http(403, "origin not allowed", "", ctype="text/plain")
+            return False
 
         # Read any request body (pointer POSTs are tiny JSON).
         try:
             content_len = int(headers.get("content-length", "0") or 0)
         except ValueError:
             content_len = 0
+        if content_len < 0 or content_len > _MAX_HTTP_BODY:
+            self._http(400, "request body too large", origin, ctype="text/plain")
+            return False
         body_in = leftover
         while len(body_in) < content_len:
             try:
@@ -505,6 +551,9 @@ class _OnshapeConn:
             return False
         if "websocket" in headers.get("upgrade", "").lower():
             key = headers.get("sec-websocket-key", "")
+            if not key:
+                self._http(400, "missing websocket key", origin, ctype="text/plain")
+                return False
             resp = ("HTTP/1.1 101 Switching Protocols\r\n"
                     "Upgrade: websocket\r\nConnection: Upgrade\r\n"
                     "Sec-WebSocket-Accept: %s\r\n"
@@ -526,16 +575,18 @@ class _OnshapeConn:
         return False
 
     def _http(self, status, body, origin, ctype="text/plain"):
-        reason = {200: "OK", 204: "No Content", 400: "Bad Request", 404: "Not Found"}.get(status, "OK")
+        reason = {200: "OK", 204: "No Content", 400: "Bad Request", 403: "Forbidden",
+                  404: "Not Found"}.get(status, "OK")
         data = body.encode("utf-8") if isinstance(body, str) else (body or b"")
         # Access-Control-Allow-Private-Network: Chromium's Private Network Access preflight for a
         # public page (cad.onshape.com) talking to loopback. Harmless to Firefox.
-        out = ["HTTP/1.1 %d %s" % (status, reason),
-               "Access-Control-Allow-Origin: %s" % origin,
-               "Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS",
-               "Access-Control-Allow-Headers: *",
-               "Access-Control-Allow-Private-Network: true",
-               "Connection: close"]
+        out = ["HTTP/1.1 %d %s" % (status, reason), "Connection: close"]
+        if origin and _allowed_web_origin(origin):
+            out.extend(["Access-Control-Allow-Origin: %s" % origin,
+                        "Vary: Origin",
+                        "Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS",
+                        "Access-Control-Allow-Headers: Content-Type",
+                        "Access-Control-Allow-Private-Network: true"])
         if ctype is not None:
             out.append("Content-Type: %s" % ctype)
             out.append("Content-Length: %d" % len(data))
@@ -758,7 +809,6 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
   // Keep the last sample fresh while the cursor is still (gesture start without a move).
   setInterval(function () {
     if (!last.t) return;
-    if (Date.now() - last.t > 400) return;
     try {
       fetch(ENDPOINT, {
         method: "POST",
@@ -864,6 +914,7 @@ class OnshapeBridge:
         self._lock = threading.Lock()
         self._acc = [0.0] * 6
         self._stop = threading.Event()
+        self._enabled = threading.Event()          # explicit Onshape setup/Enabled gate
         self._period = 1.0 / self._clamp_rate(rate_hz)
         self._server_thread = None
         self._worker_thread = None
@@ -873,13 +924,23 @@ class OnshapeBridge:
         self._version = ""
         self._in_motion = False
         self._held_pivot = None           # orbit pivot captured at gesture start and held (see _navigate)
+        self._held_zoom_pivot = None      # To Object/To Cursor target, held for one zoom gesture
+        self._held_zoom_resolved = False
         self._nav_logged = False          # debug: log one camera read/write per gesture
         self._force_focus = bool(_SPIN)   # spike/test: drive even if the client reports unfocused
         self._log = get_logger()
         self._warned = set()
         # Control scheme (orbit pivot / orbit style / zoom mode); a dict ref-swap is atomic, so the
         # worker reads it lock-free each flush (same pattern as the broker / SW driver).
-        self._scheme = {"op": "view", "os": "free", "zm": "to_center"}
+        self._scheme = {"op": "screen_center", "os": "free", "zm": "to_center"}
+        # _horizon_fixed is None until the first set_scheme so
+        # a daemon that STARTS in turntable never levels -- only a real free->turntable switch
+        # queues _level_pending, which the worker applies on the next navigation step.
+        self._level_horizon = True
+        self._horizon_fixed = None
+        self._level_pending = False
+        self._pivot_hold_sec = _MOTION_IDLE
+        self._zoom_hold_sec = _MOTION_IDLE
 
     @staticmethod
     def _clamp_rate(hz):
@@ -893,8 +954,37 @@ class OnshapeBridge:
     def set_rate(self, hz):
         self._period = 1.0 / self._clamp_rate(hz)
 
-    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode):
-        self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode}
+    def set_pivot_hold(self, sec):
+        try:
+            sec = float(sec)
+        except (TypeError, ValueError):
+            sec = _MOTION_IDLE
+        self._pivot_hold_sec = min(10.0, max(0.0, sec))
+
+    def set_zoom_hold(self, sec):
+        try:
+            sec = float(sec)
+        except (TypeError, ValueError):
+            sec = _MOTION_IDLE
+        self._zoom_hold_sec = min(10.0, max(0.0, sec))
+
+    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True,
+                   orbit_pivot_fallbacks=None, level_horizon_on_entry=True):
+        self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode,
+                        "sel_override": bool(selection_overrides_pivot),
+                        "fallbacks": list(orbit_pivot_fallbacks or [])}
+        self._held_pivot = None
+        self._held_zoom_pivot = None
+        self._held_zoom_resolved = False
+        # A free->turntable switch queues one horizon-leveling pass,
+        # applied by the worker on the next navigation step. Leaving turntable cancels it.
+        self._level_horizon = bool(level_horizon_on_entry)
+        fixed = (orbit_style == "turntable")
+        if fixed and self._horizon_fixed is False and self._level_horizon:
+            self._level_pending = True
+        elif not fixed or not self._level_horizon:
+            self._level_pending = False
+        self._horizon_fixed = fixed
 
     def submit(self, ox, oy, oz, px, py, zoom):
         with self._lock:
@@ -908,14 +998,26 @@ class OnshapeBridge:
     def version(self):
         return self._version
 
+    def set_enabled(self, enabled):
+        """Bind/generate credentials only while the configured integration is enabled."""
+        if enabled:
+            self._enabled.set()
+            return
+        self._enabled.clear()
+        try:
+            if self._srv:
+                self._srv.close()
+        except Exception:
+            pass
+        conn = self._conn
+        if conn is not None:
+            try:
+                conn.sock.close()
+            except Exception:
+                pass
+
     def start(self):
         if self._server_thread is not None:
-            return
-        # Cert generation is safe (only writes our own files); it makes the bridge self-sufficient.
-        # The sensitive step -- trusting the cert -- stays manual/confirmed (see setup_onshape).
-        if not ensure_cert(self._cert_path, self._key_path):
-            self._log.info("onshape: no TLS cert (run Onshape 'Set up', or install cryptography/"
-                           "openssl); bridge disabled")
             return
         self._server_thread = threading.Thread(target=self._run_server, name="onshape-server",
                                                daemon=True)
@@ -940,6 +1042,18 @@ class OnshapeBridge:
 
     # --- server thread ------------------------------------------------------------------------
     def _run_server(self):
+        while not self._stop.is_set():
+            if not self._enabled.wait(0.25):
+                continue
+            if not ensure_cert(self._cert_path, self._key_path):
+                self._log.info("onshape: no TLS cert (run Onshape 'Set up', or install "
+                               "cryptography/openssl); bridge disabled")
+                self._enabled.clear()
+                continue
+            self._serve_enabled()
+            self._stop.wait(0.5)             # avoid a tight retry loop on bind/cert-load failure
+
+    def _serve_enabled(self):
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         try:
             ctx.load_cert_chain(self._cert_path, self._key_path)
@@ -958,7 +1072,7 @@ class OnshapeBridge:
                            self._host, self._port, exc)
             return
         self._log.info("onshape: NL-Proxy bridge listening on https://%s:%d", self._host, self._port)
-        while not self._stop.is_set():
+        while not self._stop.is_set() and self._enabled.is_set():
             try:
                 raw, _ = srv.accept()
             except socket.timeout:
@@ -966,8 +1080,20 @@ class OnshapeBridge:
             except OSError:
                 break
             threading.Thread(target=self._handle_raw, args=(raw, ctx), daemon=True).start()
+        try:
+            srv.close()
+        except Exception:
+            pass
+        if self._srv is srv:
+            self._srv = None
 
     def _handle_raw(self, raw, ctx):
+        if not self._enabled.is_set():
+            try:
+                raw.close()
+            except Exception:
+                pass
+            return
         try:
             raw.settimeout(10.0)
             tls = ctx.wrap_socket(raw, server_side=True)
@@ -992,6 +1118,8 @@ class OnshapeBridge:
             self._conn = None
             self._in_motion = False
             self._held_pivot = None
+            self._held_zoom_pivot = None
+            self._held_zoom_resolved = False
             self._set_connected(False)
 
     def _set_connected(self, connected):
@@ -1028,11 +1156,14 @@ class OnshapeBridge:
             focused = conn.focus or self._force_focus
             if has and focused:
                 try:
-                    self._navigate(conn, delta)
+                    idle = cycle - last_motion if last_motion > 0.0 else float("inf")
+                    self._navigate(conn, delta, idle)
                     last_motion = cycle
                 except _ConnDead:
                     self._drop(conn)
-            elif self._in_motion and (not focused or cycle - last_motion > _MOTION_IDLE):
+            elif self._in_motion and (
+                    not focused or cycle - last_motion > max(self._pivot_hold_sec,
+                                                               self._zoom_hold_sec)):
                 # End the gesture promptly when Onshape loses focus, or after an idle pause.
                 try:
                     self._end_motion(conn)
@@ -1056,7 +1187,7 @@ class OnshapeBridge:
             pass
 
     # --- one navigation step (read camera -> apply -> write) ----------------------------------
-    def _navigate(self, conn, delta):
+    def _navigate(self, conn, delta, idle=0.0):
         ox, oy, oz, px, py, zoom = delta
         affine = conn.read("view.affine")
         if not (isinstance(affine, list) and len(affine) >= 16):
@@ -1071,23 +1202,58 @@ class OnshapeBridge:
         changed_affine = False
         new_extents = None
 
+        # Level ONCE on turntable entry (queued by set_scheme): rebuild right/up so
+        # camera-right is horizontal while back (the view direction) and the eye stay put -- the
+        # screen centre and zoom are untouched, only the roll goes. Skipped in the degenerate
+        # straight-along-WORLD_UP view. Uses the same +Z Top-plane normal as the turntable itself.
+        if self._level_pending:
+            self._level_pending = False
+            leveled = _level_horizon_basis(back)
+            if leveled is not None:
+                right, up = leveled
+                changed_affine = True
+                self._log.info("onshape: horizon leveled on turntable entry")
+
         if ox or oy or oz:
+            self._held_zoom_pivot = None
+            self._held_zoom_resolved = False
             # Orbit about the gesture pivot, captured ONCE at the start of the gesture and held (so
             # the hit-test runs once, not per frame, and the pivot doesn't chase the moving view).
-            pivot = self._gesture_pivot(conn, scheme, eye, right, up, back)
-            eye, right, up, back = self._orbit(ox, oy, oz, eye, right, up, back, pivot, scheme)
-            changed_affine = True
+            pivot = self._gesture_pivot(conn, scheme, eye, right, up, back, idle)
+            if pivot is None:
+                if changed_affine:              # still deliver the entry-leveling write below
+                    ox = oy = oz = 0.0
+                else:
+                    return
+            else:
+                eye, right, up, back = self._orbit(ox, oy, oz, eye, right, up, back, pivot, scheme)
+                changed_affine = True
         elif px or py:
             eye = self._pan(conn, eye, right, up, px, py)
             changed_affine = True
             self._held_pivot = None         # pan moved the screen centre -> re-hit on the next orbit
         elif zoom:
+            cursor_zoom = scheme.get("zm", "to_center") == "to_cursor"
+            if cursor_zoom and idle > self._zoom_hold_sec:
+                self._held_zoom_pivot = None
+                self._held_zoom_resolved = False
+            if not cursor_zoom:
+                self._held_zoom_pivot = self._zoom_target(conn, scheme, eye, right, up, back)
+                self._held_zoom_resolved = False
+            elif not self._held_zoom_resolved:
+                self._held_zoom_pivot = self._zoom_target(conn, scheme, eye, right, up, back)
+                self._held_zoom_resolved = True
+            zpivot = self._held_zoom_pivot
             if self._perspective(conn):
-                zpivot = self._held_pivot or self._object_center(conn) or eye_in
-                eye = self._zoom_persp(eye, _v_neg(back), zpivot, zoom)
+                reference = zpivot or self._object_center(conn)
+                eye = self._zoom_persp(eye, _v_neg(back), reference, zoom,
+                                       hold_target=zpivot is not None)
                 changed_affine = True
             else:
                 new_extents = self._zoom_ortho(conn, zoom)
+                if new_extents is not None and zpivot is not None:
+                    eye = self._zoom_ortho_eye(eye, right, up, zpivot,
+                                                self._zoom_factor(zoom))
                 # Re-assert the (unchanged) affine alongside the extents change. Onshape treats the
                 # view.affine write as the frame's commit; writing extents alone makes it snap the
                 # view back on the next frame (the zoom "rubber-bands"). This matches the real
@@ -1123,10 +1289,12 @@ class OnshapeBridge:
         self._in_motion = True
         conn.write_best_effort("motion", True)
 
-    def _gesture_pivot(self, conn, scheme, eye, right, up, back):
+    def _gesture_pivot(self, conn, scheme, eye, right, up, back, idle=0.0):
         """The orbit pivot for this gesture -- computed once (this is where the hit-test happens),
         then HELD until a pan/zoom moves the view or the gesture ends. Also shows Onshape's on-screen
         pivot marker when it (re)computes."""
+        if idle > self._pivot_hold_sec:
+            self._held_pivot = None
         if self._held_pivot is None:
             self._held_pivot = self._pivot(conn, scheme, eye, right, up, back)
             if self._held_pivot is not None:
@@ -1139,6 +1307,8 @@ class OnshapeBridge:
             return
         self._in_motion = False
         self._held_pivot = None
+        self._held_zoom_pivot = None
+        self._held_zoom_resolved = False
         self._nav_logged = False              # re-arm the per-gesture debug log
         conn.write_best_effort("pivot.visible", False)
         conn.write_best_effort("motion", False)
@@ -1180,12 +1350,26 @@ class OnshapeBridge:
         gy = PAN_SIGN[1] * py * PAN_SCALE * vh
         return _v_add(eye, _v_add(_v_scale(right, gx), _v_scale(up, gy)))
 
-    def _zoom_persp(self, eye, forward, pivot, zoom):
-        """Perspective zoom = dolly the eye along forward, proportional to the pivot distance."""
+    @staticmethod
+    def _zoom_factor(zoom):
+        return max(0.02, 1.0 - ZOOM_SIGN * zoom * ZOOM_SCALE)
+
+    def _zoom_persp(self, eye, forward, pivot, zoom, hold_target=False):
+        """Perspective To Object/To Cursor scales the eye about P; To Center dollies forward."""
+        if hold_target and pivot is not None:
+            return _v_add(pivot, _v_scale(_v_sub(eye, pivot), self._zoom_factor(zoom)))
         dist = _v_len(_v_sub(pivot, eye)) if pivot is not None else 1.0
         if dist < 1e-6:
             dist = 1.0
         return _v_add(eye, _v_scale(forward, ZOOM_SIGN * zoom * ZOOM_SCALE * dist))
+
+    @staticmethod
+    def _zoom_ortho_eye(eye, right, up, pivot, factor):
+        """Shift an orthographic eye so P keeps its screen coordinate as extents scale."""
+        offset = _v_sub(pivot, eye)
+        planar = _v_add(_v_scale(right, _v_dot(offset, right)),
+                        _v_scale(up, _v_dot(offset, up)))
+        return _v_add(eye, _v_scale(planar, 1.0 - factor))
 
     def _zoom_ortho(self, conn, zoom):
         """Orthographic zoom = scale view.extents about the view centre (moving the eye does nothing
@@ -1194,38 +1378,85 @@ class OnshapeBridge:
         ext = conn.read("view.extents")
         if not (isinstance(ext, list) and len(ext) >= 6):
             return None
-        s = 1.0 - ZOOM_SIGN * zoom * ZOOM_SCALE
-        if s < 0.02:
-            s = 0.02
+        s = self._zoom_factor(zoom)
         return [ext[0] * s, ext[1] * s, ext[2], ext[3] * s, ext[4] * s, ext[5]]
 
     # --- scheme geometry ----------------------------------------------------------------------
-    def _pivot(self, conn, scheme, eye, right, up, back):
-        op = scheme.get("op", "view")
-        if op == "origin":
-            return (0.0, 0.0, 0.0)
-        if op == "cursor":
-            # Under-mouse: aim the hit-test through the page-reported #canvas NDC. No sample /
-            # off-canvas / miss -> screen centre (same as "view"), then model centre. Needs the
-            # userscript installed (docs §8.14); the ray/hold/fallback path is offline-tested.
-            hit = self._hit_cursor(conn, eye, right, up, back)
-            if hit is not None:
-                return hit
-            hit = self._hit_center(conn, eye, right, up, back)
-            if hit is not None:
-                return hit
-        elif op in ("view", "selection"):
-            # Orbit about what's under the screen centre (like Onshape's own right-click orbit).
-            hit = self._hit_center(conn, eye, right, up, back)
-            if hit is not None:
-                return hit
-        center = self._object_center(conn)
-        if center is not None:
-            return center
-        # last resort: a point in front of the camera, so orbit still has a sane pivot.
-        return _v_add(eye, _v_scale(_v_neg(back), self._view_half(conn) * 4.0))
+    def _zoom_target(self, conn, scheme, eye, right, up, back):
+        """Resolve the advertised zoom target. Empty space keeps the cursor's screen position by
+        intersecting its ray with the current target-depth plane; orbit ray misses still use the
+        explicit fallback chain instead."""
+        zm = scheme.get("zm", "to_center")
+        if zm == "to_object":
+            return self._object_center(conn)
+        if zm == "to_cursor":
+            if scheme.get("sel_override", True):
+                selected = self._selection_center(conn)
+                if selected is not None:
+                    return selected
+            return (self._hit_cursor(conn, eye, right, up, back) or
+                    self._cursor_depth_point(conn, eye, right, up, back))
+        return None
 
-    def _hit_center(self, conn, eye, right, up, back):
+    def _cursor_depth_point(self, conn, eye, right, up, back):
+        """Synthetic To Cursor target on a view-facing plane at the current target/model depth."""
+        ndc = _get_page_pointer()
+        if ndc is None:
+            return None
+        half_x, half_y = self._view_halves(conn)
+        origin, direction = self._pixel_ray(ndc[0], ndc[1], eye, right, up, back,
+                                            half_x, half_y, 0.0)
+        target = conn.read("view.target", ttl=_TGT_TTL)
+        reference = None
+        if isinstance(target, list) and len(target) >= 3:
+            try:
+                candidate = tuple(float(v) for v in target[:3])
+                if all(math.isfinite(v) for v in candidate):
+                    reference = candidate
+            except (TypeError, ValueError):
+                pass
+        reference = reference or self._object_center(conn)
+        forward = _v_neg(back)
+        if reference is None:
+            reference = _v_add(eye, _v_scale(forward, max(half_y, 1.0)))
+        denom = _v_dot(direction, forward)
+        if abs(denom) < 1e-9:
+            return None
+        distance = _v_dot(_v_sub(reference, origin), forward) / denom
+        if distance <= 1e-6:
+            distance = max(_v_len(_v_sub(reference, eye)), half_y, 1.0)
+        return _v_add(origin, _v_scale(direction, distance))
+
+    def _pivot(self, conn, scheme, eye, right, up, back):
+        op = scheme.get("op", "screen_center")
+        # A camera primary keeps its selection-override exemption even though the method
+        # itself is unsupported here -- the same convention as Fusion/SolidWorks/FreeCAD,
+        # whose resolvers also skip camera but never let selection hijack it.
+        if scheme.get("sel_override", True) and op != "camera":
+            selected = self._selection_center(conn)
+            if selected is not None:
+                return selected
+        for method in orbit_pivot_candidates(op, scheme.get("fallbacks", [])):
+            if method == "origin":
+                return (0.0, 0.0, 0.0)
+            if method == "cursor":
+                point = self._hit_cursor(conn, eye, right, up, back)
+            elif method == "screen_center":
+                point = self._hit_screen_center(conn, eye, right, up, back)
+            elif method == "selection":
+                point = self._selection_center(conn)
+            elif method == "object":
+                point = self._object_center(conn)
+            else:
+                # camera / cursor_3d unsupported in Onshape: no 3D cursor exists, and the
+                # default view is orthographic, where rotating about the eye just slides the
+                # image around instead of turning in place. Skip to the next candidate.
+                continue
+            if point is not None:
+                return point
+        return None
+
+    def _hit_screen_center(self, conn, eye, right, up, back):
         """navlib hit-test through the screen centre (NDC 0,0)."""
         half_x, half_y = self._view_halves(conn)
         vh = max(half_x, half_y)
@@ -1247,8 +1478,8 @@ class OnshapeBridge:
         return self._hit_ray(conn, lookfrom, direction, vh)
 
     def _hit_ray(self, conn, lookfrom, direction, vh):
-        """Write an arbitrary pick ray, widen the aperture until a bbox-valid hit.lookat lands.
-        Shared by centre and cursor. Returns the hit point or None."""
+        """Write an arbitrary pick ray, widen the aperture until a bbox-valid, re-cast-confirmed
+        hit.lookat lands. Shared by centre and cursor. Returns the hit point or None."""
         if conn._hit_unsupported:
             return None
         bbox = conn.read("model.extents", ttl=_OBJ_TTL)
@@ -1259,20 +1490,39 @@ class OnshapeBridge:
         except _PropUnsupported:
             conn._hit_unsupported = True
             return None
+        confirm_from = _v_sub(lookfrom, _v_scale(direction, _CONFIRM_BACKOFF * vh))
         for f in HIT_APERTURES:
             try:
+                conn.write("hit.lookfrom", list(lookfrom))
                 conn.write("hit.aperture", max(1e-5, vh * f))
                 pt = conn._rpc("self:read", ["hit.lookat"])
             except _PropUnsupported:
                 continue
-            if self._valid_hit(pt, bbox):
+            if not self._valid_hit(pt, bbox):
+                continue
+            # Onshape fabricates a no-hit as a point on the ray at the scene's camera
+            # distance (it never signals a miss). Confirm the candidate by re-casting the
+            # SAME ray from further back: a real surface point is invariant to the ray
+            # origin, a fabricated at-depth point tracks it. Disagreement -> not a real
+            # surface -> keep widening / let the configured chain continue.
+            try:
+                conn.write("hit.lookfrom", list(confirm_from))
+                pt2 = conn._rpc("self:read", ["hit.lookat"])
+            except _PropUnsupported:
+                continue
+            if (self._valid_hit(pt2, bbox)
+                    and max(abs(float(pt[i]) - float(pt2[i])) for i in range(3))
+                    <= _CONFIRM_TOL * vh):
                 return (float(pt[0]), float(pt[1]), float(pt[2]))
+            if _DEBUG:
+                self._log.info("onshape hit: origin-dependent hit rejected as a fabricated "
+                               "no-hit point (aperture %.3g)", vh * f)
         return None
 
     @staticmethod
     def _pixel_ray(ndc_x, ndc_y, eye, right, up, back, half_x, half_y, backoff):
         """Orthographic pick ray through a canvas NDC point (x right, y up, both in [-1,1]).
-        NDC (0,0) is the screen-centre ray the old _hit_center used. lookfrom is pulled `backoff`
+        NDC (0,0) is the screen-centre ray used by _hit_screen_center. lookfrom is pulled `backoff`
         along forward so the ray starts outside the model."""
         fwd = _v_normalize(_v_neg(back))
         offset = _v_add(_v_scale(right, ndc_x * half_x), _v_scale(up, ndc_y * half_y))
@@ -1281,8 +1531,11 @@ class OnshapeBridge:
 
     @staticmethod
     def _valid_hit(pt, bbox):
-        """A hit counts only if it's a finite 3-point inside the model bounding box (expanded ~10% of
-        its diagonal) -- so a no-hit sentinel or a stale value can't masquerade as a real hit."""
+        """A hit counts only if it's a finite 3-point essentially INSIDE the model bounding box
+        (0.1% of its diagonal of float/transport slop -- a real surface point always is). The old
+        10%-of-diagonal margin let Onshape's fabricated no-hit points (a point on the ray at the
+        scene's camera distance, emitted when the raycast misses) pass as pivots whenever they
+        landed near the model; those must fail so the configured fallback chain continues."""
         if not (isinstance(pt, list) and len(pt) >= 3):
             return False
         try:
@@ -1293,7 +1546,7 @@ class OnshapeBridge:
             return False
         if isinstance(bbox, list) and len(bbox) >= 6:
             dx, dy, dz = bbox[3] - bbox[0], bbox[4] - bbox[1], bbox[5] - bbox[2]
-            m = 0.1 * math.sqrt(dx * dx + dy * dy + dz * dz) + 1e-6
+            m = 1e-3 * math.sqrt(dx * dx + dy * dy + dz * dz) + 1e-9
             if not (bbox[0] - m <= x <= bbox[3] + m and bbox[1] - m <= y <= bbox[4] + m
                     and bbox[2] - m <= z <= bbox[5] + m):
                 return False
@@ -1303,6 +1556,26 @@ class OnshapeBridge:
         ext = conn.read("model.extents", ttl=_OBJ_TTL)
         if isinstance(ext, list) and len(ext) >= 6:
             return ((ext[0] + ext[3]) * 0.5, (ext[1] + ext[4]) * 0.5, (ext[2] + ext[5]) * 0.5)
+        return None
+
+    def _selection_center(self, conn):
+        """Selection-extents centre exposed by the navlib client, or None.
+
+        Navlib models selection state separately from model extents. Some clients omit these
+        optional properties; ``conn.read`` already turns an unsupported read into None, preserving
+        the designated-pivot path when an Onshape build does not expose them.
+        """
+        empty = conn.read("selection.empty", ttl=_OBJ_TTL)
+        if empty is True:
+            return None
+        ext = conn.read("selection.extents", ttl=_OBJ_TTL)
+        if isinstance(ext, list) and len(ext) >= 6:
+            try:
+                values = [float(v) for v in ext[:6]]
+            except (TypeError, ValueError):
+                return None
+            if all(math.isfinite(v) for v in values):
+                return tuple((values[i] + values[i + 3]) * 0.5 for i in range(3))
         return None
 
     def _view_halves(self, conn):

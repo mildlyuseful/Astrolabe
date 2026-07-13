@@ -198,7 +198,11 @@ def _reset(monkeypatch):
 
 
 def _wire(monkeypatch, vp, design, cursor=(800.0, 450.0), scale=1.0):
-    monkeypatch.setattr(tn, "app", types.SimpleNamespace(activeViewport=vp))
+    empty = types.SimpleNamespace(count=0, item=lambda _i: None)
+    monkeypatch.setattr(
+        tn, "app", types.SimpleNamespace(
+            activeViewport=vp,
+            userInterface=types.SimpleNamespace(activeSelections=empty)))
     monkeypatch.setattr(tn, "_active_design", lambda: design)
     monkeypatch.setattr(tn, "_cursor_screen_pos", lambda: cursor)
     monkeypatch.setattr(tn, "_screen_scale", lambda sx, sy: scale)
@@ -338,12 +342,12 @@ def test_orbit_pivot_cursor_falls_back_to_object_centre(monkeypatch):
     assert (p.x, p.y, p.z) == (9, 9, 9)
 
 
-def test_orbit_pivot_view_still_uses_screen_centre(monkeypatch):
+def test_orbit_pivot_screen_center_uses_viewport_center(monkeypatch):
     # regression: the _raycast_pivot refactor must not change the "view" pivot's source
     monkeypatch.setattr(tn, "_screen_center_pivot", lambda cam: _pt(7, 7, 7))
     monkeypatch.setattr(tn, "_cursor_pivot",
                         lambda cam: (_ for _ in ()).throw(AssertionError("wrong path")))
-    p = tn._orbit_pivot("view", object(), _pt(0, 0, 0), idle=10.0)
+    p = tn._orbit_pivot("screen_center", object(), _pt(0, 0, 0), idle=10.0)
     assert (p.x, p.y, p.z) == (7, 7, 7)
 
 
@@ -365,3 +369,71 @@ def test_zoom_pivot_to_cursor_holds_and_falls_back(monkeypatch):
 def test_zoom_pivot_to_center_unchanged():
     tgt = _pt(0, 0, 0)
     assert tn._zoom_pivot("to_center", object(), tgt, idle=0.0) is tgt
+
+
+def test_pan_mode_native_zoom_and_dolly_are_distinct():
+    eye = (0.0, -10.0, 2.0)
+    target = (0.0, 0.0, 2.0)
+    pivot = (4.0, 0.0, 2.0)
+
+    zoom_eye, zoom_target, scale_extents = tn._zoom_geometry(
+        eye, target, pivot, 0.5, "zoom")
+    dolly_eye, dolly_target, dolly_scales = tn._zoom_geometry(
+        eye, target, pivot, 0.5, "dolly")
+
+    assert scale_extents is True and dolly_scales is False
+    assert zoom_target != target                 # native zoom shifts framing toward the pivot
+    assert dolly_target == target                # dolly moves only the eye
+    assert zoom_eye != dolly_eye
+
+
+def test_selection_override_uses_aggregate_selection_bounds(monkeypatch):
+    class Selection:
+        def __init__(self, bounds):
+            self.entity = types.SimpleNamespace(boundingBox=FakeBB(*bounds))
+
+    class Selections:
+        def __init__(self, items):
+            self._items = items
+            self.count = len(items)
+
+        def item(self, index):
+            return self._items[index]
+
+    selected = Selections([
+        Selection(((-2.0, 0.0, 4.0), (2.0, 2.0, 6.0))),
+        Selection(((8.0, -4.0, 0.0), (10.0, 4.0, 8.0))),
+    ])
+    monkeypatch.setattr(
+        tn, "app", types.SimpleNamespace(
+            userInterface=types.SimpleNamespace(activeSelections=selected)))
+    target = _pt(50.0, 50.0, 50.0)
+    p = tn._orbit_pivot("origin", object(), target, idle=10.0, sel_override=True)
+    assert (p.x, p.y, p.z) == pytest.approx((4.0, 0.0, 4.0))
+    p = tn._orbit_pivot("origin", object(), target, idle=10.0, sel_override=False)
+    assert (p.x, p.y, p.z) == pytest.approx((0.0, 0.0, 0.0))
+
+
+def test_designated_selection_works_when_override_is_off(monkeypatch):
+    selected = types.SimpleNamespace(
+        count=1,
+        item=lambda _i: types.SimpleNamespace(
+            entity=types.SimpleNamespace(boundingBox=FakeBB((2, 4, 6), (6, 8, 10)))))
+    monkeypatch.setattr(
+        tn, "app", types.SimpleNamespace(
+            userInterface=types.SimpleNamespace(activeSelections=selected)))
+    p = tn._orbit_pivot("selection", object(), _pt(50, 50, 50), idle=10.0,
+                        sel_override=False)
+    assert (p.x, p.y, p.z) == pytest.approx((4.0, 6.0, 8.0))
+
+
+def test_non_geometric_selection_uses_selection_point(monkeypatch):
+    selected = types.SimpleNamespace(
+        count=1,
+        item=lambda _i: types.SimpleNamespace(
+            entity=object(), point=_pt(3.0, 5.0, 7.0)))
+    monkeypatch.setattr(
+        tn, "app", types.SimpleNamespace(
+            userInterface=types.SimpleNamespace(activeSelections=selected)))
+    p = tn._selection_center()
+    assert (p.x, p.y, p.z) == pytest.approx((3.0, 5.0, 7.0))

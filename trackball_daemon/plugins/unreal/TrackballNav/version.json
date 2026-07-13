@@ -1,4 +1,4 @@
 {
-  "version": "0.2.4",
-  "_comment": "Kept in sync with ADDIN_VERSION in Content/Python/trackball_nav.py AND VersionName in TrackballNav.uplugin. The daemon's integrations._ADDINS['unreal'] reads this (like Fusion's TrackballNav.manifest / Blender's & FreeCAD's version.json) to drive auto_update. Bump on any add-on change so auto_update re-copies; reload = restart the Unreal Editor. 0.2.4: selection_overrides_pivot. 0.2.3: under-mouse cursor orbit + to_cursor via GeoReferencing. 0.2.0: Blender-parity scheme + orbit baseline x2."
+  "version": "0.2.13",
+  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.13: independent orbit/zoom holds."
 }

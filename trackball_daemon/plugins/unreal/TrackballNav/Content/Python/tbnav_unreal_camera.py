@@ -23,26 +23,15 @@ back via make_rot_from_xz, so the only things to settle live are the user-feel S
 """
 import math
 
-# --- baseline sign/scale (the add-on's intrinsic feel). The daemon's Per-App Bindings
-#     (gain 1.0 == this baseline) scale from here and the Invert checkboxes flip further, so
-#     DO NOT also scale/invert in the daemon. Left-handed + degrees => expect to FLIP several
-#     signs vs the other apps; SETTLE EACH BY OBSERVING THE VIEWPORT, not algebra. ----------
-ORBIT_SCALE = (2.0, 2.0, 2.0)   # (pitch o[0] about right, yaw o[1] about up, twist o[2] about fwd).
-                                # 2.0 (NOT 1.0): on real hardware the default orbit felt HALF of what it
-                                # should be, so the baseline is doubled (verified on the device). 1.0
-                                # would rotate by the full broker angle = the --debug cube, but the
-                                # device/feel wants ~2x that here. Tune with the per-app orbit
-                                # Sensitivity slider (set 0.5 to get back to the cube's 1:1). Do NOT
-                                # copy Blender's 0.5 -- that halving is specific to its RegionView3D.
-ORBIT_SIGN = (1.0, 1.0, 1.0)    # (pitch, yaw, twist) direction -- LIVE-TUNE on the device.
-PAN_SIGN = (1.0, -1.0)          # pan along (camera-right, camera-up) -- LIVE-TUNE.
-PAN_SCALE = 0.14                # broker pan delta * focus-distance (cm) -> world units. Mirrors the
-                                # Fusion add-in's proven ratio (the daemon sends the SAME pan deltas to
-                                # every app); CENTIMETRES, so the effective move is ~100x the metre-based
-                                # apps because we multiply by the focus distance (often 1000s of cm).
-ZOOM_SIGN = 1.0                 # twist -> dolly direction (positive twist dollies the eye FORWARD = in).
-ZOOM_SCALE = 0.25               # broker zoom delta * focus-distance (cm) per frame -> forward dolly.
-MOVE_SCALE = 0.5                # fly/walk move per ball delta * focus-distance (cm) -- LIVE-TUNE.
+# Host correction is supplied by the daemon in frame.adv after the active action is known.
+# Pure camera math stays neutral so it remains independently testable and cannot double-apply it.
+ORBIT_SCALE = (1.0, 1.0, 1.0)
+ORBIT_SIGN = (1.0, 1.0, 1.0)
+PAN_SIGN = (1.0, 1.0)
+PAN_SCALE = 1.0
+ZOOM_SIGN = 1.0
+ZOOM_SCALE = 1.0
+MOVE_SCALE = 1.0
 WORLD_UP = (0.0, 0.0, 1.0)      # Unreal is Z-up (verified); turntable azimuth axis.
 
 DIST_DEFAULT = 1000.0           # cm: focus distance used to scale pan/zoom before the first orbit.
@@ -226,6 +215,23 @@ def dolly(cam, z, dist, toward=None):
     cam.location = list(v_add(tuple(cam.location), v_scale(cam.forward, k)))
 
 
+def lens_zoom(cam, z, field_of_view, toward=None):
+    """Return a new perspective FOV while keeping an optional world point fixed on screen."""
+    old_fov = max(5.0, min(170.0, float(field_of_view)))
+    factor = max(0.05, min(20.0, 1.0 - ZOOM_SIGN * z * ZOOM_SCALE))
+    old_tan = math.tan(math.radians(old_fov) * 0.5)
+    new_tan = max(math.tan(math.radians(2.5)), min(math.tan(math.radians(85.0)),
+                                                       old_tan * factor))
+    new_fov = math.degrees(2.0 * math.atan(new_tan))
+    ratio = new_tan / old_tan
+    if toward is not None:
+        offset = v_sub(toward, tuple(cam.location))
+        planar = v_add(v_scale(cam.right, v_dot(offset, cam.right)),
+                       v_scale(cam.up, v_dot(offset, cam.up)))
+        cam.location = list(v_add(tuple(cam.location), v_scale(planar, 1.0 - ratio)))
+    return new_fov
+
+
 # ---------------------------------------------------------------------------------------
 # fly / walk (first-person) -- mode ports of the Blender add-on
 # ---------------------------------------------------------------------------------------
@@ -235,6 +241,22 @@ def horizontal(v):
     h = (v[0], v[1], 0.0)
     n = v_len(h)
     return (h[0] / n, h[1] / n, h[2] / n) if n > 1e-9 else (0.0, 0.0, 0.0)
+
+
+def level_horizon(cam):
+    """Remove existing roll: rebuild right/up so camera-right is horizontal (perpendicular to
+    WORLD_UP) while forward is unchanged. The eye stays put, so the tracked focus distance and
+    the synthesised orbit point (location + forward*dist) are preserved -- only the roll goes.
+    Returns False in the degenerate
+    straight-up/straight-down view, where roll is indistinguishable from yaw (the same
+    singularity basis_to_rotator resolves by reporting roll 0)."""
+    right = v_cross(WORLD_UP, cam.forward)       # Unreal: right = up x forward (verified)
+    if v_len(right) < 1e-6:
+        return False
+    right = v_normalize(right)
+    cam.right = right
+    cam.up = v_cross(cam.forward, right)
+    return True
 
 
 def look(cam, o, horizon_lock):

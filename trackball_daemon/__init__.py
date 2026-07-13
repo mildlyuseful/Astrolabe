@@ -6,9 +6,8 @@ or installs from GitHub without source changes):
   paths        - per-user config directory
   util         - logging (file-based, safe under pythonw / no console)
   config       - the single source of truth (JSON in the per-user config dir)
-  output       - UNCHANGED output/injection math (SendInput + quaternion + routing),
-                 reading its numbers from config instead of module constants
-  ble          - UNCHANGED BLE/data-ingestion loop (scan/connect/subscribe/reconnect)
+  output       - output/injection math (SendInput + quaternion + app-aware routing)
+  ble          - BLE/data-ingestion loop (scan/connect/subscribe/reconnect)
   winfocus     - foreground-window process detection (route nav to the focused app)
   navbroker    - 127.0.0.1 socket broker streaming nav deltas to the socket add-ons
   solidworks_driver - in-process SolidWorks COM driver (no add-in)
@@ -21,4 +20,4 @@ or installs from GitHub without source changes):
   app          - orchestrator that wires the above together
 """
 
-__version__ = "0.1.57"
+__version__ = "0.1.73"

@@ -1,13 +1,15 @@
 # Godot navigation — maintainer's guide
 
 Socket **EditorPlugin** for Godot 4's editor 3D viewport. Same NavBroker protocol as
-Unreal/Unity. Add-on `0.1.3`.
+Unreal/Unity.
 
 ## Editor camera limits
 
 Godot's 3D editor viewport stores only **yaw/pitch** (no roll). Free trackball orbit and
 twist→roll are disabled: the plugin always uses **turntable**, maps twist to zoom/dolly/none
 (never roll), and horizon-locks fly/walk look. Daemon UI matches (no free orbit / roll / bank).
+This is a current host limitation, not an unimplemented UI option. Pan-mode **Zoom** changes the
+editor Camera3D FOV/orthographic size; **Dolly** translates the camera.
 
 ## Layout
 
@@ -54,8 +56,19 @@ Set up still stages a copy at
 
 ## Controls (Unreal/Blender parity)
 
+Every visible Orbit/Camera/Fly/Walk action has an independent X/Y/Z source and invert under
+`advanced.axis_source` / `advanced.invert`. Godot still drops unsupported roll/bank output; source
+routing does not bypass the editor camera's yaw/pitch limitation.
+
 Orbit / fly / walk, under-cursor via `EditorInterface.get_editor_viewport_3d(0)` mouse
-ray, selection AABB override, same `adv` block as Unreal/Unity.
+ray, selection AABB override, and the same rich `adv` contract as Unreal/Unity. Model Center uses
+aggregate scene bounds and remains distinct from Selection. Screen Center/Under Cursor orbit misses
+continue the global chain; an empty-space To Cursor zoom synthesizes a point at the tracked focus
+depth. Pivot and Zoom hold are independent, with the same pan/orbit invalidation contract as the
+other hosts.
+
+Godot does not need horizon-entry leveling because no reachable editor-camera state contains roll.
+Intrinsic signs/scales arrive in `adv.host_baseline`; camera math stays neutral.
 
 ## Logs
 
@@ -65,3 +78,5 @@ ray, selection AABB override, same `adv` block as Unreal/Unity.
 
 Disable/enable the plugin or restart Godot. Bump `plugin.cfg` version + `version.json` +
 `ADDIN_VERSION` in `trackball_nav.gd`.
+
+The current parser/GUI/live checks are tracked in [`TODO.md`](../../TODO.md).

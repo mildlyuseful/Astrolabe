@@ -41,7 +41,7 @@ class NavBroker:
         self._period = 1.0 / self._clamp_rate(rate_hz)     # flush/refresh interval
         # Control scheme sent each frame. "adv" is an optional app-specific extras dict (e.g.
         # Blender's richer nav options) that rides along additively; None => omitted from the frame.
-        self._scheme = {"op": "view", "os": "free", "zm": "to_center", "adv": None}
+        self._scheme = {"op": "screen_center", "os": "free", "zm": "to_center", "adv": None}
 
     @staticmethod
     def _clamp_rate(hz):

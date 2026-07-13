@@ -7,10 +7,10 @@ import math
 
 ORBIT_SCALE = (1.0, 1.0, 1.0)
 ORBIT_SIGN = (1.0, 1.0, 1.0)
-PAN_SIGN = (-1.0, 1.0)
-PAN_SCALE = 0.14
+PAN_SIGN = (1.0, 1.0)
+PAN_SCALE = 1.0
 ZOOM_SIGN = 1.0
-ZOOM_SCALE = 0.25
+ZOOM_SCALE = 1.0
 WORLD_UP = (0.0, 0.0, 1.0)
 DIST_MIN = 1.0e-4
 
@@ -88,14 +88,29 @@ def _rotate_vec(v, axis, angle):
     return list(rotate_about_axis(tuple(v), axis, angle))
 
 
+def level_horizon(cam):
+    """Remove existing roll: rebuild `up` so camera-right is horizontal (perpendicular to
+    WORLD_UP) while the view direction is unchanged. eye and target are untouched, so the
+    eye-target distance and the active orbit point are preserved -- only the roll goes. Returns
+    False in the degenerate
+    straight-up/straight-down view, where roll is indistinguishable from yaw."""
+    fwd = cam.forward()
+    right = v_cross(fwd, WORLD_UP)
+    if v_len(right) < 1e-6:
+        return False
+    right = v_normalize(right)
+    cam.up = list(v_cross(right, fwd))
+    return True
+
+
 def orbit(cam, o, turntable, pivot):
-    """Orbit eye (and optionally target for viewpoint) about pivot. pivot None => turn in place
+    """Orbit eye (and optionally target for camera) about pivot. pivot None => turn in place
     about the eye (target orbits with the look direction)."""
     pitch = o[0] * ORBIT_SCALE[0] * ORBIT_SIGN[0]
     yaw = o[1] * ORBIT_SCALE[1] * ORBIT_SIGN[1]
     twist = o[2] * ORBIT_SCALE[2] * ORBIT_SIGN[2]
     if pivot is None:
-        # Viewpoint: rotate look direction about the eye.
+        # Camera: rotate look direction about the eye.
         pivot = tuple(cam.eye)
         eye_fixed = True
     else:

@@ -20,9 +20,9 @@ from System.Windows.Forms import Cursor
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.10"
+ADDIN_VERSION = "0.1.18"          # keep in sync with version.json
 _DEFAULT_PORT = 47900
-PIVOT_HOLD_IDLE = 0.35
+PIVOT_HOLD_IDLE = 0.5
 OBJ_CACHE_SEC = 0.5
 BBOX_MARGIN = 0.10
 
@@ -34,7 +34,11 @@ _idle_hooked = False
 _host = "?"
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
 _zoom_gesture = {"pivot": None}
+# Fixed-horizon transition tracker: None until the first frame so startup in turntable does not
+# level the view; only a real free->turntable switch does.
+_horizon = {"fixed": None}
 _obj_cache = {"t": 0.0, "center": None, "bbox": None}
+_scene_cache = {"t": 0.0, "center": None}
 _last_scheme = {"v": None}
 _last_err = {"t": 0.0, "s": ""}
 _rl = {}
@@ -139,6 +143,35 @@ def _selection_center():
     return center, bb
 
 
+def _document_center():
+    """Center of all visible document geometry's aggregate bounding box, or None."""
+    now = time.time()
+    if _scene_cache["center"] is not None and now - _scene_cache["t"] < OBJ_CACHE_SEC:
+        return _scene_cache["center"]
+    doc = Rhino.RhinoDoc.ActiveDoc
+    bbox = RG.BoundingBox.Empty
+    if doc is not None:
+        try:
+            objects = doc.Objects.GetObjectList(Rhino.DocObjects.ObjectType.AnyObject) or []
+        except Exception:
+            objects = []
+        for obj in objects:
+            try:
+                if obj.IsDeleted or obj.IsHidden:
+                    continue
+                b = obj.Geometry.GetBoundingBox(True)
+                if b.IsValid:
+                    bbox = RG.BoundingBox.Union(bbox, b) if bbox.IsValid else b
+            except Exception:
+                continue
+    center = None
+    if bbox.IsValid:
+        c = bbox.Center
+        center = (c.X, c.Y, c.Z)
+    _scene_cache.update(t=now, center=center)
+    return center
+
+
 def _in_bbox(p, bbox):
     if bbox is None:
         return True
@@ -152,7 +185,7 @@ def _raycast_client(view, client_x, client_y, bbox):
     """Raycast from viewport pixel to the front surface under that pixel.
 
     The path that reliably hits geometry is the raw frustum ``RayShoot``
-    (``Ray3d(line.From, line.Direction)``) — same as 0.1.7. That ray often runs
+    (``Ray3d(line.From, line.Direction)``). That ray often runs
     far→near so ``hits[0]`` is the *back* face.
 
     Front face: meshed brep + ``MeshRay`` from the camera through the far frustum
@@ -160,7 +193,7 @@ def _raycast_client(view, client_x, client_y, bbox):
     RayShoot back-face fallback).
 
     Do **not** use bare ``vector.IsTiny`` — in Rhino Python that name is a method
-    object (always truthy), which silently aborted 0.1.8/0.1.9 before any shoot.
+    object (always truthy), which silently aborts before any shoot.
     """
     try:
         vp = view.ActiveViewport
@@ -172,7 +205,6 @@ def _raycast_client(view, client_x, client_y, bbox):
         if doc is None:
             return None
         cam = vp.CameraLocation
-        # Exact construction from the working 0.1.7 logs.
         shoot_ray = RG.Ray3d(line.From, line.Direction)
         # Eye → farther frustum end (into the scene) for MeshRay front-face picks.
         if cam.DistanceTo(line.From) >= cam.DistanceTo(line.To):
@@ -367,15 +399,35 @@ def _cursor_pivot(view, bbox):
         xy, x, y, w, h = _cursor_frustum_xy(view)
         if xy is None:
             _log_rl("cpivot", "cursor-pivot: mouse outside view (%.0f,%.0f in %.0fx%.0f) → "
-                    "view/forward fallback" % (x, y, w, h))
+                    "fallback chain" % (x, y, w, h))
             return None
         hit = _raycast_client(view, xy[0], xy[1], bbox)
         if hit is None:
             _log_rl("cpivot", "cursor-pivot: nothing under cursor (%.0f,%.0f) → "
-                    "view/forward fallback" % (xy[0], xy[1]))
+                    "fallback chain" % (xy[0], xy[1]))
         return hit
     except Exception:
-        _log_rl("cpivot", "cursor-pivot: exception → view/forward fallback")
+        _log_rl("cpivot", "cursor-pivot: exception → fallback chain")
+        return None
+
+
+def _cursor_depth_point(view):
+    """Intersect the live cursor frustum line with the viewport target-depth plane."""
+    try:
+        xy, _x, _y, _w, _h = _cursor_frustum_xy(view)
+        if xy is None:
+            return None
+        ok, line = view.ActiveViewport.GetFrustumLine(xy[0], xy[1])
+        if not ok:
+            return None
+        plane = Rhino.Geometry.Plane(view.ActiveViewport.CameraTarget,
+                                     view.ActiveViewport.CameraDirection)
+        ok, t = Rhino.Geometry.Intersect.Intersection.LinePlane(line, plane)
+        if not ok:
+            return None
+        p = line.PointAt(t)
+        return (float(p.X), float(p.Y), float(p.Z))
+    except Exception:
         return None
 
 
@@ -385,48 +437,47 @@ def _forward_point(cam):
     return (cam.eye[0] + f[0] * d, cam.eye[1] + f[1] * d, cam.eye[2] + f[2] * d)
 
 
-def _orbit_pivot(op, cam, view, idle, sel_override=True):
-    if op == "viewpoint":
-        return None
+def _orbit_pivot(op, cam, view, idle, sel_override=True, candidates=None,
+                 hold_sec=PIVOT_HOLD_IDLE):
     center, bbox = _selection_center()
-    if op in ("object", "selection"):
-        return center if center is not None else _forward_point(cam)
-    if sel_override and center is not None:
+    if sel_override and op != "camera" and center is not None:
         return center
     ray_bbox = bbox if sel_override else None
-    if op == "origin":
-        return (0.0, 0.0, 0.0)
-    if op == "view":
-        if _gesture["pivot"] is None or _gesture["invalid"] or idle > PIVOT_HOLD_IDLE:
-            _gesture["pivot"] = _screen_center_pivot(view, ray_bbox)
-            if _gesture["pivot"] is None:
-                _gesture["pivot"] = center if center is not None else _forward_point(cam)
-            _gesture["invalid"] = False
+    if _gesture["pivot"] is not None and not _gesture["invalid"] and idle <= hold_sec:
         return _gesture["pivot"]
-    if op == "cursor":
-        if _gesture["pivot"] is None or _gesture["invalid"] or idle > PIVOT_HOLD_IDLE:
-            hit = _cursor_pivot(view, ray_bbox)
-            if hit is None:
-                # Prefer real Auto Depth over a synthetic look-at point when the mouse miss.
-                hit = _screen_center_pivot(view, ray_bbox)
-            if hit is None:
-                hit = center if center is not None else _forward_point(cam)
-            _gesture["pivot"] = hit
+    for method in (candidates or [op]):
+        if method == "camera":
+            point = tuple(cam.eye)
+        elif method == "origin":
+            point = (0.0, 0.0, 0.0)
+        elif method == "screen_center":
+            point = _screen_center_pivot(view, ray_bbox)
+        elif method == "cursor":
+            point = _cursor_pivot(view, ray_bbox)
+        elif method == "object":
+            point = _document_center()
+        elif method == "selection":
+            point = center
+        else:
+            continue
+        if point is not None:
+            _gesture["pivot"] = point
             _gesture["invalid"] = False
-        return _gesture["pivot"]
-    return _forward_point(cam)
+            return point
+    return None
 
 
-def _zoom_toward(zm, view, idle=0.0, sel_override=True):
+def _zoom_toward(zm, view, idle=0.0, sel_override=True, hold_sec=PIVOT_HOLD_IDLE):
     center, bbox = _selection_center()
     if zm == "to_object":
-        return center
+        return _document_center()
     if zm == "to_cursor":
         if sel_override and center is not None:
             return center
-        if _zoom_gesture["pivot"] is None or idle > PIVOT_HOLD_IDLE:
+        if _zoom_gesture["pivot"] is None or idle > hold_sec:
             ray_bbox = bbox if sel_override else None
-            _zoom_gesture["pivot"] = _cursor_pivot(view, ray_bbox)
+            _zoom_gesture["pivot"] = (_cursor_pivot(view, ray_bbox) or
+                                        _cursor_depth_point(view))
         return _zoom_gesture["pivot"]
     return None
 
@@ -435,16 +486,20 @@ def _apply(view, frame, idle):
     o = list(frame.get("o", [0.0, 0.0, 0.0]))
     p = list(frame.get("p", [0.0, 0.0]))
     z = float(frame.get("z", 0.0))
-    op = frame.get("op", "view")
+    op = frame.get("op", "screen_center")
     style = frame.get("os", "free")
     zm = frame.get("zm", "to_center")
     adv = frame.get("adv") or {}
+    zoom_style = str(adv.get("zoom_style", "dolly"))
     sel_override = bool(adv.get("selection_overrides_pivot", True))
+    orbit_hold = max(0.0, min(10.0, float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE))))
+    zoom_hold = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
+    pivot_candidates = adv.get("orbit_pivot_candidates") or [op]
 
-    sig = (op, style, zm, sel_override)
+    sig = (op, style, zm, zoom_style, sel_override)
     if sig != _last_scheme["v"]:
         _last_scheme["v"] = sig
-        _log("scheme: pivot=%s style=%s zoom=%s sel_override=%s" % sig)
+        _log("scheme: pivot=%s style=%s zoom=%s pan_zoom=%s sel_override=%s" % sig)
 
     # Generic daemon invert already applied; no per-mode advanced invert for Rhino default suite.
     cam = _read_camera(view)
@@ -452,26 +507,61 @@ def _apply(view, frame, idle):
     changed = False
     turntable = style == "turntable"
 
+    # Level ONCE when the style transitions free->turntable: remove existing roll
+    # instead of locking the tilted horizon. eye/target stay put, so distance and the active
+    # orbit point are preserved. Transitions only; ordinary turntable frames never re-level.
+    prev = _horizon["fixed"]
+    _horizon["fixed"] = turntable
+    if turntable and prev is False and bool(adv.get("level_horizon_on_entry", True)):
+        if cammath.level_horizon(cam):
+            _log("horizon: leveled on turntable entry")
+            changed = True
+
     if o[0] or o[1] or o[2]:
-        pivot = _orbit_pivot(op, cam, view, idle, sel_override=sel_override)
+        pivot = _orbit_pivot(op, cam, view, idle, sel_override=sel_override,
+                             candidates=pivot_candidates, hold_sec=orbit_hold)
+        if pivot is None:
+            if changed:                      # deliver the entry-leveling even though the
+                _write_camera(view, cam)     # pivot chain produced no orbit frame
+            return
         if pivot is not None:
             dist = max(cammath.DIST_MIN, cammath.v_len(cammath.v_sub(tuple(cam.eye), pivot)))
         cammath.orbit(cam, o, turntable, pivot)
         _zoom_gesture["pivot"] = None
         changed = True
     elif p[0] or p[1]:
-        _gesture["invalid"] = True
-        _zoom_gesture["pivot"] = None
+        _gesture.update({"pivot": None, "invalid": True})
         cammath.pan(cam, p[0], p[1], dist)
         changed = True
     elif z:
-        _gesture["invalid"] = True
-        toward = _zoom_toward(zm, view, idle, sel_override=sel_override)
+        _gesture.update({"pivot": None, "invalid": True})
+        toward = _zoom_toward(zm, view, idle, sel_override=sel_override, hold_sec=zoom_hold)
+        if _magnify(view, z, zoom_style, toward):
+            return
         cammath.dolly(cam, z, dist, toward)
         changed = True
 
     if changed:
         _write_camera(view, cam)
+
+
+def _magnify(view, z, zoom_style, toward=None):
+    """Use Rhino's native lens Zoom (mode=True) or camera Dolly (mode=False)."""
+    try:
+        factor = max(0.05, min(20.0, 1.0 + cammath.ZOOM_SIGN * z * cammath.ZOOM_SCALE))
+        vp = view.ActiveViewport
+        if toward is None:
+            ok = vp.Magnify(factor, zoom_style == "zoom")
+        else:
+            client = vp.WorldToClient(RG.Point3d(*toward))
+            fixed = System.Drawing.Point(int(round(client.X)), int(round(client.Y)))
+            ok = vp.Magnify(factor, zoom_style == "zoom", fixed)
+        if ok:
+            view.Redraw()
+        return bool(ok)
+    except Exception as exc:
+        _log_rl("magnify", "native %s failed; using camera dolly (%s)" % (zoom_style, exc))
+        return False
 
 
 def _on_idle(sender, e):
