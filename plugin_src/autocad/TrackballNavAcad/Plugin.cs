@@ -57,7 +57,7 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.13";  // 0.3.13: Zoom/Dolly + configurable pivot hold
+        public const string PluginVersion = "0.3.14";  // 0.3.14: pan invalidation + cursor-depth zoom
                                                        // 0.3.11: level-horizon toggle -- turntable
                                                        // entry levels once (default) or keeps tilt
                                                        // (adv.level_horizon_on_entry; issue #2).
@@ -860,6 +860,17 @@ namespace TrackballNav
             return p;
         }
 
+        Point3d? CapturePointerDepthPoint()
+        {
+            if (!_ptrValid) return null;
+            try
+            {
+                PivotViewBasis(out var viewDir, out var targetDepth);
+                return NavMath.AtViewDepth(_ptrPoint, viewDir, targetDepth);
+            }
+            catch { return null; }
+        }
+
         // The held "screen_center" pivot: the first surface under the viewport CENTRE — the
         // same expanding model-space ray the cursor pivot uses, aimed through the view centre
         // instead of the mouse, but STRICT: no construction-plane or view-depth synthesis.
@@ -964,7 +975,7 @@ namespace TrackballNav
                     {
                         _heldZoomPivot = selectionOverrides ? CaptureSelectionCenter(doc) : null;
                         if (!_heldZoomPivot.HasValue)
-                            _heldZoomPivot = CapturePointerPivot();
+                            _heldZoomPivot = CapturePointerPivot() ?? CapturePointerDepthPoint();
                     }
                     _heldZoomSet = true;
                 }
@@ -975,8 +986,16 @@ namespace TrackballNav
                                      levelOnEntry, zoomStyle);
                 NavMath.Write(_gsView, _cam);
                 _gsView.Update();                      // repaint from the kernel cache: NO regen
-                if (hasPan || hasZoom) _heldOrbitSet = false;   // view moved under the cursor ->
-                if (hasOrbit || hasPan) _heldZoomSet = false;   // the next orbit/zoom re-captures
+                if (hasPan || hasZoom)                         // view moved under the cursor ->
+                {
+                    _heldOrbitSet = false;
+                    _heldOrbitPivot = null;
+                }
+                if (hasOrbit || hasPan)                        // next zoom re-captures
+                {
+                    _heldZoomSet = false;
+                    _heldZoomPivot = null;
+                }
                 return true;
             }
             catch (System.Exception ex)

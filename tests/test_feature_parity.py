@@ -103,3 +103,16 @@ def test_sketchup_selection_override_does_not_replace_to_object():
     source = _source("trackball_daemon/plugins/sketchup/trackball_nav/camera.rb")
     assert "selection_overrides && zoom_mode == 'to_cursor'" in source
     assert "advanced.fetch('pan_scales_with_distance', true)" in source
+
+
+def test_sketchup_profile_exposes_pivot_hold_and_free_style_autoselects_roll():
+    assert APP_BINDING_PROFILES["sketchup"].supports("screen_hold")
+    source = _source("trackball_daemon/ui.py")
+    assert 'if value != "free" or "roll" not in profile.twist_actions' in source
+    assert 'self._set_and_save(adv + ("twist_action",), "roll")' in source
+
+
+def test_godot_holds_resolved_zoom_target_including_synthetic_depth():
+    source = _source("trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd")
+    assert "if not _zoom_gesture_resolved or idle > hold_sec" in source
+    assert "_cursor_depth_point(camera, cam)" in source

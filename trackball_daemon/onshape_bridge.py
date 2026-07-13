@@ -102,9 +102,9 @@ def _allowed_web_origin(origin):
 # (px,py) = pan, zoom = zoom. OutputEngine already composes the immutable Onshape baseline with
 # user bindings, so this implementation stays neutral.
 ORBIT_SIGN = (1.0, 1.0, 1.0)
-# turntable azimuth axis. Onshape's scene up may be Y or Z -- VERIFY live (only affects turntable:
-# toggle it and watch whether verticals stay vertical). (0,1,0) = Y-up (WebGL convention) as a start.
-WORLD_UP = (0.0, 1.0, 0.0)
+# Onshape's Top plane normal is world +Z. Turntable yaw and one-time horizon leveling must both use
+# it; +Y is the Front-plane normal and produced a horizon parallel to Front instead of Top.
+WORLD_UP = (0.0, 0.0, 1.0)
 PAN_SIGN = (1.0, 1.0)
 PAN_SCALE = 1.0
 ZOOM_SCALE = 1.0
@@ -809,7 +809,6 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
   // Keep the last sample fresh while the cursor is still (gesture start without a move).
   setInterval(function () {
     if (!last.t) return;
-    if (Date.now() - last.t > 400) return;
     try {
       fetch(ENDPOINT, {
         method: "POST",
@@ -1195,8 +1194,7 @@ class OnshapeBridge:
         # Level ONCE on turntable entry (queued by set_scheme; issue #2): rebuild right/up so
         # camera-right is horizontal while back (the view direction) and the eye stay put -- the
         # screen centre and zoom are untouched, only the roll goes. Skipped in the degenerate
-        # straight-along-WORLD_UP view. Uses the same WORLD_UP as the turntable itself (Y-up
-        # guess -- needs the same live verification; see the WORLD_UP note above).
+        # straight-along-WORLD_UP view. Uses the same +Z Top-plane normal as the turntable itself.
         if self._level_pending:
             self._level_pending = False
             leveled = _level_horizon_basis(back)
@@ -1367,7 +1365,9 @@ class OnshapeBridge:
 
     # --- scheme geometry ----------------------------------------------------------------------
     def _zoom_target(self, conn, scheme, eye, right, up, back):
-        """Resolve the advertised zoom target. A miss honestly degrades to To Center."""
+        """Resolve the advertised zoom target. Empty space keeps the cursor's screen position by
+        intersecting its ray with the current target-depth plane; orbit ray misses still use the
+        explicit fallback chain instead."""
         zm = scheme.get("zm", "to_center")
         if zm == "to_object":
             return self._object_center(conn)
@@ -1376,8 +1376,38 @@ class OnshapeBridge:
                 selected = self._selection_center(conn)
                 if selected is not None:
                     return selected
-            return self._hit_cursor(conn, eye, right, up, back)
+            return (self._hit_cursor(conn, eye, right, up, back) or
+                    self._cursor_depth_point(conn, eye, right, up, back))
         return None
+
+    def _cursor_depth_point(self, conn, eye, right, up, back):
+        """Synthetic To Cursor target on a view-facing plane at the current target/model depth."""
+        ndc = _get_page_pointer()
+        if ndc is None:
+            return None
+        half_x, half_y = self._view_halves(conn)
+        origin, direction = self._pixel_ray(ndc[0], ndc[1], eye, right, up, back,
+                                            half_x, half_y, 0.0)
+        target = conn.read("view.target", ttl=_TGT_TTL)
+        reference = None
+        if isinstance(target, list) and len(target) >= 3:
+            try:
+                candidate = tuple(float(v) for v in target[:3])
+                if all(math.isfinite(v) for v in candidate):
+                    reference = candidate
+            except (TypeError, ValueError):
+                pass
+        reference = reference or self._object_center(conn)
+        forward = _v_neg(back)
+        if reference is None:
+            reference = _v_add(eye, _v_scale(forward, max(half_y, 1.0)))
+        denom = _v_dot(direction, forward)
+        if abs(denom) < 1e-9:
+            return None
+        distance = _v_dot(_v_sub(reference, origin), forward) / denom
+        if distance <= 1e-6:
+            distance = max(_v_len(_v_sub(reference, eye)), half_y, 1.0)
+        return _v_add(origin, _v_scale(direction, distance))
 
     def _pivot(self, conn, scheme, eye, right, up, back):
         op = scheme.get("op", "screen_center")

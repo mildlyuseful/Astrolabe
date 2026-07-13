@@ -37,7 +37,7 @@ PAN_SCALE = 1.0
 ZOOM_SCALE = 1.0
 ZOOM_SIGN = 1.0
 
-ADDIN_VERSION = "0.1.22"         # 0.1.22: configurable pivot hold
+ADDIN_VERSION = "0.1.23"         # 0.1.23: empty-space To Cursor depth
                                  # 0.1.20: level horizon on turntable entry
                                  # (adv.level_horizon_on_entry; issue #2).
                                  # 0.1.19: immutable host baseline profile.
@@ -401,7 +401,9 @@ def _cursor_pivot(cam):
     perspective rays run from the eye through it, ortho rays run parallel to the view axis through
     it (pushed back like the centre ray). Returns a Point3D or None (continue the fallback chain)."""
     design = _active_design()
-    vp = app.activeViewport
+    vp = app.activeViewport if app is not None else None
+    if vp is None:
+        return None
     if design is None or not vp:
         return None
     px = _cursor_view_pixel(vp)
@@ -438,6 +440,40 @@ def _cursor_pivot(cam):
             return None
         origin = adsk.core.Point3D.create(eye.x, eye.y, eye.z)
     return _raycast_pivot(design, origin, d, half_h, "cursor-pivot")
+
+
+def _cursor_depth_point(cam):
+    """Unproject the cursor to Fusion's current target-depth plane when the ray misses geometry."""
+    vp = app.activeViewport if app is not None else None
+    px = _cursor_view_pixel(vp) if vp else None
+    if px is None:
+        return None
+    try:
+        pm = vp.viewToModelSpace(adsk.core.Point2D.create(px[0], px[1]))
+        eye, tgt = cam.eye, cam.target
+        try:
+            if cam.cameraType == adsk.core.CameraTypes.OrthographicCameraType:
+                return adsk.core.Point3D.create(pm.x, pm.y, pm.z)
+        except Exception:
+            pass
+        forward = adsk.core.Vector3D.create(tgt.x - eye.x, tgt.y - eye.y, tgt.z - eye.z)
+        if forward.length < 1e-9:
+            return None
+        forward.normalize()
+        direction = adsk.core.Vector3D.create(pm.x - eye.x, pm.y - eye.y, pm.z - eye.z)
+        if direction.length < 1e-9:
+            return None
+        direction.normalize()
+        denom = direction.dotProduct(forward)
+        if abs(denom) < 1e-9:
+            return None
+        to_target = adsk.core.Vector3D.create(tgt.x - eye.x, tgt.y - eye.y, tgt.z - eye.z)
+        distance = to_target.dotProduct(forward) / denom
+        return adsk.core.Point3D.create(eye.x + direction.x * distance,
+                                        eye.y + direction.y * distance,
+                                        eye.z + direction.z * distance)
+    except Exception:
+        return None
 
 
 def _orbit_pivot(op, cam, tgt, idle, sel_override=True, candidates=None,
@@ -488,7 +524,7 @@ def _zoom_pivot(zm, cam, tgt, idle, sel_override=True, hold_sec=PIVOT_HOLD_IDLE)
             if selected is not None:
                 return selected
         if _zoom_gesture["pivot"] is None or idle > hold_sec:
-            _zoom_gesture["pivot"] = _cursor_pivot(cam)
+            _zoom_gesture["pivot"] = _cursor_pivot(cam) or _cursor_depth_point(cam)
         return _zoom_gesture["pivot"] or tgt
     return tgt
 

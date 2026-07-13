@@ -840,12 +840,12 @@ def test_zoom_to_cursor_holds_cursor_point():
     assert len(_model._ext.ray_calls) == n_calls
 
 
-def test_zoom_to_cursor_miss_is_plain_center_zoom():
+def test_zoom_to_cursor_miss_uses_cursor_at_model_depth():
     drv = SolidWorksDriver(); drv.set_scheme("screen_center", "free", "to_cursor")
     _model, view = _cursor_setup(drv, ray_hits=None)
     drv._flush((0, 0, 0, 0, 0, 0.5))
     assert len(view.zooms) == 1
-    assert view.translation_sets == []                       # no recenter -> native centre zoom
+    assert view.translation_sets, "empty-space To Cursor must retain the cursor screen point"
 
 
 def test_orbit_and_pan_reset_zoom_cursor_pivot():

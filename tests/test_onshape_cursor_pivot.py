@@ -106,6 +106,10 @@ def test_level_horizon_basis_skips_world_up_singularity():
     assert ob._level_horizon_basis(ob.WORLD_UP) is None
 
 
+def test_onshape_turntable_uses_top_plane_normal():
+    assert ob.WORLD_UP == (0.0, 0.0, 1.0)
+
+
 def test_level_horizon_transition_queues_once_and_toggle_can_preserve_tilt(bridge):
     bridge.set_scheme("object", "free", "to_center")
     assert bridge._level_pending is False
@@ -391,10 +395,21 @@ def test_zoom_target_math_keeps_requested_point_fixed(bridge):
     assert abs(new_offset[1] - old_offset[1] * factor) < 1e-9
 
 
+def test_zoom_to_cursor_miss_synthesizes_cursor_depth(bridge, monkeypatch):
+    ob._set_page_pointer(0.5, -0.25, True)
+    conn = FakeConn(view_ext=[-4.0, -2.0, -1.0, 4.0, 2.0, 1.0],
+                    model_ext=[-1.0, -1.0, -1.0, 1.0, 1.0, 1.0])
+    camera = ((0, 0, 10), (1, 0, 0), (0, 1, 0), (0, 0, 1))
+    monkeypatch.setattr(bridge, "_hit_cursor", lambda *a: None)
+    assert bridge._zoom_target(conn, {"zm": "to_cursor", "sel_override": False}, *camera) == \
+        (2.0, -0.5, 0.0)
+
+
 def test_userscript_mentions_endpoint_and_canvas():
     assert "127.51.68.120:8181/trackball/pointer" in ob._POINTER_USERSCRIPT
     assert 'getElementById("canvas")' in ob._POINTER_USERSCRIPT
     assert "getBoundingClientRect" in ob._POINTER_USERSCRIPT
+    assert "Date.now() - last.t > 400" not in ob._POINTER_USERSCRIPT
     assert ob.pointer_userscript_source() == ob._POINTER_USERSCRIPT
     steps = ob.pointer_install_instructions()
     assert "Tampermonkey" in steps and "Violentmonkey" in steps

@@ -15,7 +15,7 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.13";  // 0.1.13: native Zoom/Dolly + configurable pivot hold
+        const string AddinVersion = "0.1.14";  // 0.1.14: held pivots + empty-space To Cursor depth
                                                // 0.1.11: level horizon on fixed-horizon mode entry
                                                // (adv.level_horizon_on_entry; issue #2).
         const int DefaultPort = 47900;
@@ -659,13 +659,13 @@ namespace Astrolabe.TrackballNav
                     else if (twistAction == "zoom")
                     {
                         projectionZoom = PrepareProjectionZoom(sv, ref cam, twist, null);
-                        _gestureInvalid = true;
+                        if (orbitO.sqrMagnitude <= 1e-24f) { _gestureInvalid = true; _gesturePivot = null; }
                         did = projectionZoom.Active;
                     }
                     else if (twistAction == "dolly")
                     {
                         ApplyDolly(ref cam, twist, null);
-                        _gestureInvalid = true;
+                        if (orbitO.sqrMagnitude <= 1e-24f) { _gestureInvalid = true; _gesturePivot = null; }
                         did = true;
                     }
                 }
@@ -695,6 +695,7 @@ namespace Astrolabe.TrackballNav
             if (Mathf.Abs(p.x) > 1e-12f || Mathf.Abs(p.y) > 1e-12f)
             {
                 _gestureInvalid = true;
+                _gesturePivot = null;
                 _zoomGesturePivot = null;
                 TrackballNavCamera.Pan(ref cam, p.x, p.y, panScales ? _focusDist : TrackballNavCamera.DistDefault);
                 return true;
@@ -702,6 +703,7 @@ namespace Astrolabe.TrackballNav
             if (Mathf.Abs(z) > 1e-12f)
             {
                 _gestureInvalid = true;
+                _gesturePivot = null;
                 var toward = ZoomToward(zm, idle, pivotHold, selOverride, sv);
                 if (zoomStyle == "zoom")
                     projectionZoom = PrepareProjectionZoom(sv, ref cam, z, toward);
@@ -852,7 +854,7 @@ namespace Astrolabe.TrackballNav
                     var hit = CursorPivot(selOverride ? bbox : null);
                     if (!hit.HasValue)
                         LogCursorMiss("zoom");
-                    _zoomGesturePivot = hit;
+                    _zoomGesturePivot = hit ?? CursorDepthPoint();
                 }
                 return _zoomGesturePivot;
             }
@@ -889,6 +891,13 @@ namespace Astrolabe.TrackballNav
             if (!_cursorHitValid || !_cursorHit.HasValue) return null;
             if (bbox.HasValue && !InBbox(_cursorHit.Value, bbox.Value)) return null;
             return _cursorHit;
+        }
+
+        static Vector3? CursorDepthPoint()
+        {
+            if (!_hasCursorRay) return null;
+            var direction = _cursorRay.direction.normalized;
+            return _cursorRay.origin + direction * TrackballNavCamera.ClampDist(_focusDist);
         }
 
         static void LogCursorMiss(string why)

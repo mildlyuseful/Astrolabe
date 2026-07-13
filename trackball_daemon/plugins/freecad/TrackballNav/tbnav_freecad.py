@@ -25,7 +25,7 @@ import traceback
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.11"         # 0.1.11: configurable pivot hold
+ADDIN_VERSION = "0.1.12"         # 0.1.12: empty-space To Cursor depth
                                  # (adv.level_horizon_on_entry; issue #2).
                                  # 0.1.9: immutable host baseline profile.
                                  # 0.1.8: camera/screen_center canonical pivot names.
@@ -386,6 +386,24 @@ def _cursor_pivot(view, bbox):
     return p
 
 
+def _cursor_depth_point(view):
+    """FreeCAD's focal-plane unprojection for empty-space To Cursor zoom."""
+    px = _cursor["px"]
+    if px is None:
+        return None
+    x, y = px
+    if CURSOR_Y_FLIP:
+        try:
+            y = int(view.getSize()[1]) - y
+        except Exception:
+            pass
+    try:
+        point = view.getPoint((int(x), int(y)))
+        return (float(point[0]), float(point[1]), float(point[2]))
+    except Exception:
+        return None
+
+
 def _selection_center(doc):
     """Mean of the bounding-box centres of the current selection, or None."""
     try:
@@ -448,8 +466,9 @@ def _zoom_pivot(zm, view, doc, idle, sel_override=True, hold_sec=PIVOT_HOLD_IDLE
         # pivot, in its own slot so orbit/zoom gestures don't clobber each other's pivot.
         if _zoom_gesture["pivot"] is None or idle > hold_sec:
             _center, bbox = _object_center(doc)
-            _zoom_gesture["pivot"] = _cursor_pivot(view, bbox)
-        return _zoom_gesture["pivot"]      # None (miss/no cursor) -> zoom about the look-at
+            _zoom_gesture["pivot"] = (_cursor_pivot(view, bbox) or
+                                        _cursor_depth_point(view))
+        return _zoom_gesture["pivot"]
     return None                            # to_center -> look-at (screen centre)
 
 

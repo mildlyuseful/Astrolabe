@@ -20,7 +20,7 @@ from System.Windows.Forms import Cursor
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.16"          # 0.1.16: native Zoom/Dolly + configurable pivot hold
+ADDIN_VERSION = "0.1.17"          # 0.1.17: cursor-depth zoom + explicit invalidation
                                   # 0.1.14: level horizon on turntable entry
                                   # (adv.level_horizon_on_entry; issue #2).
                                   # 0.1.13: immutable host baseline profile.
@@ -416,6 +416,26 @@ def _cursor_pivot(view, bbox):
         return None
 
 
+def _cursor_depth_point(view):
+    """Intersect the live cursor frustum line with the viewport target-depth plane."""
+    try:
+        xy, _x, _y, _w, _h = _cursor_frustum_xy(view)
+        if xy is None:
+            return None
+        ok, line = view.ActiveViewport.GetFrustumLine(xy[0], xy[1])
+        if not ok:
+            return None
+        plane = Rhino.Geometry.Plane(view.ActiveViewport.CameraTarget,
+                                     view.ActiveViewport.CameraDirection)
+        ok, t = Rhino.Geometry.Intersect.Intersection.LinePlane(line, plane)
+        if not ok:
+            return None
+        p = line.PointAt(t)
+        return (float(p.X), float(p.Y), float(p.Z))
+    except Exception:
+        return None
+
+
 def _forward_point(cam):
     d = cam.distance()
     f = cam.forward()
@@ -461,7 +481,8 @@ def _zoom_toward(zm, view, idle=0.0, sel_override=True, hold_sec=PIVOT_HOLD_IDLE
             return center
         if _zoom_gesture["pivot"] is None or idle > hold_sec:
             ray_bbox = bbox if sel_override else None
-            _zoom_gesture["pivot"] = _cursor_pivot(view, ray_bbox)
+            _zoom_gesture["pivot"] = (_cursor_pivot(view, ray_bbox) or
+                                        _cursor_depth_point(view))
         return _zoom_gesture["pivot"]
     return None
 
@@ -513,12 +534,12 @@ def _apply(view, frame, idle):
         _zoom_gesture["pivot"] = None
         changed = True
     elif p[0] or p[1]:
-        _gesture["invalid"] = True
+        _gesture.update({"pivot": None, "invalid": True})
         _zoom_gesture["pivot"] = None
         cammath.pan(cam, p[0], p[1], dist)
         changed = True
     elif z:
-        _gesture["invalid"] = True
+        _gesture.update({"pivot": None, "invalid": True})
         toward = _zoom_toward(zm, view, idle, sel_override=sel_override, hold_sec=hold_sec)
         if _magnify(view, z, zoom_style, toward):
             return

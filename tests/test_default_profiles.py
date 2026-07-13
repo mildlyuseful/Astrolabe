@@ -99,15 +99,15 @@ def test_level_horizon_default_override_and_reset_semantics(isolated_config):
 
 def test_bundled_profile_contract_versions_cover_every_installed_addin():
     assert {key: integrations.bundled_addin_version(key) for key in integrations.ADDIN_KEYS} == {
-        "fusion360": "0.1.22",
-        "blender": "0.1.20",
-        "freecad": "0.1.11",
-        "sketchup": "0.2.11",
-        "unreal": "0.2.11",
-        "unity": "0.1.13",
-        "godot": "0.1.10",
-        "rhino": "0.1.16",
-        "autocad": "0.3.13",
+        "fusion360": "0.1.23",
+        "blender": "0.1.21",
+        "freecad": "0.1.12",
+        "sketchup": "0.2.12",
+        "unreal": "0.2.12",
+        "unity": "0.1.14",
+        "godot": "0.1.11",
+        "rhino": "0.1.17",
+        "autocad": "0.3.14",
     }
 
 

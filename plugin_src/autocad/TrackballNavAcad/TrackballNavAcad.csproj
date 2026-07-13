@@ -18,7 +18,7 @@
     <AssemblyName>TrackballNavAcad</AssemblyName>
     <!-- Keep in sync with Plugin.PluginVersion; version.json for the daemon's update check is
          generated from this on Release build. -->
-    <Version>0.3.13</Version>
+    <Version>0.3.14</Version>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <DebugType>none</DebugType>

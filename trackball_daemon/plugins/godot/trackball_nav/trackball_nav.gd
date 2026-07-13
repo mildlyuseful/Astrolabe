@@ -1,7 +1,7 @@
 @tool
 extends EditorPlugin
 
-const ADDIN_VERSION := "0.1.10"
+const ADDIN_VERSION := "0.1.11"
 const DEFAULT_PORT := 47900
 const PIVOT_HOLD_IDLE := 0.5
 const OBJ_CACHE_SEC := 0.5
@@ -15,6 +15,7 @@ var _gesture_t := 0.0
 var _gesture_pivot = null
 var _gesture_invalid := true
 var _zoom_gesture_pivot = null
+var _zoom_gesture_resolved := false
 var _focus_dist := 10.0
 var _obj_cache_t := 0.0
 var _obj_center = null
@@ -28,6 +29,7 @@ func _enter_tree() -> void:
 	_gesture_pivot = null
 	_gesture_invalid = true
 	_zoom_gesture_pivot = null
+	_zoom_gesture_resolved = false
 	_focus_dist = TrackballNavCamera.DIST_DEFAULT
 	_host = str(Engine.get_version_info().get("string", "?"))
 	_log("start: TrackballNav v%s (Godot %s)" % [ADDIN_VERSION, _host])
@@ -214,7 +216,10 @@ func _apply_orbit(camera: Camera3D, cam: TrackballNavCamera.Cam, o: Vector3, p: 
 				_projection_zoom(camera, cam, twist, null)
 			else:
 				TrackballNavCamera.dolly(cam, twist, _focus_dist, null)
-			_gesture_invalid = true
+			# A combined twist+orbit packet is one gesture. Preserve its held pivot.
+			if absf(orbit_o.x) <= 1e-12 and absf(orbit_o.y) <= 1e-12:
+				_gesture_invalid = true
+				_gesture_pivot = null
 			did = true
 		if absf(orbit_o.x) > 1e-12 or absf(orbit_o.y) > 1e-12:
 			var pivot = _orbit_pivot(op, cam, idle, pivot_hold, sel_override, pivot_candidates)
@@ -223,17 +228,21 @@ func _apply_orbit(camera: Camera3D, cam: TrackballNavCamera.Cam, o: Vector3, p: 
 			_focus_dist = TrackballNavCamera.clamp_dist((cam.location - pivot).length())
 			TrackballNavCamera.orbit(cam, orbit_o, true, pivot)  # turntable only
 			_zoom_gesture_pivot = null
+			_zoom_gesture_resolved = false
 			return true
 		return did
 	if absf(p.x) > 1e-12 or absf(p.y) > 1e-12:
 		_gesture_invalid = true
+		_gesture_pivot = null
 		_zoom_gesture_pivot = null
+		_zoom_gesture_resolved = false
 		TrackballNavCamera.pan(cam, p.x, p.y,
 			_focus_dist if pan_scales else TrackballNavCamera.DIST_DEFAULT)
 		return true
 	if absf(z) > 1e-12:
 		_gesture_invalid = true
-		var toward = _zoom_toward(zm, idle, pivot_hold, sel_override)
+		_gesture_pivot = null
+		var toward = _zoom_toward(camera, cam, zm, idle, pivot_hold, sel_override)
 		if zoom_style == "zoom":
 			_projection_zoom(camera, cam, z, toward)
 		else:
@@ -250,7 +259,9 @@ func _apply_fly(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float, s
 	if absf(p.x) > 1e-12 or absf(p.y) > 1e-12 or absf(z) > 1e-12:
 		TrackballNavCamera.fly_move(cam, p, z, _focus_dist, speed)
 		_gesture_invalid = true
+		_gesture_pivot = null
 		_zoom_gesture_pivot = null
+		_zoom_gesture_resolved = false
 		return true
 	return false
 
@@ -262,7 +273,9 @@ func _apply_walk(cam: TrackballNavCamera.Cam, o: Vector3, p: Vector2, z: float, 
 	if absf(p.x) > 1e-12 or absf(p.y) > 1e-12 or absf(z) > 1e-12:
 		TrackballNavCamera.walk_move(cam, p, z, _focus_dist, speed)
 		_gesture_invalid = true
+		_gesture_pivot = null
 		_zoom_gesture_pivot = null
+		_zoom_gesture_resolved = false
 		return true
 	return false
 
@@ -295,15 +308,19 @@ func _orbit_pivot(op: String, cam: TrackballNavCamera.Cam, idle: float, hold_sec
 	return null
 
 
-func _zoom_toward(zm: String, idle: float, hold_sec: float, sel_override: bool):
+func _zoom_toward(camera: Camera3D, cam: TrackballNavCamera.Cam, zm: String, idle: float,
+		hold_sec: float, sel_override: bool):
 	var center = _selection_center()
 	if zm == "to_object":
 		return _scene_center()
 	if zm == "to_cursor":
 		if sel_override and center != null:
 			return center
-		if _zoom_gesture_pivot == null or idle > hold_sec:
+		if not _zoom_gesture_resolved or idle > hold_sec:
 			_zoom_gesture_pivot = _cursor_pivot()
+			if _zoom_gesture_pivot == null:
+				_zoom_gesture_pivot = _cursor_depth_point(camera, cam)
+			_zoom_gesture_resolved = true
 		return _zoom_gesture_pivot
 	return null
 
@@ -345,6 +362,25 @@ func _cursor_pivot():
 	var origin := camera.project_ray_origin(mouse)
 	var direction := camera.project_ray_normal(mouse)
 	return _trace_ray(origin, direction)
+
+
+func _cursor_depth_point(camera: Camera3D, cam: TrackballNavCamera.Cam):
+	var vp := EditorInterface.get_editor_viewport_3d(0)
+	if vp == null:
+		return null
+	var mouse := vp.get_mouse_position()
+	var origin := camera.project_ray_origin(mouse)
+	var direction := camera.project_ray_normal(mouse).normalized()
+	var reference = _scene_center()
+	if reference == null:
+		reference = _forward_point(cam)
+	var denom := direction.dot(cam.forward)
+	if absf(denom) < 1e-9:
+		return null
+	var distance := (reference - origin).dot(cam.forward) / denom
+	if distance <= 1e-6:
+		distance = TrackballNavCamera.clamp_dist(_focus_dist)
+	return origin + direction * distance
 
 
 func _trace_ray(origin: Vector3, direction: Vector3):

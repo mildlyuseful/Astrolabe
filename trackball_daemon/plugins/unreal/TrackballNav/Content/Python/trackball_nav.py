@@ -28,7 +28,7 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.11"         # 0.2.11: native Zoom/Dolly + configurable pivot hold
+ADDIN_VERSION = "0.2.12"         # 0.2.12: cursor-depth zoom + explicit invalidation
                                  # 0.2.9: level horizon on fixed-horizon mode entry
                                  # (adv.level_horizon_on_entry; issue #2).
                                  # 0.2.8: immutable host baseline profile.
@@ -484,6 +484,20 @@ def _cursor_pivot(bbox):
         "cursor-pivot: nothing under cursor -> continue configured chain")
 
 
+def _cursor_depth_point():
+    """Point on the cursor ray at the current focus depth, for empty-space To Cursor zoom."""
+    ray = _cursor_screen_ray()
+    if ray is None:
+        return None
+    _px, origin, direction = ray
+    n = cammath.v_len(direction)
+    if n < 1e-9:
+        return None
+    direction = tuple(v / n for v in direction)
+    return tuple(origin[i] + direction[i] * cammath._clamp_dist(_focus["dist"])
+                 for i in range(3))
+
+
 def _forward_point(cam):
     """A synthetic pivot a focus-distance ahead of the eye (used when nothing better resolves);
     orbiting about it feels like turning around the thing in front of you."""
@@ -538,7 +552,7 @@ def _zoom_toward(zm, idle=0.0, sel_override=True, hold_sec=PIVOT_HOLD_IDLE):
             return center
         if _zoom_gesture["pivot"] is None or idle > hold_sec:
             ray_bbox = bbox if sel_override else None
-            _zoom_gesture["pivot"] = _cursor_pivot(ray_bbox)   # None on miss -> forward dolly
+            _zoom_gesture["pivot"] = _cursor_pivot(ray_bbox) or _cursor_depth_point()
         return _zoom_gesture["pivot"]
     return None                              # to_center -> dolly along forward
 
@@ -656,13 +670,13 @@ def _apply_orbit(cam, o, p, z, op, style, zm, twist_action, zoom_style, lock, pa
         return did
     if p[0] or p[1]:
         _log_rl("rx_pan", "rx pan p=(%.4f,%.4f)" % (p[0], p[1]))
-        _gesture["invalid"] = True                   # view moved -> next orbit re-raycasts its pivot
+        _gesture.update({"pivot": None, "invalid": True})
         _zoom_gesture["pivot"] = None
         cammath.pan(cam, p[0], p[1], _focus["dist"] if pan_scales else cammath.DIST_DEFAULT)
         return True
     if z:
         _log_rl("rx_zoom", "rx zoom z=%.4f zm=%s" % (z, zm))
-        _gesture["invalid"] = True
+        _gesture.update({"pivot": None, "invalid": True})
         toward = _zoom_toward(zm, idle, sel_override=sel_override, hold_sec=hold_sec)
         if zoom_style == "zoom" and _apply_lens_zoom(cam, z, toward):
             pass
@@ -682,7 +696,7 @@ def _apply_fly(cam, o, p, z, adv):
     if p[0] or p[1] or z:
         _log_rl("rx_pan", "rx fly-move p=(%.4f,%.4f) z=%.4f" % (p[0], p[1], z))
         cammath.fly_move(cam, p, z, _focus["dist"], adv.get("fly_speed", 1.0))
-        _gesture["invalid"] = True
+        _gesture.update({"pivot": None, "invalid": True})
         _zoom_gesture["pivot"] = None
         return True
     return False
@@ -698,7 +712,7 @@ def _apply_walk(cam, o, p, z, adv):
     if p[0] or p[1] or z:
         _log_rl("rx_pan", "rx walk-move p=(%.4f,%.4f) z=%.4f" % (p[0], p[1], z))
         cammath.walk_move(cam, p, z, _focus["dist"], adv.get("walk_speed", 1.0))
-        _gesture["invalid"] = True
+        _gesture.update({"pivot": None, "invalid": True})
         _zoom_gesture["pivot"] = None
         return True
     return False

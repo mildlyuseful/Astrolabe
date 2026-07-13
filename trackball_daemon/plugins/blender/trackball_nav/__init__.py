@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 20),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 21),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.20"                   # 0.1.20: configurable pivot hold
+ADDIN_VERSION = "0.1.21"                   # 0.1.21: cursor-depth zoom + explicit invalidation
                                            # 0.1.18: shared Zoom mode targets + twist zoom/dolly
                                            # 0.1.17: level horizon on fixed-horizon mode entry
                                            # (adv.level_horizon_on_entry; issue #2).
@@ -385,6 +385,27 @@ def _raycast_cursor(rv, region, win):
     return hit
 
 
+def _cursor_depth_point(rv, region, win):
+    """Point on the cursor ray at the current view-location depth (used only for To Cursor zoom)."""
+    pix = _cursor_region_pixel(region, win)
+    if pix is None:
+        return None
+    try:
+        from bpy_extras import view3d_utils as v3d
+        origin = v3d.region_2d_to_origin_3d(region, rv, pix)
+        direction = v3d.region_2d_to_vector_3d(region, rv, pix).normalized()
+        _right, _up, fwd, _back = _view_axes(rv)
+        denom = direction.dot(fwd)
+        if abs(denom) < 1e-9:
+            return None
+        distance = (rv.view_location - origin).dot(fwd) / denom
+        if distance <= 1e-6:
+            distance = max(float(rv.view_distance), 1e-3)
+        return origin + direction * distance
+    except Exception:
+        return None
+
+
 def _selection_median():
     """Median (mean of world origins) of the current selection, or None."""
     try:
@@ -479,7 +500,8 @@ def _zoom_pivot(zm, rv, region, win, adv, idle=0.0, hold_sec=PIVOT_HOLD_IDLE):
         return _object_center()
     if zm == "to_cursor":
         if not _zoom_gesture["resolved"] or idle > hold_sec:
-            _zoom_gesture["pivot"] = _raycast_cursor(rv, region, win)
+            _zoom_gesture["pivot"] = (_raycast_cursor(rv, region, win) or
+                                        _cursor_depth_point(rv, region, win))
             _zoom_gesture["resolved"] = True
         return _zoom_gesture["pivot"]
     return None
@@ -690,19 +712,19 @@ def _apply(target, frame, idle):
     if nav_mode == "fly":
         _apply_fly(rv, o, p, z, adv)
         if p[0] or p[1] or z:
-            _gesture["invalid"] = True
+            _gesture.update({"pivot": None, "invalid": True})
             _zoom_gesture.update({"pivot": None, "resolved": False})
     elif nav_mode == "walk":
         _apply_walk(rv, o, p, z, adv)
         if p[0] or p[1] or z:
-            _gesture["invalid"] = True
+            _gesture.update({"pivot": None, "invalid": True})
             _zoom_gesture.update({"pivot": None, "resolved": False})
     else:                                           # orbit mode
         if o[0] or o[1] or o[2]:
             _apply_orbit(_win, rv, region, o, frame, adv, idle)
         elif p[0] or p[1]:
             _pan(rv, p[0], p[1], bool(adv.get("pan_scales_with_distance", True)))
-            _gesture["invalid"] = True              # view moved -> recast screen-center next orbit
+            _gesture.update({"pivot": None, "invalid": True})
             _zoom_gesture.update({"pivot": None, "resolved": False})
         elif z:
             pivot = _zoom_pivot(zm, rv, region, _win, adv, idle, hold_sec)
@@ -710,7 +732,7 @@ def _apply(target, frame, idle):
                 _dolly(rv, z, pivot)
             else:
                 _zoom(rv, z, pivot)
-            _gesture["invalid"] = True
+            _gesture.update({"pivot": None, "invalid": True})
 
     # Camera view: optionally drive the real scene camera from the trackball.
     if rv.view_perspective == 'CAMERA':

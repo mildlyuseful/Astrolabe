@@ -489,6 +489,28 @@ Completed:
   exact signed GUI artifact and its SmartScreen/third-party-AV reputation remain **needs live
   verification**; source-package data and cache exclusion were verified with setuptools `sdist`.
 
+### Final cleanup follow-up — gesture consistency and cursor-depth zoom
+
+- Selecting **Free** orbit now sets Twist action to **Roll** once, while leaving the control fully
+  editable afterward. Confirmed SketchUp still exposes and consumes the universal Pivot hold.
+- Fixed Godot's effective zero-duration pivot cache by retaining the orbit pivot through combined
+  twist/orbit packets and tracking a resolved zoom target separately from a non-null surface hit.
+- Corrected Onshape's fixed horizon to the +Z Top plane. Its userscript now keeps a stationary
+  pointer sample fresh, eliminating the forced mouse jog after orbit/pan, and To Cursor holds its
+  zoom point for the configured gesture duration.
+- Pan/zoom explicitly clears stale orbit/zoom pivot objects in AutoCAD, Blender, Unreal, Rhino,
+  Unity, and Godot; the remaining integrations already cleared their equivalent state.
+- Empty-space **To Cursor** now synthesizes a point on the cursor ray at the current target,
+  focus, or model-center depth in Blender, FreeCAD, Fusion, SketchUp, Unreal, Unity, Godot, Rhino,
+  AutoCAD, SOLIDWORKS, and Onshape. Orbit ray misses remain strict and continue through the user's
+  configured fallback chain.
+- Versions: daemon 0.1.72; Blender 0.1.21; FreeCAD 0.1.12; Fusion 0.1.23;
+  SketchUp 0.2.12; Unreal 0.2.12; Unity 0.1.14; Godot 0.1.11; Rhino 0.1.17;
+  AutoCAD 0.3.14.
+- Verification: `pytest -q` — 388 passed; Python compileall passed; AutoCAD NavMath console suite
+  passed; AutoCAD 2026 Release build succeeded with its pre-existing WindowsBase warning and no
+  errors. All host-specific interaction changes still need normal in-host smoke testing.
+
 ## Handoff rules
 
 - Work only on the first `[~]` step; do not start later steps in the same checkpoint.

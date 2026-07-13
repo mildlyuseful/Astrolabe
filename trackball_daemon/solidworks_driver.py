@@ -1019,6 +1019,18 @@ class SolidWorksDriver:
                 a * c0[1] + b * c1[1] + depth * c2[1],
                 a * c0[2] + b * c1[2] + depth * c2[2])
 
+    def _cursor_depth_point(self, view, c0, c1, c2, model):
+        """Empty-space To Cursor target at the model-center depth on the cursor ray."""
+        ab = self._cursor_screen_ab(view, c0, c1)
+        center = self._object_center(model)
+        if ab is None or center is None:
+            return None
+        a, b = ab
+        depth = c2[0] * center[0] + c2[1] * center[1] + c2[2] * center[2]
+        return (a * c0[0] + b * c1[0] + depth * c2[0],
+                a * c0[1] + b * c1[1] + depth * c2[1],
+                a * c0[2] + b * c1[2] + depth * c2[2])
+
     def _info_rl(self, key, msg, period=2.0):
         """Rate-limited info log (the worker runs at rate_hz -- unthrottled logs would spam)."""
         now = time.monotonic()
@@ -1071,9 +1083,10 @@ class SolidWorksDriver:
             elif zm == "to_cursor" and can_hold:
                 if self._zoom_pivot is None or idle >= self._pivot_hold_sec:
                     ad = view.Orientation3.ArrayData
-                    self._zoom_pivot = self._cursor_pivot(
-                        view, (ad[0], ad[3], ad[6]), (ad[1], ad[4], ad[7]),
-                        (ad[2], ad[5], ad[8]), model)
+                    c0 = (ad[0], ad[3], ad[6]); c1 = (ad[1], ad[4], ad[7])
+                    c2 = (ad[2], ad[5], ad[8])
+                    self._zoom_pivot = (self._cursor_pivot(view, c0, c1, c2, model) or
+                                        self._cursor_depth_point(view, c0, c1, c2, model))
                 center = self._zoom_pivot           # None (miss) -> plain to_center zoom
         if center is not None and can_hold:
             ad = view.Orientation3.ArrayData

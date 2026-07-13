@@ -1,4 +1,4 @@
 {
-  "version": "0.1.10",
-  "_comment": "Kept in sync with plugin.cfg / ADDIN_VERSION. 0.1.10: native Zoom/Dolly and configurable pivot hold."
+  "version": "0.1.11",
+  "_comment": "Kept in sync with plugin.cfg / ADDIN_VERSION. 0.1.11: reliable held pivots and empty-space To Cursor depth."
 }

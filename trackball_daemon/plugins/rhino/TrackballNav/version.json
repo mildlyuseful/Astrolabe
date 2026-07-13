@@ -1,4 +1,4 @@
 {
-  "version": "0.1.16",
-  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_rhino.py. 0.1.16: native Zoom/Dolly and configurable pivot hold."
+  "version": "0.1.17",
+  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_rhino.py. 0.1.17: cursor-depth zoom and explicit invalidation."
 }

@@ -203,6 +203,20 @@ module TrackballNav
         raytest_pixel(model, view, px[0], px[1], 'cursor-pivot')
       end
 
+      def cursor_depth_point(view, fallback)
+        px = @cursor_pixel
+        return nil unless px.is_a?(Array) && px.length == 2
+
+        ray = view.pickray(px[0], px[1])
+        return nil unless ray && ray[0] && ray[1]
+
+        normal = view.camera.direction
+        plane = [fallback, normal]
+        Geom.intersect_line_plane(ray, plane)
+      rescue StandardError
+        nil
+      end
+
       def raytest_pixel(model, view, x, y, label)
         ray = view.pickray(x, y)
         hit = ray && model.raytest(ray)
@@ -404,7 +418,7 @@ module TrackballNav
                         object_center(model, fallback)
                       elsif zoom_mode == 'to_cursor'
                         @cursor_refresh&.call(view)
-                        cursor_pivot(model, view)
+                        cursor_pivot(model, view) || cursor_depth_point(view, fallback)
                       end
         @zoom_resolved = true
         @zoom_pivot || fallback

@@ -276,14 +276,14 @@ def test_orbit_pivot_object_does_not_use_cursor(monkeypatch):
     assert _SystemLibrary.calls == []
 
 
-def test_zoom_toward_to_cursor_holds_and_falls_back():
+def test_zoom_toward_to_cursor_holds_and_synthesizes_empty_space_depth():
     assert tn._zoom_toward("to_cursor", idle=10.0) == PTR_HIT
     _SystemLibrary.hit = _Hit((6.0, 6.0, 6.0))
     assert tn._zoom_toward("to_cursor", idle=0.0) == PTR_HIT
     assert tn._zoom_toward("to_cursor", idle=tn.PIVOT_HOLD_IDLE + 0.01) == (6.0, 6.0, 6.0)
     tn._zoom_gesture["pivot"] = None
     _SystemLibrary.hit = None
-    assert tn._zoom_toward("to_cursor", idle=10.0) is None
+    assert tn._zoom_toward("to_cursor", idle=10.0) == (0.0, 0.0, -900.0)
 
 
 def test_zoom_toward_to_center_is_none():

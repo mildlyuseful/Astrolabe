@@ -832,6 +832,7 @@ class SettingsWindow:
     # All apps pull from binding_schema.BINDING_SECTIONS and toggle capabilities in one profile map.
     def _bindings_fields(self, parent, app_key):
         profile = binding_profile(app_key)
+        controls = {}
         ttk.Label(parent, text=profile.title, foreground="#555").pack(
             anchor="w", padx=10, pady=(8, 2))
         for section in BINDING_SECTIONS:
@@ -841,9 +842,10 @@ class SettingsWindow:
             box = ttk.LabelFrame(parent, text=section.title)
             box.pack(fill="x", padx=10, pady=6)
             for field in fields:
-                self._render_binding_field(box, app_key, profile, field)
+                self._render_binding_field(box, app_key, profile, field, controls)
 
-    def _render_binding_field(self, parent, app_key, profile, field):
+    def _render_binding_field(self, parent, app_key, profile, field, controls=None):
+        controls = controls if controls is not None else {}
         base = ("apps", app_key, "bindings")
         adv = ("apps", app_key, "advanced")
         if field == "rate":
@@ -877,9 +879,21 @@ class SettingsWindow:
             self._entry_row(parent, "Walk speed", adv + ("walk_speed",),
                             hint="Movement multiplier while Mode is Walk.")
         elif field == "orbit_style":
-            self._mapped_combo_row(parent, "Orbit style", base + ("scheme", "orbit_style"),
-                                   [(_option_label(v), v) for v in profile.orbit_styles],
-                                   hint="Default follows General. Free permits roll; Turntable keeps a fixed horizon.")
+            def select_free_twist(value):
+                # Free orbit should feel like a trackball immediately, but this is only a
+                # one-time convenience: changing Twist action afterwards remains unrestricted.
+                if value != "free" or "roll" not in profile.twist_actions:
+                    return
+                self._set_and_save(adv + ("twist_action",), "roll")
+                twist_var = controls.get("twist_action")
+                if twist_var is not None:
+                    twist_var.set(_option_label("roll"))
+
+            controls["orbit_style"] = self._mapped_combo_row(
+                parent, "Orbit style", base + ("scheme", "orbit_style"),
+                [(_option_label(v), v) for v in profile.orbit_styles],
+                hint="Default follows General. Free permits roll; Turntable keeps a fixed horizon.",
+                on_change=select_free_twist)
         elif field == "orbit_pivot":
             options = [("Default", "default")]
             options.extend([(_PIVOT_LABELS[value], value) for value in profile.pivots])
@@ -889,9 +903,10 @@ class SettingsWindow:
                 on_change=(self._warn_onshape_cursor_userscript_if_needed
                            if app_key == "onshape" else None))
         elif field == "twist_action":
-            self._mapped_combo_row(parent, "Twist action", adv + ("twist_action",),
-                                   [(_option_label(v), v) for v in profile.twist_actions],
-                                   hint="Action driven by unshifted twist in Orbit mode, including Turntable.")
+            controls["twist_action"] = self._mapped_combo_row(
+                parent, "Twist action", adv + ("twist_action",),
+                [(_option_label(v), v) for v in profile.twist_actions],
+                hint="Action driven by unshifted twist in Orbit mode, including Turntable.")
         elif field == "lock_horizon":
             self._bool_row(parent, "Lock horizon", adv + ("lock_horizon",),
                            hint="Keep the horizon fixed even when Orbit style is Free.")
