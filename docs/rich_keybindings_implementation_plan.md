@@ -70,7 +70,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 0 — Baseline contracts and Windows-input spike | COMPLETE | Start `d25944d`; checkpoint `cf9d116`; items 0.1–0.5 complete | Wait for explicit `START PHASE 1` or independently authorized `START PHASE 4`. |
 | 1 — App and setting registries | COMPLETE | Start `30b1598`; registries `2183f45`; consumer cutover `0c23104`; items 1.1–1.4 complete | Wait for explicit `START PHASE 2`. |
 | 2 — Sparse System→Global→app config | COMPLETE | Start `de0f42f`; fixtures `67f6710`; System defaults `1af1368`; resolver `da8e219`; store/migration `ecbeb3b`; consumer cutover `e70ea68`; items 2.1–2.5 complete | Wait for explicit `START PHASE 3`. |
-| 3 — Runtime state and dependency closure | NOT_STARTED | — | Start only after Phase 2 is COMPLETE. |
+| 3 — Runtime state and dependency closure | IN_PROGRESS | Start `91e5a09`; bootstrap complete | Freeze current tray mode changes and OutputEngine mode ownership in focused tests before adding the serialized runtime store. |
 | 4 — Target-isolated navigation transport | NOT_STARTED | — | May be split/merged independently only after Phase 0 contracts exist. |
 | 5 — Input providers and Windows keyboard | NOT_STARTED | — | Start after Phases 0 and 3 are COMPLETE. |
 | 6 — BLE five-way protocol and adapter | NOT_STARTED | — | Start after Phase 5 provider contract is COMPLETE. |

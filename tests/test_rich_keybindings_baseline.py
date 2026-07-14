@@ -15,6 +15,8 @@ from trackball_daemon.app import App
 from trackball_daemon.config import Config, effective_scheme, host_baseline
 from trackball_daemon.navbroker import NavBroker
 from trackball_daemon.output import OutputEngine
+from trackball_daemon import tray as tray_mod
+from trackball_daemon.tray import TrayController
 
 
 def _packet(rx=0.01, ry=0.02, rz=0.03):
@@ -53,6 +55,42 @@ def test_runtime_mode_survives_config_refresh_but_new_engine_uses_startup_defaul
 
     replacement = OutputEngine(cfg)
     assert replacement.mode == OutputEngine.MODE_CURSOR
+
+
+def test_tray_mode_item_reads_and_mutates_output_engine_directly(monkeypatch):
+    """Freeze the Phase 0 ownership boundary before Phase 3 reroutes it."""
+    calls = []
+    engine = SimpleNamespace(
+        mode=OutputEngine.MODE_CURSOR,
+        toggle_mode=lambda: calls.append("toggle"),
+        reset_view=lambda: None,
+    )
+    controller = TrayController.__new__(TrayController)
+    controller.app = SimpleNamespace(
+        engine=engine,
+        is_connected=lambda: False,
+        app_connection_summary=lambda: "none",
+        open_settings=lambda: None,
+        quit=lambda: None,
+    )
+
+    class _Menu(tuple):
+        SEPARATOR = object()
+
+        def __new__(cls, *items):
+            return tuple.__new__(cls, items)
+
+    monkeypatch.setattr(tray_mod.pystray, "Menu", _Menu)
+    monkeypatch.setattr(
+        tray_mod.pystray, "MenuItem",
+        lambda text, action, **kwargs: SimpleNamespace(text=text, action=action, **kwargs),
+    )
+
+    menu = controller._build_menu()
+    mode_item = menu[4]
+    assert mode_item.text(None) == "Mode: Pointer"
+    mode_item.action(None, None)
+    assert calls == ["toggle"]
 
 
 def test_scheme_inheritance_uses_only_the_explicit_default_sentinel():
