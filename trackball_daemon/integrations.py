@@ -20,7 +20,10 @@ import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 from typing import Callable, Optional
+
+from .app_registry import APP_SPECS_BY_ID, AppSpec
 
 
 def _hidden_check_output(args, *, timeout=8) -> str:
@@ -38,8 +41,7 @@ def _hidden_check_output(args, *, timeout=8) -> str:
 
 @dataclass
 class AppDef:
-    key: str
-    name: str
+    spec: AppSpec
     needs_plugin: bool                 # True: needs an add-on; False: gesture/profile only
     detect: Callable[[], Optional[str]]
     setup: Optional[Callable] = None   # per-app installer; None => generic mark-installed
@@ -52,6 +54,14 @@ class AppDef:
     health_check: str = ""
     security_notes: str = ""
     security_confirmation: str = ""       # non-empty => UI confirms before setup mutates state
+
+    @property
+    def key(self):
+        return self.spec.app_id
+
+    @property
+    def name(self):
+        return self.spec.display_name
 
 
 @dataclass(frozen=True)
@@ -1550,31 +1560,32 @@ _APP_UX = {
 }
 
 
-APPS = [
-    AppDef("blender", "Blender", True, detect_blender, setup=install_blender,
+APPS = (
+    AppDef(APP_SPECS_BY_ID["blender"], True, detect_blender, setup=install_blender,
            **_APP_UX["blender"]),
-    AppDef("freecad", "FreeCAD", True, detect_freecad, setup=install_freecad,
+    AppDef(APP_SPECS_BY_ID["freecad"], True, detect_freecad, setup=install_freecad,
            **_APP_UX["freecad"]),
-    AppDef("sketchup", "SketchUp", True, detect_sketchup, setup=install_sketchup,
+    AppDef(APP_SPECS_BY_ID["sketchup"], True, detect_sketchup, setup=install_sketchup,
            **_APP_UX["sketchup"]),
-    AppDef("unreal", "Unreal Engine", True, detect_unreal, setup=install_unreal,
+    AppDef(APP_SPECS_BY_ID["unreal"], True, detect_unreal, setup=install_unreal,
            **_APP_UX["unreal"]),
-    AppDef("unity", "Unity", True, detect_unity, setup=install_unity,
+    AppDef(APP_SPECS_BY_ID["unity"], True, detect_unity, setup=install_unity,
            **_APP_UX["unity"]),
-    AppDef("godot", "Godot", True, detect_godot, setup=install_godot,
+    AppDef(APP_SPECS_BY_ID["godot"], True, detect_godot, setup=install_godot,
            **_APP_UX["godot"]),
-    AppDef("rhino", "Rhino", True, detect_rhino, setup=install_rhino,
+    AppDef(APP_SPECS_BY_ID["rhino"], True, detect_rhino, setup=install_rhino,
            **_APP_UX["rhino"]),
-    AppDef("fusion360", "Fusion 360", True, detect_fusion, setup=install_fusion,
+    AppDef(APP_SPECS_BY_ID["fusion360"], True, detect_fusion, setup=install_fusion,
            **_APP_UX["fusion360"]),
-    AppDef("solidworks", "SolidWorks", False, detect_solidworks, setup=setup_solidworks,
+    AppDef(APP_SPECS_BY_ID["solidworks"], False, detect_solidworks, setup=setup_solidworks,
            **_APP_UX["solidworks"]),
-    AppDef("onshape", "Onshape", False, detect_onshape, setup=setup_onshape,
+    AppDef(APP_SPECS_BY_ID["onshape"], False, detect_onshape, setup=setup_onshape,
            **_APP_UX["onshape"]),
-    AppDef("autocad", "AutoCAD", True, detect_autocad, setup=install_autocad,
+    AppDef(APP_SPECS_BY_ID["autocad"], True, detect_autocad, setup=install_autocad,
            **_APP_UX["autocad"]),
-]
-APPS_BY_KEY = {a.key: a for a in APPS}
+)
+APPS_BY_KEY = MappingProxyType({app_id: next(app for app in APPS if app.key == app_id)
+                                for app_id in APP_SPECS_BY_ID})
 
 
 def setup_action_label(appdef: AppDef, app_cfg, installed_version=_VERSION_UNSET) -> Optional[str]:

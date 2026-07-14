@@ -254,7 +254,7 @@ def test_every_rich_integration_consumes_per_action_axis_sources():
 
 def test_ui_exposes_global_and_per_action_axis_routing():
     source = (Path(__file__).parents[1] / "trackball_daemon/ui.py").read_text(encoding="utf-8")
-    schema = (Path(__file__).parents[1] / "trackball_daemon/binding_schema.py").read_text(
+    schema = (Path(__file__).parents[1] / "trackball_daemon/settings_schema.py").read_text(
         encoding="utf-8")
     assert "Physical trackball orientation" in source
     assert "Changing a source swaps axes instead of duplicating one" in source

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
+from .app_registry import APP_IDS
 from .paths import config_path
 
 # Physical device orientation. ``source[i]`` says which raw sensor axis becomes logical X/Y/Z;
@@ -75,10 +76,7 @@ class HostBaseline:
 
 
 HOST_PROFILE_PATH = Path(__file__).with_name("host_profiles.json")
-HOST_PROFILE_APP_KEYS = (
-    "blender", "freecad", "sketchup", "unreal", "unity", "godot", "rhino", "fusion360",
-    "solidworks", "onshape", "autocad",
-)
+HOST_PROFILE_APP_KEYS = APP_IDS
 HOST_PROFILE_FIELDS = {
     "orbit_sign", "orbit_scale", "pan_sign", "pan_scale", "zoom_sign", "zoom_scale",
     "move_scale", "apply_in_daemon", "advanced_invert",

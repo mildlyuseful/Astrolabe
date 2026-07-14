@@ -17,6 +17,8 @@ import threading
 import tkinter as tk
 
 from . import integrations
+from .app_registry import (APP_SPECS, APP_SPECS_BY_ID, TransportKind,
+                           resolve_foreground_context)
 from .autocad_driver import AutoCADPluginLoader
 from .ble import start_ble_thread
 from .config import (Config, compose_advanced_with_host_baseline, effective_level_horizon,
@@ -140,7 +142,7 @@ class App:
     def _broker_excluded_keys(self):
         """Apps whose frames do NOT go to the socket broker (in-process transports). AutoCAD is a
         broker app -- its NETLOADed plugin is the sole transport (the COM one is archived)."""
-        return ("solidworks", "onshape")
+        return tuple(spec.app_id for spec in APP_SPECS if spec.transport is not TransportKind.BROKER)
 
     def _apply_schemes(self):
         """Push each CAD app's effective control scheme to its driver. Mirrors _apply_rates:
@@ -227,37 +229,13 @@ class App:
             self.broker.set_rate(self._app_rate(key))
 
     # --- 3D-app nav routing -------------------------------------------------------
-    _APP_PROC_HINTS = {
-        "fusion360": ("fusion",),
-        "blender": ("blender",),
-        "freecad": ("freecad",),
-        "sketchup": ("sketchup",),
-        "unreal": ("unrealeditor", "ue4editor"),
-        "unity": ("unity",),
-        "godot": ("godot",),
-        "rhino": ("rhino",),
-        "solidworks": ("sldworks",),
-        "autocad": ("acad",),
-    }
-    _BROWSER_PROCS = ("chrome", "msedge", "firefox", "brave", "opera", "vivaldi")
+    def _foreground_app_context(self):
+        proc = foreground_process_name()
+        connected = bool(self.onshape_bridge is not None and self.onshape_bridge.is_connected())
+        return resolve_foreground_context(proc, onshape_connected=connected)
 
     def _foreground_app_key(self):
-        proc = foreground_process_name()
-        if not proc:
-            return None
-        for key, hints in self._APP_PROC_HINTS.items():
-            if any(h in proc for h in hints):
-                return key
-        # Onshape runs in a browser, so the foreground PROCESS is the browser (chrome/msedge/...),
-        # not "onshape". We can't match by window title either -- Onshape titles the tab with the
-        # document name (e.g. "monstera leaf | Part Studio 1"), not "Onshape". Instead: a browser is
-        # foreground AND an Onshape tab has completed the 3Dconnexion handshake (bridge connected).
-        # The bridge's own focus signal (Onshape reports when its 3D view is active) is the finer
-        # gate, applied in the driver before any camera move -- so we never move a backgrounded tab.
-        if any(b in proc for b in self._BROWSER_PROCS):
-            if self.onshape_bridge is not None and self.onshape_bridge.is_connected():
-                return "onshape"
-        return None
+        return self._foreground_app_context().app_id
 
     def _active_app_key(self):
         key = self._foreground_app_key()
@@ -298,9 +276,10 @@ class App:
         if key is None:
             return
         self._activate_nav_app(key)
-        if key == "onshape":                      # browser bridge (NL-Proxy emulation), not the broker
+        transport = APP_SPECS_BY_ID[key].transport
+        if transport is TransportKind.ONSHAPE_BRIDGE:  # NL-Proxy emulation, not the broker
             self.onshape_bridge.submit(ox, oy, oz, px, py, zoom)
-        elif key == "solidworks":                 # external COM automation, not the socket broker
+        elif transport is TransportKind.SOLIDWORKS_COM:  # external COM, not the socket broker
             self.sw_driver.submit(ox, oy, oz, px, py, zoom)
         else:                                     # socket add-ons (Fusion, AutoCAD, ...) via the broker
             self.broker.submit(ox, oy, oz, px, py, zoom)

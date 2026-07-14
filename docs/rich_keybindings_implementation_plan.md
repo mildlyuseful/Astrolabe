@@ -68,7 +68,7 @@ commit only the intended files, record the commit in this table, and wait.
 | Phase | Status | Checkpoint | Next exact action |
 |---|---|---|---|
 | 0 — Baseline contracts and Windows-input spike | COMPLETE | Start `d25944d`; checkpoint `cf9d116`; items 0.1–0.5 complete | Wait for explicit `START PHASE 1` or independently authorized `START PHASE 4`. |
-| 1 — App and setting registries | NOT_STARTED | — | Start only after Phase 0 is COMPLETE. |
+| 1 — App and setting registries | IN_PROGRESS | Start `30b1598`; no checkpoint commit yet | Inventory app/setting metadata owners, then implement immutable registries and migrate consumers. |
 | 2 — Sparse System→Global→app config | NOT_STARTED | — | Start only after Phase 1 is COMPLETE. |
 | 3 — Runtime state and dependency closure | NOT_STARTED | — | Start only after Phase 2 is COMPLETE. |
 | 4 — Target-isolated navigation transport | NOT_STARTED | — | May be split/merged independently only after Phase 0 contracts exist. |

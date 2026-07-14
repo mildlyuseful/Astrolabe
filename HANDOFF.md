@@ -39,9 +39,11 @@ trackball_daemon/
   ble.py                     scan/connect/subscribe/reconnect loop
   output.py                  pointer/cube math and global/app mapping boundary
   config.py                  config loading, validation, migrations, reset semantics
+  app_registry.py            immutable app identity, focus, transport, modes, capabilities
+  settings_schema.py         stable setting/command IDs, validation, scope, UI metadata
   default_profiles.json      shipped General and neutral user-profile defaults
   host_profiles.json         immutable developer-owned host alignment
-  binding_schema.py          declarative Per-App Bindings capability/UI contract
+  binding_schema.py          compatibility imports for the two canonical registries
   navbroker.py               loopback JSON transport for socket add-ons
   solidworks_driver.py       direct out-of-process SolidWorks COM transport
   onshape_bridge.py          Onshape TLS/WAMP NL-Proxy-compatible bridge
@@ -60,14 +62,23 @@ archive/                     retired implementations kept only for earned techni
 ui_demo/                     design prototypes; not part of the daemon runtime
 ```
 
-Configuration ownership is deliberately split:
+Configuration and registry ownership is deliberately split:
 
 - `default_profiles.json` defines what a clean install and **Reset to defaults** receive.
 - `host_profiles.json` defines software-convention corrections that users must not need to discover
   or reapply.
 - `%APPDATA%\TrackballDaemon\config.json` stores device and user choices.
-- `binding_schema.py` defines which controls are honest for each host. A field is exposed only when
-  every advertised option has a distinct runtime consumer.
+- `app_registry.py` is the only code-owned app identity/order table. Its immutable `AppSpec`
+  records own display names, process selectors, navigation transports/modes, and capability flags.
+  Packaged profile files are validated against that suite.
+- `settings_schema.py` owns stable setting and non-setting command IDs, v8 path mappings, types,
+  validation, scope, capability predicates, System-default source metadata, allowed operations,
+  and the current presentation order. A setting is exposed only when the app satisfies its
+  predicate and every advertised option has a distinct runtime consumer.
+- `integrations.py` retains setup/detection/install metadata and functions, but every `AppDef`
+  references the canonical `AppSpec`; it does not repeat app IDs or display names.
+- `binding_schema.py` is a compatibility import surface for the current UI and older tests. It owns
+  no app or setting metadata.
 
 `config.py` constructs only per-app operational state in Python, then merges the complete resolved
 navigation profile from `default_profiles.json`. The test suite also enforces the ownership
@@ -312,10 +323,12 @@ native HID remains the daemon-closed fallback.
 
 ### Host focus and process identity
 
-Desktop hosts route by foreground process name. Onshape cannot route by title because the browser
-tab title is the document name; it uses browser process + connected bridge, then Onshape's own focus
-signal as the fine gate. Keep routing tests at packet boundaries: discovering focus only after a
-packet has already been transformed applies the previous app's mapping to that packet.
+Desktop hosts route by foreground process name through `app_registry.resolve_foreground_context`.
+Onshape cannot route by title because the browser tab title is the document name. The resolver
+models its bridge as disconnected, connected-background, or connected-foreground; only foreground
+browser + connected bridge selects Onshape, then Onshape's own focus signal remains the fine gate.
+Keep routing tests at packet boundaries: discovering focus only after a packet has already been
+transformed applies the previous app's mapping to that packet.
 
 ### COM attachment
 

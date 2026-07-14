@@ -16,6 +16,7 @@ import pytest
 
 from trackball_daemon import output as output_mod
 from trackball_daemon.app import App
+from trackball_daemon.app_registry import APP_SPECS_BY_ID
 from trackball_daemon.config import Config, host_baseline_payload
 from trackball_daemon.output import OutputEngine
 
@@ -129,7 +130,7 @@ def test_sketchup_routes_to_broker():
 
 
 def test_sketchup_process_hint_is_registered():
-    assert "sketchup" in App._APP_PROC_HINTS["sketchup"]
+    assert APP_SPECS_BY_ID["sketchup"].matches_process("sketchup.exe")
 
 
 def test_unreal_routes_to_broker():
@@ -168,9 +169,9 @@ def test_rhino_routes_to_broker():
 
 
 def test_unity_godot_rhino_process_hints_registered():
-    assert "unity" in App._APP_PROC_HINTS["unity"]
-    assert "godot" in App._APP_PROC_HINTS["godot"]
-    assert "rhino" in App._APP_PROC_HINTS["rhino"]
+    assert APP_SPECS_BY_ID["unity"].matches_process("unity.exe")
+    assert APP_SPECS_BY_ID["godot"].matches_process("godot.exe")
+    assert APP_SPECS_BY_ID["rhino"].matches_process("rhino.exe")
 
 
 def test_no_focused_app_drops_frame():
