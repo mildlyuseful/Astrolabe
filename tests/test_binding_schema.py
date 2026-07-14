@@ -1,8 +1,9 @@
 """Declarative per-app binding superstructure and presentation conventions."""
 
 from trackball_daemon import integrations
-from trackball_daemon.binding_schema import APP_BINDING_PROFILES, BINDING_SECTIONS
+from trackball_daemon.app_registry import APP_BINDING_PROFILES
 from trackball_daemon.config import Config
+from trackball_daemon.settings_schema import BINDING_SECTIONS
 from trackball_daemon.ui import _option_label
 
 

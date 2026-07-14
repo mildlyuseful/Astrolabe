@@ -55,7 +55,7 @@ socket-reader + main-thread-marshal shape — but much larger because Blender do
 | `trackball_daemon/app.py` | `App._apply_schemes` pushes the control scheme + Blender's `advanced` block to the broker; `_nav_sink` routes the focused app's frames. |
 | `trackball_daemon/config.py` + `default_profiles.json` | Validation/migrations plus shipped General and neutral Blender user defaults. |
 | `trackball_daemon/integrations.py` | `install_blender` (multi-version copy + startup shim), the `_ADDINS["blender"]` registry entry, version readers, `auto_update`. |
-| `trackball_daemon/binding_schema.py` | The ordered per-app settings contract. Blender enables its supported shared and rich-action fields here. |
+| `trackball_daemon/app_registry.py` and `settings_schema.py` | App capabilities and the ordered stable setting contract. Blender enables its supported shared and rich-action fields here. |
 | `trackball_daemon/ui.py` | The Tkinter UI. One declarative renderer builds every host section under *Per-App Bindings*; the tab is scrollable. |
 | `tools/blender_nav_*.py` | Headless test scripts (math / integration / socket probes). Not part of the shipped package. |
 
@@ -384,7 +384,7 @@ These were all found via live trackball testing; the fixes are in the code but t
 
 - **Add a Blender option:** add its shipped value to `default_profiles.json`, validate/normalize it
   in `config.py` where needed, read it from `adv` in the add-on, and expose it through Blender's
-  capability profile in `binding_schema.py`. A merely additive field needs no version migration.
+  capability profile in `app_registry.py` and its `SettingSpec` in `settings_schema.py`. A merely additive field needs no version migration.
   Bump the add-on's three markers if its code changed; restart daemon and reload scripts.
 - **Add an invertible axis:** add the key to the shipped advanced profile and action schema, apply it
   in `_apply_action_routing`, and expose it through the declarative binding profile.

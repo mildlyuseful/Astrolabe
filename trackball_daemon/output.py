@@ -12,7 +12,7 @@ import sys
 import threading
 
 from .config import host_baseline
-from .binding_schema import binding_profile
+from .app_registry import binding_profile
 
 # ===========================================================================
 # Windows SendInput (relative pointer move + wheel), pure ctypes -- no dependency

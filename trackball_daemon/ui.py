@@ -9,7 +9,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from . import integrations
-from .binding_schema import BINDING_SECTIONS, binding_profile
+from .app_registry import binding_profile
+from .settings_schema import BINDING_SECTIONS
 from .config import (ORBIT_PIVOT_METHODS, effective_level_horizon,
                      normalize_axis_permutation, normalize_orbit_pivot_fallbacks,
                      swap_axis_source)
@@ -872,7 +873,7 @@ class SettingsWindow:
         return inner
 
     # --- declarative binding renderer --------------------------------------------
-    # All apps pull from binding_schema.BINDING_SECTIONS and toggle capabilities in one profile map.
+    # All apps pull presentation order from settings_schema and capabilities from app_registry.
     def _bindings_fields(self, parent, app_key):
         profile = binding_profile(app_key)
         controls = {}

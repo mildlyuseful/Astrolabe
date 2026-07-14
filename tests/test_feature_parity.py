@@ -1,7 +1,7 @@
 """UI capability declarations must match behavior already present in each host integration."""
 from pathlib import Path
 
-from trackball_daemon.binding_schema import APP_BINDING_PROFILES
+from trackball_daemon.app_registry import APP_BINDING_PROFILES
 from trackball_daemon.ui import _free_orbit_needs_roll_warning
 
 

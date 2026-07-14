@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from trackball_daemon import integrations
-from trackball_daemon.binding_schema import APP_BINDING_PROFILES
+from trackball_daemon.app_registry import APP_BINDING_PROFILES
 from trackball_daemon.config import (
     APP_PROFILE_FIELDS,
     DEFAULTS,

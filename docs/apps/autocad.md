@@ -855,7 +855,7 @@ real COM behaviour — that's what this section's live testing is for.
 - **`integrations.py`** — `detect_autocad` (globs `Autodesk\AutoCAD*\acad.exe`) and
   `install_autocad` (verify AutoCAD + pywin32, copy/stage the bundled plugin, enable). AutoCAD IS
   a first-class `_ADDINS` entry (`version.json` manifest → install/update UI + auto_update).
-- **`binding_schema.py` / `ui.py`** — the declarative AutoCAD profile exposes the supported pivots,
+- **`app_registry.py` / `settings_schema.py` / `ui.py`** — the declarative AutoCAD profile exposes the supported pivots,
   selection override, independent hold entries, zoom style, and horizon-entry option. The add-in row
   (Install/Update + version) renders generically from `_ADDINS`.
 - **`host_profiles.json`** — the developer-owned AutoCAD alignment factors composed before the

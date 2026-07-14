@@ -574,7 +574,7 @@ back independently via `ScreenToClient` + the `Transform` inverse — returned e
   The general default scheme is `pivot=screen_center, style=free, zoom=to_center`.
 - **`integrations.py`** — `detect_solidworks` (globs `SLDWORKS.exe`) and `setup_solidworks` (verify SW
   + pywin32, mark enabled; **no add-in to copy**). SolidWorks is **not** in the add-in copy/update set.
-- **`binding_schema.py` / `ui.py`** — the declarative SolidWorks profile exposes
+- **`app_registry.py` / `settings_schema.py` / `ui.py`** — the declarative SolidWorks profile exposes
   `screen_center / cursor / selection / object / origin`, the independent Pivot/Zoom hold entries,
   selection override, and the horizon-entry option. SolidWorks honours all five pivots
   (`selection` and `object` are distinct).

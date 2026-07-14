@@ -43,7 +43,6 @@ trackball_daemon/
   settings_schema.py         stable setting/command IDs, validation, scope, UI metadata
   default_profiles.json      shipped General and neutral user-profile defaults
   host_profiles.json         immutable developer-owned host alignment
-  binding_schema.py          compatibility imports for the two canonical registries
   navbroker.py               loopback JSON transport for socket add-ons
   solidworks_driver.py       direct out-of-process SolidWorks COM transport
   onshape_bridge.py          Onshape TLS/WAMP NL-Proxy-compatible bridge
@@ -77,8 +76,6 @@ Configuration and registry ownership is deliberately split:
   predicate and every advertised option has a distinct runtime consumer.
 - `integrations.py` retains setup/detection/install metadata and functions, but every `AppDef`
   references the canonical `AppSpec`; it does not repeat app IDs or display names.
-- `binding_schema.py` is a compatibility import surface for the current UI and older tests. It owns
-  no app or setting metadata.
 
 `config.py` constructs only per-app operational state in Python, then merges the complete resolved
 navigation profile from `default_profiles.json`. The test suite also enforces the ownership
