@@ -38,10 +38,13 @@ trackball_daemon/
   app.py                     lifecycle, focus routing, service gates, scheme/rate delivery
   ble.py                     scan/connect/subscribe/reconnect loop
   output.py                  pointer/cube math and global/app mapping boundary
-  config.py                  config loading, validation, migrations, reset semantics
+  config_store.py            transactional v9 loading, migration, snapshots, and events
+  config_resolver.py         pure System -> Global -> app setting resolution
+  config.py                  host/default helpers and historical migration machinery
   app_registry.py            immutable app identity, focus, transport, modes, capabilities
   settings_schema.py         stable setting/command IDs, validation, scope, UI metadata
-  default_profiles.json      shipped General and neutral user-profile defaults
+  system_defaults.json       concrete developer-owned setting defaults
+  default_profiles.json      frozen v8 migration compatibility data
   host_profiles.json         immutable developer-owned host alignment
   navbroker.py               loopback JSON transport for socket add-ons
   solidworks_driver.py       direct out-of-process SolidWorks COM transport
@@ -63,7 +66,10 @@ ui_demo/                     design prototypes; not part of the daemon runtime
 
 Configuration and registry ownership is deliberately split:
 
-- `default_profiles.json` defines what a clean install and **Reset to defaults** receive.
+- `system_defaults.json` exhaustively defines the concrete base-installed System setting layer and
+  its sparse host-specific differences.
+- `default_profiles.json` is frozen compatibility data for reconstructing v8 inheritance during
+  migration; new defaults do not belong there.
 - `host_profiles.json` defines software-convention corrections that users must not need to discover
   or reapply.
 - `%APPDATA%\TrackballDaemon\config.json` stores device and user choices.
@@ -71,15 +77,17 @@ Configuration and registry ownership is deliberately split:
   records own display names, process selectors, navigation transports/modes, and capability flags.
   Packaged profile files are validated against that suite.
 - `settings_schema.py` owns stable setting and non-setting command IDs, v8 path mappings, types,
-  validation, scope, capability predicates, System-default source metadata, allowed operations,
-  and the current presentation order. A setting is exposed only when the app satisfies its
+  validation, scope, capability predicates, concrete System-default source metadata, allowed
+  operations, and the current presentation order. A setting is exposed only when the app satisfies its
   predicate and every advertised option has a distinct runtime consumer.
 - `integrations.py` retains setup/detection/install metadata and functions, but every `AppDef`
   references the canonical `AppSpec`; it does not repeat app IDs or display names.
 
-`config.py` constructs only per-app operational state in Python, then merges the complete resolved
-navigation profile from `default_profiles.json`. The test suite also enforces the ownership
-contract `rich_actions == not apply_in_daemon`, so each host baseline is applied exactly once.
+`ConfigStore` persists sparse v9 user overrides, validates the complete candidate before atomic
+replacement, and publishes deeply immutable snapshots. Feature consumers use typed transactions
+and snapshot/domain accessors; only the store's isolated legacy migration boundary materializes v8
+dictionaries. The test suite also enforces the ownership contract
+`rich_actions == not apply_in_daemon`, so each host baseline is applied exactly once.
 
 See [`docs/default_profiles.md`](docs/default_profiles.md) for the composition and tuning workflow.
 
@@ -258,8 +266,9 @@ and `TODO.md` for intentionally deferred parity.
 
 ## 8. Configuration and migrations
 
-The current config schema is version 8. Loading performs a deep merge with shipped defaults, then
-normalizes axis/pivot values and runs historical migrations. Important milestones:
+The current config schema is version 9. Its setting hierarchy is sparse System→Global→app:
+missing overrides inherit, and persisted v9 state never uses `0`, `"default"`, missing-field
+exceptions, or legacy mode names as inheritance sentinels. Important milestones:
 
 - v2 neutralized old per-app scaling that moved into host integrations.
 - v3 renamed pointer/cursor scheme values without losing Blender's separate 3D Cursor meaning.
@@ -268,14 +277,18 @@ normalizes axis/pivot values and runs historical migrations. Important milestone
 - v6/v7 transferred developer host alignment out of saved user preferences and established atomic
   user-profile reset semantics.
 - v8 separated orbit-pivot and cursor-zoom holds.
+- v9 introduced stable-ID System/Global/app layers, typed transactions, immutable snapshots,
+  structured observable change events, `cube`/`cursor` to `3d`/`pointer` aliases, selected-app UI
+  state, and removal of obsolete `general.buttons`.
 
 Old values must continue to land on their current meaning. Migration tests are durable user-data
 tests, not checkpoint tests. Corrupt or structurally invalid configuration must fall back safely
 without overwriting the bad source file unless a deliberate recovery policy is introduced.
 
-`APP_PROFILE_FIELDS` is the atomic reset boundary. Reset restores navigation fields from
-`default_profiles.json`, removes an app-specific horizon override so it inherits General, and
-preserves operational state such as enabled/installed/add-on version.
+Global reset removes the user override so System is visible again. Linking an app setting removes
+its app override; unlink-all pins the current effective values. Resetting an app setting to System
+pins the concrete System value and therefore breaks its Global link. All these operations preserve
+operational state such as enabled/installed/add-on version.
 
 The deprecated per-app `start_automatically` field had no consumer and is removed on load. The real
 daemon-level **Start at login** toggle lives in `tray.py` and writes only the current user's Windows

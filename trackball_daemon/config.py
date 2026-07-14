@@ -1,8 +1,8 @@
-"""The single source of truth: a JSON config in the per-user config dir.
+"""Host alignment, legacy v8 defaults, normalization, and historical migration helpers.
 
-Defaults are chosen so behavior is byte-identical to the original cube_test.py
-constants -- moving the numbers into config must not change the math. The UI and the
-output engine both read/write this one object.
+The transactional v9 source of truth is :mod:`trackball_daemon.config_store`. The materialized
+``LegacyConfig`` below exists only to reconstruct historical configs during migration and to keep
+durable regression tests for versions 1 through 8.
 """
 import copy
 from collections.abc import Mapping

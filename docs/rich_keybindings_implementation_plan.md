@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation in progress (Phases 0–1 complete)
+Status: implementation in progress (Phases 0–2 complete)
 
 Target branch: `rich-keybindings`
 
@@ -69,7 +69,7 @@ commit only the intended files, record the commit in this table, and wait.
 |---|---|---|---|
 | 0 — Baseline contracts and Windows-input spike | COMPLETE | Start `d25944d`; checkpoint `cf9d116`; items 0.1–0.5 complete | Wait for explicit `START PHASE 1` or independently authorized `START PHASE 4`. |
 | 1 — App and setting registries | COMPLETE | Start `30b1598`; registries `2183f45`; consumer cutover `0c23104`; items 1.1–1.4 complete | Wait for explicit `START PHASE 2`. |
-| 2 — Sparse System→Global→app config | IN_PROGRESS | Start `de0f42f`; no checkpoint commit yet | Freeze complete v8 migration fixtures before implementing System defaults or v9 storage. |
+| 2 — Sparse System→Global→app config | COMPLETE | Start `de0f42f`; fixtures `67f6710`; System defaults `1af1368`; resolver `da8e219`; store/migration `ecbeb3b`; consumer cutover `e70ea68`; items 2.1–2.5 complete | Wait for explicit `START PHASE 3`. |
 | 3 — Runtime state and dependency closure | NOT_STARTED | — | Start only after Phase 2 is COMPLETE. |
 | 4 — Target-isolated navigation transport | NOT_STARTED | — | May be split/merged independently only after Phase 0 contracts exist. |
 | 5 — Input providers and Windows keyboard | NOT_STARTED | — | Start after Phases 0 and 3 are COMPLETE. |
@@ -175,6 +175,66 @@ treating that review as an authority:
   checkpoint, mark Phase 2 `IN_PROGRESS`, and freeze v8 fixtures for every inheritance sentinel,
   equal/different app value, malformed file, operational field, and legacy name before changing
   config storage.
+
+### 0.8 Phase 2 checkpoint
+
+- **Status:** `COMPLETE` from starting commit `de0f42f`; frozen-input checkpoint `67f6710`;
+  System-default checkpoint `1af1368`; pure-resolver checkpoint `da8e219`; transactional v9
+  store/migration checkpoint `ecbeb3b`; production consumer-cutover checkpoint `e70ea68`.
+- **Completed work:** 2.1 complete validated and packaged `system_defaults.json`; 2.2 one pure sparse
+  System→Global→app resolver; 2.3 typed locked transactions, atomic persistence, immutable
+  copy-on-publish snapshots, structured events, logged subscriber failures, concurrency and
+  reentrancy behavior; 2.4 source-aware v1–v8→v9 migration with canonical aliases and recovery;
+  2.5 exhaustive resolver, empty-map, link/pin, reset, failure, and consumer-cutover tests.
+- **v9 persisted shape:** `global_overrides`, complete sparse `app_overrides`, device overrides,
+  isolated internal-runtime overrides, per-app operational records, bridge/Onshape infrastructure,
+  `ui_state.selected_app`, selected input-profile ID, and empty override maps for the developer
+  `astrolabe_5way` and `keyboard_only` binding profiles. Fresh installs persist empty user setting
+  overrides; absence is the only inheritance representation.
+- **System/default ownership:** stable setting IDs in `system_defaults.json` are the authoritative
+  developer-owned System layer. The file exhaustively covers every registry setting and declares
+  only concrete app-specific differences. `default_profiles.json` is now frozen v8 compatibility
+  data used to reconstruct exact old inheritance; its `0`, `"default"`, null/missing, and
+  `general.buttons` conventions must not be reused by v9 code.
+- **Resolution decision:** an app override wins over a compatible Global override, which wins over
+  the app-specific System value and then the global System value. If a linked Global enum value is
+  unsupported by a host, that host uses its concrete app System value while remaining linked; a
+  later compatible Global value therefore applies without user repair.
+- **Migration decision:** historical v1–v8 upgrades run only in the store's isolated legacy
+  boundary and do not publish mutable state. Migration compares each materialized value against
+  the exact old inherited value: equality omits the v9 override, while difference pins it even if
+  a current/future System value happens to match. Operational state, device/bridge/Onshape values,
+  hidden runtime parameters, and selected app are preserved. `cube`/`cursor` become `3d`/`pointer`;
+  `active_app` becomes `ui_state.selected_app`; obsolete buttons are dropped. Candidate v9 state
+  is fully validated before atomic replacement; malformed/invalid source files remain untouched.
+- **Transactions and reset semantics:** callbacks receive a structured event after the immutable
+  snapshot is published and after the store lock is released. Listener exceptions are logged and
+  do not block later listeners. Global reset removes an override. App link removes an override;
+  unlink-all pins current effective values; app reset-to-System pins concrete System values and
+  breaks links. Physical-axis source changes must commit as a complete permutation.
+- **Consumer boundary:** `app.py`, `output.py`, `integrations.py`, and `ui.py` no longer read or
+  mutate raw config dictionaries. Integration setup publishes detached operational records through
+  typed transactions. Output uses one immutable snapshot per mapping build. Until Phase 9 generates
+  settings controls from the registry, the old tuple-path UI adapter exists only inside
+  `ConfigStore`; obsolete mouse-button controls were removed. The legacy materialized class exists
+  only for historical migration and its direct regression tests.
+- **Files changed:** new `config_resolver.py`, `config_store.py`, `system_defaults.py`, and
+  `system_defaults.json`; packaged-data manifest and default-profile documentation; config,
+  settings-schema, daemon/output/integration/UI consumers; frozen v8 fixtures; and focused plus
+  existing migration, output, routing, installer, and default tests.
+- **User-owned files left untouched:** `.claude/` and
+  `docs/rich_keybindings_plan_revisions.md` remain untracked and were not staged.
+- **Verification:** frozen v8/config checkpoint = 44 passed; System-default checkpoint = 26 passed;
+  resolver checkpoint = 24 passed; store/config boundary = 61 passed; final
+  `python -m pytest -q` = 456 passed. `python -m compileall -q trackball_daemon tests`, AutoCAD
+  NavMath `ALL PASS`, `git diff --check`, package-data assertions, and a production raw-config
+  consumer scan all passed.
+- **Manual verification:** none required for this storage-only phase. Tests use isolated APPDATA
+  paths and no real user config was migrated. Packaged-runtime and live-host UI acceptance remains
+  in the existing Phase 9/11 gates rather than risking a user's current config at this checkpoint.
+- **Next exact action:** stop. On `START PHASE 3`, rerun the mandatory bootstrap, confirm this
+  checkpoint and Phase 3's start gate, mark Phase 3 `IN_PROGRESS`, then freeze current tray mode
+  changes and OutputEngine mode ownership before adding the runtime command/state store.
 
 ## 1. Product goals
 
