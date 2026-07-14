@@ -38,6 +38,8 @@ trackball_daemon/
   app.py                     lifecycle, focus routing, service gates, scheme/rate delivery
   ble.py                     scan/connect/subscribe/reconnect loop
   output.py                  pointer/cube math and global/app mapping boundary
+  windows_pointer.py         bounded SendInput motion and pointer-button sink
+  instance_lock.py           process-lifetime single-controller ownership
   commands.py                typed live-state commands and serialized dispatch queue
   runtime_state.py           dependency-resolved live authority and immutable snapshots
   input/model.py             immutable normalized controls, events, health, and transitions
@@ -108,7 +110,9 @@ coherent immutable `RuntimeSnapshot` with input/navigation state, focused contex
 identities, setting overrides, last binding event, and a monotonic revision. Dependency leaves such
 as Pan carry their prerequisites and precedence as one request; if a prerequisite loses a conflict,
 the dependent leaf is suppressed rather than leaving an unreachable mixed state. `OutputEngine`
-derives mode from this snapshot and does not own a second mutable mode value.
+derives mode from this snapshot and does not own a second mutable mode value. Supported navigation
+modes are also part of the resolved base: a held Fly/Walk request is inert while an Orbit-only app
+has focus and resumes safely if focus returns to a compatible app.
 
 See [`docs/default_profiles.md`](docs/default_profiles.md) for the composition and tuning workflow.
 
@@ -174,10 +178,10 @@ The data path is:
 ```text
 BLE float packet
   -> App._handle_ble_packet
-       -> capture focused host and activate its mapping
+       -> capture one immutable runtime snapshot, focused host, and state revision
   -> OutputEngine.handle_packet
        -> global physical orientation
-       -> pointer mode: SendInput cursor/wheel
+       -> pointer mode: windows_pointer SendInput cursor/wheel
        -> 3D mode: app user mapping and host-alignment boundary
   -> App._nav_sink (enabled gate; routes with the same captured host key)
        -> SolidWorksDriver for SolidWorks
@@ -214,16 +218,24 @@ The binding DSL is data only: stable command/setting IDs support set, explicit t
 cycle, numeric add/multiply, identity-based restore, and explicit persistent setting transactions.
 There is no eval, shell, raw JSON-pointer, arbitrary virtual-key, or scancode surface. Pointer
 buttons are restricted to paired momentary Left/Right/Middle/X1/X2 actions and are identity-owned;
-Phase 7's sink intentionally performs no OS injection. Phase 8 must connect that narrow sink to
-SendInput and retain release-on-disconnect/reload/shutdown/owner-replacement behavior.
+`SendInputPointerButtonSink` is the only OS delivery boundary. It retains
+release-on-disconnect/reload/shutdown/owner-replacement behavior and reports a rejected button edge
+instead of silently retaining ambiguous ownership. Motion injection preserves the historical
+non-throwing behavior so a transient desktop boundary cannot tear down the BLE stream.
+
+`SingleInstanceGuard` acquires `Local\TrackballDaemon.Controller.v1` before `App` is constructed.
+Therefore a second installed or source-tree instance cannot open BLE or output transports; it exits
+with an actionable diagnostic. Keep this acquisition ahead of every future transport startup.
 
 ## 5. Pointer, 3D, and mapping semantics
 
 `OutputEngine` has pointer and 3D modes. In pointer mode, yaw-dominant motion becomes wheel input;
 otherwise planar motion becomes cursor movement. Fractional pixel/notch remainders are carried.
 
-In 3D mode, the shipped toggle uses unmodified motion for orbit and Shift for mutually exclusive
-pan/zoom. The app's binding profile can change the toggle, action sources, inversions, and gains.
+In 3D mode, the shipped profile uses unmodified motion for orbit and Shift for mutually exclusive
+pan/zoom. Shift is an ordinary declarative hold binding whose `pan` dependency cascades through
+Orbit-secondary and 3D; `OutputEngine` never polls keyboard state. The app's binding profile can
+change the active mode/layer, action sources, inversions, and gains.
 `OutputEngine` publishes a complete immutable mapping snapshot and each packet retains one snapshot
 through transformation and emission. Config reloads and focus changes are serialized so fields from
 two app profiles cannot be mixed.
@@ -257,6 +269,8 @@ math, and never apply a baseline in both daemon and add-on. The `rich_actions` c
 | Rhino 8 | Broker → Python scripts | Per-user scripts plus startup command | Python constant + `version.json` |
 
 Socket add-ons send one hello line containing app key, loaded code version, host version, and PID.
+Rich add-ons consume the daemon runtime's `adv.nav_mode`; host-local mode overrides must not compete
+with that authority. Blender's former Alt+backtick operator was removed for this reason.
 Broker frames contain:
 
 ```json

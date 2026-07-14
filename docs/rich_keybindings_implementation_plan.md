@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation in progress (Phases 0–7 complete)
+Status: implementation in progress (Phases 0–8 complete)
 
 Target branch: `rich-keybindings`
 
@@ -75,8 +75,8 @@ commit only the intended files, record the commit in this table, and wait.
 | 5 — Input providers and Windows keyboard | COMPLETE | Start `2aa1c9b`; provider foundation `19c9ad1`; Raw Input/foreground `e16e340`; acceptance gate `d99a0de`; boundary reconciliation `0b99a6f`; hidden-release fail-safe `ce07604`; items 5.1–5.6 complete | Wait for explicit `START PHASE 6`. |
 | 6 — BLE five-way protocol and adapter | COMPLETE | Start `af373fa`; frozen baseline `07b9450`; host protocol/adapters `b7aec6d`; firmware/docs `26146d1`; hardware contract `dd9bb48`; completion `d569d31`; items 6.1–6.6 complete | Wait for explicit `START PHASE 7`. Final five-way pins and physical qualification remain Phase 11/release work. |
 | 7 — Binding compiler, DSL, and system profiles | COMPLETE | Start `7a0ae3d`; start ledger `6d1b7a4`; profiles/overrides `1283cb4`; compiler/runtime `86fd22c`; items 7.1–7.5 complete | Wait for explicit `START PHASE 8`. |
-| 8 — Motion/output integration | IN_PROGRESS | Start `86d67e8`; start ledger `17cc139`; automated integration `5c3bcae`; items 8.1–8.6 implemented | Run the live Windows/XIAO and duplicate-daemon stop gate below; if it passes, update HANDOFF/TODO, mark Phase 8 COMPLETE, commit the completion ledger, and stop. |
-| 9 — Barebones settings UX | NOT_STARTED | — | Start after Phases 2 and 7 are COMPLETE. |
+| 8 — Motion/output integration | COMPLETE | Start `86d67e8`; start ledger `17cc139`; automated integration `5c3bcae`; items 8.1–8.6 and live gate complete | Wait for explicit `START PHASE 9`. |
+| 9 — Barebones settings UX | NOT_STARTED | — | Wait for explicit `START PHASE 9`. |
 | 10 — Text HUD | NOT_STARTED | — | Start after Phase 8 runtime snapshots are COMPLETE. |
 | 11 — Full verification and release docs | NOT_STARTED | — | Start after Phases 0–10 are COMPLETE. |
 
@@ -488,9 +488,9 @@ treating that review as an authority:
 
 ### 0.15 Phase 8 in-progress checkpoint
 
-- **Status:** `IN_PROGRESS` from starting commit `86d67e8`; start-ledger commit `17cc139`;
-  automated integration checkpoint `5c3bcae`. Work items 8.1–8.6 are implemented; the live
-  Windows/XIAO stop gate is the first incomplete requirement.
+- **Status:** `COMPLETE` from starting commit `86d67e8`; start-ledger commit `17cc139`;
+  automated integration checkpoint `5c3bcae`; pre-acceptance ledger `c4a5987`. Work items 8.1–8.6
+  and the live Windows/XIAO stop gate are complete.
 - **Bootstrap:** complete plan/HANDOFF/TODO and Phase 8 scope reread; Phase 4/7 dependency
   confirmation; clean tracked worktree; user-owned `.claude/` and
   `docs/rich_keybindings_plan_revisions.md` remain untracked and untouched.
@@ -519,12 +519,15 @@ treating that review as an authority:
   0.1.23. Tests cover stationary mode/settings changes, one-snapshot packet ownership, bit-exact
   output, unsupported-mode focus transitions, BLE disconnect/reload/shutdown release ownership,
   rejected button injection, and duplicate rejection before `App` construction.
-- **Manual stop gate still required:** with only the source daemon owning the XIAO3389, verify
-  Pointer-mode D0/D1/D2 conventional clicks, held-button release across disconnect/quit, and that a
-  second daemon exits with the actionable already-running diagnostic without disrupting the first.
-- **Next exact action:** perform that manual stop gate. On a pass, remove the two completed Phase 8
-  items from `TODO.md`, update `HANDOFF.md`, mark this phase `COMPLETE`, commit the completion ledger,
-  and wait for the next explicit start command.
+- **Manual stop gate:** passed on Windows with the physical XIAO3389 test-bench hardware on
+  2026-07-14. D0/D1/D2 produced the expected conventional Pointer-mode clicks; held-button
+  disconnect/quit release, duplicate-daemon rejection without disrupting the owner, and the listed
+  Ctrl/Shift dependency/order checks all worked as expected.
+- **Completion cleanup:** the delivered output/singleton work is documented in `HANDOFF.md`; its two
+  Phase 8 backlog entries are removed from `TODO.md`. Final production five-way switch pins and
+  physical qualification remain explicitly deferred to Phase 11/release work.
+- **Next exact action:** stop. Wait for explicit `START PHASE 9`; do not infer Phase 9 authorization
+  from Phase 8 completion.
 
 ## 1. Product goals
 

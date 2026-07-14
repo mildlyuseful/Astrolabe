@@ -6,14 +6,6 @@ here.
 
 ## Highest priority
 
-- In Phase 8, connect Phase 7's compiled, identity-owned momentary pointer-button intents to bounded
-  SendInput delivery so XIAO3389 Left/Right/Middle retain conventional clicks while daemon
-  controller mode suppresses firmware HID. Preserve the existing disconnect, profile-reload,
-  shutdown, and ownership-replacement release rules; arbitrary virtual-key/scancode injection and
-  persistent button toggles stay out of the DSL.
-- Before Phase 8 output integration, enforce single-daemon ownership. Live Phase 6 testing found an
-  installed daemon and source-tree daemon subscribing concurrently; competing BLE/output owners
-  must fail with an actionable diagnostic instead of racing controller mode.
 - Before replacing the honest `firmware/Astrolabe` placeholder, supply the final
   Up/Down/Left/Right/Center pins and debounce timing. Phase 11/release qualification must repeat the
   physical matrix on the production five-way switch, including the simultaneous-input
