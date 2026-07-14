@@ -73,7 +73,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 3 — Runtime state and dependency closure | COMPLETE | Start `91e5a09`; frozen ownership `a2310e8`; serialized store `4c94301`; dependency engine `a58c652`; consumer cutover `a39e81e`; items 3.1–3.5 complete | Wait for explicit `START PHASE 4`. |
 | 4 — Target-isolated navigation transport | COMPLETE | Start `43832a7`; protocol `abe757e`; implementation `23bc53e`; items 4.1–4.4 complete | Wait for explicit `START PHASE 5`. |
 | 5 — Input providers and Windows keyboard | COMPLETE | Start `2aa1c9b`; provider foundation `19c9ad1`; Raw Input/foreground `e16e340`; acceptance gate `d99a0de`; boundary reconciliation `0b99a6f`; hidden-release fail-safe `ce07604`; items 5.1–5.6 complete | Wait for explicit `START PHASE 6`. |
-| 6 — BLE five-way protocol and adapter | IN_PROGRESS | Start `af373fa`; frozen baseline `07b9450`; host protocol/adapters `b7aec6d`; items 6.1–6.6 implemented for host and working test bench | Flash and run the live input/disconnect/reconnect/HID acceptance matrix; obtain the production five-way pin contract. |
+| 6 — BLE five-way protocol and adapter | IN_PROGRESS | Start `af373fa`; frozen baseline `07b9450`; host protocol/adapters `b7aec6d`; firmware/docs `26146d1`; items 6.1–6.6 implemented for host and working test bench | Flash and run the live input/disconnect/reconnect/HID acceptance matrix; obtain the production five-way pin contract. |
 | 7 — Binding compiler, DSL, and system profiles | NOT_STARTED | — | Start after Phases 2, 3, 5, and 6 are COMPLETE. |
 | 8 — Motion/output integration | NOT_STARTED | — | Start after Phases 4 and 7 are COMPLETE. |
 | 9 — Barebones settings UX | NOT_STARTED | — | Start after Phases 2 and 7 are COMPLETE. |
@@ -417,9 +417,9 @@ treating that review as an authority:
   disconnect while held, reconnect, and press again. Return the JSON and separately confirm that
   closing the daemon/tool restores ordinary HID motion and buttons. The production five-way gate
   additionally requires the real Up/Down/Left/Right/Center pin/polarity mapping.
-- **Next exact action:** checkpoint the compatible firmware/docs, then wait for the live test and
-  production hardware mapping. Do not remove the hardware TODO or mark Phase 6 complete from static
-  packet vectors alone.
+- **Next exact action:** wait for the live XIAO3389 acceptance JSON, daemon-absent HID result, and
+  production Up/Down/Left/Right/Center pin/polarity mapping. Do not remove the hardware TODO or mark
+  Phase 6 complete from static packet vectors alone.
 
 ## 1. Product goals
 
