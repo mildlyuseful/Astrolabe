@@ -8,14 +8,6 @@ here.
 
 No open items currently.
 
-## Normal priority
-
-- **Isolate broker frames by target application.** `NavBroker` currently sends each frame to every
-  connected socket client. Most add-ons do not independently verify Windows foreground ownership,
-  so opening more than one integrated host can move a background viewport. Make the target app part
-  of the broker submission/flush contract, retain per-target scheme data, and add a multi-client
-  regression test.
-
 ## Host feature parity
 
 These controls are intentionally not advertised until the host-specific behavior exists and has

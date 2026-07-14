@@ -50,9 +50,28 @@ captured enabled app is retained in `_packet_app_key` through `OutputEngine.hand
 drops navigation. Onshape resolves only for a registered foreground browser while its bridge is
 connected; connected-but-background remains non-targeted.
 
-The known defect is downstream of that capture: `NavBroker` has one accumulator/rate/scheme and
-broadcasts each frame to every connected socket client. A focus switch can also leave an old
-transport accumulator pending. Phase 4 resolves both by associating every sample and accumulator
-with one target and discarding pending old-target deltas atomically on target change. Old deltas
-must never be relabeled as the new target.
+At the baseline, the known defect was downstream of that capture: `NavBroker` had one
+accumulator/rate/scheme and broadcast each frame to every connected socket client. A focus switch
+could also leave an old transport accumulator pending.
 
+## Implemented Phase 4 contract
+
+- `NavigationEnvelope` is immutable and carries one registered target, finite orbit/pan/zoom values,
+  and the monotonic runtime-state revision captured for the BLE packet.
+- `NavigationRouter` serializes focus changes, profile changes, revision changes, and submissions
+  across socket clients, SolidWorks COM, and the Onshape bridge.
+- Each broker target owns its accumulator, refresh period, scheme/profile revision, accepted and
+  pending state revisions, delivery serial, and discard diagnostics.
+- Only clients whose existing hello `app` equals the active envelope target receive its frame.
+  Multiple clients for that same app receive the same frame; every other client receives nothing.
+- The deterministic focus-change policy is **discard old pending motion**. The newly selected target
+  also begins clean. Old deltas are never finished into, flushed to, or relabeled as a new target.
+- A profile change or newer runtime-state revision discards pending deltas produced under the older
+  interpretation. A stale revision is rejected.
+- No matching client means pending socket motion is discarded. A later reconnect begins clean.
+- Onshape may remain connected in the background, but daemon navigation selects no target until its
+  registered browser is foreground. SolidWorks and Onshape expose the same discard boundary without
+  changing their camera calculations or host protocols.
+
+The implementation changed no hello field, daemon frame field, host consumer, or add-on source.
+Accordingly, every version in the inventory above remains unchanged.

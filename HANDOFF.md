@@ -230,14 +230,23 @@ Broker frames contain:
 }
 ```
 
-`adv` is the current broker app's complete additive contract, not a Blender-only extension. It can
+`adv` is the frame target's complete additive contract, not a Blender-only extension. It can
 include mode-specific settings, action routing, host baseline, selection override, candidate list,
 independent hold times, zoom style, and horizon-entry behavior. Add-ons must ignore unknown keys and
 use safe defaults for missing ones.
 
-The current broker broadcasts a submitted frame to every connected socket client; target-client
-isolation is tracked as normal-priority work in `TODO.md`. Do not claim foreground isolation is
-complete until the broker itself scopes delivery.
+`NavigationRouter` is the single daemon-side delivery boundary for broker clients, SolidWorks COM,
+and the Onshape bridge. Every immutable sample envelope carries its target app and runtime-state
+revision. The broker owns independent accumulators, rates, schemes/profile revisions, and delivery
+state per target, and sends a frame only to clients whose existing hello `app` matches that target.
+Focus changes atomically discard pending old-target motion; they never relabel or flush it into the
+new target. A disabled/unknown foreground app and connected-but-background Onshape select no target.
+Stale runtime revisions are rejected, while a newer revision discards motion accumulated under the
+prior state before accepting new deltas.
+
+This isolation is entirely server-side. The newline JSON hello/frame shapes and all bundled add-on
+version markers remain unchanged; `docs/rich_keybindings_phase4_protocol.md` records the frozen
+inventory and Phase 4 decision.
 
 Each socket add-on's hello reports the version of the copy actually loaded by that host document.
 The daemon remembers the most recently observed version per app and uses it for Setup/Update status,

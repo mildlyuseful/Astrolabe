@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation in progress (Phases 0–3 complete)
+Status: implementation in progress (Phases 0–4 complete)
 
 Target branch: `rich-keybindings`
 
@@ -71,7 +71,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 1 — App and setting registries | COMPLETE | Start `30b1598`; registries `2183f45`; consumer cutover `0c23104`; items 1.1–1.4 complete | Wait for explicit `START PHASE 2`. |
 | 2 — Sparse System→Global→app config | COMPLETE | Start `de0f42f`; fixtures `67f6710`; System defaults `1af1368`; resolver `da8e219`; store/migration `ecbeb3b`; consumer cutover `e70ea68`; items 2.1–2.5 complete | Wait for explicit `START PHASE 3`. |
 | 3 — Runtime state and dependency closure | COMPLETE | Start `91e5a09`; frozen ownership `a2310e8`; serialized store `4c94301`; dependency engine `a58c652`; consumer cutover `a39e81e`; items 3.1–3.5 complete | Wait for explicit `START PHASE 4`. |
-| 4 — Target-isolated navigation transport | IN_PROGRESS | Start `43832a7`; bootstrap complete | Freeze broker hello/frame versions and packet-boundary foreground routing before adding the target-aware envelope/router. |
+| 4 — Target-isolated navigation transport | COMPLETE | Start `43832a7`; protocol `abe757e`; implementation `23bc53e`; items 4.1–4.4 complete | Wait for explicit `START PHASE 5`. |
 | 5 — Input providers and Windows keyboard | NOT_STARTED | — | Start after Phases 0 and 3 are COMPLETE. |
 | 6 — BLE five-way protocol and adapter | NOT_STARTED | — | Start after Phase 5 provider contract is COMPLETE. |
 | 7 — Binding compiler, DSL, and system profiles | NOT_STARTED | — | Start after Phases 2, 3, 5, and 6 are COMPLETE. |
@@ -279,6 +279,45 @@ treating that review as an authority:
 - **Next exact action:** stop. On `START PHASE 4`, rerun the mandatory bootstrap, freeze broker
   handshake/wire versions and foreground routing, mark Phase 4 `IN_PROGRESS`, and implement target-
   isolated navigation transport without changing runtime command semantics.
+
+### 0.10 Phase 4 checkpoint
+
+- **Status:** `COMPLETE` from starting commit `43832a7`; frozen-protocol checkpoint `abe757e`;
+  target-isolation implementation checkpoint `23bc53e`.
+- **Completed work:** 4.1 immutable target/revision navigation envelope, one shared router boundary,
+  and per-target broker accumulator, refresh period, scheme/profile revision, state revision, and
+  delivery diagnostics; 4.2 hello-app-matched delivery with deterministic focus-switch discard and
+  no delta relabeling; 4.3 SolidWorks and Onshape adapters with unchanged camera math and explicit
+  connected-background Onshape no-target behavior; 4.4 multiple/simultaneous client, rapid focus,
+  reconnect, stale/new revision, profile change, dead client, and no-target regressions plus resolved
+  TODO cleanup.
+- **Routing decision:** the daemon discards pending old-target deltas atomically on every target
+  change and starts the new target clean. It does not finish the old accumulator because delivery
+  after foreground ownership changed can move a background viewport. Samples captured for an
+  inactive target and stale state revisions are rejected. A newer runtime or profile revision
+  discards deltas interpreted under the prior state before accepting new motion.
+- **Protocol/version decision:** target ownership is entirely server-side and uses the existing
+  hello `app`. Socket hello and frame shapes, the Onshape WAMP/NL-Proxy contract, SolidWorks COM
+  behavior, all camera calculations, and all bundled add-on sources are unchanged. Therefore no
+  consumer or add-on version marker changed. The frozen inventory and resulting contract are in
+  `docs/rich_keybindings_phase4_protocol.md`.
+- **Files changed:** new `navigation_router.py`; target-aware `navbroker.py`; daemon packet-boundary
+  routing in `app.py`; discard adapters in `solidworks_driver.py` and `onshape_bridge.py`; transport,
+  routing, direct-driver, Blender wiring, and frozen-baseline tests; `TODO.md`, `HANDOFF.md`, the
+  protocol record, and this ledger. `output.py` and plugin handshake sources were inspected and did
+  not require changes.
+- **User-owned files left untouched:** `.claude/` and
+  `docs/rich_keybindings_plan_revisions.md` remain untracked and were not staged.
+- **Verification:** frozen protocol/routing baseline = 61 passed; broker/router focused checkpoint =
+  48 passed; transport/routing/direct camera focused suite = 166 passed; final
+  `python -m pytest -q` = 502 passed. `python -m compileall -q trackball_daemon tests`, AutoCAD
+  NavMath `ALL PASS`, and `git diff --check` also passed.
+- **Manual verification:** no live host action is required at this internal transport gate. A
+  two-host foreground/background smoke is useful when convenient but remains part of Phase 11's
+  recorded live-host matrix; it must not be represented as completed here.
+- **Next exact action:** stop. On `START PHASE 5`, rerun the mandatory bootstrap, verify Phases 0 and
+  3 are complete, reread the Phase 0 Windows-input decision, mark Phase 5 `IN_PROGRESS`, and begin
+  the provider/aggregator contract without starting Phase 6.
 
 ## 1. Product goals
 
