@@ -55,4 +55,7 @@ def test_test_bench_debounce_and_button_mapping_are_preserved():
 def test_production_placeholder_records_version_without_fabricating_hardware():
     assert "#define ASTROLABE_INPUT_PROTOCOL_VERSION 1" in PLACEHOLDER
     assert "#define ASTROLABE_FIRMWARE_PROTOCOL_REV   1" in PLACEHOLDER
-    assert "does not invent pins, polarity, or debounce" in PLACEHOLDER
+    assert "active-low inputs with internal pull-ups and firmware debounce" in PLACEHOLDER
+    assert "does not invent final pins or debounce timing" in PLACEHOLDER
+    assert "publish the full" in PLACEHOLDER
+    assert "observed bitset if simultaneous inputs occur" in PLACEHOLDER

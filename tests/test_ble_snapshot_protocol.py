@@ -85,6 +85,20 @@ def test_full_snapshots_repair_missed_edges_in_one_atomic_transition():
     assert change.snapshot.pressed_tokens == ("ble.astrolabe:fiveway.down",)
 
 
+def test_fiveway_mechanical_exclusivity_is_not_enforced_by_the_protocol():
+    provider, aggregator = _provider()
+    provider.begin_session("device#1", supports_input=True)
+
+    assert provider.accept_snapshot(encode_input_state_snapshot(1, b"\x0f")) \
+        is SequenceDisposition.FIRST
+    assert aggregator.snapshot().pressed_tokens == (
+        "ble.astrolabe:fiveway.down",
+        "ble.astrolabe:fiveway.left",
+        "ble.astrolabe:fiveway.right",
+        "ble.astrolabe:fiveway.up",
+    )
+
+
 def test_duplicate_stale_malformed_and_undefined_bits_do_not_mutate_pressed_state():
     provider, aggregator = _provider()
     provider.begin_session("device#1", supports_input=True)

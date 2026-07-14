@@ -17,7 +17,9 @@
     {"id": "fiveway.center", "label": "Astrolabe Center", "bit": 4}
   ],
   "metadata": {
-    "simultaneous_controls": "hardware_defined",
+    "electrical": "active_low_internal_pullup",
+    "debounce": "firmware_defined",
+    "simultaneous_controls": "mechanically_exclusive_not_enforced",
     "protocol_version": 1
   }
 }

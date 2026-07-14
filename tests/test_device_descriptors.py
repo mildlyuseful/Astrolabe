@@ -27,6 +27,10 @@ def test_builtin_descriptors_have_stable_distinct_control_namespaces():
         "ble.astrolabe:fiveway.right",
         "ble.astrolabe:fiveway.center",
     ]
+    assert astrolabe.metadata["electrical"] == "active_low_internal_pullup"
+    assert astrolabe.metadata["debounce"] == "firmware_defined"
+    assert astrolabe.metadata["simultaneous_controls"] == \
+        "mechanically_exclusive_not_enforced"
 
     bench = descriptors["xiao3389_3button"]
     assert bench.matches_name("TRACKBALL BLE")

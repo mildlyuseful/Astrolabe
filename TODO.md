@@ -6,10 +6,13 @@ here.
 
 ## Highest priority
 
-- Flash and hardware-verify the Phase 6 input-state firmware: initial snapshot, three-button
-  press/hold/release, rapid transitions, disconnect while held, reconnect, unchanged rotation, and
-  daemon-absent HID fallback. Supply and verify the production board's Up/Down/Left/Right/Center pin
-  and polarity mapping before replacing the honest `firmware/Astrolabe` placeholder.
+- Flash and hardware-verify the Phase 6 input-state firmware on the XIAO3389 test bench: initial
+  snapshot, jumper press/hold/release, rapid transitions, disconnect while held, reconnect,
+  unchanged rotation, and daemon-absent HID fallback. Before replacing the honest
+  `firmware/Astrolabe` placeholder, supply the final Up/Down/Left/Right/Center pins and debounce
+  timing. Phase 11/release qualification must repeat the physical matrix on the production
+  five-way switch, including the simultaneous-input contingency; the jumper gate validates the
+  software boundary but does not substitute for final-hardware qualification.
 
 ## Host feature parity
 

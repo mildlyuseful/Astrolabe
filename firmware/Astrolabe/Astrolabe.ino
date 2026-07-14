@@ -11,8 +11,10 @@
  * float32 rx/ry/rz notify) is the contract the daemon depends on and must remain unchanged.
  * Phase 6 additionally reserves characteristic 2cad0003-… for protocol-v1 full input-state
  * snapshots. The production implementation must map bits 0..4 to Up/Down/Left/Right/Center,
- * but this placeholder intentionally does not invent pins, polarity, or debounce for hardware
- * that is not documented in the repository.
+ * using active-low inputs with internal pull-ups and firmware debounce. This placeholder
+ * intentionally does not invent final pins or debounce timing before the hardware is complete.
+ * Although the switch is mechanically one-direction-at-a-time, firmware must publish the full
+ * observed bitset if simultaneous inputs occur rather than silently choosing a winner.
  */
 
 #define ASTROLABE_INPUT_PROTOCOL_VERSION 1

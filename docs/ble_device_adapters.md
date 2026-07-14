@@ -58,7 +58,7 @@ Built-ins live in `trackball_daemon/devices/descriptor_data`. A descriptor conta
   "controls": [
     {"id": "button.primary", "label": "Primary", "bit": 0, "kind": "button"}
   ],
-  "metadata": {"simultaneous_controls": "hardware_defined", "protocol_version": 1}
+  "metadata": {"simultaneous_controls": "mechanically_exclusive_not_enforced", "protocol_version": 1}
 }
 ```
 
@@ -88,6 +88,8 @@ format requires only reviewed descriptor data.
 - `xiao3389_3button` / `ble.xiao3389`: bit 0 Left, bit 1 Right, bit 2 Middle; advertised name
   `Trackball BLE`. This is the working dual-PMW3389 test bench, not the production five-way board.
 
-Descriptor metadata describes known capability without inventing switch mechanics. Final debounce
-and physically possible simultaneous combinations must be measured on each hardware design.
-
+The production five-way switch is active-low with internal pull-ups, with debounce owned by
+firmware. Its mechanism ordinarily permits only one direction at a time. That is descriptive
+hardware metadata, not a decoder restriction: the protocol and provider accept any combination of
+declared bits so an unusually fast/forceful transition, a fault, or future hardware cannot strand a
+hold. Final production pins and debounce timing remain hardware-design inputs.

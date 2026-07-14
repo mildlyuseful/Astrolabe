@@ -42,9 +42,16 @@ daemon subscription, ordinary BLE HID motion, scrolling, and three buttons remai
 
 `firmware/Astrolabe/Astrolabe.ino` is an empty production placeholder. It contains no sensor, BLE,
 HID, five-way pin, or debounce implementation. No repository source identifies the physical pins
-or electrical polarity for Up/Down/Left/Right/Center, so Phase 6 must not invent that hardware
-contract. The working three-button sketch is the available protocol test bench; final five-way
-firmware and live five-way acceptance require the production board mapping.
+for Up/Down/Left/Right/Center, so Phase 6 must not invent that hardware mapping. The working
+three-button sketch is the available protocol test bench; final five-way firmware and live
+five-way acceptance require the production board mapping.
+
+After this baseline was frozen, the production switch's electrical and mechanical constraints were
+confirmed: its buttons are active-low with internal pull-ups, debounce is performed in firmware,
+and the mechanism ordinarily permits only one direction at a time. Simultaneous declared bits
+remain valid on the wire and in the host decoder as a contingency for fast/forceful transitions,
+faults, and future devices. The final pins and tuned debounce interval remain intentionally
+unspecified until the hardware design is complete.
 
 ## Additive Phase 6 protocol allocation
 
@@ -77,4 +84,3 @@ hardware remains data-only at this boundary; executable adapter plug-ins are not
 `trackball_daemon.input` subpackage and Phase 6 adds `trackball_daemon.devices`. Phase 6 must switch
 to bounded `trackball_daemon*` package discovery and assert that both subpackages and descriptor
 JSON data are present in built metadata.
-
