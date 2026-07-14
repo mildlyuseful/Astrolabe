@@ -75,7 +75,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 5 — Input providers and Windows keyboard | COMPLETE | Start `2aa1c9b`; provider foundation `19c9ad1`; Raw Input/foreground `e16e340`; acceptance gate `d99a0de`; boundary reconciliation `0b99a6f`; hidden-release fail-safe `ce07604`; items 5.1–5.6 complete | Wait for explicit `START PHASE 6`. |
 | 6 — BLE five-way protocol and adapter | COMPLETE | Start `af373fa`; frozen baseline `07b9450`; host protocol/adapters `b7aec6d`; firmware/docs `26146d1`; hardware contract `dd9bb48`; completion `d569d31`; items 6.1–6.6 complete | Wait for explicit `START PHASE 7`. Final five-way pins and physical qualification remain Phase 11/release work. |
 | 7 — Binding compiler, DSL, and system profiles | COMPLETE | Start `7a0ae3d`; start ledger `6d1b7a4`; profiles/overrides `1283cb4`; compiler/runtime `86fd22c`; items 7.1–7.5 complete | Wait for explicit `START PHASE 8`. |
-| 8 — Motion/output integration | IN_PROGRESS | Start `86d67e8`; bootstrap and untouched output baseline complete | Implement 8.1–8.2 runtime-snapshot motion consumption while preserving frozen output math. |
+| 8 — Motion/output integration | IN_PROGRESS | Start `86d67e8`; start ledger `17cc139`; automated integration `5c3bcae`; items 8.1–8.6 implemented | Run the live Windows/XIAO and duplicate-daemon stop gate below; if it passes, update HANDOFF/TODO, mark Phase 8 COMPLETE, commit the completion ledger, and stop. |
 | 9 — Barebones settings UX | NOT_STARTED | — | Start after Phases 2 and 7 are COMPLETE. |
 | 10 — Text HUD | NOT_STARTED | — | Start after Phase 8 runtime snapshots are COMPLETE. |
 | 11 — Full verification and release docs | NOT_STARTED | — | Start after Phases 0–10 are COMPLETE. |
@@ -488,18 +488,43 @@ treating that review as an authority:
 
 ### 0.15 Phase 8 in-progress checkpoint
 
-- **Status:** `IN_PROGRESS` from starting commit `86d67e8`.
+- **Status:** `IN_PROGRESS` from starting commit `86d67e8`; start-ledger commit `17cc139`;
+  automated integration checkpoint `5c3bcae`. Work items 8.1–8.6 are implemented; the live
+  Windows/XIAO stop gate is the first incomplete requirement.
 - **Bootstrap:** complete plan/HANDOFF/TODO and Phase 8 scope reread; Phase 4/7 dependency
   confirmation; clean tracked worktree; user-owned `.claude/` and
   `docs/rich_keybindings_plan_revisions.md` remain untracked and untouched.
 - **Untouched baseline:** bit-exact output plus frozen legacy Shift contracts = 21 passed; full
   `python -m pytest -q` = 588 passed.
 - **Boundary decision:** retain all quaternion, cursor, host-baseline, and navigation transport math.
-  First replace packet-time `shift_held()` with the input/navigation layer from the same immutable
-  runtime snapshot used for the packet. Pointer buttons remain bounded Left/Right/Middle/X1/X2
-  resources and receive a dedicated SendInput sink only after single-process ownership is acquired.
-- **Next exact action:** implement and verify 8.1–8.2 snapshot-driven motion transformation before
-  enabling pointer-button delivery or changing the Blender add-on.
+  Packet-time `shift_held()` is gone; each sample consumes one immutable runtime snapshot for
+  Pointer/3D, primary/secondary, focused mapping, settings, and target/revision routing. Windows
+  injection is isolated in `windows_pointer.py`; pointer buttons remain bounded
+  Left/Right/Middle/X1/X2, identity-owned, and fail visibly if `SendInput` rejects an edge.
+- **Implemented:** stationary runtime settings and mode profiles publish to only the focused target;
+  supported navigation modes are part of the runtime base so a held Fly/Walk request becomes inert
+  in an Orbit-only app and safely resumes in a compatible app. Existing profile data supplies Shift
+  Pan/Zoom and XIAO3389 Left/Right/Middle. A named process-lifetime mutex is acquired before `App`
+  construction, so a second installed/source process cannot start BLE or output. Blender add-on
+  0.1.23 consumes only daemon-authoritative `adv.nav_mode`; its former Alt+backtick operator, keymap, menu,
+  and local override are removed. Stale Blender probes were updated to the target-isolated broker
+  API and canonical pivot vocabulary while their contract was already in scope.
+- **Files:** changed `output.py`, `app.py`, `runtime_state.py`, `input/bindings.py`, `__main__.py`,
+  Blender add-on/version/docs/probes, and focused tests; added `windows_pointer.py`,
+  `instance_lock.py`, and their tests. User-owned `.claude/` and
+  `docs/rich_keybindings_plan_revisions.md` remain untracked and untouched.
+- **Automated verification:** `python -m pytest -q` = 603 passed; both system binding profiles
+  validate with zero diagnostics; `compileall` and `git diff --check` pass. Blender 5.1.1 headless
+  math probe = 30/30, integration probe = 23/23, and socket probe = 4/4; its hello reported add-on
+  0.1.23. Tests cover stationary mode/settings changes, one-snapshot packet ownership, bit-exact
+  output, unsupported-mode focus transitions, BLE disconnect/reload/shutdown release ownership,
+  rejected button injection, and duplicate rejection before `App` construction.
+- **Manual stop gate still required:** with only the source daemon owning the XIAO3389, verify
+  Pointer-mode D0/D1/D2 conventional clicks, held-button release across disconnect/quit, and that a
+  second daemon exits with the actionable already-running diagnostic without disrupting the first.
+- **Next exact action:** perform that manual stop gate. On a pass, remove the two completed Phase 8
+  items from `TODO.md`, update `HANDOFF.md`, mark this phase `COMPLETE`, commit the completion ledger,
+  and wait for the next explicit start command.
 
 ## 1. Product goals
 
