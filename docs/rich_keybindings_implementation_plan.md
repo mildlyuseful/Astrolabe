@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation in progress (Phases 0–6 complete; Phase 7 in progress)
+Status: implementation in progress (Phases 0–7 complete)
 
 Target branch: `rich-keybindings`
 
@@ -74,7 +74,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 4 — Target-isolated navigation transport | COMPLETE | Start `43832a7`; protocol `abe757e`; implementation `23bc53e`; items 4.1–4.4 complete | Wait for explicit `START PHASE 5`. |
 | 5 — Input providers and Windows keyboard | COMPLETE | Start `2aa1c9b`; provider foundation `19c9ad1`; Raw Input/foreground `e16e340`; acceptance gate `d99a0de`; boundary reconciliation `0b99a6f`; hidden-release fail-safe `ce07604`; items 5.1–5.6 complete | Wait for explicit `START PHASE 6`. |
 | 6 — BLE five-way protocol and adapter | COMPLETE | Start `af373fa`; frozen baseline `07b9450`; host protocol/adapters `b7aec6d`; firmware/docs `26146d1`; hardware contract `dd9bb48`; completion `d569d31`; items 6.1–6.6 complete | Wait for explicit `START PHASE 7`. Final five-way pins and physical qualification remain Phase 11/release work. |
-| 7 — Binding compiler, DSL, and system profiles | IN_PROGRESS | Start `7a0ae3d`; bootstrap and untouched baseline complete | Implement 7.1 packaged system profiles and profile-scoped sparse override validation without starting Phase 8. |
+| 7 — Binding compiler, DSL, and system profiles | COMPLETE | Start `7a0ae3d`; start ledger `6d1b7a4`; profiles/overrides `1283cb4`; compiler/runtime `86fd22c`; items 7.1–7.5 complete | Wait for explicit `START PHASE 8`. |
 | 8 — Motion/output integration | NOT_STARTED | — | Start after Phases 4 and 7 are COMPLETE. |
 | 9 — Barebones settings UX | NOT_STARTED | — | Start after Phases 2 and 7 are COMPLETE. |
 | 10 — Text HUD | NOT_STARTED | — | Start after Phase 8 runtime snapshots are COMPLETE. |
@@ -457,6 +457,34 @@ treating that review as an authority:
 - **Next exact action:** implement and validate 7.1 `system_keybinding_profiles.json`, immutable
   profile models/loading, package-data coverage, and profile-keyed sparse overrides. Then checkpoint
   before the chord state machine.
+
+### 0.14 Phase 7 completion checkpoint
+
+- **Status:** `COMPLETE` from starting commit `7a0ae3d`; start ledger `6d1b7a4`, packaged profiles
+  and profile-scoped overrides `1283cb4`, compiler/runtime/validator `86fd22c`.
+- **Completed:** 7.1–7.5. The daemon now composes immutable `astrolabe_5way` and `keyboard_only`
+  profiles with profile-keyed sparse overrides; compiles indexed normalized chords and app/process
+  contexts; supports exact/permissive modifier matching, generic physical modifiers, cross-provider
+  chords, hold/toggle edges, dependency-owned state requests, explicit press/release lists, the
+  allowlisted setting DSL, bounded identity-owned pointer-button intents, diagnostics, lazy provider
+  configuration, and release-before-reload/shutdown behavior.
+- **Safety decisions:** Phase 3 remains the only dependency/precedence authority. Exact hardware
+  bindings reject unexpected simultaneous controls from the same device source. Pointer actions
+  terminate at an inert ownership sink in Phase 7; Phase 8 must supply bounded SendInput delivery.
+  Persistent setting lists use one ConfigStore transaction and cannot mix with runtime mutations in
+  the same atomic list. Malformed editor/import rows are disabled individually with diagnostics;
+  persisted transactions and developer profiles remain strict.
+- **Verification:** untouched baseline was 562 tests. Final `python -m pytest -q` passed 588 tests;
+  `python -m trackball_daemon.validate_bindings` reported both packaged profiles with zero
+  diagnostics; `python -m compileall -q trackball_daemon tests` and `git diff --check` passed.
+- **Files:** added/changed `system_keybinding_profiles.json`, `input/bindings.py`,
+  `input/macros.py`, `validate_bindings.py`, config/settings/command/app integration, package data,
+  and focused tests. User-owned `.claude/` and `docs/rich_keybindings_plan_revisions.md` remain
+  untracked and untouched.
+- **Deferred exactly as planned:** OS pointer-button delivery, motion/output integration, and
+  single-daemon enforcement remain Phase 8; settings UX remains Phase 9; HUD remains Phase 10.
+- **Next exact action:** stop. On explicit `START PHASE 8`, rerun the mandatory bootstrap and
+  implement Phase 8 only. Do not infer Phase 8 authorization from Phase 7 completion.
 
 ## 1. Product goals
 

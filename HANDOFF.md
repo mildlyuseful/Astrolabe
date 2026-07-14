@@ -42,6 +42,8 @@ trackball_daemon/
   runtime_state.py           dependency-resolved live authority and immutable snapshots
   input/model.py             immutable normalized controls, events, health, and transitions
   input/aggregator.py        provider registry and atomic cross-provider pressed set
+  input/bindings.py          system-profile composition, chord compiler, activation ownership
+  input/macros.py            allowlisted declarative action parsing and setting validation
   input/windows_raw_input.py lazy pass-through Windows keyboard receiver and reconciliation
   config_store.py            transactional v9 loading, migration, snapshots, and events
   config_resolver.py         pure System -> Global -> app setting resolution
@@ -49,6 +51,7 @@ trackball_daemon/
   app_registry.py            immutable app identity, focus, transport, modes, capabilities
   settings_schema.py         stable setting/command IDs, validation, scope, UI metadata
   system_defaults.json       concrete developer-owned setting defaults
+  system_keybinding_profiles.json developer-owned hardware and keyboard binding bases
   default_profiles.json      frozen v8 migration compatibility data
   host_profiles.json         immutable developer-owned host alignment
   navbroker.py               loopback JSON transport for socket add-ons
@@ -78,6 +81,8 @@ Configuration and registry ownership is deliberately split:
   migration; new defaults do not belong there.
 - `host_profiles.json` defines software-convention corrections that users must not need to discover
   or reapply.
+- `system_keybinding_profiles.json` defines immutable `astrolabe_5way` and `keyboard_only` bases.
+  User changes are sparse, stored under the base-profile ID, and never mutate this packaged file.
 - `%APPDATA%\TrackballDaemon\config.json` stores device and user choices.
 - `app_registry.py` is the only code-owned app identity/order table. Its immutable `AppSpec`
   records own display names, process selectors, navigation transports/modes, and capability flags.
@@ -189,18 +194,28 @@ unflushed deltas loses physical rotation.
 The process remains alive on Tk's mainloop. Closing Settings hides it; tray → **Quit** performs the
 only normal shutdown.
 
-The normalized input boundary is intentionally active before binding compilation. `InputAggregator`
-owns the complete pressed set across providers and publishes atomic batches, so disconnect or
-release-all cannot expose a half-released chord. `WindowsRawInputProvider` is registered with that
-boundary at daemon construction but does not start its native receiver until the Phase 7 compiler
-requests at least one keyboard control. Repeats preserve pressed state without emitting another
-activation edge. Profile swap, receiver failure/restart, lock/suspend, and shutdown release safely;
-resume/restart reconcile configured controls with `GetAsyncKeyState` only when the input desktop is
-accessible. `ForegroundMonitor` drives the same runtime context path as BLE packet routing, allowing
-stationary inputs to resolve the actual foreground app. Windows can hide Raw Input releases while a
-higher-integrity window is foreground, so the provider also polls only controls it already believes
-held and can synthesize releases only; it does not scan other configured keys or create activation
-edges from that fail-safe.
+`InputAggregator` owns the complete pressed set across providers and publishes atomic batches, so
+disconnect or release-all cannot expose a half-released chord. The binding compiler expands generic
+selectors to physical controls, indexes candidates by source token, and recomputes the complete
+hold/toggle set after every batch or foreground-context change. Phase 3 resolves dependent states,
+priority, context specificity, exactness, chord size, and activation recency; the compiler does not
+duplicate that authority. Exact keyboard matching rejects unlisted modifiers, while exact device
+bindings also reject unexpected simultaneous controls from the same source. `WindowsRawInputProvider`
+starts only when the active compiled profile requests keyboard controls. Repeats preserve pressed
+state without emitting another activation edge. Profile swap, receiver failure/restart,
+lock/suspend, and shutdown release safely; resume/restart reconcile configured controls with
+`GetAsyncKeyState` only when the input desktop is accessible. `ForegroundMonitor` drives the same
+runtime context path as BLE packet routing, allowing stationary inputs to resolve the actual
+foreground app. Windows can hide Raw Input releases while a higher-integrity window is foreground,
+so the provider also polls only controls it already believes held and can synthesize releases only;
+it does not scan other configured keys or create activation edges from that fail-safe.
+
+The binding DSL is data only: stable command/setting IDs support set, explicit two-value toggle,
+cycle, numeric add/multiply, identity-based restore, and explicit persistent setting transactions.
+There is no eval, shell, raw JSON-pointer, arbitrary virtual-key, or scancode surface. Pointer
+buttons are restricted to paired momentary Left/Right/Middle/X1/X2 actions and are identity-owned;
+Phase 7's sink intentionally performs no OS injection. Phase 8 must connect that narrow sink to
+SendInput and retain release-on-disconnect/reload/shutdown/owner-replacement behavior.
 
 ## 5. Pointer, 3D, and mapping semantics
 
