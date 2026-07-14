@@ -383,6 +383,10 @@ class SolidWorksDriver:
             a[0] += ox; a[1] += oy; a[2] += oz
             a[3] += px; a[4] += py; a[5] += zoom
 
+    def discard_pending(self):
+        """Drop deltas captured before this transport lost foreground ownership."""
+        self._drain()
+
     # --- status (read from any thread) ---------------------------------------------------
     def is_connected(self):
         return self._connected

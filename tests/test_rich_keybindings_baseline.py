@@ -175,8 +175,8 @@ def test_mapping_snapshot_owns_the_selected_apps_immutable_host_baseline(isolate
     assert engine._mapping.host_baseline is host_baseline("rhino")
 
 
-def test_broker_currently_broadcasts_the_same_frame_to_every_client(monkeypatch):
-    """Capture the known Phase 4 bug so target isolation must replace it deliberately."""
+def test_broker_isolates_navigation_to_the_active_target():
+    """The Phase 4 regression replaces the frozen broadcast-bug characterization."""
 
     class _Connection:
         def __init__(self):
@@ -185,14 +185,6 @@ def test_broker_currently_broadcasts_the_same_frame_to_every_client(monkeypatch)
         def sendall(self, payload):
             self.payloads.append(payload)
 
-    class _OneIterationStop:
-        def __init__(self):
-            self.calls = 0
-
-        def is_set(self):
-            self.calls += 1
-            return self.calls > 1
-
     broker = NavBroker(0)
     first = _Connection()
     second = _Connection()
@@ -200,13 +192,11 @@ def test_broker_currently_broadcasts_the_same_frame_to_every_client(monkeypatch)
         SimpleNamespace(conn=first, app="blender", version="1", pid=1),
         SimpleNamespace(conn=second, app="fusion360", version="1", pid=2),
     ]
-    broker._acc = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
-    broker._stop = _OneIterationStop()
-    monkeypatch.setattr("trackball_daemon.navbroker.time.sleep", lambda _seconds: None)
+    broker.activate_target("blender")
+    broker.submit("blender", 1.0, 2.0, 3.0, 4.0, 5.0, 6.0)
+    broker._flush_once(force=True)
 
-    broker._sender()
-
-    assert first.payloads == second.payloads
+    assert second.payloads == []
     frame = json.loads(first.payloads[0])
     assert frame["o"] == [1.0, 2.0, 3.0]
     assert frame["p"] == [4.0, 5.0]

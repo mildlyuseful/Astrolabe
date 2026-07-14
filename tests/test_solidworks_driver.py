@@ -239,6 +239,13 @@ def test_submit_accumulates():
     assert drv._acc == [1.5, 2.5, 3.5, 4.5, 5.5, 6.5]
 
 
+def test_discard_pending_clears_focus_stale_motion():
+    drv = SolidWorksDriver()
+    drv.submit(1, 2, 3, 4, 5, 6)
+    drv.discard_pending()
+    assert drv._acc == [0.0] * 6
+
+
 # --- rate clamp / set_rate ------------------------------------------------------------
 def test_clamp_rate_bounds_and_fallback():
     assert SolidWorksDriver._clamp_rate(0) == 1.0           # min

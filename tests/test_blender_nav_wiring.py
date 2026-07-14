@@ -47,14 +47,14 @@ def test_frame_includes_adv_when_set():
 
 def test_set_scheme_stores_advanced():
     b = NavBroker(47999)
-    b.set_scheme("screen_center", "free", "to_center")  # default: no advanced
-    assert b._scheme["adv"] is None
+    b.set_scheme("blender", "screen_center", "free", "to_center")
+    assert b.delivery_state("blender")["scheme"]["adv"] is None
     adv = {"nav_mode": "walk"}
-    b.set_scheme("camera", "turntable", "to_object", advanced=adv)
-    assert b._scheme["adv"] == adv
-    # legacy 3-arg call site still works unchanged
-    b.set_scheme("object", "free", "to_cursor")
-    assert b._scheme == {"op": "object", "os": "free", "zm": "to_cursor", "adv": None}
+    b.set_scheme("blender", "camera", "turntable", "to_object", advanced=adv)
+    assert b.delivery_state("blender")["scheme"]["adv"] == adv
+    b.set_scheme("blender", "object", "free", "to_cursor")
+    assert b.delivery_state("blender")["scheme"] == {
+        "op": "object", "os": "free", "zm": "to_cursor", "adv": None}
 
 
 # --- config: the additive Blender advanced block --------------------------------------
@@ -143,20 +143,23 @@ def _app_with_real_config(cfg, engine_app):
     app = App.__new__(App)
     app.config = cfg
     app._engine_app = engine_app
-    app._last_scheme_pushed = None
+    app._last_scheme_pushed = {}
     app.log = SimpleNamespace(info=lambda *a, **k: None)
-    app.sw_driver = None
-    app.onshape_bridge = None
-    app.broker = SimpleNamespace(schemes=[])
-    app.broker.set_scheme = lambda **kw: app.broker.schemes.append(kw)
+    app.navigation = SimpleNamespace(schemes=[])
+    app.navigation.set_scheme = lambda target, **kw: app.navigation.schemes.append(
+        {"target": target, **kw})
     return app
+
+
+def _sent(app, target):
+    return next(item for item in app.navigation.schemes if item["target"] == target)
 
 
 def test_blender_focus_sends_advanced(isolated_config):
     cfg = Config().load()
     app = _app_with_real_config(cfg, "blender")
     app._apply_schemes()
-    sent = app.broker.schemes[-1]
+    sent = _sent(app, "blender")
     adv = sent["advanced"]
     # Core Blender advanced plus immutable host corrections and app-root settings.
     for k, v in cfg.snapshot().app_profile("blender")["advanced"].items():
@@ -177,7 +180,7 @@ def test_fusion_focus_sends_selection_override_only(isolated_config):
     cfg = Config().load()
     app = _app_with_real_config(cfg, "fusion360")
     app._apply_schemes()
-    sent = app.broker.schemes[-1]
+    sent = _sent(app, "fusion360")
     assert sent["advanced"]["selection_overrides_pivot"] is True
     assert sent["advanced"]["level_horizon_on_entry"] is True
     assert sent["advanced"]["host_baseline"] == host_baseline_payload("fusion360")
@@ -194,7 +197,7 @@ def test_unreal_focus_sends_its_advanced(isolated_config):
     cfg = Config().load()
     app = _app_with_real_config(cfg, "unreal")
     app._apply_schemes()
-    sent = app.broker.schemes[-1]
+    sent = _sent(app, "unreal")
     adv = sent["advanced"]
     assert adv["nav_mode"] == "orbit"
     assert adv["selection_overrides_pivot"] is True
@@ -207,14 +210,14 @@ def test_per_app_level_horizon_override_is_sent(isolated_config):
     cfg.set_app("blender", "navigation.level_horizon_on_entry", False)
     app = _app_with_real_config(cfg, "blender")
     app._apply_schemes()
-    assert app.broker.schemes[-1]["advanced"]["level_horizon_on_entry"] is False
+    assert _sent(app, "blender")["advanced"]["level_horizon_on_entry"] is False
 
 
 def test_sketchup_focus_sends_its_advanced(isolated_config):
     cfg = Config().load()
     app = _app_with_real_config(cfg, "sketchup")
     app._apply_schemes()
-    sent = app.broker.schemes[-1]
+    sent = _sent(app, "sketchup")
     adv = sent["advanced"]
     assert adv["nav_mode"] == "orbit"
     assert adv["selection_overrides_pivot"] is True

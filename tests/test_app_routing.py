@@ -22,6 +22,7 @@ from trackball_daemon.app_registry import APP_SPECS_BY_ID
 from trackball_daemon.config import Config, host_baseline_payload
 from trackball_daemon.config_store import ConfigStore
 from trackball_daemon.output import OutputEngine
+from trackball_daemon.navigation_router import NavigationRouter
 
 
 def _scheme(pivot="default", style="default", zoom="default"):
@@ -35,17 +36,39 @@ def _bare_app():
     app.log = SimpleNamespace(info=lambda *a, **k: None)
     app.engine = SimpleNamespace(bound=[])
     app.engine.set_active_bindings = lambda k: app.engine.bound.append(k)
-    app.broker = SimpleNamespace(calls=[], rates=[], schemes=[])
-    app.broker.submit = lambda *a: app.broker.calls.append(a)
-    app.broker.set_rate = lambda hz: app.broker.rates.append(hz)
-    app.broker.set_scheme = lambda **kw: app.broker.schemes.append(kw)
+    app.broker = SimpleNamespace(
+        calls=[], targets=[], rates=[], schemes=[], active=[], discarded=[])
+    def broker_submit(target, *values, state_revision):
+        app.broker.targets.append((target, state_revision))
+        app.broker.calls.append(values)
+        return True
+    app.broker.submit = broker_submit
+    app.broker.activate_target = lambda target: app.broker.active.append(target)
+    app.broker.discard_pending = lambda target: app.broker.discarded.append(target)
+    app.broker.set_rate = lambda target, hz: app.broker.rates.append((target, hz))
+    app.broker.set_scheme = lambda target, pivot, style, zoom, **kw: app.broker.schemes.append({
+        "target": target, "orbit_pivot": pivot, "orbit_style": style,
+        "zoom_mode": zoom, **kw})
+    app.broker.delivery_state = lambda target: {"target": target}
     app.sw_driver = SimpleNamespace(calls=[], rates=[], schemes=[], holds=[], zoom_holds=[])
     app.sw_driver.submit = lambda *a: app.sw_driver.calls.append(a)
     app.sw_driver.set_rate = lambda hz: app.sw_driver.rates.append(hz)
-    app.sw_driver.set_scheme = lambda **kw: app.sw_driver.schemes.append(kw)
+    app.sw_driver.set_scheme = lambda pivot, style, zoom, **kw: app.sw_driver.schemes.append({
+        "orbit_pivot": pivot, "orbit_style": style, "zoom_mode": zoom, **kw})
     app.sw_driver.set_pivot_hold = lambda s: app.sw_driver.holds.append(s)
     app.sw_driver.set_zoom_hold = lambda s: app.sw_driver.zoom_holds.append(s)
-    app.onshape_bridge = None                   # Onshape bridge not configured in these routing tests
+    app.sw_driver.discard_pending = lambda: None
+    app.onshape_bridge = SimpleNamespace(
+        calls=[], rates=[], schemes=[], holds=[], zoom_holds=[])
+    app.onshape_bridge.submit = lambda *a: app.onshape_bridge.calls.append(a)
+    app.onshape_bridge.set_rate = lambda hz: app.onshape_bridge.rates.append(hz)
+    app.onshape_bridge.set_scheme = lambda pivot, style, zoom, **kw: (
+        app.onshape_bridge.schemes.append({
+            "orbit_pivot": pivot, "orbit_style": style, "zoom_mode": zoom, **kw}))
+    app.onshape_bridge.set_pivot_hold = lambda s: app.onshape_bridge.holds.append(s)
+    app.onshape_bridge.set_zoom_hold = lambda s: app.onshape_bridge.zoom_holds.append(s)
+    app.onshape_bridge.discard_pending = lambda: None
+    app.navigation = NavigationRouter(app.broker, app.sw_driver, app.onshape_bridge)
     app._config_tmp = tempfile.TemporaryDirectory()
     app.config = ConfigStore(Path(app._config_tmp.name) / "config.json").load()
     with app.config.transaction() as tx:
@@ -211,7 +234,36 @@ def test_first_packet_after_focus_switch_uses_new_app_mapping(isolated_config, m
     baseline = host_baseline_payload("rhino")["orbit"]
     assert app.broker.calls[-1][:3] == pytest.approx(
         (0.03 * baseline[0], 0.01 * baseline[1], 0.02 * baseline[2]))
+    assert app.broker.targets[-1][0] == "rhino"
     assert app.engine._mapping.app_key == "rhino"
+
+
+def test_packet_envelope_captures_runtime_revision():
+    app = _bare_app()
+    app.runtime = SimpleNamespace(snapshot=lambda: SimpleNamespace(
+        revision=17, focused_context=SimpleNamespace(app_id="blender")))
+    app._foreground_app_context = lambda: SimpleNamespace(
+        app_id="blender", process_name="blender.exe")
+    app._active_app_key_from_context = lambda context: context.app_id
+    app.engine.handle_packet = lambda _data: app._nav_sink(1, 2, 3, 4, 5, 6)
+
+    app._handle_ble_packet(b"packet")
+
+    assert app.broker.targets[-1] == ("blender", 17)
+
+
+def test_packet_with_no_active_app_selects_no_navigation_target():
+    app = _bare_app()
+    app.navigation.activate("blender")
+    app._foreground_app_context = lambda: SimpleNamespace(
+        app_id=None, process_name="notes.exe")
+    app._active_app_key_from_context = lambda _context: None
+    app.engine.handle_packet = lambda _data: None
+
+    app._handle_ble_packet(b"packet")
+
+    assert app.navigation.active_target is None
+    assert app.broker.active[-1] is None
 
 
 # --- per-app refresh rate -------------------------------------------------------------
@@ -223,21 +275,17 @@ def test_app_rate_override_and_fallback():
         app._app_rate("missing")
 
 
-def test_focus_applies_per_app_rate():
+def test_all_targets_receive_independent_per_app_rates():
     app = _bare_app()
-    app._active_app_key = lambda: "solidworks"
-    app._nav_sink(1, 1, 1, 1, 1, 1)              # focusing SolidWorks
-    assert app.sw_driver.rates[-1] == 60         # SW driver runs at SolidWorks' rate
-    assert app.broker.rates[-1] == 30            # broker falls back to active socket app (30)
-    app._active_app_key = lambda: "fusion360"
-    app._nav_sink(1, 1, 1, 1, 1, 1)              # switching focus to Fusion
-    assert app.broker.rates[-1] == 30            # fusion 0 -> global default 30
+    app._apply_rates()
+    assert app.sw_driver.rates[-1] == 60
+    assert ("fusion360", 30) in app.broker.rates
+    assert ("autocad", 45) in app.broker.rates
 
 
-def test_focus_applies_solidworks_scheme():
+def test_all_targets_receive_independent_schemes():
     app = _bare_app()
-    app._active_app_key = lambda: "solidworks"
-    app._nav_sink(1, 1, 1, 1, 1, 1)              # focusing SolidWorks pushes its scheme to the driver
+    app._apply_schemes()
     # solidworks per-app scheme: pivot=object (override), style=default->general free, zoom=to_object
     assert app.sw_driver.schemes[-1] == {
         "orbit_pivot": "object", "orbit_style": "free", "zoom_mode": "to_object",
@@ -247,18 +295,16 @@ def test_focus_applies_solidworks_scheme():
     assert app.sw_driver.holds[-1] == 0.75       # per-app screen-center-pivot hold pushed to the driver
 
 
-def test_focus_applies_autocad_rate_and_scheme():
-    # Focusing AutoCAD makes the BROKER carry autocad's per-app rate + scheme (the NETLOADed
-    # plugin is a broker client like any socket add-on).
+def test_autocad_profile_remains_targeted_to_its_broker_clients():
     app = _bare_app()
-    app._active_app_key = lambda: "autocad"
-    app._nav_sink(1, 1, 1, 1, 1, 1)
-    assert app.broker.rates[-1] == 45            # autocad's per-app rate now drives the broker
-    # autocad per-app scheme: pivot=origin + style=turntable (overrides), zoom=default->general to_center
-    assert app.broker.schemes[-1]["orbit_pivot"] == "origin"
-    assert app.broker.schemes[-1]["orbit_style"] == "turntable"
-    assert app.broker.schemes[-1]["zoom_mode"] == "to_center"
-    assert app.broker.schemes[-1]["advanced"]["level_horizon_on_entry"] is True
+    app._apply_rates()
+    app._apply_schemes()
+    assert ("autocad", 45) in app.broker.rates
+    sent = next(item for item in app.broker.schemes if item["target"] == "autocad")
+    assert sent["orbit_pivot"] == "origin"
+    assert sent["orbit_style"] == "turntable"
+    assert sent["zoom_mode"] == "to_center"
+    assert sent["advanced"]["level_horizon_on_entry"] is True
 
 
 # --- merged connection state ----------------------------------------------------------
