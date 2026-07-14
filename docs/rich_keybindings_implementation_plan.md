@@ -67,7 +67,7 @@ commit only the intended files, record the commit in this table, and wait.
 
 | Phase | Status | Checkpoint | Next exact action |
 |---|---|---|---|
-| 0 — Baseline contracts and Windows-input spike | IN_PROGRESS | Start `d25944d`; items 0.1–0.5 complete; checkpoint commit pending | Audit the intended diff, commit Phase 0 tests/docs/tool, then record the checkpoint hash and mark COMPLETE. |
+| 0 — Baseline contracts and Windows-input spike | COMPLETE | Start `d25944d`; checkpoint `cf9d116`; items 0.1–0.5 complete | Wait for explicit `START PHASE 1` or independently authorized `START PHASE 4`. |
 | 1 — App and setting registries | NOT_STARTED | — | Start only after Phase 0 is COMPLETE. |
 | 2 — Sparse System→Global→app config | NOT_STARTED | — | Start only after Phase 1 is COMPLETE. |
 | 3 — Runtime state and dependency closure | NOT_STARTED | — | Start only after Phase 2 is COMPLETE. |
@@ -103,6 +103,30 @@ treating that review as an authority:
   operations remain user-directed.
 - Keep export/import and a visual priority editor post-MVP; retain non-running DSL validation because
   it materially supports safe open-source contribution.
+
+### 0.6 Phase 0 checkpoint
+
+- **Status:** `COMPLETE` from starting commit `d25944d`; substantive checkpoint commit `cf9d116`.
+- **Completed work:** 0.1 untouched-code baseline; 0.2 missing behavior-contract tests; 0.3 stable
+  glossary; 0.4 Raw Input versus low-level-hook diagnostic; 0.5 durable backend decision/evidence.
+- **Files changed:** this plan, `docs/rich_keybindings_phase0_baseline.md`,
+  `docs/spikes/windows_keyboard_input.md`, `tests/test_rich_keybindings_baseline.py`, and
+  `tools/windows_input_spike.py`. No production daemon, firmware, add-on, default-data, or config
+  behavior changed.
+- **User-owned files left untouched:** `.claude/` and
+  `docs/rich_keybindings_plan_revisions.md` remain untracked and were not staged.
+- **Verification:** untouched baseline `python -m pytest -q` = 402 passed; focused contract suite =
+  74 passed; final full suite = 410 passed; `compileall`, diagnostic `py_compile`, AutoCAD NavMath
+  `ALL PASS`, automated F24 Raw Input/hook spike, and `git diff --check` all passed.
+- **Decision:** Raw Input with `RIDEV_INPUTSINK`, one daemon-owned message-only window, lazy
+  registration, enqueue-only callback, and fail-safe lifecycle release is the Phase 5 primary.
+  `GetAsyncKeyState` is reconciliation-only outside callbacks. A low-level hook requires a recorded
+  physical Raw Input failure plus watchdog/reinstall behavior.
+- **Unresolved/manual evidence:** physical left/right modifiers, AltGr/layouts, host pass-through,
+  lock/sleep/resume, RDP, and elevated/unreadable foreground behavior remain explicit Phase 5 live
+  acceptance. Synthetic F24 was not treated as proof of those cases.
+- **Next exact action:** stop. On `START PHASE 1`, run the full bootstrap and Phase 1 start gate. If
+  the user instead chooses the independent broker fix, require `START PHASE 4` and run its gate.
 
 ## 1. Product goals
 
