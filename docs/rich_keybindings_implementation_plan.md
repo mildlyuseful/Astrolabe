@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation in progress (Phases 0–8 complete)
+Status: implementation in progress (Phases 0–8 complete; Phase 9 in progress)
 
 Target branch: `rich-keybindings`
 
@@ -76,7 +76,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 6 — BLE five-way protocol and adapter | COMPLETE | Start `af373fa`; frozen baseline `07b9450`; host protocol/adapters `b7aec6d`; firmware/docs `26146d1`; hardware contract `dd9bb48`; completion `d569d31`; items 6.1–6.6 complete | Wait for explicit `START PHASE 7`. Final five-way pins and physical qualification remain Phase 11/release work. |
 | 7 — Binding compiler, DSL, and system profiles | COMPLETE | Start `7a0ae3d`; start ledger `6d1b7a4`; profiles/overrides `1283cb4`; compiler/runtime `86fd22c`; items 7.1–7.5 complete | Wait for explicit `START PHASE 8`. |
 | 8 — Motion/output integration | COMPLETE | Start `86d67e8`; start ledger `17cc139`; automated integration `5c3bcae`; completion `545a347`; items 8.1–8.6 and live gate complete | Wait for explicit `START PHASE 9`. |
-| 9 — Barebones settings UX | NOT_STARTED | — | Wait for explicit `START PHASE 9`. |
+| 9 — Barebones settings UX | IN_PROGRESS | Start `9a5b143`; untouched baseline: 603 tests pass | Implement generated Global categories and typed link/reset view model. |
 | 10 — Text HUD | NOT_STARTED | — | Start after Phase 8 runtime snapshots are COMPLETE. |
 | 11 — Full verification and release docs | NOT_STARTED | — | Start after Phases 0–10 are COMPLETE. |
 

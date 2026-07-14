@@ -290,6 +290,13 @@ def _binding_to_row(binding):
     return row
 
 
+def binding_to_row(binding):
+    """Return a detached declarative row for UI/export consumers."""
+    if not isinstance(binding, BindingDefinition):
+        raise TypeError("binding must be a BindingDefinition")
+    return _binding_to_row(binding)
+
+
 def _validate_profile(profile, selectors):
     ids = [binding.binding_id for binding in profile.bindings]
     if len(set(ids)) != len(ids):

@@ -14,7 +14,6 @@
     "input.mode.default": "3d",
     "navigation.camera.lock_to_view": false,
     "navigation.fly.speed": 1.0,
-    "navigation.legacy_layer_toggle": "shift",
     "navigation.level_horizon_on_entry": true,
     "navigation.mode": "orbit",
     "navigation.orbit.lock_horizon": false,

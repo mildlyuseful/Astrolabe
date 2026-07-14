@@ -119,7 +119,7 @@ class ForegroundContext:
 
 
 _BASE_FEATURES = frozenset({
-    "rate", "orbit_sensitivity", "pan_gain", "zoom_gain", "zoom_dominance", "toggle",
+    "rate", "orbit_sensitivity", "pan_gain", "zoom_gain", "zoom_dominance",
     "orbit_style", "orbit_pivot", "twist_action", "level_horizon", "selection_override",
     "zoom_target", "orbit_hold", "zoom_hold", "action_routing",
 })

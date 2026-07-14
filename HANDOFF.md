@@ -52,6 +52,8 @@ trackball_daemon/
   config.py                  host/default helpers and historical migration machinery
   app_registry.py            immutable app identity, focus, transport, modes, capabilities
   settings_schema.py         stable setting/command IDs, validation, scope, UI metadata
+  settings_ui_model.py       UI-independent Global/app projections and typed reset/link actions
+  binding_ui_model.py        profile-scoped declarative binding editor and capability projection
   system_defaults.json       concrete developer-owned setting defaults
   system_keybinding_profiles.json developer-owned hardware and keyboard binding bases
   default_profiles.json      frozen v8 migration compatibility data
@@ -61,7 +63,7 @@ trackball_daemon/
   onshape_bridge.py          Onshape TLS/WAMP NL-Proxy-compatible bridge
   autocad_driver.py          AutoCAD discovery, staging, trust, and NETLOAD delivery only
   integrations.py            host detection, setup metadata, copy/install/update operations
-  tray.py / ui.py            tray lifecycle and settings interface
+  tray.py / ui.py            tray lifecycle and generated barebones settings/binding interface
   winfocus.py                foreground process query and motion-independent monitor
   plugins/                   bundled host add-ons and manifests
 
@@ -101,6 +103,14 @@ replacement, and publishes deeply immutable snapshots. Feature consumers use typ
 and snapshot/domain accessors; only the store's isolated legacy migration boundary materializes v8
 dictionaries. The test suite also enforces the ownership contract
 `rich_actions == not apply_in_daemon`, so each host baseline is applied exactly once.
+
+The settings window consumes `SettingsUIModel` and `BindingUIModel`, not mutable config maps.
+Global and per-app pages are generated from `SettingSpec`; linked app rows display their current
+Global-effective value, and every edit/reset/bulk link operation is a typed transaction. The
+keybinding page edits declarative rows against the selected immutable System input profile, stores
+only sparse profile-scoped patches, reports missing input providers as capability status, and
+validates the complete candidate before commit. The former `navigation.legacy_layer_toggle`
+setting is removed on v9 load because Phase 8 made layer activation binding-profile data.
 
 Persistent configuration is not live control state. `RuntimeStore` resolves a context-aware base
 from one immutable config snapshot, then layers runtime latches and identity-owned hold requests

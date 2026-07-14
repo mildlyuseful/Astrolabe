@@ -202,6 +202,20 @@ def test_v8_aliases_are_canonical_and_removed_data_is_not_written(tmp_path):
     assert '"cursor"' not in json.dumps(disk["global_overrides"].get("input.mode.default"))
 
 
+def test_phase8_legacy_layer_setting_is_removed_from_existing_v9_files(tmp_path):
+    path = _store_path(tmp_path)
+    ConfigStore(path).load()
+    disk = json.loads(path.read_text(encoding="utf-8"))
+    disk["global_overrides"]["navigation.legacy_layer_toggle"] = "none"
+    disk["app_overrides"]["blender"]["navigation.legacy_layer_toggle"] = "shift"
+    path.write_text(json.dumps(disk), encoding="utf-8")
+
+    ConfigStore(path).load()
+    cleaned = json.loads(path.read_text(encoding="utf-8"))
+    assert "navigation.legacy_layer_toggle" not in cleaned["global_overrides"]
+    assert "navigation.legacy_layer_toggle" not in cleaned["app_overrides"]["blender"]
+
+
 @pytest.mark.parametrize("fixture", [
     "config_v8_malformed.json",
     "config_v8_invalid_shape.json",

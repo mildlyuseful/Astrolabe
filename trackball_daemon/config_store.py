@@ -45,6 +45,7 @@ from .system_defaults import SYSTEM_DEFAULTS
 
 
 CONFIG_VERSION = 9
+DEPRECATED_V9_SETTING_IDS = frozenset({"navigation.legacy_layer_toggle"})
 DEFAULT_INPUT_PROFILE = "astrolabe_5way"
 INPUT_PROFILES = SYSTEM_INPUT_PROFILE_IDS
 logger = logging.getLogger("trackball_daemon.config_store")
@@ -70,7 +71,7 @@ APP_INTERNAL_PATH_IDS = {
     "navigation.zoom.distance_max": ("bindings", "zoom", "dist_max"),
     "navigation.zoom.distance_default": ("bindings", "zoom", "dist_default"),
 }
-assert set(APP_INTERNAL_PATH_IDS.values()) == set(APP_INTERNAL_PROFILE_PATHS)
+assert set(APP_INTERNAL_PATH_IDS.values()) <= set(APP_INTERNAL_PROFILE_PATHS)
 
 
 def _valid_internal_value(internal_id, value):
@@ -145,6 +146,20 @@ def _fresh_state():
         "input_profile": DEFAULT_INPUT_PROFILE,
         "keybinding_overrides": {profile: {} for profile in INPUT_PROFILES},
     }
+
+
+def _remove_deprecated_v9_settings(state):
+    """Drop settings whose runtime authority moved to declarative profile data in Phase 8."""
+    changed = False
+    for setting_id in DEPRECATED_V9_SETTING_IDS:
+        if setting_id in state.get("global_overrides", {}):
+            state["global_overrides"].pop(setting_id, None)
+            changed = True
+        for overrides in state.get("app_overrides", {}).values():
+            if setting_id in overrides:
+                overrides.pop(setting_id, None)
+                changed = True
+    return changed
 
 
 def _normalize_legacy(disk):
@@ -351,8 +366,11 @@ def _materialize_app(app_id, values, internal_overrides):
 class ConfigSnapshot:
     revision: int
     global_values: object
+    global_override_ids: frozenset
     app_values: object
+    app_override_ids: object
     device_values: object
+    device_override_ids: frozenset
     device_char_uuid: str
     app_operational: object
     bridge_port: int
@@ -534,8 +552,14 @@ class ConfigStore:
         return ConfigSnapshot(
             revision=self._revision,
             global_values=_freeze(global_values),
+            global_override_ids=frozenset(self._state["global_overrides"]),
             app_values=_freeze(app_values),
+            app_override_ids=MappingProxyType({
+                app_id: frozenset(values)
+                for app_id, values in self._state["app_overrides"].items()
+            }),
             device_values=_freeze(device_values),
+            device_override_ids=frozenset(self._state["device_overrides"]),
             device_char_uuid=self._state["device_char_uuid"],
             app_operational=_freeze(self._state["apps"]),
             bridge_port=self._state["bridge"]["port"],
@@ -557,7 +581,10 @@ class ConfigStore:
                 try:
                     disk = json.loads(self.path.read_text(encoding="utf-8"))
                     if isinstance(disk, dict) and disk.get("version") == CONFIG_VERSION:
+                        cleaned = _remove_deprecated_v9_settings(disk)
                         validate_v9_state(disk)
+                        if cleaned:
+                            self._save_unlocked(disk)
                         self._state = copy.deepcopy(disk)
                     else:
                         migrated = migrate_v8_to_v9(disk)

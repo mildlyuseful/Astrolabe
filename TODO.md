@@ -69,8 +69,8 @@ High-risk app-specific checks:
 - **SolidWorks:** COM throughput on large assemblies and cursor mapping at non-100% display scaling.
 - **FreeCAD:** perspective-camera path and world-space bounds for nested/placed objects.
 - **Rhino:** startup registration fallback and live under-cursor/object-center behavior.
-- **Daemon UI:** expanded 3D-app cards, scrolling, tooltips, confirmations, and reset behavior in the
-  normal packaged Tk runtime.
+- **Daemon UI:** finish the later visual layer for expanded 3D-app cards and the declarative
+  keybinding editor, including accessibility/usability polish in the normal packaged Tk runtime.
 
 ## Release readiness
 

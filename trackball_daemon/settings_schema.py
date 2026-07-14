@@ -158,7 +158,7 @@ class BindingSection:
 
 BINDING_SECTIONS = (
     BindingSection("sensitivity", "Sensitivity & rate", (
-        "rate", "orbit_sensitivity", "pan_gain", "zoom_gain", "zoom_dominance", "toggle")),
+        "rate", "orbit_sensitivity", "pan_gain", "zoom_gain", "zoom_dominance")),
     BindingSection("navigation", "Navigation mode", ("nav_mode", "fly_speed", "walk_speed")),
     BindingSection("orbit", "Orbit", (
         "orbit_style", "orbit_pivot", "orbit_hold", "twist_action", "lock_horizon",
@@ -257,7 +257,7 @@ _SPECS = [
 
     _global("input.mode.default", ("general", "default_mode"), ValueKind.ENUM, "Default input mode",
             category="input", choices=("cube", "cursor", "3d", "pointer"),
-            help_text="Legacy cube/cursor values migrate to 3d/pointer in Phase 2."),
+            help_text="Input mode used when no runtime binding overrides it; legacy values migrate."),
     _global("pointer.cursor.gain", ("general", "cursor", "gain"), ValueKind.NUMBER,
             "Pointer sensitivity", category="pointer", minimum=0.0),
     _global("pointer.scroll.gain", ("general", "scroll", "gain"), ValueKind.NUMBER,
@@ -292,8 +292,6 @@ _SPECS = [
          "Zoom gain", "zoom_gain", category="sensitivity", minimum=0.0),
     _app("navigation.zoom.dominance", ("bindings", "zoom", "dominance"), ValueKind.NUMBER,
          "Zoom dominance", "zoom_dominance", category="sensitivity", minimum=0.0),
-    _app("navigation.legacy_layer_toggle", ("bindings", "toggle"), ValueKind.ENUM,
-         "Orbit / pan-zoom toggle", "toggle", category="sensitivity", choices=("shift", "none")),
     _app("navigation.orbit.style", ("bindings", "scheme", "orbit_style"), ValueKind.ENUM,
          "Orbit style", "orbit_style", category="orbit",
          choices=("default", "free", "turntable"), global_path=("general", "scheme", "orbit_style")),
@@ -405,6 +403,8 @@ SETTING_SPECS_BY_APP_PATH = MappingProxyType(
 # Stored profile mechanics that are deliberately not user controls. They remain classified until
 # the v9 migration can remove/restructure them rather than being mistaken for missing UI metadata.
 APP_INTERNAL_PROFILE_PATHS = frozenset({
+    # Compatibility-only materialized field. Phase 8 moved layer activation into keybinding data.
+    ("bindings", "toggle"),
     ("bindings", "orbit", "axis_sign", 0),
     ("bindings", "orbit", "axis_sign", 1),
     ("bindings", "orbit", "axis_sign", 2),
