@@ -10,6 +10,8 @@ methods against lightweight stubs.
 """
 import struct
 import threading
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -18,6 +20,7 @@ from trackball_daemon import output as output_mod
 from trackball_daemon.app import App
 from trackball_daemon.app_registry import APP_SPECS_BY_ID
 from trackball_daemon.config import Config, host_baseline_payload
+from trackball_daemon.config_store import ConfigStore
 from trackball_daemon.output import OutputEngine
 
 
@@ -43,29 +46,29 @@ def _bare_app():
     app.sw_driver.set_pivot_hold = lambda s: app.sw_driver.holds.append(s)
     app.sw_driver.set_zoom_hold = lambda s: app.sw_driver.zoom_holds.append(s)
     app.onshape_bridge = None                   # Onshape bridge not configured in these routing tests
-    app.config = SimpleNamespace(data={
-        "active_app": "fusion360",
-        "bridge": {"rate_hz": 30},
-        "general": {"scheme": {"orbit_pivot": "screen_center", "orbit_style": "free", "zoom_mode": "to_center"}},
-        "apps": {
-            "solidworks": dict(rate_hz=60, orbit_pivot_hold_sec=0.75,
-                               zoom_cursor_hold_sec=1.25,
-                               bindings=_scheme(pivot="object", zoom="to_object")),
-            "autocad": dict(rate_hz=45, bindings=_scheme(pivot="origin", style="turntable")),
-            "sketchup": dict(rate_hz=0, bindings=_scheme()),
-            "fusion360": dict(rate_hz=0, bindings=_scheme()),
-        },
-    })
+    app._config_tmp = tempfile.TemporaryDirectory()
+    app.config = ConfigStore(Path(app._config_tmp.name) / "config.json").load()
+    with app.config.transaction() as tx:
+        tx.set_selected_app("fusion360")
+        tx.set_app("solidworks", "navigation.refresh_rate", 60)
+        tx.set_app("solidworks", "navigation.orbit.pivot", "object")
+        tx.set_app("solidworks", "navigation.zoom.target", "to_object")
+        tx.set_app("solidworks", "navigation.orbit.pivot_hold_seconds", 0.75)
+        tx.set_app("solidworks", "navigation.zoom.cursor_hold_seconds", 1.25)
+        tx.set_app("autocad", "navigation.refresh_rate", 45)
+        tx.set_app("autocad", "navigation.orbit.pivot", "origin")
+        tx.set_app("autocad", "navigation.orbit.style", "turntable")
     return app
 
 
 def test_sensitive_services_require_setup_and_enabled():
     app = App.__new__(App)
-    app.config = SimpleNamespace(data={"apps": {
-        "solidworks": {"installed": False, "enabled": True},
-        "onshape": {"installed": True, "enabled": False},
-        "autocad": {"installed": True, "enabled": True},
-    }})
+    app._config_tmp = tempfile.TemporaryDirectory()
+    app.config = ConfigStore(Path(app._config_tmp.name) / "config.json").load()
+    with app.config.transaction() as tx:
+        tx.set_app_operational("solidworks", installed=False, enabled=True)
+        tx.set_app_operational("onshape", installed=True, enabled=False)
+        tx.set_app_operational("autocad", installed=True, enabled=True)
     app.sw_driver = SimpleNamespace(states=[], set_enabled=lambda v: app.sw_driver.states.append(v))
     app.onshape_bridge = SimpleNamespace(
         states=[], set_enabled=lambda v: app.onshape_bridge.states.append(v))
@@ -185,8 +188,11 @@ def test_no_focused_app_drops_frame():
 def test_first_packet_after_focus_switch_uses_new_app_mapping(isolated_config, monkeypatch):
     """Focus selection must happen before OutputEngine transforms the packet."""
     cfg = Config().load()
-    cfg.data["apps"]["fusion360"]["bindings"]["orbit"]["axis_source"] = [0, 1, 2]
-    cfg.data["apps"]["rhino"]["bindings"]["orbit"]["axis_source"] = [2, 0, 1]
+    with cfg.transaction() as tx:
+        for axis, source in zip("xyz", (0, 1, 2)):
+            tx.set_app("fusion360", f"navigation.routing.orbit.{axis}.source", source)
+        for axis, source in zip("xyz", (2, 0, 1)):
+            tx.set_app("rhino", f"navigation.routing.orbit.{axis}.source", source)
     app = _bare_app()
     app.config = cfg
     app.engine = OutputEngine(cfg)
@@ -211,7 +217,8 @@ def test_app_rate_override_and_fallback():
     app = _bare_app()
     assert app._app_rate("solidworks") == 60     # per-app override
     assert app._app_rate("fusion360") == 30      # 0 -> global default
-    assert app._app_rate("missing") == 30        # unknown -> global default
+    with pytest.raises(KeyError):
+        app._app_rate("missing")
 
 
 def test_focus_applies_per_app_rate():

@@ -2,7 +2,7 @@
 
 Lives as a Toplevel under a hidden Tk root. Closing the window HIDES it (withdraw) so the
 app keeps running in the tray; the app exits only via tray -> Quit. Every edit writes to
-the config store immediately (Config.save -> listeners -> OutputEngine.apply_config), so
+the config store immediately (typed transaction -> listeners -> OutputEngine.apply_config), so
 changes persist and apply live.
 """
 import tkinter as tk
@@ -11,7 +11,7 @@ from tkinter import ttk, messagebox
 from . import integrations
 from .app_registry import binding_profile
 from .settings_schema import BINDING_SECTIONS
-from .config import (ORBIT_PIVOT_METHODS, effective_level_horizon,
+from .config import (ORBIT_PIVOT_METHODS,
                      normalize_axis_permutation, normalize_orbit_pivot_fallbacks,
                      swap_axis_source)
 
@@ -29,7 +29,7 @@ _OPTION_LABELS = {
     "default": "Default", "free": "Free", "turntable": "Turntable",
     "orbit": "Orbit", "fly": "Fly", "walk": "Walk",
     "roll": "Roll", "zoom": "Zoom", "dolly": "Dolly", "none": "None",
-    "shift": "Shift", "cube": "Cube", "cursor": "Cursor",
+    "shift": "Shift", "3d": "3D", "pointer": "Pointer",
     "left": "Left", "right": "Right", "middle": "Middle",
     "to_center": "To Center", "to_object": "To Object", "to_cursor": "To Cursor",
 }
@@ -189,17 +189,10 @@ class SettingsWindow:
 
     # --- config helpers -----------------------------------------------------------
     def _get(self, keys):
-        node = self.cfg.data
-        for k in keys:
-            node = node[k]
-        return node
+        return self.cfg.ui_value(keys)
 
     def _set_and_save(self, keys, value):
-        node = self.cfg.data
-        for k in keys[:-1]:
-            node = node[k]
-        node[keys[-1]] = value
-        self.cfg.save()                  # -> notifies listeners -> engine.apply_config()
+        self.cfg.set_ui_value(keys, value)
         if self._refresh_twist_warning is not None:
             self._refresh_twist_warning()
 
@@ -381,8 +374,8 @@ class SettingsWindow:
         (per-app override if the user ever touched it, else the General default); the first toggle
         writes an explicit per-app override. 'Reset user overrides' removes the override so the app
         follows the General checkbox again."""
-        var = tk.BooleanVar(value=effective_level_horizon(
-            self.cfg.data["general"], self.cfg.data["apps"].get(app_key)))
+        var = tk.BooleanVar(value=self.cfg.snapshot().app_value(
+            app_key, "navigation.level_horizon_on_entry"))
         check = ttk.Checkbutton(parent, text="Level horizon when entering Turntable/Walk", variable=var,
                                 command=lambda: self._set_and_save(
                                     ("apps", app_key, "level_horizon_on_entry"), bool(var.get())))
@@ -558,7 +551,7 @@ class SettingsWindow:
     def _warn_onshape_cursor_userscript_if_needed(self, new_value):
         if new_value != "cursor":
             return
-        if self.cfg.data.get("onshape", {}).get("cursor_userscript_warn_dismissed"):
+        if self.cfg.snapshot().onshape.get("cursor_userscript_warn_dismissed"):
             return
         self._show_onshape_userscript_dialog(
             title="Onshape — under-cursor orbit",
@@ -598,8 +591,9 @@ class SettingsWindow:
         observed = getattr(self.app, "observed_addin_versions", {}).get(appdef.key)
         if observed is not None:
             return integrations.setup_action_label(
-                appdef, self.cfg.data["apps"].get(appdef.key, {}), installed_version=observed)
-        return integrations.setup_action_label(appdef, self.cfg.data["apps"].get(appdef.key, {}))
+                appdef, self.cfg.snapshot().app_operational[appdef.key], installed_version=observed)
+        return integrations.setup_action_label(
+            appdef, self.cfg.snapshot().app_operational[appdef.key])
 
     @staticmethod
     def _compatibility_text(appdef):
@@ -612,7 +606,7 @@ class SettingsWindow:
         return text, "#555"
 
     def _app_row(self, parent, appdef):
-        a = self.cfg.data["apps"][appdef.key]
+        a = self.cfg.snapshot().app_operational[appdef.key]
         card = ttk.LabelFrame(parent, text=appdef.name)
         card.pack(fill="x", padx=10, pady=5)
 
@@ -762,7 +756,7 @@ class SettingsWindow:
             result = integrations.install(appdef, self.cfg)
         ok, msg, copyables = integrations.normalize_install_result(result)
         if ok:
-            enabled_var.set(bool(self.cfg.data["apps"][appdef.key]["enabled"]))
+            enabled_var.set(bool(self.cfg.snapshot().app_operational[appdef.key]["enabled"]))
             try:
                 status_label.config(text=self._app_status_text(appdef))
                 action = self._app_button_text(appdef)
@@ -811,7 +805,7 @@ class SettingsWindow:
         ttk.Label(top, text="Editing app:", width=24, anchor="w").pack(side="left")
 
         app_keys = [a.key for a in integrations.APPS]
-        self._edit_app = tk.StringVar(value=self.cfg.data["active_app"])
+        self._edit_app = tk.StringVar(value=self.cfg.snapshot().selected_app)
         combo = ttk.Combobox(top, textvariable=self._edit_app, values=app_keys,
                              state="readonly", width=18)
         combo.pack(side="left")
@@ -1117,16 +1111,13 @@ class SettingsWindow:
         self._entry_row(sec2, "Scroll deadzone", ("general", "scroll", "deadzone"))
         self._entry_row(sec2, "Scroll dominance", ("general", "scroll", "dominance"))
 
-        sec3 = ttk.LabelFrame(body, text="Mode & buttons")
+        sec3 = ttk.LabelFrame(body, text="Mode")
         sec3.pack(fill="x", padx=10, pady=6)
         self._combo_row(sec3, "Default mode", ("general", "default_mode"),
-                        values=["cube", "cursor"], on_change=self._apply_default_mode)
-        for b in ("left", "right", "middle"):
-            self._combo_row(sec3, f"{b.capitalize()} button", ("general", "buttons", b),
-                            values=["left", "right", "middle", "none"])
+                        values=["3d", "pointer"], on_change=self._apply_default_mode)
         return outer
 
     def _apply_default_mode(self):
-        mode = self.cfg.data["general"]["default_mode"]
-        self.app.engine.set_mode(self.app.engine.MODE_CUBE if mode == "cube"
+        mode = self.cfg.snapshot().global_value("input.mode.default")
+        self.app.engine.set_mode(self.app.engine.MODE_CUBE if mode == "3d"
                                  else self.app.engine.MODE_CURSOR)

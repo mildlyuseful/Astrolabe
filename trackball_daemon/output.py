@@ -190,28 +190,30 @@ class OutputEngine:
         self._bindings_app = None
         self.apply_config()
         # default mode chosen only at startup (apply_config must NOT reset a live toggle)
-        self.mode = MODE_CUBE if self.cfg.data["general"]["default_mode"] == "cube" else MODE_CURSOR
+        self.mode = (MODE_CUBE if self.cfg.snapshot().global_value("input.mode.default") == "3d"
+                     else MODE_CURSOR)
         self._last_mode = self.mode
 
     def apply_config(self):
         """Build and atomically publish a complete mapping after a config change."""
         with self._mapping_lock:
-            app_key = self._bindings_app or self.cfg.data["active_app"]
+            snapshot = self.cfg.snapshot()
+            app_key = self._bindings_app or snapshot.selected_app
             self._mapping = self._build_mapping(app_key)
 
     def _build_mapping(self, app_key):
         """Build a mapping without exposing a partially refreshed set of fields."""
-        g = self.cfg.data["general"]
+        snapshot = self.cfg.snapshot()
+        g = snapshot.general_profile
         orientation = g.get("axis_orientation") or {}
         global_src = tuple(int(v) for v in orientation.get("source", [0, 1, 2]))
         global_sign = tuple(-1.0 if v else 1.0
                             for v in orientation.get("invert", [False, False, False]))
         c, s = g["cursor"], g["scroll"]
 
-        apps = self.cfg.data["apps"]
-        if app_key not in apps:
-            app_key = self.cfg.data["active_app"]
-        app = apps[app_key]
+        if app_key not in snapshot.app_profiles:
+            app_key = snapshot.selected_app
+        app = snapshot.app_profile(app_key)
         b = app["bindings"]
         o, p, z = b["orbit"], b["pan"], b["zoom"]
         # Fold the user's per-axis invert flags into the snapshot signs (default off => no-op,
@@ -264,7 +266,7 @@ class OutputEngine:
     def set_active_bindings(self, key):
         """Atomically switch to app ``key`` and publish its complete mapping snapshot."""
         with self._mapping_lock:
-            app_key = key or self.cfg.data["active_app"]
+            app_key = key or self.cfg.snapshot().selected_app
             mapping = self._build_mapping(app_key)
             self._bindings_app = key
             self._mapping = mapping

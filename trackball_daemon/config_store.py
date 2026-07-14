@@ -12,7 +12,7 @@ from .app_registry import APP_IDS, APP_SPECS_BY_ID
 from .config import (
     DEFAULTS,
     DEFAULT_ORBIT_PIVOT_FALLBACKS,
-    Config as LegacyConfig,
+    LegacyConfig,
     _deep_merge,
     _mapping_shapes_match,
     default_app_profile,
@@ -32,6 +32,8 @@ from .paths import config_path
 from .settings_schema import (
     APP_INTERNAL_PROFILE_PATHS,
     SETTING_SPECS,
+    SETTING_SPECS_BY_APP_PATH,
+    SETTING_SPECS_BY_GLOBAL_PATH,
     SETTING_SPECS_BY_ID,
     SettingScope,
 )
@@ -65,6 +67,18 @@ APP_INTERNAL_PATH_IDS = {
     "navigation.zoom.distance_default": ("bindings", "zoom", "dist_default"),
 }
 assert set(APP_INTERNAL_PATH_IDS.values()) == set(APP_INTERNAL_PROFILE_PATHS)
+
+
+def _valid_internal_value(internal_id, value):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    if internal_id.endswith("source"):
+        return value in (0, 1, 2)
+    if internal_id.endswith("sign") or ".axis_sign." in internal_id:
+        return value in (-1, -1.0, 1, 1.0)
+    if internal_id.endswith("deadzone"):
+        return value >= 0
+    return value > 0
 
 
 def _get_path(root, path, default=None):
@@ -261,14 +275,19 @@ def validate_v9_state(state):
     if (not isinstance(state["internal_global_overrides"], dict) or
             not set(state["internal_global_overrides"]) <= set(GLOBAL_INTERNAL_PATHS)):
         raise ValueError("invalid internal Global overrides")
+    if any(not _valid_internal_value(key, value)
+           for key, value in state["internal_global_overrides"].items()):
+        raise ValueError("invalid internal Global override value")
     if (not isinstance(state["internal_app_overrides"], dict) or
             set(state["internal_app_overrides"]) != set(APP_IDS)):
         raise ValueError("internal app override suite mismatch")
     for app_id, values in state["internal_app_overrides"].items():
         if not isinstance(values, dict) or not set(values) <= set(APP_INTERNAL_PATH_IDS):
             raise ValueError(f"invalid internal app overrides for {app_id}")
-    if not isinstance(state["device_char_uuid"], str):
-        raise ValueError("device_char_uuid must be a string")
+        if any(not _valid_internal_value(key, value) for key, value in values.items()):
+            raise ValueError(f"invalid internal app override value for {app_id}")
+    if not isinstance(state["device_char_uuid"], str) or not state["device_char_uuid"].strip():
+        raise ValueError("device_char_uuid must be a non-empty string")
     if not isinstance(state["apps"], dict) or set(state["apps"]) != set(APP_IDS):
         raise ValueError("operational app suite mismatch")
     for app_id, values in state["apps"].items():
@@ -278,11 +297,16 @@ def validate_v9_state(state):
                 not isinstance(values["addin_version"], str)):
             raise ValueError(f"invalid operational values for {app_id}")
     if (not isinstance(state["bridge"], dict) or set(state["bridge"]) != {"port"} or
-            type(state["bridge"]["port"]) is not int):
+            type(state["bridge"]["port"]) is not int or
+            not 1 <= state["bridge"]["port"] <= 65535):
         raise ValueError("invalid bridge settings")
-    if not isinstance(state["onshape"], dict):
+    if (not isinstance(state["onshape"], dict) or
+            set(state["onshape"]) != set(DEFAULTS["onshape"])):
         raise ValueError("invalid Onshape settings")
-    if (not isinstance(state["ui_state"], dict) or
+    for key, default in DEFAULTS["onshape"].items():
+        if type(state["onshape"][key]) is not type(default):
+            raise ValueError(f"invalid Onshape setting: {key}")
+    if (not isinstance(state["ui_state"], dict) or set(state["ui_state"]) != {"selected_app"} or
             state["ui_state"].get("selected_app") not in APP_IDS):
         raise ValueError("invalid selected app")
     if state["input_profile"] not in INPUT_PROFILES:
@@ -291,6 +315,13 @@ def validate_v9_state(state):
             set(state["keybinding_overrides"]) != set(INPUT_PROFILES) or
             not all(isinstance(value, dict) for value in state["keybinding_overrides"].values())):
         raise ValueError("invalid keybinding override suite")
+    resolved_globals = resolve_all_globals(state["global_overrides"])
+    physical_sources = [
+        resolved_globals[f"input.axis_orientation.{axis}.source"].value
+        for axis in ("x", "y", "z")
+    ]
+    if sorted(physical_sources) != [0, 1, 2]:
+        raise ValueError("physical axis sources must remain a permutation")
 
 
 def _materialize_general(global_values, internal_overrides):
@@ -321,6 +352,7 @@ class ConfigSnapshot:
     global_values: object
     app_values: object
     device_values: object
+    device_char_uuid: str
     app_operational: object
     bridge_port: int
     onshape: object
@@ -334,7 +366,10 @@ class ConfigSnapshot:
         return self.global_values[setting_id]
 
     def app_value(self, app_id, setting_id):
-        return self.app_values[app_id][setting_id]
+        values = self.app_values[app_id]
+        if setting_id in values:
+            return values[setting_id]
+        return self.global_values[setting_id]
 
     def device_value(self, setting_id):
         return self.device_values[setting_id]
@@ -487,6 +522,7 @@ class ConfigStore:
             global_values=_freeze(global_values),
             app_values=_freeze(app_values),
             device_values=_freeze(device_values),
+            device_char_uuid=self._state["device_char_uuid"],
             app_operational=_freeze(self._state["apps"]),
             bridge_port=self._state["bridge"]["port"],
             onshape=_freeze(self._state["onshape"]),
@@ -526,6 +562,89 @@ class ConfigStore:
 
     def transaction(self):
         return ConfigTransaction(self)
+
+    def ui_value(self, keys):
+        """Temporary path adapter owned by the store until Phase 9 generates the settings UI."""
+        keys = tuple(keys)
+        snapshot = self.snapshot()
+        if keys == ("active_app",):
+            return snapshot.selected_app
+        if keys[:1] == ("onshape",):
+            return _get_path(snapshot.onshape, keys[1:])
+        if keys == ("bridge", "port"):
+            return snapshot.bridge_port
+        if keys == ("bridge", "rate_hz"):
+            return snapshot.global_value("navigation.refresh_rate")
+        if keys[:1] == ("device",):
+            setting_id = f"device.{keys[1]}"
+            return snapshot.device_value(setting_id)
+        if keys[:2] == ("general", "axis_orientation") and len(keys) == 3:
+            field = keys[2]
+            suffix = "source" if field == "source" else "invert"
+            return [snapshot.global_value(f"input.axis_orientation.{axis}.{suffix}")
+                    for axis in ("x", "y", "z")]
+        global_spec = SETTING_SPECS_BY_GLOBAL_PATH.get(keys)
+        if global_spec is not None:
+            return snapshot.global_value(global_spec.setting_id)
+        if keys[:1] == ("general",):
+            return _get_path(snapshot.general_profile, keys[1:])
+        if len(keys) >= 3 and keys[0] == "apps":
+            app_id = keys[1]
+            if len(keys) == 3 and keys[2] in APP_OPERATIONAL_FIELDS:
+                return snapshot.app_operational[app_id][keys[2]]
+            app_path = keys[2:]
+            spec = SETTING_SPECS_BY_APP_PATH.get(app_path)
+            if spec is not None and spec.applies_to(APP_SPECS_BY_ID[app_id]):
+                with self._lock:
+                    linked = spec.setting_id not in self._state["app_overrides"][app_id]
+                if linked and spec.setting_id == "navigation.refresh_rate":
+                    return 0
+                if linked and spec.setting_id in {
+                    "navigation.orbit.style", "navigation.orbit.pivot",
+                    "navigation.zoom.target",
+                }:
+                    return "default"
+                return snapshot.app_value(app_id, spec.setting_id)
+            return _get_path(snapshot.app_profile(app_id), app_path)
+        raise KeyError(keys)
+
+    def set_ui_value(self, keys, value):
+        """Map existing UI paths to typed v9 operations; never expose mutable config state."""
+        keys = tuple(keys)
+        if keys == ("active_app",):
+            return self.set_selected_app(value)
+        if keys[:1] == ("onshape",) and len(keys) == 2:
+            return self.transaction().set_onshape(keys[1], value).commit()
+        if keys == ("bridge", "port"):
+            return self.transaction().set_bridge_port(value).commit()
+        if keys == ("bridge", "rate_hz"):
+            return self.set_global("navigation.refresh_rate", value)
+        if keys[:1] == ("device",) and len(keys) == 2:
+            return self.set_device(f"device.{keys[1]}", value)
+        if keys[:2] == ("general", "axis_orientation") and len(keys) == 3:
+            field = keys[2]
+            suffix = "source" if field == "source" else "invert"
+            with self.transaction() as tx:
+                for axis, item in zip(("x", "y", "z"), value):
+                    tx.set_global(f"input.axis_orientation.{axis}.{suffix}", item)
+            return None
+        global_spec = SETTING_SPECS_BY_GLOBAL_PATH.get(keys)
+        if global_spec is not None:
+            return self.set_global(global_spec.setting_id, _canonical(global_spec.setting_id, value))
+        if len(keys) >= 3 and keys[0] == "apps":
+            app_id = keys[1]
+            if len(keys) == 3 and keys[2] in APP_OPERATIONAL_FIELDS:
+                return self.set_app_operational(app_id, **{keys[2]: value})
+            spec = SETTING_SPECS_BY_APP_PATH.get(keys[2:])
+            if spec is not None and spec.applies_to(APP_SPECS_BY_ID[app_id]):
+                if value == "default" or (spec.setting_id == "navigation.refresh_rate" and value == 0):
+                    return self.link_app(app_id, spec.setting_id)
+                return self.set_app(app_id, spec.setting_id, value)
+        raise KeyError(keys)
+
+    def reset_app_profile(self, app_id):
+        """Compatibility spelling: the old Reset User Overrides action now links all settings."""
+        return self.transaction().link_all_app(app_id).commit()
 
     def add_listener(self, listener):
         with self._lock:

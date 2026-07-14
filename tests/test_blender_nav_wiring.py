@@ -5,6 +5,7 @@ The invariant under test: extending the broker must NOT change what existing add
 they read only o/p/z/op/os/zm, so "adv" is present only when the focused app sets it.
 """
 import ast
+from collections.abc import Mapping
 import json
 import warnings
 from pathlib import Path
@@ -15,6 +16,14 @@ from trackball_daemon.config import (Config, compose_advanced_with_host_baseline
                                      default_app_profile, host_baseline_payload)
 from trackball_daemon.navbroker import NavBroker
 from trackball_daemon.ui import _PIVOT_LABELS
+
+
+def _plain(value):
+    if isinstance(value, Mapping):
+        return {key: _plain(child) for key, child in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(child) for child in value]
+    return value
 
 
 # --- broker frame construction --------------------------------------------------------
@@ -51,13 +60,13 @@ def test_set_scheme_stores_advanced():
 # --- config: the additive Blender advanced block --------------------------------------
 def test_blender_app_has_advanced_block(isolated_config):
     cfg = Config().load()
-    blender = cfg.data["apps"]["blender"]
+    blender = cfg.snapshot().app_profile("blender")
     assert "advanced" in blender
-    assert blender["advanced"] == default_app_profile("blender")["advanced"]
+    assert _plain(blender["advanced"]) == default_app_profile("blender")["advanced"]
     # Blender's native default pivot is "camera" (orbit about view_location)
     assert blender["bindings"]["scheme"]["orbit_pivot"] == "camera"
     # Every app now has the shared Twist action; Fusion additionally supports zoom vs dolly.
-    assert cfg.data["apps"]["fusion360"]["advanced"] == {
+    assert _plain(cfg.snapshot().app_profile("fusion360")["advanced"]) == {
         "twist_action": "roll", "zoom_style": "zoom"}
 
 
@@ -100,13 +109,13 @@ def test_advanced_appears_on_old_config_via_deep_merge(isolated_config):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(disk, f)
     cfg = Config().load()
-    assert cfg.data["apps"]["blender"]["advanced"] == default_app_profile("blender")["advanced"]
+    assert _plain(cfg.snapshot().app_profile("blender")["advanced"]) == default_app_profile("blender")["advanced"]
 
 
 def test_sketchup_app_has_blender_parity_advanced_block(isolated_config):
     cfg = Config().load()
-    sketchup = cfg.data["apps"]["sketchup"]
-    assert sketchup["advanced"] == default_app_profile("sketchup")["advanced"]
+    sketchup = cfg.snapshot().app_profile("sketchup")
+    assert _plain(sketchup["advanced"]) == default_app_profile("sketchup")["advanced"]
     assert sketchup["advanced"]["nav_mode"] == "orbit"
     assert set(sketchup["advanced"]["invert"]) == {"orbit", "camera", "fly", "walk"}
     assert set(sketchup["advanced"]["invert"]["fly"]) == {
@@ -126,7 +135,7 @@ def test_sketchup_advanced_appears_on_old_config_via_deep_merge(isolated_config)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(disk, f)
     cfg = Config().load()
-    assert cfg.data["apps"]["sketchup"]["advanced"] == default_app_profile("sketchup")["advanced"]
+    assert _plain(cfg.snapshot().app_profile("sketchup")["advanced"]) == default_app_profile("sketchup")["advanced"]
 
 
 # --- App._apply_schemes: advanced only for a focused Blender ---------------------------
@@ -150,11 +159,11 @@ def test_blender_focus_sends_advanced(isolated_config):
     sent = app.broker.schemes[-1]
     adv = sent["advanced"]
     # Core Blender advanced plus immutable host corrections and app-root settings.
-    for k, v in cfg.data["apps"]["blender"]["advanced"].items():
+    for k, v in cfg.snapshot().app_profile("blender")["advanced"].items():
         if k != "invert":
             assert adv[k] == v
     expected = compose_advanced_with_host_baseline(
-        "blender", cfg.data["apps"]["blender"]["advanced"])
+        "blender", cfg.snapshot().app_profile("blender")["advanced"])
     assert adv["invert"] == expected["invert"]
     assert adv["host_baseline"] == host_baseline_payload("blender")
     assert adv["selection_overrides_pivot"] is True
@@ -189,13 +198,13 @@ def test_unreal_focus_sends_its_advanced(isolated_config):
     adv = sent["advanced"]
     assert adv["nav_mode"] == "orbit"
     assert adv["selection_overrides_pivot"] is True
-    assert adv["nav_mode"] == cfg.data["apps"]["unreal"]["advanced"]["nav_mode"]
-    assert adv is not cfg.data["apps"]["blender"]["advanced"]
+    assert adv["nav_mode"] == cfg.snapshot().app_profile("unreal")["advanced"]["nav_mode"]
+    assert adv is not cfg.snapshot().app_profile("blender")["advanced"]
 
 
 def test_per_app_level_horizon_override_is_sent(isolated_config):
     cfg = Config().load()
-    cfg.data["apps"]["blender"]["level_horizon_on_entry"] = False
+    cfg.set_app("blender", "navigation.level_horizon_on_entry", False)
     app = _app_with_real_config(cfg, "blender")
     app._apply_schemes()
     assert app.broker.schemes[-1]["advanced"]["level_horizon_on_entry"] is False
@@ -209,7 +218,7 @@ def test_sketchup_focus_sends_its_advanced(isolated_config):
     adv = sent["advanced"]
     assert adv["nav_mode"] == "orbit"
     assert adv["selection_overrides_pivot"] is True
-    assert sent["advanced"] is not cfg.data["apps"]["blender"]["advanced"]
+    assert sent["advanced"] is not cfg.snapshot().app_profile("blender")["advanced"]
 
 
 def test_blender_addon_consumes_selection_override():

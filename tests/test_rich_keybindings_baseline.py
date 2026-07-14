@@ -43,7 +43,7 @@ def test_shift_is_sampled_only_while_a_valid_3d_packet_is_processed(
 def test_runtime_mode_survives_config_refresh_but_new_engine_uses_startup_default(
         isolated_config):
     cfg = Config().load()
-    cfg.data["general"]["default_mode"] = "cursor"
+    cfg.set_global("input.mode.default", "pointer")
     engine = OutputEngine(cfg)
     assert engine.mode == OutputEngine.MODE_CURSOR
 
@@ -83,7 +83,7 @@ def test_malformed_json_falls_back_without_overwriting_source(isolated_config):
 
     cfg = Config().load()
 
-    assert cfg.data["version"] == 8
+    assert cfg.snapshot().global_value("input.mode.default") == "3d"
     assert path.read_text(encoding="utf-8") == malformed
 
 

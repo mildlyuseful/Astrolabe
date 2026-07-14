@@ -79,8 +79,8 @@ def test_cursor_scroll_bit_exact(engine, monkeypatch):
 
 def test_global_orientation_precedes_both_3d_and_cursor_routing(engine, monkeypatch):
     # Logical XYZ <- raw Y, X, Z, with logical Y inverted (a 90-degree base reorientation).
-    engine.cfg.data["general"]["axis_orientation"] = {
-        "source": [1, 0, 2], "invert": [False, True, False]}
+    engine.cfg.set_ui_value(("general", "axis_orientation", "source"), [1, 0, 2])
+    engine.cfg.set_ui_value(("general", "axis_orientation", "invert"), [False, True, False])
     engine.apply_config()
 
     nav = []
@@ -99,10 +99,12 @@ def test_global_orientation_precedes_both_3d_and_cursor_routing(engine, monkeypa
 
 
 def test_global_orientation_composes_with_distinct_per_app_axis_routes(engine, monkeypatch):
-    engine.cfg.data["general"]["axis_orientation"] = {
-        "source": [1, 0, 2], "invert": [False, False, False]}
-    engine.cfg.data["apps"]["fusion360"]["bindings"]["orbit"]["axis_source"] = [0, 1, 2]
-    engine.cfg.data["apps"]["rhino"]["bindings"]["orbit"]["axis_source"] = [2, 0, 1]
+    engine.cfg.set_ui_value(("general", "axis_orientation", "source"), [1, 0, 2])
+    with engine.cfg.transaction() as tx:
+        for axis, source in zip("xyz", (0, 1, 2)):
+            tx.set_app("fusion360", f"navigation.routing.orbit.{axis}.source", source)
+        for axis, source in zip("xyz", (2, 0, 1)):
+            tx.set_app("rhino", f"navigation.routing.orbit.{axis}.source", source)
     monkeypatch.setattr(output_mod, "shift_held", lambda: False)
     nav = []
     engine.nav_sink = lambda *a: nav.append(a)
@@ -122,7 +124,7 @@ def test_global_orientation_composes_with_distinct_per_app_axis_routes(engine, m
 
 
 def test_lean_host_baseline_composes_with_user_inversion(engine, monkeypatch):
-    engine.cfg.data["apps"]["fusion360"]["bindings"]["invert"]["orbit"] = [True, False, False]
+    engine.cfg.set_app("fusion360", "navigation.routing.orbit.x.invert", True)
     engine.set_active_bindings("fusion360")
     monkeypatch.setattr(output_mod, "shift_held", lambda: False)
     nav = []
@@ -150,7 +152,7 @@ def test_rich_host_baseline_is_deferred_to_mode_aware_addon(engine, monkeypatch)
 
 
 def test_ordinary_profile_twist_action_routes_before_host_alignment(engine, monkeypatch):
-    engine.cfg.data["apps"]["fusion360"]["advanced"]["twist_action"] = "zoom"
+    engine.cfg.set_app("fusion360", "navigation.orbit.twist_action", "zoom")
     engine.set_active_bindings("fusion360")
     monkeypatch.setattr(output_mod, "shift_held", lambda: False)
     nav = []
@@ -166,7 +168,7 @@ def test_ordinary_profile_twist_action_routes_before_host_alignment(engine, monk
 
 
 def test_ordinary_profile_twist_none_drops_twist(engine, monkeypatch):
-    engine.cfg.data["apps"]["rhino"]["advanced"]["twist_action"] = "none"
+    engine.cfg.set_app("rhino", "navigation.orbit.twist_action", "none")
     engine.set_active_bindings("rhino")
     monkeypatch.setattr(output_mod, "shift_held", lambda: False)
     nav = []

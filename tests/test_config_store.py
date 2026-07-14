@@ -84,6 +84,33 @@ def test_invalid_transaction_does_not_publish_or_touch_disk(tmp_path):
     assert store.snapshot().revision == revision
 
 
+def test_axis_source_updates_must_be_atomic_permutations(tmp_path):
+    store = ConfigStore(_store_path(tmp_path)).load()
+    with pytest.raises(ValueError, match="permutation"):
+        store.set_global("input.axis_orientation.x.source", 1)
+    store.set_ui_value(("general", "axis_orientation", "source"), [1, 0, 2])
+    assert store.ui_value(("general", "axis_orientation", "source")) == [1, 0, 2]
+
+
+def test_link_unlink_and_system_reset_operations_have_distinct_semantics(tmp_path):
+    store = ConfigStore(_store_path(tmp_path)).load()
+    store.set_global("navigation.orbit.pivot", "selection")
+    assert store.snapshot().app_value("blender", "navigation.orbit.pivot") == "selection"
+
+    store.transaction().unlink_all_app("blender").commit()
+    store.set_global("navigation.orbit.pivot", "origin")
+    assert store.snapshot().app_value("blender", "navigation.orbit.pivot") == "selection"
+
+    store.transaction().link_all_app("blender").commit()
+    assert store.snapshot().app_value("blender", "navigation.orbit.pivot") == "origin"
+
+    store.transaction().reset_app_setting_to_system(
+        "blender", "navigation.orbit.pivot").commit()
+    assert store.snapshot().app_value("blender", "navigation.orbit.pivot") == "camera"
+    store.set_global("navigation.orbit.pivot", "object")
+    assert store.snapshot().app_value("blender", "navigation.orbit.pivot") == "camera"
+
+
 def test_listener_failure_is_logged_and_does_not_hide_or_block_other_subscribers(
         tmp_path, caplog):
     store = ConfigStore(_store_path(tmp_path)).load()

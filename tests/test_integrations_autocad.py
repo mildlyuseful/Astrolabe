@@ -27,7 +27,7 @@ def test_install_copies_plugin_and_manifest(isolated_config, monkeypatch):
     bundled = integrations.bundled_addin_version("autocad")
     assert integrations.installed_addin_version("autocad") == bundled
     assert integrations.update_available("autocad") is False
-    ac = cfg.data["apps"]["autocad"]
+    ac = cfg.snapshot().app_operational["autocad"]
     assert ac["enabled"] is True and ac["installed"] is True
     assert ac["addin_version"] == bundled
     assert "TBNAV" in msg
@@ -52,7 +52,7 @@ def test_locked_dll_stages_the_update(isolated_config, monkeypatch):
     assert ok is True                                    # staged, not failed
     assert "STAGED" in msg and "next time" in msg.lower()
     assert integrations.installed_addin_version("autocad") == "0.0.1"
-    assert cfg.data["apps"]["autocad"]["installed"] is True
+    assert cfg.snapshot().app_operational["autocad"]["installed"] is True
     assert integrations.auto_update(cfg) == []       # do not claim the locked runtime copy changed
 
 
@@ -74,7 +74,7 @@ def test_existing_plugin_with_non_lock_write_failure_is_not_staged(isolated_conf
 
     assert ok is False
     assert "could not copy" in msg.lower() and "access denied" in msg.lower()
-    assert cfg.data["apps"]["autocad"]["installed"] is False
+    assert cfg.snapshot().app_operational["autocad"]["installed"] is False
 
 
 def test_first_install_copy_failure_is_not_reported_as_staged(isolated_config, monkeypatch):
@@ -90,8 +90,8 @@ def test_first_install_copy_failure_is_not_reported_as_staged(isolated_config, m
 
     assert ok is False
     assert "could not copy" in msg.lower() and "access denied" in msg.lower()
-    assert cfg.data["apps"]["autocad"]["installed"] is False
-    assert cfg.data["apps"]["autocad"]["enabled"] is False
+    assert cfg.snapshot().app_operational["autocad"]["installed"] is False
+    assert cfg.snapshot().app_operational["autocad"]["enabled"] is False
 
 
 def test_missing_bundled_dll_fails_honestly(isolated_config, monkeypatch):
@@ -110,7 +110,7 @@ def test_missing_bundled_dll_fails_honestly(isolated_config, monkeypatch):
 
     assert ok is False
     assert "missing from this build" in msg.lower()
-    assert cfg.data["apps"]["autocad"]["installed"] is False
+    assert cfg.snapshot().app_operational["autocad"]["installed"] is False
 
 
 def test_update_available_via_manifest(isolated_config, monkeypatch):
@@ -140,16 +140,16 @@ def test_install_fails_when_autocad_absent(isolated_config, monkeypatch):
     ok, msg = integrations.install(appdef, cfg)
     assert ok is False
     assert "not found" in msg.lower()
-    assert cfg.data["apps"]["autocad"]["enabled"] is False
+    assert cfg.snapshot().app_operational["autocad"]["enabled"] is False
 
 
 def test_autocad_in_default_config(isolated_config):
     # config.DEFAULTS["apps"] must include the autocad app (deep-merge adds it to old configs too).
     cfg = Config().load()
-    assert "autocad" in cfg.data["apps"]
-    ac = cfg.data["apps"]["autocad"]
+    assert "autocad" in cfg.snapshot().app_operational
+    ac = cfg.snapshot().app_operational["autocad"]
     assert ac["enabled"] is False and ac["installed"] is False
-    assert ac["bindings"]["scheme"]["orbit_pivot"] == "default"   # shared _app() shape
+    assert cfg.snapshot().app_value("autocad", "navigation.orbit.pivot") == "screen_center"
 
 
 def test_autocad_plugin_consumes_advanced_settings_and_all_generic_pivots():

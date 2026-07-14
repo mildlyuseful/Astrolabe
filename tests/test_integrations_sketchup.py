@@ -46,7 +46,7 @@ def test_install_copies_loader_and_addon_to_all_years(isolated_config, monkeypat
     ok, msg = integrations.install(integrations.APPS_BY_KEY["sketchup"], cfg)
     assert ok is True
     assert "2024" in msg and "2026" in msg
-    su = cfg.data["apps"]["sketchup"]
+    su = cfg.snapshot().app_operational["sketchup"]
     assert su["installed"] is True and su["enabled"] is True
     assert su["addin_version"] == "0.2.13"
     for addon in integrations.sketchup_addon_dirs():
@@ -62,7 +62,7 @@ def test_install_fails_when_sketchup_absent(isolated_config, monkeypatch):
     ok, msg = integrations.install(integrations.APPS_BY_KEY["sketchup"], cfg)
     assert ok is False
     assert "not found" in msg.lower()
-    assert cfg.data["apps"]["sketchup"]["enabled"] is False
+    assert cfg.snapshot().app_operational["sketchup"]["enabled"] is False
 
 
 def test_reinstall_does_not_re_enable(isolated_config, monkeypatch):
@@ -70,10 +70,10 @@ def test_reinstall_does_not_re_enable(isolated_config, monkeypatch):
     cfg = Config().load()
     appdef = integrations.APPS_BY_KEY["sketchup"]
     integrations.install(appdef, cfg)
-    cfg.data["apps"]["sketchup"]["enabled"] = False
+    cfg.set_app_operational("sketchup", enabled=False)
     ok, _msg = integrations.install(appdef, cfg)
     assert ok is True
-    assert cfg.data["apps"]["sketchup"]["enabled"] is False
+    assert cfg.snapshot().app_operational["sketchup"]["enabled"] is False
 
 
 def test_auto_update_recopies_on_version_bump(isolated_config, monkeypatch):
@@ -97,8 +97,8 @@ def test_auto_update_skips_when_not_installed(isolated_config, monkeypatch):
 
 def test_sketchup_in_default_config(isolated_config):
     cfg = Config().load()
-    assert "sketchup" in cfg.data["apps"]
-    assert cfg.data["apps"]["sketchup"]["enabled"] is False
+    assert "sketchup" in cfg.snapshot().app_operational
+    assert cfg.snapshot().app_operational["sketchup"]["enabled"] is False
 
 
 def test_sketchup_extension_consumes_selection_override():

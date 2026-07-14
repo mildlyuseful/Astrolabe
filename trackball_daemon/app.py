@@ -21,9 +21,9 @@ from .app_registry import (APP_SPECS, APP_SPECS_BY_ID, TransportKind,
                            resolve_foreground_context)
 from .autocad_driver import AutoCADPluginLoader
 from .ble import start_ble_thread
-from .config import (Config, compose_advanced_with_host_baseline, effective_level_horizon,
-                     effective_scheme, host_baseline_payload,
+from .config import (compose_advanced_with_host_baseline, host_baseline_payload,
                      normalize_orbit_pivot_fallbacks, orbit_pivot_candidates)
+from .config_store import ConfigStore
 from .navbroker import NavBroker
 from .onshape_bridge import OnshapeBridge
 from .output import OutputEngine
@@ -42,7 +42,7 @@ class App:
     def __init__(self, debug=False):
         self.debug = debug
         self.log = get_logger()
-        self.config = Config().load()
+        self.config = ConfigStore().load()
         self.first_run = self.config.first_run
         self.engine = OutputEngine(self.config)
         self.stop_event = threading.Event()
@@ -59,20 +59,21 @@ class App:
 
         # 3D-app nav bridge (127.0.0.1). The engine forwards orbit/pan/zoom deltas here,
         # gated on the focused CAD app; socket add-ons connect and drive their app's camera.
-        self.broker = NavBroker(self.config.data["bridge"]["port"], self._on_clients_changed,
-                                rate_hz=self.config.data["bridge"].get("rate_hz", 30))
+        snapshot = self.config.snapshot()
+        self.broker = NavBroker(snapshot.bridge_port, self._on_clients_changed,
+                                rate_hz=snapshot.global_value("navigation.refresh_rate"))
         # SolidWorks is driven by external COM automation, not a socket add-in: this in-process
         # driver attaches to a running SolidWorks and moves its camera directly. It lives parallel
         # to the broker; _nav_sink routes solidworks frames here instead of to the broker.
         self.sw_driver = SolidWorksDriver(self._on_sw_connection_changed,
-                                          rate_hz=self.config.data["bridge"].get("rate_hz", 30))
+                                          rate_hz=snapshot.global_value("navigation.refresh_rate"))
         # Onshape (browser) is driven by an in-process bridge that impersonates the 3Dconnexion
         # local NL-Proxy service Onshape's page connects to (TLS WebSocket on 127.51.68.120:8181).
         # Like the SW driver it lives parallel to the broker; _nav_sink routes onshape frames here.
-        ocfg = self.config.data.get("onshape", {})
+        ocfg = snapshot.onshape
         self.onshape_bridge = OnshapeBridge(
             self._on_onshape_connection_changed,
-            rate_hz=self.config.data["bridge"].get("rate_hz", 30),
+            rate_hz=snapshot.global_value("navigation.refresh_rate"),
             host=ocfg.get("address") or None, port=ocfg.get("port") or None,
             cert_path=ocfg.get("cert_path") or None, key_path=ocfg.get("key_path") or None)
         # AutoCAD is a BROKER app: its compiled NETLOAD plugin (plugin_src/autocad) drives the
@@ -100,8 +101,9 @@ class App:
 
     # --- BLE wiring and packet-boundary routing -----------------------------------
     def get_ble_params(self):
-        d = self.config.data["device"]
-        return d["name"], d.get("address", ""), d["char_uuid"]
+        snapshot = self.config.snapshot()
+        return (snapshot.device_value("device.name"),
+                snapshot.device_value("device.address"), snapshot.device_char_uuid)
 
     def set_status(self, text):
         # Called from the BLE thread; just store + log. The Tk poll pushes it to the GUI.
@@ -114,7 +116,7 @@ class App:
     def is_connected(self):
         return self._status.startswith(("connected", "subscribed"))
 
-    def on_config_changed(self):
+    def on_config_changed(self, _event):
         self.engine.apply_config()
         self._apply_service_gates()
         self._apply_rates()
@@ -122,7 +124,7 @@ class App:
 
     def _service_allowed(self, key):
         """Sensitive in-process services require both successful setup and Enabled=true."""
-        cfg = self.config.data.get("apps", {}).get(key) or {}
+        cfg = self.config.snapshot().app_operational[key]
         return bool(cfg.get("installed") and cfg.get("enabled"))
 
     def _apply_service_gates(self):
@@ -135,9 +137,12 @@ class App:
             self.acad_loader.set_enabled(self._service_allowed("autocad"))
 
     def _effective_scheme(self, key):
-        g = self.config.data["general"].get("scheme", {})
-        a = (self.config.data["apps"].get(key) or {}).get("bindings", {}).get("scheme", {})
-        return effective_scheme(g, a)
+        snapshot = self.config.snapshot()
+        return {
+            "orbit_pivot": snapshot.app_value(key, "navigation.orbit.pivot"),
+            "orbit_style": snapshot.app_value(key, "navigation.orbit.style"),
+            "zoom_mode": snapshot.app_value(key, "navigation.zoom.target"),
+        }
 
     def _broker_excluded_keys(self):
         """Apps whose frames do NOT go to the socket broker (in-process transports). AutoCAD is a
@@ -147,12 +152,13 @@ class App:
     def _apply_schemes(self):
         """Push each CAD app's effective control scheme to its driver. Mirrors _apply_rates:
         the broker gets the focused socket app's scheme; the SW driver gets SolidWorks'."""
+        snapshot = self.config.snapshot()
         fallbacks = normalize_orbit_pivot_fallbacks(
-            self.config.data.get("general", {}).get("orbit_pivot_fallbacks"))
+            list(snapshot.global_value("navigation.orbit.pivot_fallbacks")))
         if self.broker is not None:
             key = self._engine_app
             if not key or key in self._broker_excluded_keys():
-                key = self.config.data.get("active_app", "fusion360")
+                key = snapshot.selected_app
             scheme = self._effective_scheme(key)
             # Apps with a richer nav set (Blender, Unreal) carry their own "advanced" options. Attach
             # the FOCUSED broker app's advanced block as the additive "adv" object on every frame; the
@@ -162,15 +168,15 @@ class App:
             # nav_mode delivery is robust -- switching to fly/walk reaches the add-on on focus.
             # selection_overrides_pivot lives on the app root (all apps) and is folded into adv so
             # every socket add-on can read one place — Fusion/etc. still ignore unknown keys.
-            appcfg = self.config.data["apps"].get(key) or {}
+            appcfg = snapshot.app_profile(key)
             adv = compose_advanced_with_host_baseline(key, appcfg.get("advanced"))
             adv["host_baseline"] = host_baseline_payload(key)
             adv["selection_overrides_pivot"] = bool(
                 appcfg.get("selection_overrides_pivot", True))
             adv["orbit_hold_sec"] = appcfg.get("orbit_pivot_hold_sec", 0.5)
             adv["zoom_hold_sec"] = appcfg.get("zoom_cursor_hold_sec", 0.5)
-            adv["level_horizon_on_entry"] = effective_level_horizon(
-                self.config.data["general"], appcfg)
+            adv["level_horizon_on_entry"] = snapshot.app_value(
+                key, "navigation.level_horizon_on_entry")
             adv["orbit_pivot_fallbacks"] = fallbacks
             adv["orbit_pivot_candidates"] = orbit_pivot_candidates(
                 scheme["orbit_pivot"], fallbacks)
@@ -184,34 +190,30 @@ class App:
                               % (key, scheme["orbit_pivot"], scheme["orbit_style"],
                                  scheme["zoom_mode"], nav))
         if self.sw_driver is not None:
-            swcfg = self.config.data["apps"].get("solidworks") or {}
+            swcfg = snapshot.app_profile("solidworks")
             self.sw_driver.set_scheme(
                 **self._effective_scheme("solidworks"),
                 selection_overrides_pivot=bool(swcfg.get("selection_overrides_pivot", True)),
                 orbit_pivot_fallbacks=fallbacks,
-                level_horizon_on_entry=effective_level_horizon(
-                    self.config.data["general"], swcfg))
+                level_horizon_on_entry=snapshot.app_value(
+                    "solidworks", "navigation.level_horizon_on_entry"))
             self.sw_driver.set_pivot_hold(swcfg.get("orbit_pivot_hold_sec", 0.5))
             self.sw_driver.set_zoom_hold(swcfg.get("zoom_cursor_hold_sec", 0.5))
         if self.onshape_bridge is not None:
-            oncfg = self.config.data["apps"].get("onshape") or {}
+            oncfg = snapshot.app_profile("onshape")
             self.onshape_bridge.set_scheme(
                 **self._effective_scheme("onshape"),
                 selection_overrides_pivot=bool(oncfg.get("selection_overrides_pivot", True)),
                 orbit_pivot_fallbacks=fallbacks,
-                level_horizon_on_entry=effective_level_horizon(
-                    self.config.data["general"], oncfg))
+                level_horizon_on_entry=snapshot.app_value(
+                    "onshape", "navigation.level_horizon_on_entry"))
             self.onshape_bridge.set_pivot_hold(oncfg.get("orbit_pivot_hold_sec", 0.5))
             self.onshape_bridge.set_zoom_hold(oncfg.get("zoom_cursor_hold_sec", 0.5))
 
     def _app_rate(self, key):
         """Effective viewport/flush rate (Hz) for app `key`: its per-app override, or the global
         bridge default when the per-app value is 0/unset."""
-        appcfg = self.config.data["apps"].get(key) or {}
-        rate = appcfg.get("rate_hz") or 0
-        if rate and rate > 0:
-            return rate
-        return self.config.data["bridge"].get("rate_hz", 30)
+        return self.config.snapshot().app_value(key, "navigation.refresh_rate")
 
     def _apply_rates(self):
         """Run each CAD component at its app's configured rate. The SolidWorks driver always uses
@@ -225,7 +227,7 @@ class App:
         if self.broker is not None:
             key = self._engine_app
             if not key or key in self._broker_excluded_keys():
-                key = self.config.data.get("active_app", "fusion360")
+                key = self.config.snapshot().selected_app
             self.broker.set_rate(self._app_rate(key))
 
     # --- 3D-app nav routing -------------------------------------------------------
@@ -241,8 +243,8 @@ class App:
         key = self._foreground_app_key()
         if key is None:
             return None
-        appcfg = self.config.data["apps"].get(key)
-        if not appcfg or not appcfg.get("enabled"):
+        appcfg = self.config.snapshot().app_operational.get(key)
+        if not appcfg or not appcfg["enabled"]:
             return None
         return key
 
@@ -331,7 +333,7 @@ class App:
         # Publish the bridge port for the add-ons, then start the broker.
         try:
             with open(user_config_dir() / "bridge.json", "w", encoding="utf-8") as f:
-                json.dump({"port": self.config.data["bridge"]["port"]}, f)
+                json.dump({"port": self.config.snapshot().bridge_port}, f)
         except OSError:
             pass
         self.broker.start()

@@ -5,7 +5,8 @@ import shutil
 
 import pytest
 
-from trackball_daemon.config import Config, CONFIG_VERSION, DEFAULTS, effective_level_horizon
+from trackball_daemon.config import (LegacyConfig as Config, CONFIG_VERSION, DEFAULTS,
+                                     effective_level_horizon)
 
 
 FIXTURES = Path(__file__).with_name("fixtures")

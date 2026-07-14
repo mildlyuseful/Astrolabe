@@ -5,6 +5,7 @@ constants -- moving the numbers into config must not change the math. The UI and
 output engine both read/write this one object.
 """
 import copy
+from collections.abc import Mapping
 import json
 import threading
 from dataclasses import dataclass
@@ -174,7 +175,14 @@ def host_baseline_payload(app_key):
 
 def compose_advanced_with_host_baseline(app_key, advanced):
     """Return wire-ready advanced settings: immutable host corrections XOR user preferences."""
-    out = copy.deepcopy(advanced or {})
+    def detached(value):
+        if isinstance(value, Mapping):
+            return {key: detached(child) for key, child in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [detached(child) for child in value]
+        return copy.deepcopy(value)
+
+    out = detached(advanced or {})
     for mode, action in host_baseline(app_key).advanced_invert:
         group = out.setdefault("invert", {}).setdefault(mode, {})
         group[action] = not bool(group.get(action, False))
@@ -377,7 +385,7 @@ def default_app_profile(app_key):
     return copy.deepcopy(_DEFAULT_APP_PROFILES[app_key])
 
 
-class Config:
+class LegacyConfig:
     def __init__(self):
         self._lock = threading.Lock()
         self.path = config_path()
@@ -596,3 +604,15 @@ class Config:
         for k in keys[:-1]:
             node = node[k]
         node[keys[-1]] = value
+
+
+class Config:
+    """Compatibility constructor returning the transactional v9 store.
+
+    New code should import :class:`ConfigStore` directly. Keeping this lazy constructor for one
+    cycle avoids an import loop while callers and third-party scripts move off the old module.
+    """
+
+    def __new__(cls, *args, **kwargs):
+        from .config_store import ConfigStore
+        return ConfigStore(*args, **kwargs)
