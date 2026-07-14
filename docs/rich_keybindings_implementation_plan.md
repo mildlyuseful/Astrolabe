@@ -75,7 +75,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 5 — Input providers and Windows keyboard | COMPLETE | Start `2aa1c9b`; provider foundation `19c9ad1`; Raw Input/foreground `e16e340`; acceptance gate `d99a0de`; boundary reconciliation `0b99a6f`; hidden-release fail-safe `ce07604`; items 5.1–5.6 complete | Wait for explicit `START PHASE 6`. |
 | 6 — BLE five-way protocol and adapter | COMPLETE | Start `af373fa`; frozen baseline `07b9450`; host protocol/adapters `b7aec6d`; firmware/docs `26146d1`; hardware contract `dd9bb48`; completion `d569d31`; items 6.1–6.6 complete | Wait for explicit `START PHASE 7`. Final five-way pins and physical qualification remain Phase 11/release work. |
 | 7 — Binding compiler, DSL, and system profiles | COMPLETE | Start `7a0ae3d`; start ledger `6d1b7a4`; profiles/overrides `1283cb4`; compiler/runtime `86fd22c`; items 7.1–7.5 complete | Wait for explicit `START PHASE 8`. |
-| 8 — Motion/output integration | NOT_STARTED | — | Start after Phases 4 and 7 are COMPLETE. |
+| 8 — Motion/output integration | IN_PROGRESS | Start `86d67e8`; bootstrap and untouched output baseline complete | Implement 8.1–8.2 runtime-snapshot motion consumption while preserving frozen output math. |
 | 9 — Barebones settings UX | NOT_STARTED | — | Start after Phases 2 and 7 are COMPLETE. |
 | 10 — Text HUD | NOT_STARTED | — | Start after Phase 8 runtime snapshots are COMPLETE. |
 | 11 — Full verification and release docs | NOT_STARTED | — | Start after Phases 0–10 are COMPLETE. |
@@ -485,6 +485,21 @@ treating that review as an authority:
   single-daemon enforcement remain Phase 8; settings UX remains Phase 9; HUD remains Phase 10.
 - **Next exact action:** stop. On explicit `START PHASE 8`, rerun the mandatory bootstrap and
   implement Phase 8 only. Do not infer Phase 8 authorization from Phase 7 completion.
+
+### 0.15 Phase 8 in-progress checkpoint
+
+- **Status:** `IN_PROGRESS` from starting commit `86d67e8`.
+- **Bootstrap:** complete plan/HANDOFF/TODO and Phase 8 scope reread; Phase 4/7 dependency
+  confirmation; clean tracked worktree; user-owned `.claude/` and
+  `docs/rich_keybindings_plan_revisions.md` remain untracked and untouched.
+- **Untouched baseline:** bit-exact output plus frozen legacy Shift contracts = 21 passed; full
+  `python -m pytest -q` = 588 passed.
+- **Boundary decision:** retain all quaternion, cursor, host-baseline, and navigation transport math.
+  First replace packet-time `shift_held()` with the input/navigation layer from the same immutable
+  runtime snapshot used for the packet. Pointer buttons remain bounded Left/Right/Middle/X1/X2
+  resources and receive a dedicated SendInput sink only after single-process ownership is acquired.
+- **Next exact action:** implement and verify 8.1–8.2 snapshot-driven motion transformation before
+  enabling pointer-button delivery or changing the Blender add-on.
 
 ## 1. Product goals
 
