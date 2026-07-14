@@ -63,6 +63,143 @@ class BindingEvent:
 
 
 @dataclass(frozen=True)
+class StateNode:
+    node_id: str
+    assignments: object = field(default_factory=dict)
+    requires: tuple = ()
+
+    def __post_init__(self):
+        if not self.node_id:
+            raise ValueError("state node ID is required")
+        object.__setattr__(self, "assignments", _freeze(dict(self.assignments)))
+        object.__setattr__(self, "requires", tuple(self.requires))
+
+
+class DependencyGraph:
+    """Validated declarative state graph with transitive assignment closure."""
+
+    def __init__(self, nodes):
+        nodes = tuple(nodes)
+        assignment_values = {
+            "input.mode": INPUT_MODES,
+            "navigation.mode": NAVIGATION_MODES,
+            "navigation.layer": NAVIGATION_LAYERS,
+        }
+        self._nodes = {node.node_id: node for node in nodes}
+        if len(self._nodes) != len(nodes):
+            raise ValueError("duplicate state node ID")
+        for node in nodes:
+            for field_name, value in node.assignments.items():
+                if field_name not in assignment_values or value not in assignment_values[field_name]:
+                    raise ValueError(
+                        f"invalid state assignment for {node.node_id}: {field_name}={value!r}")
+            missing = set(node.requires) - set(self._nodes)
+            if missing:
+                raise ValueError(f"state node {node.node_id} has unknown dependencies: {missing}")
+        self._closures = {}
+        visiting = []
+
+        def visit(node_id):
+            if node_id in visiting:
+                cycle = visiting[visiting.index(node_id):] + [node_id]
+                raise ValueError("dependency cycle: " + " -> ".join(cycle))
+            if node_id in self._closures:
+                return self._closures[node_id]
+            visiting.append(node_id)
+            assignments = {}
+            for dependency in self._nodes[node_id].requires:
+                for field_name, value in visit(dependency).items():
+                    if field_name in assignments and assignments[field_name] != value:
+                        raise ValueError(
+                            f"conflicting dependency assignments for {node_id}: {field_name}")
+                    assignments[field_name] = value
+            for field_name, value in self._nodes[node_id].assignments.items():
+                if field_name in assignments and assignments[field_name] != value:
+                    raise ValueError(f"state node {node_id} contradicts dependency {field_name}")
+                assignments[field_name] = value
+            visiting.pop()
+            self._closures[node_id] = MappingProxyType(assignments)
+            return self._closures[node_id]
+
+        for node_id in self._nodes:
+            visit(node_id)
+
+    @property
+    def node_ids(self):
+        return tuple(self._nodes)
+
+    def closure(self, node_id):
+        try:
+            return self._closures[node_id]
+        except KeyError as exc:
+            raise ValueError(f"unknown runtime state target: {node_id}") from exc
+
+
+DEFAULT_DEPENDENCY_GRAPH = DependencyGraph((
+    StateNode("input.pointer", {"input.mode": "pointer"}),
+    StateNode("input.3d", {"input.mode": "3d"}),
+    StateNode("navigation.orbit", {"navigation.mode": "orbit"}, ("input.3d",)),
+    StateNode("navigation.fly", {"navigation.mode": "fly"}, ("input.3d",)),
+    StateNode("navigation.walk", {"navigation.mode": "walk"}, ("input.3d",)),
+    StateNode("orbit.primary", {"navigation.layer": "primary"}, ("navigation.orbit",)),
+    StateNode("orbit.secondary", {"navigation.layer": "secondary"}, ("navigation.orbit",)),
+    StateNode("fly.primary", {"navigation.layer": "primary"}, ("navigation.fly",)),
+    StateNode("fly.secondary", {"navigation.layer": "secondary"}, ("navigation.fly",)),
+    StateNode("walk.primary", {"navigation.layer": "primary"}, ("navigation.walk",)),
+    StateNode("walk.secondary", {"navigation.layer": "secondary"}, ("navigation.walk",)),
+    StateNode("pan", {}, ("orbit.secondary",)),
+    StateNode("zoom", {}, ("orbit.secondary",)),
+    StateNode("fly.move", {}, ("fly.secondary",)),
+    StateNode("walk.move", {}, ("walk.secondary",)),
+))
+
+
+@dataclass(frozen=True)
+class RequestPrecedence:
+    priority: int
+    context_specificity: int
+    exact_match: bool
+    chord_size: int
+    activation_serial: int
+
+    @property
+    def key(self):
+        return (
+            self.priority,
+            self.context_specificity,
+            1 if self.exact_match else 0,
+            self.chord_size,
+            self.activation_serial,
+        )
+
+
+@dataclass(frozen=True)
+class RequestIdentity:
+    binding_id: str
+    activation_id: str
+    target: str
+    source: str
+
+
+@dataclass(frozen=True)
+class RequestToken:
+    identity: RequestIdentity
+    precedence: RequestPrecedence
+    context_app_id: str | None = None
+    setting_id: str | None = None
+    value: object = None
+    label: str = ""
+
+    @property
+    def is_setting(self):
+        return self.setting_id is not None
+
+    def matches_context(self, context):
+        return (self.context_app_id is None or
+                self.context_app_id.casefold() == (context.app_id or "").casefold())
+
+
+@dataclass(frozen=True)
 class RuntimeSnapshot:
     revision: int
     focused_context: FocusedContext
@@ -94,6 +231,8 @@ class _RuntimeDraft:
     latched_state: dict
     latched_settings: dict
     last_binding_event: BindingEvent | None
+    request_tokens: dict
+    activation_serial: int
 
     def clone(self):
         return _RuntimeDraft(
@@ -101,6 +240,8 @@ class _RuntimeDraft:
             latched_state=copy.deepcopy(self.latched_state),
             latched_settings=copy.deepcopy(self.latched_settings),
             last_binding_event=self.last_binding_event,
+            request_tokens=copy.deepcopy(self.request_tokens),
+            activation_serial=self.activation_serial,
         )
 
     def set_context(self, context):
@@ -127,18 +268,79 @@ class _RuntimeDraft:
     def clear_setting_latch(self, setting_id):
         self.latched_settings.pop(setting_id, None)
 
+    def request(self, *, binding_id, activation_id, target, source, priority,
+                context_specificity, exact_match, chord_size, context_app_id=None,
+                setting_id=None, value=None, label=""):
+        if not binding_id or not activation_id or not target or not source:
+            raise ValueError("request identity fields must be non-empty")
+        if (type(priority) is not int or type(context_specificity) is not int or
+                priority < 0 or context_specificity < 0):
+            raise ValueError("request priority and context specificity must be non-negative ints")
+        if type(chord_size) is not int or chord_size < 1:
+            raise ValueError("request chord size must be a positive int")
+        identity = RequestIdentity(binding_id, activation_id, target, source)
+        if identity in self.request_tokens:
+            return self.request_tokens[identity]
+        self.activation_serial += 1
+        token = RequestToken(
+            identity=identity,
+            precedence=RequestPrecedence(
+                priority, context_specificity, bool(exact_match), chord_size,
+                self.activation_serial),
+            context_app_id=context_app_id,
+            setting_id=setting_id,
+            value=copy.deepcopy(value),
+            label=label,
+        )
+        self.request_tokens[identity] = token
+        self.last_binding_event = BindingEvent(
+            binding_id, activation_id,
+            "setting.runtime.request" if setting_id is not None else "state.request",
+            source, True, label)
+        return token
+
+    def release(self, *, binding_id, activation_id=None, target=None, source=None, label=""):
+        matches = [
+            identity for identity in self.request_tokens
+            if (identity.binding_id == binding_id and
+                (activation_id is None or identity.activation_id == activation_id) and
+                (target is None or identity.target == target) and
+                (source is None or identity.source == source))
+        ]
+        removed = [self.request_tokens.pop(identity) for identity in matches]
+        if removed:
+            last = max(removed, key=lambda token: token.precedence.activation_serial)
+            self.last_binding_event = BindingEvent(
+                binding_id, activation_id or last.identity.activation_id, "state.release",
+                source or last.identity.source, False, label or last.label)
+        return tuple(removed)
+
+    def release_all(self, source=None):
+        matches = [identity for identity in self.request_tokens
+                   if source is None or identity.source == source]
+        removed = [self.request_tokens.pop(identity) for identity in matches]
+        if removed:
+            last = max(removed, key=lambda token: token.precedence.activation_serial)
+            self.last_binding_event = BindingEvent(
+                last.identity.binding_id, last.identity.activation_id, "state.release_all",
+                source or last.identity.source, False, last.label)
+        return tuple(removed)
+
 
 class RuntimeStore:
     """Own live state and publish one immutable snapshot per command transaction."""
 
-    def __init__(self, base_resolver):
+    def __init__(self, base_resolver, dependency_graph=DEFAULT_DEPENDENCY_GRAPH):
         if not callable(base_resolver):
             raise TypeError("base_resolver must be callable")
         self._base_resolver = base_resolver
+        if not isinstance(dependency_graph, DependencyGraph):
+            raise TypeError("dependency_graph must be a DependencyGraph")
+        self._dependency_graph = dependency_graph
         self._lock = threading.RLock()
         self._listeners = []
         self._revision = 0
-        self._draft = _RuntimeDraft(FocusedContext(), {}, {}, None)
+        self._draft = _RuntimeDraft(FocusedContext(), {}, {}, None, {}, 0)
         base = self._resolve_base(self._draft.focused_context)
         self._snapshot = self._build_snapshot(self._draft, base, self._revision)
 
@@ -148,8 +350,37 @@ class RuntimeStore:
             raise TypeError("base_resolver must return RuntimeBaseState")
         return base
 
+    def _state_token_assignments(self, tokens):
+        return {token.identity: self._dependency_graph.closure(token.identity.target)
+                for token in tokens if not token.is_setting}
+
     @staticmethod
-    def _build_snapshot(draft, base, revision):
+    def _precedence_winners(tokens, assignments):
+        winners = {}
+        for token in tokens:
+            for field_name, value in assignments[token.identity].items():
+                existing = winners.get(field_name)
+                if existing is None or token.precedence.key > existing[0].precedence.key:
+                    winners[field_name] = (token, value)
+        return winners
+
+    def _viable_state_winners(self, tokens):
+        """Resolve fields while removing a leaf whose prerequisite lost a conflict."""
+        assignments = self._state_token_assignments(tokens)
+        viable = list(tokens)
+        while viable:
+            winners = self._precedence_winners(viable, assignments)
+            remaining = [
+                token for token in viable
+                if all(winners[field_name][1] == value
+                       for field_name, value in assignments[token.identity].items())
+            ]
+            if len(remaining) == len(viable):
+                return winners
+            viable = remaining
+        return {}
+
+    def _build_snapshot(self, draft, base, revision):
         state = {
             "input.mode": base.input_mode,
             "navigation.mode": base.navigation_mode,
@@ -158,6 +389,18 @@ class RuntimeStore:
         state.update(draft.latched_state)
         settings = dict(base.settings)
         settings.update(draft.latched_settings)
+        active_tokens = [token for token in draft.request_tokens.values()
+                         if token.matches_context(draft.focused_context)]
+        state_tokens = [token for token in active_tokens if not token.is_setting]
+        for field_name, (_token, value) in self._viable_state_winners(state_tokens).items():
+            state[field_name] = value
+        setting_winners = {}
+        for token in (token for token in active_tokens if token.is_setting):
+            existing = setting_winners.get(token.setting_id)
+            if existing is None or token.precedence.key > existing.precedence.key:
+                setting_winners[token.setting_id] = token
+        for setting_id, token in setting_winners.items():
+            settings[setting_id] = copy.deepcopy(token.value)
         latched = dict(draft.latched_state)
         latched.update({f"setting:{key}": value
                         for key, value in draft.latched_settings.items()})
@@ -170,7 +413,9 @@ class RuntimeStore:
             effective_navigation_mode=state["navigation.mode"],
             base_navigation_layer=base.navigation_layer,
             effective_navigation_layer=state["navigation.layer"],
-            held_binding_ids=(),
+            held_binding_ids=tuple(dict.fromkeys(
+                token.identity.binding_id for token in sorted(
+                    active_tokens, key=lambda item: item.precedence.activation_serial))),
             latched_overrides=_freeze(latched),
             base_settings=_freeze(dict(base.settings)),
             effective_settings=_freeze(settings),
@@ -216,4 +461,3 @@ class RuntimeStore:
             except Exception:
                 logger.exception("Runtime listener failed for revision %s", snapshot.revision)
         return snapshot
-

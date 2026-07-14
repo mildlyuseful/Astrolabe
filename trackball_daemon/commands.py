@@ -116,6 +116,84 @@ class ClearRuntimeOverride(RuntimeCommand):
 
 
 @dataclass(frozen=True)
+class RequestState(RuntimeCommand):
+    binding_id: str = ""
+    activation_id: str = ""
+    target: str = ""
+    source: str = "binding"
+    priority: int = 0
+    context_specificity: int = 0
+    exact_match: bool = True
+    chord_size: int = 1
+    context_app_id: str | None = None
+    label: str = ""
+    command_id = "state.request"
+
+    def apply(self, draft, _previous):
+        draft.request(
+            binding_id=self.binding_id, activation_id=self.activation_id,
+            target=self.target, source=self.source, priority=self.priority,
+            context_specificity=self.context_specificity, exact_match=self.exact_match,
+            chord_size=self.chord_size, context_app_id=self.context_app_id,
+            label=self.label,
+        )
+
+
+@dataclass(frozen=True)
+class RequestSettingOverride(RuntimeCommand):
+    binding_id: str = ""
+    activation_id: str = ""
+    setting_id: str = ""
+    value: object = None
+    source: str = "binding"
+    priority: int = 0
+    context_specificity: int = 0
+    exact_match: bool = True
+    chord_size: int = 1
+    context_app_id: str | None = None
+    label: str = ""
+    command_id = "setting.runtime.request"
+
+    def apply(self, draft, _previous):
+        if not self.setting_id:
+            raise ValueError("setting_id is required")
+        draft.request(
+            binding_id=self.binding_id, activation_id=self.activation_id,
+            target=f"setting:{self.setting_id}", source=self.source,
+            priority=self.priority, context_specificity=self.context_specificity,
+            exact_match=self.exact_match, chord_size=self.chord_size,
+            context_app_id=self.context_app_id, setting_id=self.setting_id,
+            value=self.value, label=self.label,
+        )
+
+
+@dataclass(frozen=True)
+class ReleaseState(RuntimeCommand):
+    binding_id: str = ""
+    activation_id: str | None = None
+    target: str | None = None
+    source: str | None = None
+    label: str = ""
+    command_id = "state.release"
+
+    def apply(self, draft, _previous):
+        if not self.binding_id:
+            raise ValueError("binding_id is required")
+        draft.release(
+            binding_id=self.binding_id, activation_id=self.activation_id,
+            target=self.target, source=self.source, label=self.label)
+
+
+@dataclass(frozen=True)
+class ReleaseAll(RuntimeCommand):
+    source: str | None = None
+    command_id = "state.release_all"
+
+    def apply(self, draft, _previous):
+        draft.release_all(self.source)
+
+
+@dataclass(frozen=True)
 class CommandBatch(RuntimeCommand):
     commands: tuple = ()
     command_id = "runtime.batch"
@@ -157,4 +235,3 @@ class SerializedCommandQueue:
             finally:
                 self._draining = False
         return envelope[1]
-
