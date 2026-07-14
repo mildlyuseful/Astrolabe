@@ -16,13 +16,15 @@ from types import SimpleNamespace
 
 import pytest
 
-from trackball_daemon import output as output_mod
 from trackball_daemon.app import App
 from trackball_daemon.app_registry import APP_SPECS_BY_ID
 from trackball_daemon.config import Config, host_baseline_payload
 from trackball_daemon.config_store import ConfigStore
+from trackball_daemon.commands import (
+    RequestSettingOverride, RequestState, SerializedCommandQueue, SetFocusedContext)
 from trackball_daemon.output import OutputEngine
 from trackball_daemon.navigation_router import NavigationRouter
+from trackball_daemon.runtime_state import ConfigRuntimeBaseResolver, FocusedContext, RuntimeStore
 
 
 def _scheme(pivot="default", style="default", zoom="default"):
@@ -208,7 +210,7 @@ def test_no_focused_app_drops_frame():
     assert app.sw_driver.calls == []
 
 
-def test_first_packet_after_focus_switch_uses_new_app_mapping(isolated_config, monkeypatch):
+def test_first_packet_after_focus_switch_uses_new_app_mapping(isolated_config):
     """Focus selection must happen before OutputEngine transforms the packet."""
     cfg = Config().load()
     with cfg.transaction() as tx:
@@ -220,7 +222,6 @@ def test_first_packet_after_focus_switch_uses_new_app_mapping(isolated_config, m
     app.config = cfg
     app.engine = OutputEngine(cfg)
     app.engine.nav_sink = app._nav_sink
-    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
     focused = ["fusion360"]
     app._foreground_app_context = lambda: SimpleNamespace(
         app_id=focused[0], process_name=f"{focused[0]}.exe")
@@ -245,11 +246,17 @@ def test_packet_envelope_captures_runtime_revision():
     app._foreground_app_context = lambda: SimpleNamespace(
         app_id="blender", process_name="blender.exe")
     app._active_app_key_from_context = lambda context: context.app_id
-    app.engine.handle_packet = lambda _data: app._nav_sink(1, 2, 3, 4, 5, 6)
+    app._apply_runtime_navigation_profile = lambda _snapshot: None
+    captured = []
+    def handle(_data, runtime_snapshot=None):
+        captured.append(runtime_snapshot.revision)
+        app._nav_sink(1, 2, 3, 4, 5, 6)
+    app.engine.handle_packet = handle
 
     app._handle_ble_packet(b"packet")
 
     assert app.broker.targets[-1] == ("blender", 17)
+    assert captured == [17]
 
 
 def test_packet_with_no_active_app_selects_no_navigation_target():
@@ -258,7 +265,7 @@ def test_packet_with_no_active_app_selects_no_navigation_target():
     app._foreground_app_context = lambda: SimpleNamespace(
         app_id=None, process_name="notes.exe")
     app._active_app_key_from_context = lambda _context: None
-    app.engine.handle_packet = lambda _data: None
+    app.engine.handle_packet = lambda _data, runtime_snapshot=None: None
 
     app._handle_ble_packet(b"packet")
 
@@ -293,6 +300,33 @@ def test_all_targets_receive_independent_schemes():
         "orbit_pivot_fallbacks": ["cursor_3d", "camera", "object", "origin"],
         "level_horizon_on_entry": True}
     assert app.sw_driver.holds[-1] == 0.75       # per-app screen-center-pivot hold pushed to the driver
+
+
+def test_stationary_runtime_mode_and_settings_publish_to_focused_rich_target():
+    app = _bare_app()
+    app.runtime = RuntimeStore(ConfigRuntimeBaseResolver(app.config))
+    commands = SerializedCommandQueue(app.runtime)
+    commands.dispatch(SetFocusedContext(
+        origin="test", context=FocusedContext("blender", "blender.exe")))
+    commands.dispatch(RequestState(
+        origin="test", source="binding", binding_id="fly", activation_id="1",
+        target="navigation.fly"))
+    commands.dispatch(RequestSettingOverride(
+        origin="test", source="binding", binding_id="speed", activation_id="1",
+        setting_id="navigation.fly.speed", value=2.5))
+    commands.dispatch(RequestSettingOverride(
+        origin="test", source="binding", binding_id="pivot", activation_id="1",
+        setting_id="navigation.orbit.pivot", value="selection"))
+
+    app._apply_runtime_navigation_profile(app.runtime.snapshot())
+
+    sent = next(item for item in reversed(app.broker.schemes)
+                if item["target"] == "blender")
+    assert sent["orbit_pivot"] == "selection"
+    assert sent["advanced"]["nav_mode"] == "fly"
+    assert sent["advanced"]["fly_speed"] == 2.5
+    assert ("blender", app.runtime.snapshot().effective_settings[
+        "navigation.refresh_rate"]) in app.broker.rates
 
 
 def test_autocad_profile_remains_targeted_to_its_broker_clients():

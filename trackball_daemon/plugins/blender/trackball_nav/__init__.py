@@ -25,7 +25,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Trackball Daemon",
-    "version": (0, 1, 22),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 23),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +43,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.22"                   # keep in sync with bl_info and version.json
+ADDIN_VERSION = "0.1.23"                   # keep in sync with bl_info and version.json
 
 # Host correction arrives in ``adv.host_baseline`` from the daemon's immutable profile registry.
 # Camera math stays neutral so corrections cannot be double-applied here and in the daemon.
@@ -88,12 +88,6 @@ _tracker = {"gen": 0}
 _last_target = {"key": None}    # stabilise which VIEW_3D we drive across ties
 _last_scheme = {"v": None}
 _host = "?"                     # Blender version string, captured on the main thread in register()
-# Blender-shortcut nav-mode override: None => follow the daemon's Mode; "orbit"/"fly"/"walk" => the
-# in-Blender shortcut (Alt+`) overrode it. Cleared automatically when the daemon's Mode changes, so
-# the daemon dropdown re-takes control. _daemon_nav tracks the last Mode the daemon sent.
-_mode_override = {"v": None}
-_daemon_nav = {"v": None}
-_addon_keymaps = []
 
 
 # ======================================================================================
@@ -660,13 +654,8 @@ def _apply(target, frame, idle):
     style = frame.get("os", "free")
     zm = frame.get("zm", "to_center")
     adv = frame.get("adv") or {}
-    # Effective nav mode: the Blender-shortcut override wins, but a change to the daemon's Mode
-    # dropdown clears the override so the dropdown re-takes control.
-    daemon_nav = adv.get("nav_mode", "orbit")
-    if daemon_nav != _daemon_nav["v"]:
-        _daemon_nav["v"] = daemon_nav
-        _mode_override["v"] = None
-    nav_mode = _mode_override["v"] or daemon_nav
+    # Navigation mode has one authority: the daemon's immutable runtime profile for this frame.
+    nav_mode = adv.get("nav_mode", "orbit")
     _maybe_level_horizon(rv, nav_mode, style, adv)
 
     sig = (nav_mode, op, style, zm, adv.get("twist_action"), adv.get("zoom_style"),
@@ -815,66 +804,6 @@ def _reader():
 
 
 # ======================================================================================
-# In-Blender nav-mode toggle (operator + keymap), so you can switch orbit/fly/walk from the
-# viewport like Blender's own Walk/Fly shortcut -- it flips the TRACKBALL's mode (a local override),
-# it does NOT start Blender's modal walk/fly (which the trackball can't drive).
-# ======================================================================================
-_NAV_CYCLE = ("orbit", "fly", "walk")
-
-
-class TRACKBALL_NAV_OT_cycle_mode(bpy.types.Operator):
-    """Cycle the Trackball navigation between Orbit, Fly and Walk. Overrides the daemon's Mode until
-    you change the daemon Mode dropdown again."""
-    bl_idname = "trackball_nav.cycle_mode"
-    bl_label = "Trackball: Cycle Nav Mode"
-    bl_options = {'REGISTER'}
-
-    mode: bpy.props.EnumProperty(            # "CYCLE" or a specific mode (for menu items)
-        name="Mode",
-        items=[("CYCLE", "Cycle", ""), ("orbit", "Orbit", ""), ("fly", "Fly", ""),
-               ("walk", "Walk", "")],
-        default="CYCLE", options={'SKIP_SAVE'})
-
-    def execute(self, context):
-        if self.mode == "CYCLE":
-            cur = _mode_override["v"] or _daemon_nav["v"] or "orbit"
-            i = _NAV_CYCLE.index(cur) if cur in _NAV_CYCLE else 0
-            nxt = _NAV_CYCLE[(i + 1) % len(_NAV_CYCLE)]
-        else:
-            nxt = self.mode
-        _mode_override["v"] = nxt
-        self.report({'INFO'}, "Trackball nav: %s" % nxt.capitalize())
-        _log("mode override -> %s (Blender shortcut)" % nxt)
-        return {'FINISHED'}
-
-
-def _menu_func(self, context):
-    self.layout.operator(TRACKBALL_NAV_OT_cycle_mode.bl_idname, text="Trackball: Cycle Nav Mode")
-
-
-def _register_keymap():
-    try:
-        kc = bpy.context.window_manager.keyconfigs.addon
-        if kc is None:                       # e.g. --background: no addon keyconfig
-            return
-        km = kc.keymaps.new(name="3D View", space_type="VIEW_3D")
-        kmi = km.keymap_items.new(TRACKBALL_NAV_OT_cycle_mode.bl_idname, "ACCENT_GRAVE", "PRESS", alt=True)
-        _addon_keymaps.append((km, kmi))
-        _log("keymap: Alt+` -> cycle trackball nav mode (rebind in Preferences > Keymap, 'Trackball')")
-    except Exception:
-        _log("keymap registration failed: " + traceback.format_exc().strip().replace("\n", " | "))
-
-
-def _unregister_keymap():
-    for km, kmi in _addon_keymaps:
-        try:
-            km.keymap_items.remove(kmi)
-        except Exception:
-            pass
-    _addon_keymaps.clear()
-
-
-# ======================================================================================
 # Passive mouse tracker (Half A of the under-mouse "cursor" pivot). Blender has no on-demand mouse
 # getter, so a window-wide modal operator caches the cursor's window-space position on each
 # MOUSEMOVE; it returns {'PASS_THROUGH'} so it never consumes events or blocks normal interaction.
@@ -959,19 +888,11 @@ def register():
     _gesture.update({"t": 0.0, "pivot": None, "invalid": True})
     _zoom_gesture.update({"pivot": None, "resolved": False})
     _horizon["fixed"] = None
-    _mode_override["v"] = None
-    _daemon_nav["v"] = None
     _cursor.update({"win": None, "x": 0.0, "y": 0.0, "t": 0.0, "ok": False})
-    for cls in (TRACKBALL_NAV_OT_cycle_mode, TRACKBALL_NAV_OT_mouse_tracker):
-        try:
-            bpy.utils.register_class(cls)
-        except Exception:                    # already registered (e.g. reload) -> ignore
-            pass
     try:
-        bpy.types.VIEW3D_MT_view.append(_menu_func)
-    except Exception:
+        bpy.utils.register_class(TRACKBALL_NAV_OT_mouse_tracker)
+    except Exception:                        # already registered (e.g. reload) -> ignore
         pass
-    _register_keymap()
     if _on_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load_post)   # restart the tracker after a file load
     _reader_thread = threading.Thread(target=_reader, name="trackball-nav-reader", daemon=True)
@@ -999,16 +920,10 @@ def unregister():
             bpy.app.handlers.load_post.remove(_on_load_post)
     except Exception:
         pass
-    _unregister_keymap()
     try:
-        bpy.types.VIEW3D_MT_view.remove(_menu_func)
+        bpy.utils.unregister_class(TRACKBALL_NAV_OT_mouse_tracker)
     except Exception:
         pass
-    for cls in (TRACKBALL_NAV_OT_mouse_tracker, TRACKBALL_NAV_OT_cycle_mode):
-        try:
-            bpy.utils.unregister_class(cls)
-        except Exception:
-            pass
     _log("unregister: Trackball Nav v%s" % ADDIN_VERSION)
 
 

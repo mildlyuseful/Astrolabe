@@ -5,6 +5,9 @@ from trackball_daemon.commands import SerializedCommandQueue
 from trackball_daemon.config_store import ConfigStore
 from trackball_daemon.input import (
     BindingController,
+    InputAggregator,
+    InputControlDescriptor,
+    InputEvent,
     PointerButtonSink,
     SystemBindingProfile,
     compile_binding_profile,
@@ -12,6 +15,7 @@ from trackball_daemon.input import (
     compose_binding_profile,
     load_system_binding_profiles,
 )
+from trackball_daemon.windows_pointer import SendInputPointerButtonSink
 from trackball_daemon.runtime_state import (
     FocusedContext,
     RuntimeBaseState,
@@ -208,6 +212,26 @@ def test_pointer_resource_is_identity_owned_and_reload_synthesizes_release():
     assert sink.events[0][2] == sink.events[1][2]
 
 
+def test_ble_disconnect_releases_a_real_pointer_output_sink():
+    events = []
+    sink = SendInputPointerButtonSink(
+        lambda button, pressed: events.append((button, pressed)))
+    controller, _runtime_store, _catalog = _controller(
+        "astrolabe_5way", pointer_sink=sink)
+    aggregator = InputAggregator()
+    aggregator.register_controls((InputControlDescriptor(
+        "ble.xiao3389", "button.left", "Left", "button"),))
+    aggregator.add_listener(controller.handle_transition)
+
+    aggregator.accept(InputEvent(
+        "ble.xiao3389", "button.left", "pressed", 1.0))
+    aggregator.accept(InputEvent(
+        "ble.xiao3389", None, "disconnected", 2.0))
+
+    assert events == [("left", True), ("left", False)]
+    assert sink.held == {}
+
+
 def test_reload_releases_all_runtime_requests_in_one_revision():
     custom = _binding_row(
         ("keyboard:a",),
@@ -318,6 +342,26 @@ def test_static_invalid_entry_is_disabled_without_losing_valid_bindings():
     assert "bad.freecad.fly" not in {binding.id for binding in compiled.bindings}
     assert any(item.binding_id == "bad.freecad.fly" for item in compiled.diagnostics)
     assert "keyboard.ctrl.3d" in {binding.id for binding in compiled.bindings}
+
+
+def test_context_scoped_hold_rejects_an_unsupported_navigation_mode():
+    catalog = load_system_binding_profiles()
+    base = catalog.profile("keyboard_only")
+    invalid = replace(
+        base.bindings[0], binding_id="bad.freecad.fly.hold",
+        context=replace(base.bindings[0].context, apps=("freecad",)),
+        press_actions=(replace(base.bindings[1].press_actions[0],
+                               command_id="state.request", target="navigation.fly"),),
+        release_actions=(replace(base.bindings[1].release_actions[0],
+                                 command_id="state.release", target="navigation.fly"),))
+    profile = SystemBindingProfile(base.id, base.label, base.bindings + (invalid,))
+
+    compiled = compile_binding_profile(profile, catalog)
+
+    assert "bad.freecad.fly.hold" not in {binding.id for binding in compiled.bindings}
+    assert any(item.binding_id == "bad.freecad.fly.hold" and
+               item.code == "unsupported_navigation_mode"
+               for item in compiled.diagnostics)
 
 
 def test_malformed_editor_row_is_isolated_with_actionable_diagnostic():

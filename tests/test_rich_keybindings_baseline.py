@@ -23,23 +23,21 @@ def _packet(rx=0.01, ry=0.02, rz=0.03):
     return struct.pack("<fff", rx, ry, rz)
 
 
-def test_shift_is_sampled_only_while_a_valid_3d_packet_is_processed(
-        isolated_config, monkeypatch):
+def test_secondary_layer_is_runtime_owned_and_stationary(isolated_config):
+    from trackball_daemon.commands import ReleaseState, RequestState
+
     engine = OutputEngine(Config().load())
-    calls = []
-    monkeypatch.setattr(output_mod, "shift_held", lambda: calls.append("sample") or False)
-
-    assert calls == []  # stationary input cannot currently observe a Shift transition
-    engine.handle_packet(b"short")
-    assert calls == []
-
     engine.set_mode(OutputEngine.MODE_CUBE)
-    engine.handle_packet(_packet())
-    assert calls == ["sample"]
+    engine.commands.dispatch(RequestState(
+        origin="test", source="keyboard", binding_id="shift.pan", activation_id="1",
+        target="pan"))
+    assert engine.runtime.snapshot().effective_navigation_layer == "secondary"
+    assert engine.runtime.snapshot().effective_input_mode == "3d"
 
-    engine.set_mode(OutputEngine.MODE_CURSOR)
-    engine.handle_packet(_packet())
-    assert calls == ["sample"]
+    engine.commands.dispatch(ReleaseState(
+        origin="test", source="keyboard", binding_id="shift.pan", activation_id="1",
+        target="pan"))
+    assert engine.runtime.snapshot().effective_navigation_layer == "primary"
 
 
 def test_runtime_mode_survives_config_refresh_but_new_engine_uses_startup_default(

@@ -276,6 +276,31 @@ def test_context_specific_request_deactivates_and_reactivates_with_focus():
     assert runtime.snapshot().effective_navigation_mode == "fly"
 
 
+def test_held_navigation_mode_is_inert_in_unsupported_focus_and_resumes_safely():
+    contexts = {"value": FocusedContext(app_id="blender", executable="blender.exe")}
+
+    def base(context):
+        modes = ("orbit",) if context.app_id == "freecad" else ("orbit", "fly", "walk")
+        return RuntimeBaseState("pointer", supported_navigation_modes=modes)
+
+    runtime = RuntimeStore(base)
+    commands = SerializedCommandQueue(runtime)
+    commands.dispatch(SetFocusedContext(context=contexts["value"]))
+    commands.dispatch(_request("fly", "fly-1", "navigation.fly"))
+    assert runtime.snapshot().effective_navigation_mode == "fly"
+    assert runtime.snapshot().effective_input_mode == "3d"
+
+    commands.dispatch(SetFocusedContext(
+        context=FocusedContext(app_id="freecad", executable="freecad.exe")))
+    assert runtime.snapshot().effective_navigation_mode == "orbit"
+    assert runtime.snapshot().effective_input_mode == "pointer"
+
+    commands.dispatch(SetFocusedContext(
+        context=FocusedContext(app_id="blender", executable="blender.exe")))
+    assert runtime.snapshot().effective_navigation_mode == "fly"
+    assert runtime.snapshot().effective_input_mode == "3d"
+
+
 def test_release_all_can_reconcile_one_provider_without_touching_another():
     runtime = RuntimeStore(_base)
     commands = SerializedCommandQueue(runtime)

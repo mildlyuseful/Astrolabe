@@ -465,13 +465,16 @@ def _binding_compile_diagnostic(binding):
     if not app_ids:
         return None
     for action in binding.press_actions + binding.release_actions:
-        if action.command_id == "navigation.mode.set":
+        if (action.command_id == "navigation.mode.set" or
+                (action.command_id == "state.request" and
+                 action.target.startswith("navigation."))):
+            target = action.target.removeprefix("navigation.")
             unsupported = [app_id for app_id in app_ids
-                           if action.target not in APP_SPECS_BY_ID[app_id].supported_modes]
+                           if target not in APP_SPECS_BY_ID[app_id].supported_modes]
             if unsupported:
                 return BindingDiagnostic(
                     binding.id, "unsupported_navigation_mode",
-                    f"{action.target} is unsupported by: {', '.join(unsupported)}")
+                    f"{target} is unsupported by: {', '.join(unsupported)}")
         if action.command_id.startswith("setting."):
             spec = SETTING_SPECS_BY_ID[action.target]
             unsupported = [app_id for app_id in app_ids
@@ -779,6 +782,8 @@ class BindingController:
             working_settings[action.target] = value
             return (SetRuntimeSetting(origin=_BINDING_SOURCE,
                                       setting_id=action.target, value=value),)
+        if command_id == "state.request":
+            self._require_action_capability(action, snapshot)
         return () if command_id.startswith("pointer.") else (self._simple_runtime_action(
             command_id, action, activation, metadata),)
 
@@ -805,12 +810,18 @@ class BindingController:
     @staticmethod
     def _require_action_capability(action, snapshot):
         app_id = snapshot.focused_context.app_id
-        if action.command_id.startswith("navigation."):
+        navigation_target = None
+        if action.command_id == "navigation.mode.set":
+            navigation_target = action.target
+        elif (action.command_id == "state.request" and
+              action.target.startswith("navigation.")):
+            navigation_target = action.target.removeprefix("navigation.")
+        if action.command_id.startswith("navigation.") or navigation_target is not None:
             if app_id is None:
                 return
             spec = APP_SPECS_BY_ID[app_id]
-            if action.command_id == "navigation.mode.set" and action.target not in spec.supported_modes:
-                raise ValueError(f"{action.target} navigation is unsupported by {app_id}")
+            if navigation_target is not None and navigation_target not in spec.supported_modes:
+                raise ValueError(f"{navigation_target} navigation is unsupported by {app_id}")
         elif action.command_id.startswith("setting."):
             setting = SETTING_SPECS_BY_ID[action.target]
             if (setting.scope is SettingScope.GLOBAL_AND_APP and app_id is not None and

@@ -46,41 +46,41 @@ def feed(frame):
 ADV = dict(nav_mode="orbit", twist_action="roll", zoom_style="zoom", lock_horizon=False,
            pan_scales_with_distance=True, zoom_to_mouse=False, lock_camera_to_view=False)
 
-# --- orbit (viewpoint pivot -> turn the camera in place: rotates view, keeps the EYE) ---
+# --- orbit (camera pivot -> turn the camera in place: rotates view, keeps the EYE) ---
 rot0 = rv.view_rotation.copy()
 eye0 = tn._eye(rv)
-feed({"o": [0.3, 0.2, 0.0], "p": [0, 0], "z": 0.0, "op": "viewpoint", "os": "free", "zm": "to_center",
+feed({"o": [0.3, 0.2, 0.0], "p": [0, 0], "z": 0.0, "op": "camera", "os": "free", "zm": "to_center",
       "adv": ADV})
 check("orbit.changes_rotation", rv.view_rotation.rotation_difference(rot0).angle > 1e-4)
-check("orbit.viewpoint_keeps_eye", (tn._eye(rv) - eye0).length < 1e-4)
+check("orbit.camera_keeps_eye", (tn._eye(rv) - eye0).length < 1e-4)
 
 # --- turntable keeps the horizon level ---
 rv.view_rotation = rot0.copy()
-feed({"o": [0.2, 0.5, 0.0], "p": [0, 0], "z": 0.0, "op": "viewpoint", "os": "turntable",
+feed({"o": [0.2, 0.5, 0.0], "p": [0, 0], "z": 0.0, "op": "camera", "os": "turntable",
       "zm": "to_center", "adv": ADV})
 check("turntable.horizon_level", abs((rv.view_rotation @ __import__("mathutils").Vector((1, 0, 0))).z) < 1e-5)
 
 # --- pan moves view_location ---
 loc1 = rv.view_location.copy()
-feed({"o": [0, 0, 0], "p": [0.5, 0.0], "z": 0.0, "op": "viewpoint", "os": "free", "zm": "to_center",
+feed({"o": [0, 0, 0], "p": [0.5, 0.0], "z": 0.0, "op": "camera", "os": "free", "zm": "to_center",
       "adv": ADV})
 check("pan.moves_location", (rv.view_location - loc1).length > 1e-6)
 
 # --- zoom changes view_distance ---
 d0 = rv.view_distance
-feed({"o": [0, 0, 0], "p": [0, 0], "z": 0.5, "op": "viewpoint", "os": "free", "zm": "to_center",
+feed({"o": [0, 0, 0], "p": [0, 0], "z": 0.5, "op": "camera", "os": "free", "zm": "to_center",
       "adv": ADV})
 check("zoom.changes_distance", abs(rv.view_distance - d0) > 1e-6)
 
 # --- dolly (zoom_style=dolly) moves view_location along the view axis ---
 loc2 = rv.view_location.copy()
-feed({"o": [0, 0, 0], "p": [0, 0], "z": 0.5, "op": "viewpoint", "os": "free", "zm": "to_center",
+feed({"o": [0, 0, 0], "p": [0, 0], "z": 0.5, "op": "camera", "os": "free", "zm": "to_center",
       "adv": dict(ADV, zoom_style="dolly")})
 check("dolly.moves_location", (rv.view_location - loc2).length > 1e-6)
 
 # --- fly look rotates about the eye (eye ~ stationary) ---
 eye0 = tn._eye(rv)
-feed({"o": [0.2, 0.2, 0.0], "p": [0, 0], "z": 0.0, "op": "viewpoint", "os": "free", "zm": "to_center",
+feed({"o": [0.2, 0.2, 0.0], "p": [0, 0], "z": 0.0, "op": "camera", "os": "free", "zm": "to_center",
       "adv": dict(ADV, nav_mode="fly")})
 check("fly.eye_stationary", (tn._eye(rv) - eye0).length < 1e-4)
 
@@ -94,14 +94,14 @@ rv.view_distance = 10.0
 rv.view_rotation = Quaternion((1.0, 0.0, 0.0, 0.0))
 
 # auto-depth: the screen-centre ray passes through the origin (inside the default cube) -> a hit
-hit = tn._raycast_center(rv, region)
+hit = tn._raycast_screen_center(rv, region)
 check("autodepth.raycast_hits_cube", hit is not None)
 
 # orbiting about the auto-depth pivot (the cube surface, != view_location) moves view_location
 tn._gesture.update({"pivot": None, "invalid": True, "t": 0.0})
 loc_ad = rv.view_location.copy()
-feed({"o": [0.3, 0.0, 0.0], "p": [0, 0], "z": 0.0, "op": "view", "os": "free", "zm": "to_center",
-      "adv": ADV})
+feed({"o": [0.3, 0.0, 0.0], "p": [0, 0], "z": 0.0, "op": "screen_center", "os": "free", "zm": "to_center",
+      "adv": dict(ADV, selection_overrides_pivot=False)})
 check("autodepth.orbit_moves_location", (rv.view_location - loc_ad).length > 1e-6)
 
 # ===== under-mouse "cursor" pivot (Half B + the mapping; the live modal tracker is GUI-only) =====
@@ -121,12 +121,11 @@ cur_hit = tn._raycast_cursor(rv, region, _win)
 check("cursor.raycast_cursor_hits_cube", cur_hit is not None
       and (cur_hit - (hit_c or Vector((9, 9, 9)))).length < 1e-4)
 
-# cursor OUTSIDE this region (window-space far to the left) -> None -> selection-median fallback
+# cursor OUTSIDE this region (window-space far to the left) -> None
 tn._cursor.update({"x": region.x - 500.0, "y": region.y + region.height * 0.5})
 check("cursor.offscreen_is_none", tn._raycast_cursor(rv, region, _win) is None)
 
-# end to end: op="cursor" with the cursor over the cube orbits about that hit (moves view_location);
-# with the cursor off-viewport it falls back to the selection median (cube at origin still moves it).
+# end to end: op="cursor" with the cursor over the cube orbits about that hit (moves view_location).
 for ob in bpy.context.scene.objects:
     try:
         ob.select_set(ob.type == 'MESH')
@@ -137,7 +136,7 @@ tn._cursor.update({"win": _win.as_pointer(), "ok": True,
 tn._gesture.update({"pivot": None, "invalid": True, "t": 0.0})
 loc_cur = rv.view_location.copy()
 feed({"o": [0.3, 0.0, 0.0], "p": [0, 0], "z": 0.0, "op": "cursor", "os": "free", "zm": "to_center",
-      "adv": ADV})
+      "adv": dict(ADV, selection_overrides_pivot=False)})
 check("cursor.orbit_moves_location", (rv.view_location - loc_cur).length > 1e-6)
 
 # selection median: select the mesh objects -> median at the origin (default cube)
@@ -156,7 +155,7 @@ check("cursor.pivot_reads_cursor", (tn._cursor_location() - Vector((2, 0, 0))).l
 # camera view + nav WITHOUT lock -> exit to perspective so the edits are visible (like Blender)
 rv.view_perspective = 'CAMERA'
 rot_cam = rv.view_rotation.copy()
-feed({"o": [0.3, 0.2, 0.0], "p": [0, 0], "z": 0.0, "op": "viewpoint", "os": "free",
+feed({"o": [0.3, 0.2, 0.0], "p": [0, 0], "z": 0.0, "op": "camera", "os": "free",
       "zm": "to_center", "adv": dict(ADV, lock_camera_to_view=False)})
 check("cameraview.nav_exits_to_perspective", rv.view_perspective == 'PERSP')
 check("cameraview.nav_moves_view", rv.view_rotation.rotation_difference(rot_cam).angle > 1e-4)
@@ -165,7 +164,7 @@ check("cameraview.nav_moves_view", rv.view_rotation.rotation_difference(rot_cam)
 if bpy.context.scene.camera is not None:
     rv.view_perspective = 'CAMERA'
     cam0 = bpy.context.scene.camera.matrix_world.copy()
-    feed({"o": [0.2, 0.1, 0.0], "p": [0, 0], "z": 0.0, "op": "viewpoint", "os": "free",
+    feed({"o": [0.2, 0.1, 0.0], "p": [0, 0], "z": 0.0, "op": "camera", "os": "free",
           "zm": "to_center", "adv": dict(ADV, lock_camera_to_view=True)})
     moved = any(abs(cam0[i][j] - bpy.context.scene.camera.matrix_world[i][j]) > 1e-6
                 for i in range(4) for j in range(4))
@@ -174,19 +173,17 @@ if bpy.context.scene.camera is not None:
 else:
     print("SKIP cameralock (no scene camera)")
 
-# --- per-mode invert: independent direction flips (the user's case: flip Walk fwd, Viewpoint axes) --
+# --- per-mode invert: independent direction flips (the user's case: Walk fwd and Camera axes) ---
 def _reset_view():
     rv.view_perspective = 'PERSP'
     rv.view_location = Vector((0, 0, 0))
     rv.view_rotation = Quaternion(Vector((1, 0, 0)), -math.pi / 2)   # look horizontally (-Y), not down
     rv.view_distance = 8.0
-    tn._mode_override["v"] = None
-    tn._daemon_nav["v"] = None
 
 
 def _walk_fwd(forward_inv):
     _reset_view()
-    feed({"o": [0, 0, 0], "p": [0.0, 0.5], "z": 0.0, "op": "viewpoint", "os": "free",
+    feed({"o": [0, 0, 0], "p": [0.0, 0.5], "z": 0.0, "op": "camera", "os": "free",
           "zm": "to_center", "adv": dict(ADV, nav_mode="walk", invert={"walk": {"forward": forward_inv}})})
     return rv.view_location.copy()
 
@@ -197,38 +194,24 @@ check("invert.walk_forward_flips", wa.length > 1e-6 and wa.dot(wb) < 0)
 
 def _vp_pitch_fwd(pitch_inv):
     _reset_view()
-    feed({"o": [0.3, 0, 0], "p": [0, 0], "z": 0.0, "op": "viewpoint", "os": "free",
-          "zm": "to_center", "adv": dict(ADV, nav_mode="orbit", invert={"viewpoint": {"pitch": pitch_inv}})})
+    feed({"o": [0.3, 0, 0], "p": [0, 0], "z": 0.0, "op": "camera", "os": "free",
+          "zm": "to_center", "adv": dict(ADV, nav_mode="orbit", invert={"camera": {"pitch": pitch_inv}})})
     return tn._view_axes(rv)[2].copy()          # forward vector
 
 
 fa, fb = _vp_pitch_fwd(False), _vp_pitch_fwd(True)
-check("invert.viewpoint_pitch_flips", abs(fa.z) > 1e-4 and fa.z * fb.z < 0)
+check("invert.camera_pitch_flips", abs(fa.z) > 1e-4 and fa.z * fb.z < 0)
 
-# --- in-Blender mode toggle: operator cycles orbit->fly->walk, override wins, clears on daemon change
-rv.view_perspective = 'PERSP'
-bpy.utils.register_class(tn.TRACKBALL_NAV_OT_cycle_mode)
-tn._mode_override["v"] = None
-tn._daemon_nav["v"] = "orbit"
-bpy.ops.trackball_nav.cycle_mode()      # orbit -> fly
-check("toggle.cycle_to_fly", tn._mode_override["v"] == "fly")
-bpy.ops.trackball_nav.cycle_mode()      # fly -> walk
-check("toggle.cycle_to_walk", tn._mode_override["v"] == "walk")
-bpy.ops.trackball_nav.cycle_mode()      # walk -> orbit
-check("toggle.cycle_to_orbit", tn._mode_override["v"] == "orbit")
-bpy.utils.unregister_class(tn.TRACKBALL_NAV_OT_cycle_mode)
-
-# override "fly" wins even though the daemon frame says nav=orbit (fly look keeps the eye)
-tn._mode_override["v"] = "fly"
-tn._daemon_nav["v"] = "orbit"
+# --- daemon-authoritative nav mode: consecutive frames switch behavior with no host-local state ---
+_reset_view()
 eye0 = tn._eye(rv)
-feed({"o": [0.2, 0.2, 0.0], "p": [0, 0], "z": 0.0, "op": "viewpoint", "os": "free",
+feed({"o": [0.2, 0.2, 0.0], "p": [0, 0], "z": 0.0, "op": "camera", "os": "free",
+      "zm": "to_center", "adv": dict(ADV, nav_mode="fly")})
+check("daemon_mode.fly_keeps_eye", (tn._eye(rv) - eye0).length < 1e-4)
+orbit_loc = rv.view_location.copy()
+feed({"o": [0.2, 0.2, 0.0], "p": [0, 0], "z": 0.0, "op": "camera", "os": "free",
       "zm": "to_center", "adv": dict(ADV, nav_mode="orbit")})
-check("override.wins_over_daemon", (tn._eye(rv) - eye0).length < 1e-4)
-# changing the daemon Mode (orbit->walk) clears the override so the dropdown re-takes control
-feed({"o": [0.0, 0.0, 0.0], "p": [0, 0], "z": 0.0, "op": "viewpoint", "os": "free",
-      "zm": "to_center", "adv": dict(ADV, nav_mode="walk")})
-check("override.clears_on_daemon_change", tn._mode_override["v"] is None)
+check("daemon_mode.orbit_takes_effect_next_frame", (rv.view_location - orbit_loc).length > 1e-6)
 
 print("\n%d failures" % len(_fails))
 if _fails:

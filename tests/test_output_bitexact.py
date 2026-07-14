@@ -11,6 +11,8 @@ import threading
 import pytest
 
 from trackball_daemon import output as output_mod
+from trackball_daemon.commands import RequestSettingOverride, RequestState, SetFocusedContext
+from trackball_daemon.runtime_state import FocusedContext
 from trackball_daemon.config import Config, host_baseline_payload
 from trackball_daemon.output import OutputEngine
 
@@ -19,13 +21,18 @@ def _pkt(rx, ry, rz):
     return struct.pack("<fff", rx, ry, rz)
 
 
+def _hold_secondary(engine):
+    engine.commands.dispatch(RequestState(
+        origin="test", source="test", binding_id="secondary", activation_id="1",
+        target="orbit.secondary"))
+
+
 @pytest.fixture
 def engine(isolated_config):
     return OutputEngine(Config().load())
 
 
-def test_cube_orbit_bit_exact(engine, monkeypatch):
-    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
+def test_cube_orbit_bit_exact(engine):
     nav = []
     engine.nav_sink = lambda *a: nav.append(a)
     engine.set_mode(OutputEngine.MODE_CUBE)
@@ -38,22 +45,22 @@ def test_cube_orbit_bit_exact(engine, monkeypatch):
         0.029999999329447746, 0.0, 0.0, 0.0)
 
 
-def test_cube_pan_bit_exact(engine, monkeypatch):
-    monkeypatch.setattr(output_mod, "shift_held", lambda: True)
+def test_cube_pan_bit_exact(engine):
     nav = []
     engine.nav_sink = lambda *a: nav.append(a)
     engine.set_mode(OutputEngine.MODE_CUBE)
+    _hold_secondary(engine)
     engine.handle_packet(_pkt(0.02, 0.03, 0.001))           # twist below deadzone -> pan
     assert engine.pan_x == 0.029999999329447746
     assert engine.pan_y == -0.019999999552965164
     assert nav[-1] == (0.0, 0.0, 0.0, 0.029999999329447746, -0.019999999552965164, 0.0)
 
 
-def test_cube_zoom_bit_exact(engine, monkeypatch):
-    monkeypatch.setattr(output_mod, "shift_held", lambda: True)
+def test_cube_zoom_bit_exact(engine):
     nav = []
     engine.nav_sink = lambda *a: nav.append(a)
     engine.set_mode(OutputEngine.MODE_CUBE)
+    _hold_secondary(engine)
     engine.handle_packet(_pkt(0.001, 0.001, 0.05))          # twist dominant -> zoom
     assert engine.distance == 5.949999999254942
     assert nav[-1] == (0.0, 0.0, 0.0, 0.0, 0.0, 0.05000000074505806)
@@ -85,7 +92,6 @@ def test_global_orientation_precedes_both_3d_and_cursor_routing(engine, monkeypa
 
     nav = []
     engine.nav_sink = lambda *a: nav.append(a)
-    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
     engine.set_mode(OutputEngine.MODE_CUBE)
     engine.handle_packet(_pkt(0.01, 0.02, 0.03))
     assert nav[-1][:3] == pytest.approx((0.02, -0.01, 0.03))
@@ -105,7 +111,6 @@ def test_global_orientation_composes_with_distinct_per_app_axis_routes(engine, m
             tx.set_app("fusion360", f"navigation.routing.orbit.{axis}.source", source)
         for axis, source in zip("xyz", (2, 0, 1)):
             tx.set_app("rhino", f"navigation.routing.orbit.{axis}.source", source)
-    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
     nav = []
     engine.nav_sink = lambda *a: nav.append(a)
     engine.set_mode(OutputEngine.MODE_CUBE)
@@ -123,10 +128,9 @@ def test_global_orientation_composes_with_distinct_per_app_axis_routes(engine, m
         (0.03 * rhino[0], 0.02 * rhino[1], 0.01 * rhino[2]))
 
 
-def test_lean_host_baseline_composes_with_user_inversion(engine, monkeypatch):
+def test_lean_host_baseline_composes_with_user_inversion(engine):
     engine.cfg.set_app("fusion360", "navigation.routing.orbit.x.invert", True)
     engine.set_active_bindings("fusion360")
-    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
     nav = []
     engine.nav_sink = lambda *a: nav.append(a)
     engine.set_mode(OutputEngine.MODE_CUBE)
@@ -138,9 +142,8 @@ def test_lean_host_baseline_composes_with_user_inversion(engine, monkeypatch):
         (-0.01 * baseline[0], 0.02 * baseline[1], 0.03 * baseline[2]))
 
 
-def test_rich_host_baseline_is_deferred_to_mode_aware_addon(engine, monkeypatch):
+def test_rich_host_baseline_is_deferred_to_mode_aware_addon(engine):
     engine.set_active_bindings("blender")
-    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
     nav = []
     engine.nav_sink = lambda *a: nav.append(a)
     engine.set_mode(OutputEngine.MODE_CUBE)
@@ -151,10 +154,9 @@ def test_rich_host_baseline_is_deferred_to_mode_aware_addon(engine, monkeypatch)
     assert nav[-1][:3] == pytest.approx((0.01, 0.02, 0.03))
 
 
-def test_ordinary_profile_twist_action_routes_before_host_alignment(engine, monkeypatch):
+def test_ordinary_profile_twist_action_routes_before_host_alignment(engine):
     engine.cfg.set_app("fusion360", "navigation.orbit.twist_action", "zoom")
     engine.set_active_bindings("fusion360")
-    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
     nav = []
     engine.nav_sink = lambda *args: nav.append(args)
     engine.set_mode(OutputEngine.MODE_CUBE)
@@ -167,10 +169,9 @@ def test_ordinary_profile_twist_action_routes_before_host_alignment(engine, monk
     assert nav[-1][5] == pytest.approx(0.03 * baseline["zoom"])
 
 
-def test_ordinary_profile_twist_none_drops_twist(engine, monkeypatch):
+def test_ordinary_profile_twist_none_drops_twist(engine):
     engine.cfg.set_app("rhino", "navigation.orbit.twist_action", "none")
     engine.set_active_bindings("rhino")
-    monkeypatch.setattr(output_mod, "shift_held", lambda: False)
     nav = []
     engine.nav_sink = lambda *args: nav.append(args)
     engine.set_mode(OutputEngine.MODE_CUBE)
@@ -179,6 +180,34 @@ def test_ordinary_profile_twist_none_drops_twist(engine, monkeypatch):
 
     assert nav[-1][2] == 0.0
     assert nav[-1][5] == 0.0
+
+
+def test_runtime_sensitivity_override_affects_next_packet_without_config_reload(engine):
+    nav = []
+    engine.nav_sink = lambda *args: nav.append(args)
+    engine.set_mode(OutputEngine.MODE_CUBE)
+    engine.commands.dispatch(SetFocusedContext(
+        origin="test", context=FocusedContext(engine._mapping.app_key, "test.exe")))
+    engine.commands.dispatch(RequestSettingOverride(
+        origin="test", source="test", binding_id="precision", activation_id="1",
+        setting_id="navigation.orbit.sensitivity", value=0.25))
+
+    engine.handle_packet(_pkt(0.04, 0.0, 0.0))
+
+    assert nav[-1][0] == pytest.approx(0.01)
+
+
+def test_explicit_runtime_snapshot_owns_mode_and_mapping_for_whole_packet(engine, monkeypatch):
+    moves = []
+    monkeypatch.setattr(output_mod, "send_mouse",
+                        lambda dx=0, dy=0, wheel=0: moves.append((dx, dy, wheel)))
+    engine.set_mode(OutputEngine.MODE_CURSOR)
+    captured = engine.runtime.snapshot()
+    engine.set_mode(OutputEngine.MODE_CUBE)
+
+    engine.handle_packet(_pkt(0.01, 0.02, 0.03), runtime_snapshot=captured)
+
+    assert moves == [(4, 2, 0)]
 
 
 def test_config_reload_and_focus_switch_publish_one_coherent_mapping(engine, monkeypatch):

@@ -59,10 +59,12 @@ try:
     check("socket.addon_connected", connected)
     print("clients:", broker.client_infos())
 
-    broker.set_scheme("viewpoint", "free", "to_center",
+    broker.activate_target("blender")
+    broker.set_scheme("blender", "camera", "free", "to_center",
                       advanced={"nav_mode": "orbit", "twist_action": "roll", "zoom_style": "zoom"})
     rot0 = rv.view_rotation.copy()
-    broker.submit(0.3, 0.2, 0.0, 0.0, 0.0, 0.0)            # one orbit delta on the BLE-thread side
+    broker.submit("blender", 0.3, 0.2, 0.0, 0.0, 0.0, 0.0,
+                  state_revision=1)                          # one orbit delta on the BLE-thread side
 
     # the broker's sender thread flushes to the socket; drain on the main thread until the view moves
     applied = False
@@ -86,8 +88,8 @@ try:
 
     def submit_and_drain(op, adv):
         rot = rv.view_rotation.copy()
-        broker.set_scheme(op, "free", "to_center", advanced=adv)
-        broker.submit(0.3, 0.2, 0.0, 0.0, 0.0, 0.0)
+        broker.set_scheme("blender", op, "free", "to_center", advanced=adv)
+        broker.submit("blender", 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, state_revision=1)
         for _ in range(100):
             time.sleep(0.05)
             tn._on_timer()
@@ -102,7 +104,7 @@ try:
 
     rv.view_location = Vector((0.0, 0.0, 0.0)); rv.view_distance = 8.0
     eye0 = tn._eye(rv)
-    submit_and_drain("viewpoint", {"nav_mode": "fly"})
+    submit_and_drain("camera", {"nav_mode": "fly"})
     check("socket.navmode_fly_keeps_eye", (tn._eye(rv) - eye0).length < 1e-3)
 finally:
     tn.unregister()

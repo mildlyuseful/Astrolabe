@@ -12,12 +12,13 @@ Threading model (Windows):
   * debug thread      -> optional pygame cube (--debug)
 The process stays alive on the Tk mainloop and exits only when tray -> Quit tears it down.
 """
+import copy
 import json
 import threading
 import tkinter as tk
 
 from . import integrations
-from .app_registry import APP_SPECS, resolve_foreground_context
+from .app_registry import APP_SPECS, APP_SPECS_BY_ID, resolve_foreground_context
 from .autocad_driver import AutoCADPluginLoader
 from .ble import start_ble_thread
 from .commands import SerializedCommandQueue, SetFocusedContext
@@ -45,14 +46,24 @@ from .output import OutputEngine
 from .paths import user_config_dir
 from .solidworks_driver import SolidWorksDriver
 from .runtime_state import ConfigRuntimeBaseResolver, FocusedContext, RuntimeStore
+from .settings_schema import SETTING_SPECS
 from .tray import TrayController
 from .ui import SettingsWindow
 from .util import get_logger
 from .winfocus import ForegroundMonitor, foreground_process_name
+from .windows_pointer import SendInputPointerButtonSink
 
 
 _NO_PACKET_APP = object()
 _NO_PACKET_REVISION = object()
+
+
+def _set_nested(container, path, value):
+    """Set one already-shaped dict/list path in a detached materialized profile."""
+    current = container
+    for key in path[:-1]:
+        current = current[key]
+    current[path[-1]] = copy.deepcopy(value)
 
 
 class App:
@@ -81,12 +92,13 @@ class App:
         self.device_adapters = DeviceAdapterRegistry(
             device_descriptors, self.ble_input_providers)
         self.binding_catalog = load_system_binding_profiles()
+        self.pointer_button_output = SendInputPointerButtonSink()
         self.binding_controller = BindingController(
             self._compiled_binding_profile(), self.commands, self.runtime,
-            config_store=self.config)
+            config_store=self.config, pointer_sink=self.pointer_button_output)
         self._binding_context = self.runtime.snapshot().focused_context
         self.input_aggregator.add_listener(self.binding_controller.handle_transition)
-        self.runtime.add_listener(self._on_runtime_binding_context_changed)
+        self.runtime.add_listener(self._on_runtime_state_changed)
         self._configure_binding_controls()
         self.stop_event = threading.Event()
         self._status = "starting"
@@ -144,6 +156,7 @@ class App:
         self._packet_app_key = _NO_PACKET_APP
         self._packet_state_revision = _NO_PACKET_REVISION
         self._last_scheme_pushed = {}
+        self._last_runtime_rate = {}
         self.foreground_monitor = ForegroundMonitor(self._on_foreground_process_changed)
         self._apply_rates()
         self._apply_schemes()
@@ -204,12 +217,12 @@ class App:
         for source_id in self.ble_input_providers:
             self.configure_ble_controls(source_id, required.get(source_id, ()))
 
-    def _on_runtime_binding_context_changed(self, event):
+    def _on_runtime_state_changed(self, event):
         context = event.snapshot.focused_context
-        if context == self._binding_context:
-            return
-        self._binding_context = context
-        self.binding_controller.context_changed()
+        if context != self._binding_context:
+            self._binding_context = context
+            self.binding_controller.context_changed()
+        self._apply_runtime_navigation_profile(event.snapshot)
 
     def _service_allowed(self, key):
         """Sensitive in-process services require both successful setup and Enabled=true."""
@@ -277,6 +290,70 @@ class App:
                 self.log.info("scheme -> %s: pivot=%s style=%s zoom=%s nav=%s"
                               % (key, scheme["orbit_pivot"], scheme["orbit_style"],
                                  scheme["zoom_mode"], nav))
+        runtime = getattr(self, "runtime", None)
+        if runtime is not None:
+            self._apply_runtime_navigation_profile(runtime.snapshot())
+
+    def _apply_runtime_navigation_profile(self, runtime_snapshot):
+        """Publish the focused app's runtime settings and daemon-authoritative nav mode."""
+        navigation = getattr(self, "navigation", None)
+        app_id = runtime_snapshot.focused_context.app_id
+        if navigation is None or app_id not in APP_SPECS_BY_ID:
+            return
+        app_spec = APP_SPECS_BY_ID[app_id]
+        settings = runtime_snapshot.effective_settings
+        config_snapshot = self.config.snapshot()
+        app_profile = config_snapshot.app_profile(app_id)
+        advanced = compose_advanced_with_host_baseline(app_id, app_profile.get("advanced"))
+        for setting in SETTING_SPECS:
+            if (setting.applies_to(app_spec) and setting.app_path[:1] == ("advanced",) and
+                    setting.setting_id in settings):
+                _set_nested(advanced, setting.app_path[1:], settings[setting.setting_id])
+        # Runtime state, not any host-local override or persisted navigation.mode value, is the
+        # authority delivered to rich add-ons.
+        advanced["nav_mode"] = runtime_snapshot.effective_navigation_mode
+        selection_override = settings.get(
+            "navigation.orbit.selection_override", True)
+        pivot_hold = settings.get("navigation.orbit.pivot_hold_seconds", 0.5)
+        zoom_hold = settings.get("navigation.zoom.cursor_hold_seconds", 0.5)
+        level_horizon = settings.get("navigation.level_horizon_on_entry", True)
+        fallbacks = normalize_orbit_pivot_fallbacks(
+            list(settings.get(
+                "navigation.orbit.pivot_fallbacks",
+                config_snapshot.global_value("navigation.orbit.pivot_fallbacks"))))
+        orbit_pivot = settings.get(
+            "navigation.orbit.pivot", config_snapshot.app_value(
+                app_id, "navigation.orbit.pivot"))
+        orbit_style = settings.get(
+            "navigation.orbit.style", config_snapshot.app_value(
+                app_id, "navigation.orbit.style"))
+        zoom_mode = settings.get(
+            "navigation.zoom.target", config_snapshot.app_value(
+                app_id, "navigation.zoom.target"))
+        advanced["host_baseline"] = host_baseline_payload(app_id)
+        advanced["selection_overrides_pivot"] = bool(selection_override)
+        advanced["orbit_hold_sec"] = pivot_hold
+        advanced["zoom_hold_sec"] = zoom_hold
+        advanced["level_horizon_on_entry"] = level_horizon
+        advanced["orbit_pivot_fallbacks"] = fallbacks
+        advanced["orbit_pivot_candidates"] = orbit_pivot_candidates(
+            orbit_pivot, fallbacks)
+        navigation.set_scheme(
+            app_id, orbit_pivot=orbit_pivot, orbit_style=orbit_style,
+            zoom_mode=zoom_mode, advanced=advanced,
+            selection_overrides_pivot=bool(selection_override),
+            orbit_pivot_fallbacks=fallbacks,
+            level_horizon_on_entry=level_horizon,
+            pivot_hold_sec=pivot_hold, zoom_hold_sec=zoom_hold)
+        rate = settings.get(
+            "navigation.refresh_rate", config_snapshot.app_value(
+                app_id, "navigation.refresh_rate"))
+        rates = getattr(self, "_last_runtime_rate", None)
+        if rates is None:
+            self._last_runtime_rate = rates = {}
+        if rates.get(app_id) != rate:
+            rates[app_id] = rate
+            navigation.set_rate(app_id, rate)
 
     def _app_rate(self, key):
         """Effective viewport/flush rate (Hz) for app `key`: its per-app override, or the global
@@ -352,9 +429,12 @@ class App:
         previous_revision = getattr(self, "_packet_state_revision", _NO_PACKET_REVISION)
         self._packet_app_key = key
         runtime = getattr(self, "runtime", None)
-        self._packet_state_revision = runtime.snapshot().revision if runtime is not None else 0
+        runtime_snapshot = runtime.snapshot() if runtime is not None else None
+        self._packet_state_revision = runtime_snapshot.revision if runtime_snapshot is not None else 0
         try:
-            self.engine.handle_packet(bytes(data))
+            if runtime_snapshot is not None:
+                self._apply_runtime_navigation_profile(runtime_snapshot)
+            self.engine.handle_packet(bytes(data), runtime_snapshot=runtime_snapshot)
         finally:
             self._packet_app_key = previous
             self._packet_state_revision = previous_revision
@@ -498,7 +578,10 @@ class App:
         # Called from the tray thread.
         self.stop_event.set()
         if getattr(self, "binding_controller", None) is not None:
-            self.binding_controller.release_all("daemon_shutdown")
+            try:
+                self.binding_controller.release_all("daemon_shutdown")
+            finally:
+                self.pointer_button_output.release_all()
         if getattr(self, "input_aggregator", None) is not None:
             self.input_aggregator.shutdown("daemon_shutdown")
         if getattr(self, "foreground_monitor", None) is not None:

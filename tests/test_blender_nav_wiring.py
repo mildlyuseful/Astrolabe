@@ -90,6 +90,16 @@ def test_blender_bundled_version_markers_stay_in_sync():
     assert ".".join(map(str, assignments["bl_info"]["version"])) == manifest_version
 
 
+def test_blender_navigation_mode_has_no_host_local_override():
+    source = (Path(__file__).parents[1] /
+              "trackball_daemon/plugins/blender/trackball_nav/__init__.py").read_text(
+                  encoding="utf-8")
+    assert 'nav_mode = adv.get("nav_mode", "orbit")' in source
+    assert "_mode_override" not in source
+    assert "TRACKBALL_NAV_OT_cycle_mode" not in source
+    assert "trackball_nav.cycle_mode" not in source
+
+
 def test_blender_addon_consumes_shared_zoom_target_and_behavior():
     source = (Path(__file__).parents[1] /
               "trackball_daemon/plugins/blender/trackball_nav/__init__.py").read_text(

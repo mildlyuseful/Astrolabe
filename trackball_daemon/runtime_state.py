@@ -11,6 +11,8 @@ import logging
 import threading
 from types import MappingProxyType
 
+from .app_registry import APP_SPECS_BY_ID
+
 
 logger = logging.getLogger("trackball_daemon.runtime_state")
 
@@ -41,6 +43,7 @@ class RuntimeBaseState:
     navigation_mode: str = "orbit"
     navigation_layer: str = "primary"
     settings: object = field(default_factory=dict)
+    supported_navigation_modes: tuple = NAVIGATION_MODES
 
     def __post_init__(self):
         if self.input_mode not in INPUT_MODES:
@@ -49,6 +52,11 @@ class RuntimeBaseState:
             raise ValueError(f"invalid base navigation mode: {self.navigation_mode}")
         if self.navigation_layer not in NAVIGATION_LAYERS:
             raise ValueError(f"invalid base navigation layer: {self.navigation_layer}")
+        modes = tuple(self.supported_navigation_modes)
+        if (not modes or any(mode not in NAVIGATION_MODES for mode in modes) or
+                self.navigation_mode not in modes):
+            raise ValueError("base navigation mode must be included in its supported modes")
+        object.__setattr__(self, "supported_navigation_modes", modes)
         object.__setattr__(self, "settings", _freeze(dict(self.settings)))
 
 
@@ -62,13 +70,19 @@ class ConfigRuntimeBaseResolver:
         snapshot = self._config_store.snapshot()
         settings = dict(snapshot.global_values)
         app_values = snapshot.app_values.get(context.app_id) if context.app_id else None
+        app_spec = APP_SPECS_BY_ID.get(context.app_id) if context.app_id else None
+        supported_modes = app_spec.supported_modes if app_spec else NAVIGATION_MODES
+        navigation_mode = (app_values or {}).get("navigation.mode", "orbit")
+        if navigation_mode not in supported_modes:
+            navigation_mode = supported_modes[0]
         if app_values is not None:
             settings.update(app_values)
         return RuntimeBaseState(
             input_mode=snapshot.global_value("input.mode.default"),
-            navigation_mode=(app_values or {}).get("navigation.mode", "orbit"),
+            navigation_mode=navigation_mode,
             navigation_layer="primary",
             settings=settings,
+            supported_navigation_modes=supported_modes,
         )
 
 
@@ -406,12 +420,20 @@ class RuntimeStore:
             "navigation.mode": base.navigation_mode,
             "navigation.layer": base.navigation_layer,
         }
-        state.update(draft.latched_state)
+        state.update({
+            field_name: value for field_name, value in draft.latched_state.items()
+            if (field_name != "navigation.mode" or
+                value in base.supported_navigation_modes)
+        })
         settings = dict(base.settings)
         settings.update(draft.latched_settings)
         active_tokens = [token for token in draft.request_tokens.values()
                          if token.matches_context(draft.focused_context)]
-        state_tokens = [token for token in active_tokens if not token.is_setting]
+        state_tokens = [
+            token for token in active_tokens if not token.is_setting and
+            self._dependency_graph.closure(token.identity.target).get(
+                "navigation.mode", base.navigation_mode) in base.supported_navigation_modes
+        ]
         for field_name, (_token, value) in self._viable_state_winners(state_tokens).items():
             state[field_name] = value
         setting_winners = {}
