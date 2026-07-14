@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation in progress (Phases 0–5 complete; Phase 6 in progress)
+Status: implementation in progress (Phases 0–6 complete; Phase 7 awaiting authorization)
 
 Target branch: `rich-keybindings`
 
@@ -73,7 +73,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 3 — Runtime state and dependency closure | COMPLETE | Start `91e5a09`; frozen ownership `a2310e8`; serialized store `4c94301`; dependency engine `a58c652`; consumer cutover `a39e81e`; items 3.1–3.5 complete | Wait for explicit `START PHASE 4`. |
 | 4 — Target-isolated navigation transport | COMPLETE | Start `43832a7`; protocol `abe757e`; implementation `23bc53e`; items 4.1–4.4 complete | Wait for explicit `START PHASE 5`. |
 | 5 — Input providers and Windows keyboard | COMPLETE | Start `2aa1c9b`; provider foundation `19c9ad1`; Raw Input/foreground `e16e340`; acceptance gate `d99a0de`; boundary reconciliation `0b99a6f`; hidden-release fail-safe `ce07604`; items 5.1–5.6 complete | Wait for explicit `START PHASE 6`. |
-| 6 — BLE five-way protocol and adapter | IN_PROGRESS | Start `af373fa`; frozen baseline `07b9450`; host protocol/adapters `b7aec6d`; firmware/docs `26146d1`; deferred-hardware contract `dd9bb48`; items 6.1–6.6 implemented for host and working test bench | Run the XIAO D0-to-GND jumper input/disconnect/reconnect/HID gate. Final five-way pins and physical qualification are explicitly deferred to Phase 11/release readiness. |
+| 6 — BLE five-way protocol and adapter | COMPLETE | Start `af373fa`; frozen baseline `07b9450`; host protocol/adapters `b7aec6d`; firmware/docs `26146d1`; hardware contract `dd9bb48`; jumper-gate ledger `d24a9bb`; items 6.1–6.6 complete | Wait for explicit `START PHASE 7`. Final five-way pins and physical qualification remain Phase 11/release work. |
 | 7 — Binding compiler, DSL, and system profiles | NOT_STARTED | — | Start after Phases 2, 3, 5, and 6 are COMPLETE. |
 | 8 — Motion/output integration | NOT_STARTED | — | Start after Phases 4 and 7 are COMPLETE. |
 | 9 — Barebones settings UX | NOT_STARTED | — | Start after Phases 2 and 7 are COMPLETE. |
@@ -380,10 +380,10 @@ treating that review as an authority:
   Phase 5 is `COMPLETE`, and begin the BLE five-way protocol and adapter work without starting
   Phase 7.
 
-### 0.12 Phase 6 in-progress checkpoint
+### 0.12 Phase 6 completion checkpoint
 
-- **Status:** `IN_PROGRESS` from starting commit `af373fa`; current protocol and hardware baseline
-  frozen in `docs/rich_keybindings_phase6_protocol.md`.
+- **Status:** `COMPLETE` from starting commit `af373fa`; protocol and hardware baseline frozen in
+  `docs/rich_keybindings_phase6_protocol.md`.
 - **Completed work:** mandatory bootstrap; Phase 5 dependency confirmation; 532-test untouched
   baseline; inventory of GATT UUIDs, byte-exact rotation packets, BLE transport ownership,
   controller/HID transitions, three-button test-bench pins and debounce, daemon-absent fallback,
@@ -414,22 +414,34 @@ treating that review as an authority:
   current full suite = 562 passed;
   compileall and `git diff --check` passed.
   Setuptools discovery now includes `trackball_daemon`, `trackball_daemon.input`, and
-  `trackball_daemon.devices`. `arduino-cli` is not installed in this workspace, so the sketch has
-  static compatibility coverage but still requires the documented board-toolchain compile/flash.
-- **Manual gate still required:** compile/flash `firmware/XIAO3389/XIAO3389.ino`; run
-  `python tools/ble_input_acceptance.py --name "Trackball BLE" --seconds 120`; use a jumper from D0
-  to GND to exercise initial state, Left press-hold-release, rapid transitions, motion, disconnect
-  while held, reconnect, and another press. Return the JSON and separately confirm that closing the
-  daemon/tool restores ordinary HID motion and the D0 button. This is sufficient to close the
-  Phase 6 development gate because later phases consume the normalized provider contract.
+  `trackball_daemon.devices`. The sketch compiled with the installed Arduino CLI, Seeed non-mbed
+  nRF52 1.1.12 core, and `Seeeduino:nrf52:xiaonRF52840` target: 137384 bytes program storage and
+  16160 bytes global data.
+- **Live gate:** passed on the XIAO3389 test bench. The acceptance run received 4635 motion
+  notifications; repeatedly decoded D0 Left and D1 Right press/release snapshots; accepted a reset
+  sequence baseline after each reconnect; emitted a synthetic D0 release when disconnected while
+  held; re-established input after two reconnects; and ended with no pressed controls. With all
+  daemon/test clients stopped, normal Windows Bluetooth HID motion and D0 left click both worked.
+- **Expected pre-integration behavior:** when the daemon subscribes, firmware controller mode
+  deliberately suppresses every HID report. Phase 6 normalizes the button but does not yet map it
+  back to an OS click, so D0 does not click in daemon Pointer mode at this checkpoint. Phase 7 must
+  compile a bounded momentary pointer-button action and Phase 8 must inject/release it, including
+  disconnect/reload/shutdown fail-safes. This is tracked work, not a firmware fallback failure.
+- **Adjacent lifecycle debt observed live:** two daemon instances (installed and source-tree)
+  could subscribe concurrently. Phase 8 must enforce single-daemon ownership before output
+  integration so competing clients cannot leave firmware controller ownership ambiguous.
 - **Deferred production gate:** the final switch is active-low with internal pull-ups and firmware
   debounce. Its mechanism ordinarily allows one direction, but protocol/host code deliberately
   accepts simultaneous declared bits as a contingency. Final pins, debounce tuning, and the real
   Up/Down/Left/Right/Center physical matrix remain an explicit Phase 11/release-readiness blocker;
   the jumper result must not be represented as final-hardware qualification.
-- **Next exact action:** wait for the live XIAO3389 jumper acceptance JSON and daemon-absent HID
-  result. If both pass, record the evidence, mark Phase 6 `COMPLETE`, set the next exact command to
-  `START PHASE 7`, and stop. Do not wait for the unfinished production pin map.
+- **Stop gate:** satisfied for the agreed test-bench development boundary. Automated protocol and
+  provider vectors, live motion/input/reconnect/held-disconnect behavior, compile/flash, and
+  daemon-absent HID fallback all passed. Production switch qualification remains explicitly
+  deferred and cannot be described as passed.
+- **Next exact action:** stop. On explicit `START PHASE 7`, rerun the mandatory bootstrap, confirm
+  Phase 6 is `COMPLETE`, and implement the binding compiler/DSL/profile work including the bounded
+  momentary pointer-button action. Do not start Phase 8.
 
 ## 1. Product goals
 
@@ -1359,8 +1371,10 @@ snapshot after subscription/reconnect.
 press/release events; disconnect always releases every control owned by that device instance.
 
 6.5 Preserve controller-mode HID suppression and transition releases. When the daemon is absent,
-ordinary HID operation remains available. Hardware-test debounce and physically possible switch
-combinations rather than guessing them into schema logic.
+ordinary HID operation remains available. While the daemon owns controller mode, normalized
+buttons intentionally await Phase 7/8 host actions rather than also emitting HID and risking double
+activation. Hardware-test debounce and physically possible switch combinations rather than
+guessing them into schema logic.
 
 6.6 Document a data-only device descriptor/adapter registration boundary for other BLE hardware.
 Remove the lost-controller-buttons TODO only when hardware and packet-vector tests pass. Update
@@ -1373,8 +1387,9 @@ publisher; live five-way and legacy compatibility.
 
 - Automated vectors cover sequence wraparound, duplicates, stale packets, missed transitions,
   reconnect, malformed input, and disconnect-held release.
-- Live Up/Down/Left/Right/Center events are indistinguishable from keyboard controls to the fake
-  binding consumer; legacy rotation-only and daemon-absent HID paths still work.
+- Live test-bench button events are indistinguishable from keyboard controls to the fake binding
+  consumer; legacy rotation-only and daemon-absent HID paths still work. Final production
+  Up/Down/Left/Right/Center qualification is a Phase 11/release gate.
 - Commit host+firmware+protocol work as one compatible boundary, mark Phase 6 `COMPLETE`, set next
   action to `START PHASE 7`, and stop.
 
@@ -1393,7 +1408,9 @@ publisher; live five-way and legacy compatibility.
 **Work**
 
 7.1 Define and validate developer-owned base profiles `astrolabe_5way` and `keyboard_only`.
-`astrolabe_5way` may include keyboard fallbacks. Store sparse user overrides under the selected
+`astrolabe_5way` may include keyboard fallbacks plus test-bench compatibility bindings for
+`ble.xiao3389:button.left/right/middle`; these preserve conventional pointer buttons without
+changing the final five-way switch semantics. Store sparse user overrides under the selected
 base-profile ID so switching away and back restores the correct customizations.
 
 7.2 Compile normalized chords and indexes by source token/context. Implement exact and
@@ -1401,13 +1418,19 @@ allow-extra-modifier policies, generic/left-right modifiers, modifier-only and c
 chords, context specificity, explicit priority, activation serial, and OS-repeat rejection.
 
 7.3 Implement hold and toggle activation, distinct press/release action lists, atomic active-set
-recomputation after every event, and release-all before profile/config recompilation.
+recomputation after every event, and release-all before profile/config recompilation. Track
+externally held output resources by binding activation identity so provider disconnect, profile
+reload, shutdown, and a replaced owner always synthesize the matching release.
 
 7.4 Implement the allowlisted declarative DSL: stable command/setting IDs; `set`, boolean or
 explicit two-value `toggle` (including numeric sensitivity presets), `cycle`, numeric
 `add`/`multiply`, identity-based `restore_previous`, and atomic action lists; app,
 executable, and input-profile conditions; capability/type/value validation; no Python/eval/shell or
 raw JSON-pointer targets.
+
+The allowlist also includes a narrow momentary `pointer_button` action for Left, Right, Middle,
+X1, and X2. It is valid only as paired press/release behavior, never as arbitrary key/scancode
+injection or a persistent toggle, and must participate in the release-all ownership rules.
 
 7.5 Disable invalid entries individually with actionable diagnostics. Add a non-running validation
 command suitable for contributors and packaged-build tests.
@@ -1455,6 +1478,11 @@ numbers, including sensitivity/gain. Persistent macro writes remain visibly expl
 daemon remains authoritative. Update Blender version markers and bundled metadata in the same
 commit if its add-on changes.
 
+8.6 Route compiled `pointer_button` actions through a dedicated SendInput press/release sink and
+ship the XIAO3389 Left/Right/Middle compatibility bindings. Enforce one daemon instance/one BLE
+controller owner before starting transport; a second installed or source-tree instance must exit
+with an actionable diagnostic instead of competing for subscriptions.
+
 **Safe internal checkpoints:** OutputEngine snapshot consumption; feature command integration;
 host-local state authority/versioning.
 
@@ -1463,6 +1491,9 @@ host-local state authority/versioning.
 - Existing bit-exact output, cursor/pointer-pivot, quaternion, and host camera tests remain green.
 - All requested mode/setting transitions work while the ball is stationary and affect only the
   foreground target; focus change during a hold resolves safely.
+- In daemon Pointer mode, XIAO3389 Left/Right/Middle produce conventional OS clicks without a
+  duplicate firmware HID report, and every disconnect/reload/shutdown path releases a held button.
+  A second daemon instance cannot acquire BLE/output ownership.
 - Commit integration and any synchronized add-on version change, mark Phase 8 `COMPLETE`, set next
   action according to the first incomplete Phase 9/10 dependency, and stop.
 

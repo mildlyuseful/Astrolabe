@@ -6,13 +6,19 @@ here.
 
 ## Highest priority
 
-- Flash and hardware-verify the Phase 6 input-state firmware on the XIAO3389 test bench: initial
-  snapshot, jumper press/hold/release, rapid transitions, disconnect while held, reconnect,
-  unchanged rotation, and daemon-absent HID fallback. Before replacing the honest
-  `firmware/Astrolabe` placeholder, supply the final Up/Down/Left/Right/Center pins and debounce
-  timing. Phase 11/release qualification must repeat the physical matrix on the production
-  five-way switch, including the simultaneous-input contingency; the jumper gate validates the
-  software boundary but does not substitute for final-hardware qualification.
+- In Phases 7/8, compile and deliver bounded momentary pointer-button actions so XIAO3389
+  Left/Right/Middle retain conventional clicks while daemon controller mode suppresses firmware
+  HID. Provider disconnect, profile reload, shutdown, and ownership replacement must release held
+  OS buttons; arbitrary virtual-key/scancode injection and persistent button toggles stay out of
+  the DSL.
+- Before Phase 8 output integration, enforce single-daemon ownership. Live Phase 6 testing found an
+  installed daemon and source-tree daemon subscribing concurrently; competing BLE/output owners
+  must fail with an actionable diagnostic instead of racing controller mode.
+- Before replacing the honest `firmware/Astrolabe` placeholder, supply the final
+  Up/Down/Left/Right/Center pins and debounce timing. Phase 11/release qualification must repeat the
+  physical matrix on the production five-way switch, including the simultaneous-input
+  contingency; the passed XIAO jumper gate validates the software boundary but does not substitute
+  for final-hardware qualification.
 
 ## Host feature parity
 
