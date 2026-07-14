@@ -57,17 +57,24 @@ def test_runtime_mode_survives_config_refresh_but_new_engine_uses_startup_defaul
     assert replacement.mode == OutputEngine.MODE_CURSOR
 
 
-def test_tray_mode_item_reads_and_mutates_output_engine_directly(monkeypatch):
-    """Freeze the Phase 0 ownership boundary before Phase 3 reroutes it."""
-    calls = []
+def test_tray_mode_item_reads_and_mutates_the_shared_runtime_authority(monkeypatch):
+    """The Phase 3 command boundary replaces direct OutputEngine ownership."""
+    from trackball_daemon.commands import RequestState, SerializedCommandQueue
+    from trackball_daemon.runtime_state import RuntimeBaseState, RuntimeStore
+
+    runtime = RuntimeStore(lambda _context: RuntimeBaseState(input_mode="pointer"))
+    commands = SerializedCommandQueue(runtime)
+    origins = []
+    runtime.add_listener(lambda event: origins.append(event.origin))
     engine = SimpleNamespace(
         mode=OutputEngine.MODE_CURSOR,
-        toggle_mode=lambda: calls.append("toggle"),
         reset_view=lambda: None,
     )
     controller = TrayController.__new__(TrayController)
     controller.app = SimpleNamespace(
         engine=engine,
+        runtime=runtime,
+        commands=commands,
         is_connected=lambda: False,
         app_connection_summary=lambda: "none",
         open_settings=lambda: None,
@@ -90,7 +97,13 @@ def test_tray_mode_item_reads_and_mutates_output_engine_directly(monkeypatch):
     mode_item = menu[4]
     assert mode_item.text(None) == "Mode: Pointer"
     mode_item.action(None, None)
-    assert calls == ["toggle"]
+    assert runtime.snapshot().effective_input_mode == "3d"
+    assert mode_item.text(None) == "Mode: 3D navigation"
+    commands.dispatch(RequestState(
+        origin="fake-provider", source="keyboard", binding_id="hold-pointer",
+        activation_id="hold-1", target="input.pointer"))
+    assert runtime.snapshot().effective_input_mode == "pointer"
+    assert origins == ["tray", "fake-provider"]
 
 
 def test_scheme_inheritance_uses_only_the_explicit_default_sentinel():

@@ -13,6 +13,8 @@ import threading
 
 from .config import host_baseline
 from .app_registry import binding_profile
+from .commands import SerializedCommandQueue, SetInputMode, ToggleInputMode
+from .runtime_state import ConfigRuntimeBaseResolver, RuntimeStore
 
 # ===========================================================================
 # Windows SendInput (relative pointer move + wheel), pure ctypes -- no dependency
@@ -166,8 +168,12 @@ class OutputEngine:
     MODE_CUBE = MODE_CUBE
     MODE_CURSOR = MODE_CURSOR
 
-    def __init__(self, config):
+    def __init__(self, config, runtime_store=None, command_queue=None):
         self.cfg = config
+        self.runtime = runtime_store or RuntimeStore(ConfigRuntimeBaseResolver(config))
+        self.commands = command_queue or SerializedCommandQueue(self.runtime)
+        if self.commands.runtime_store is not self.runtime:
+            raise ValueError("OutputEngine command queue must own the supplied runtime store")
         self.lock = threading.Lock()            # protects view state (orientation/pan/distance)
         self._mapping_lock = threading.RLock()  # serialize config reloads with foreground switches
         self._mapping = None
@@ -188,18 +194,18 @@ class OutputEngine:
         # Which app's 3D bindings to use (None => config "active_app"). The app sets this to
         # the focused CAD app so each app is driven with its own sensitivities.
         self._bindings_app = None
-        self.apply_config()
-        # default mode chosen only at startup (apply_config must NOT reset a live toggle)
-        self.mode = (MODE_CUBE if self.cfg.snapshot().global_value("input.mode.default") == "3d"
-                     else MODE_CURSOR)
+        self.apply_config(refresh_runtime=False)
         self._last_mode = self.mode
 
-    def apply_config(self):
+    def apply_config(self, *, refresh_runtime=True):
         """Build and atomically publish a complete mapping after a config change."""
         with self._mapping_lock:
             snapshot = self.cfg.snapshot()
             app_key = self._bindings_app or snapshot.selected_app
             self._mapping = self._build_mapping(app_key)
+        if refresh_runtime:
+            from .commands import RefreshRuntimeBase
+            self.commands.dispatch(RefreshRuntimeBase(origin="config"))
 
     def _build_mapping(self, app_key):
         """Build a mapping without exposing a partially refreshed set of fields."""
@@ -260,8 +266,18 @@ class OutputEngine:
         )
 
     # --- runtime controls (thread-safe) -------------------------------------------
+    @property
+    def mode(self):
+        return (MODE_CUBE if self.runtime.snapshot().effective_input_mode == "3d"
+                else MODE_CURSOR)
+
     def set_mode(self, mode):
-        self.mode = mode
+        canonical = {MODE_CUBE: "3d", MODE_CURSOR: "pointer", "3d": "3d",
+                     "pointer": "pointer"}.get(mode)
+        if canonical is None:
+            raise ValueError(f"invalid output mode: {mode!r}")
+        self.commands.dispatch(SetInputMode(origin="output-compat", mode=canonical))
+        return self.mode
 
     def set_active_bindings(self, key):
         """Atomically switch to app ``key`` and publish its complete mapping snapshot."""
@@ -272,7 +288,7 @@ class OutputEngine:
             self._mapping = mapping
 
     def toggle_mode(self):
-        self.mode = MODE_CURSOR if self.mode == MODE_CUBE else MODE_CUBE
+        self.commands.dispatch(ToggleInputMode(origin="output-compat"))
         return self.mode
 
     def reset_view(self):

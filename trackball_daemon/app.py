@@ -21,6 +21,7 @@ from .app_registry import (APP_SPECS, APP_SPECS_BY_ID, TransportKind,
                            resolve_foreground_context)
 from .autocad_driver import AutoCADPluginLoader
 from .ble import start_ble_thread
+from .commands import SerializedCommandQueue, SetFocusedContext
 from .config import (compose_advanced_with_host_baseline, host_baseline_payload,
                      normalize_orbit_pivot_fallbacks, orbit_pivot_candidates)
 from .config_store import ConfigStore
@@ -29,6 +30,7 @@ from .onshape_bridge import OnshapeBridge
 from .output import OutputEngine
 from .paths import user_config_dir
 from .solidworks_driver import SolidWorksDriver
+from .runtime_state import ConfigRuntimeBaseResolver, FocusedContext, RuntimeStore
 from .tray import TrayController
 from .ui import SettingsWindow
 from .util import get_logger
@@ -44,7 +46,9 @@ class App:
         self.log = get_logger()
         self.config = ConfigStore().load()
         self.first_run = self.config.first_run
-        self.engine = OutputEngine(self.config)
+        self.runtime = RuntimeStore(ConfigRuntimeBaseResolver(self.config))
+        self.commands = SerializedCommandQueue(self.runtime)
+        self.engine = OutputEngine(self.config, self.runtime, self.commands)
         self.stop_event = threading.Event()
         self._status = "starting"
         self._last_pushed = None
@@ -240,7 +244,10 @@ class App:
         return self._foreground_app_context().app_id
 
     def _active_app_key(self):
-        key = self._foreground_app_key()
+        return self._active_app_key_from_context(self._foreground_app_context())
+
+    def _active_app_key_from_context(self, context):
+        key = context.app_id
         if key is None:
             return None
         appcfg = self.config.snapshot().app_operational.get(key)
@@ -248,9 +255,20 @@ class App:
             return None
         return key
 
+    def _publish_runtime_context(self, app_id, executable=None):
+        commands = getattr(self, "commands", None)
+        if commands is None:
+            return
+        context = FocusedContext(app_id=app_id, executable=executable)
+        if self.runtime.snapshot().focused_context != context:
+            commands.dispatch(SetFocusedContext(origin="foreground", context=context))
+
     def _activate_nav_app(self, key):
         """Switch mappings/rate/scheme before transforming the focused app's next packet."""
         if key != self._engine_app:               # drive each app with its own bindings + rate
+            runtime = getattr(self, "runtime", None)
+            if runtime is not None and runtime.snapshot().focused_context.app_id != key:
+                self._publish_runtime_context(key)
             self._engine_app = key
             self.engine.set_active_bindings(key)
             self._apply_rates()
@@ -258,7 +276,9 @@ class App:
 
     def _handle_ble_packet(self, data):
         """Choose one focused app for both mapping and routing of this complete BLE packet."""
-        key = self._active_app_key()
+        context = self._foreground_app_context()
+        key = self._active_app_key_from_context(context)
+        self._publish_runtime_context(context.app_id, context.process_name)
         if key is not None:
             self._activate_nav_app(key)
         previous = getattr(self, "_packet_app_key", _NO_PACKET_APP)

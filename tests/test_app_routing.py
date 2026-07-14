@@ -199,7 +199,9 @@ def test_first_packet_after_focus_switch_uses_new_app_mapping(isolated_config, m
     app.engine.nav_sink = app._nav_sink
     monkeypatch.setattr(output_mod, "shift_held", lambda: False)
     focused = ["fusion360"]
-    app._active_app_key = lambda: focused[0]
+    app._foreground_app_context = lambda: SimpleNamespace(
+        app_id=focused[0], process_name=f"{focused[0]}.exe")
+    app._active_app_key_from_context = lambda context: context.app_id
     packet = struct.pack("<fff", 0.01, 0.02, 0.03)
 
     app._handle_ble_packet(packet)

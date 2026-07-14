@@ -9,7 +9,7 @@ import threading
 import pystray
 from PIL import Image, ImageDraw
 
-from .output import OutputEngine
+from .commands import ToggleInputMode
 
 # --- "Start at login" (Windows HKCU Run key) -------------------------------------------
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -76,8 +76,8 @@ class TrayController:
         return f"Status: {'Connected' if self.app.is_connected() else 'Disconnected'}"
 
     def _mode_text(self, _item):
-        is_cube = self.app.engine.mode == OutputEngine.MODE_CUBE
-        return f"Mode: {'3D navigation' if is_cube else 'Pointer'}"
+        mode = self.app.runtime.snapshot().effective_input_mode
+        return f"Mode: {'3D navigation' if mode == '3d' else 'Pointer'}"
 
     def _apps_text(self, _item):
         return f"Apps: {self.app.app_connection_summary()}"
@@ -89,7 +89,7 @@ class TrayController:
             pystray.MenuItem(self._status_text, None, enabled=False),
             pystray.MenuItem(self._apps_text, None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(self._mode_text, lambda icon, item: self.app.engine.toggle_mode()),
+            pystray.MenuItem(self._mode_text, self._toggle_mode),
             pystray.MenuItem("Recenter 3D view", lambda icon, item: self.app.engine.reset_view()),
             pystray.MenuItem("Start at login", self._toggle_startup,
                              checked=lambda item: is_startup_enabled()),
@@ -99,6 +99,9 @@ class TrayController:
 
     def _toggle_startup(self, icon, item):
         set_startup_enabled(not is_startup_enabled())
+
+    def _toggle_mode(self, _icon, _item):
+        self.app.commands.dispatch(ToggleInputMode(origin="tray"))
 
     def start(self):
         self._thread = threading.Thread(target=self.icon.run, name="tray", daemon=True)

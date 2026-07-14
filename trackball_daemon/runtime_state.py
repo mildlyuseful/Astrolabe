@@ -52,6 +52,26 @@ class RuntimeBaseState:
         object.__setattr__(self, "settings", _freeze(dict(self.settings)))
 
 
+class ConfigRuntimeBaseResolver:
+    """Resolve the live base from one immutable config snapshot and focused context."""
+
+    def __init__(self, config_store):
+        self._config_store = config_store
+
+    def __call__(self, context):
+        snapshot = self._config_store.snapshot()
+        settings = dict(snapshot.global_values)
+        app_values = snapshot.app_values.get(context.app_id) if context.app_id else None
+        if app_values is not None:
+            settings.update(app_values)
+        return RuntimeBaseState(
+            input_mode=snapshot.global_value("input.mode.default"),
+            navigation_mode=(app_values or {}).get("navigation.mode", "orbit"),
+            navigation_layer="primary",
+            settings=settings,
+        )
+
+
 @dataclass(frozen=True)
 class BindingEvent:
     binding_id: str

@@ -1118,6 +1118,6 @@ class SettingsWindow:
         return outer
 
     def _apply_default_mode(self):
-        mode = self.cfg.snapshot().global_value("input.mode.default")
-        self.app.engine.set_mode(self.app.engine.MODE_CUBE if mode == "3d"
-                                 else self.app.engine.MODE_CURSOR)
+        # ConfigStore's listener refreshes the context-aware runtime base through the command
+        # queue. A Global default edit must not create a latched runtime override.
+        return None

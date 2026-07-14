@@ -9,6 +9,15 @@ from .runtime_state import (
     NAVIGATION_LAYERS,
     NAVIGATION_MODES,
 )
+from .settings_schema import SETTING_SPECS_BY_ID
+
+
+def _validate_runtime_setting(setting_id, value):
+    spec = SETTING_SPECS_BY_ID.get(setting_id)
+    if spec is None or not spec.keybindable:
+        raise ValueError(f"setting is not runtime-keybindable: {setting_id}")
+    if not spec.validates(value):
+        raise ValueError(f"invalid runtime value for {setting_id}: {value!r}")
 
 
 @dataclass(frozen=True)
@@ -100,6 +109,7 @@ class SetRuntimeSetting(RuntimeCommand):
     def apply(self, draft, _previous):
         if not self.setting_id:
             raise ValueError("setting_id is required")
+        _validate_runtime_setting(self.setting_id, self.value)
         draft.set_setting_latch(self.setting_id, self.value)
 
 
@@ -157,6 +167,7 @@ class RequestSettingOverride(RuntimeCommand):
     def apply(self, draft, _previous):
         if not self.setting_id:
             raise ValueError("setting_id is required")
+        _validate_runtime_setting(self.setting_id, self.value)
         draft.request(
             binding_id=self.binding_id, activation_id=self.activation_id,
             target=f"setting:{self.setting_id}", source=self.source,

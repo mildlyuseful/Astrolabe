@@ -18,12 +18,14 @@ from trackball_daemon.commands import (
     ToggleInputMode,
 )
 from trackball_daemon.runtime_state import (
+    ConfigRuntimeBaseResolver,
     DependencyGraph,
     FocusedContext,
     RuntimeBaseState,
     RuntimeStore,
     StateNode,
 )
+from trackball_daemon.config_store import ConfigStore
 
 
 def _base(context):
@@ -56,6 +58,25 @@ def test_context_change_re_resolves_base_without_destroying_latched_state():
     assert changed.effective_input_mode == "3d"
     assert changed.base_settings["pointer.cursor.gain"] == 100.0
     assert changed.focused_context.executable == "explorer.exe"
+
+
+def test_config_base_resolution_uses_the_focused_app_and_global_input_default(tmp_path):
+    config = ConfigStore(tmp_path / "config.json").load()
+    with config.transaction() as tx:
+        tx.set_global("input.mode.default", "pointer")
+        tx.set_app("blender", "navigation.mode", "fly")
+        tx.set_app("blender", "navigation.orbit.sensitivity", 3.0)
+    runtime = RuntimeStore(ConfigRuntimeBaseResolver(config))
+    commands = SerializedCommandQueue(runtime)
+    snapshot = commands.dispatch(SetFocusedContext(
+        context=FocusedContext(app_id="blender", executable="blender.exe")))
+    assert snapshot.base_input_mode == "pointer"
+    assert snapshot.base_navigation_mode == "fly"
+    assert snapshot.base_settings["navigation.orbit.sensitivity"] == 3.0
+    desktop = commands.dispatch(SetFocusedContext(
+        context=FocusedContext(executable="explorer.exe")))
+    assert desktop.base_input_mode == "pointer"
+    assert desktop.base_navigation_mode == "orbit"
 
 
 def test_command_batch_publishes_one_coherent_snapshot():
