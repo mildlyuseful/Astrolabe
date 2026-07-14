@@ -56,7 +56,7 @@ class CapabilityPredicate:
 
 @dataclass(frozen=True)
 class SystemDefaultSource:
-    """Current source location; Phase 2 will repoint this to ``system_defaults.json``."""
+    """Developer-owned source location in ``system_defaults.json``."""
 
     global_path: tuple = ()
     app_path: tuple = ()
@@ -206,10 +206,8 @@ def _app(setting_id, path, kind, label, capability, *, category, help_text="",
         scope=SettingScope.GLOBAL_AND_APP,
         capability=predicate,
         system_default_source=SystemDefaultSource(
-            global_path=(("default_profiles",) + tuple(global_path)
-                         if global_path and global_path[0] == "general"
-                         else ("python_defaults",) + tuple(global_path) if global_path else ()),
-            app_path=("default_profiles", "resolved_app_profile") + tuple(path)),
+            global_path=("system_defaults", "global", setting_id),
+            app_path=("system_defaults", "apps", "*", setting_id)),
         ui=_ui(label, help_text, control or ("checkbox" if kind is ValueKind.BOOLEAN
                                              else "choice" if kind is ValueKind.ENUM else "entry")),
         operations=operations or (_BOOL_OPS if kind is ValueKind.BOOLEAN else
@@ -232,7 +230,7 @@ def _global(setting_id, path, kind, label, *, category, help_text="", control=No
         scope=SettingScope.GLOBAL_ONLY,
         capability=CapabilityPredicate(),
         system_default_source=SystemDefaultSource(
-            global_path=("default_profiles",) + tuple(path)),
+            global_path=("system_defaults", "global", setting_id)),
         ui=_ui(label, help_text, control or ("checkbox" if kind is ValueKind.BOOLEAN
                                              else "choice" if kind is ValueKind.ENUM else "entry")),
         operations=operations or (_BOOL_OPS if kind is ValueKind.BOOLEAN else
@@ -247,11 +245,13 @@ def _global(setting_id, path, kind, label, *, category, help_text="", control=No
 _SPECS = [
     # Device identity remains editable but is deliberately not in the keybindable command surface.
     SettingSpec("device.name", ValueKind.STRING, "device", SettingScope.DEVICE,
-                CapabilityPredicate(), SystemDefaultSource(("python_defaults", "device", "name")),
+                CapabilityPredicate(), SystemDefaultSource(
+                    ("system_defaults", "device", "device.name")),
                 _ui("Device name", "BLE advertised name; applies on reconnect.", "entry"),
                 frozenset({SettingOperation.UI_PERSIST}), global_path=("device", "name")),
     SettingSpec("device.address", ValueKind.STRING, "device", SettingScope.DEVICE,
-                CapabilityPredicate(), SystemDefaultSource(("python_defaults", "device", "address")),
+                CapabilityPredicate(), SystemDefaultSource(
+                    ("system_defaults", "device", "device.address")),
                 _ui("Device address", "Optional BLE address; applies on reconnect.", "entry"),
                 frozenset({SettingOperation.UI_PERSIST}), global_path=("device", "address")),
 

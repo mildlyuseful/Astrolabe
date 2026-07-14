@@ -40,7 +40,7 @@ def test_host_profiles_are_loaded_from_separate_packaged_raw_file():
     assert raw["schema"] == 1
     assert tuple(raw["profiles"]) == HOST_PROFILE_APP_KEYS
     pyproject = (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
-    assert '"host_profiles.json", "default_profiles.json", "plugins/**/*"' in pyproject
+    assert '"host_profiles.json", "default_profiles.json", "system_defaults.json"' in pyproject
 
 
 def test_host_alignment_has_exactly_one_owner_for_every_app():

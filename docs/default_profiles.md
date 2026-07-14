@@ -1,23 +1,23 @@
-# Host baselines and shipped default profiles
+# Host baselines and System Defaults
 
-Software alignment and shipped user preference are separate packaged developer files. Neither is
+Software alignment and shipped settings are separate packaged developer files. Neither is
 edited by the normal settings UI:
 
 - `trackball_daemon/host_profiles.json` is packaged developer data. `config.py` validates it at
   startup and exposes it as the runtime-immutable `HOST_BASELINE_PROFILES` mapping.
-- `trackball_daemon/default_profiles.json` is the editable source for the settings a clean install
-  and **Reset to defaults** receive. `general` contains General-tab defaults, `common` contains the
-  complete per-app setting suite, and `profiles` contains only each host's overrides. A null
-  per-app `level_horizon_on_entry` means inherit the General default.
+- `trackball_daemon/system_defaults.json` is the authoritative base-installed profile. `global`
+  exhaustively covers every non-device `SettingSpec`, `device` covers the non-keybindable device
+  identity settings, and `apps` contains only concrete host-specific overrides. It is validated
+  against both canonical registries at startup; inheritance sentinels are forbidden.
+- `trackball_daemon/default_profiles.json` is frozen compatibility data for exact v8-to-v9
+  migration. It retains v8's `0`, `"default"`, null/missing, and `general.buttons` conventions so
+  migration can distinguish linked values from pinned user values. Do not use it for new defaults.
 - `%APPDATA%/TrackballDaemon/config.json` is per-user state. The normal UI edits only this layer;
   user gains start at their defaults and all user inversion checkboxes start unchecked.
-- `_DEFAULT_APP_PROFILES` is the validated, resolved in-memory view of `default_profiles.json`.
-  `default_app_profile()` always returns a deep copy, so reset/edit code cannot mutate the defaults.
-- `config.py` keeps only each app's operational bootstrap fields (`enabled`, `installed`, and
-  `addin_version`) in Python. Bindings, schemes, holds, advanced routing, and other resettable
-  navigation values are merged from the resolved JSON profile rather than duplicated in code.
-- `APP_PROFILE_FIELDS` defines the complete atomic reset boundary. Operational state (`enabled`,
-  `installed`, and `addin_version`) is intentionally outside it.
+- `SYSTEM_DEFAULTS` is the validated, immutable in-memory view. Accessors return detached values,
+  so config transactions cannot mutate the developer-owned layer.
+- Operational fields (`enabled`, `installed`, and `addin_version`) remain outside the setting
+  hierarchy and are preserved independently.
 
 The removed **Shipped profiles** menu had no separate profile operation: it selected the same app as
 the adjacent **Editing app** dropdown. It was redundant and has been removed. The remaining
@@ -103,17 +103,19 @@ only the orbit pivot. The still older `view_pivot_hold_sec` name was already mig
    `pytest -q`. Invalid signs, non-positive scales, malformed action paths, or missing app profiles
    fail fast at daemon import/startup.
 
-### Shipped user defaults
+### System Defaults
 
-1. Stop the daemon and open `trackball_daemon/default_profiles.json`.
-2. Change `general` for the General-tab defaults. Change `common` when every app should ship with
-   the same value, such as `orbit_pivot_hold_sec` or `zoom_cursor_hold_sec`.
-3. Add a value beneath one app in `profiles` only when that host needs a different default. Nested
-   dictionaries are deep-merged with `common`; omitted values inherit it.
-4. Restart the daemon. Existing user configs keep their saved preferences; use **Reset to defaults**
-   on an app to test its newly resolved shipped profile. A clean config uses the file immediately.
-5. Run `pytest -q tests/test_default_profiles.py tests/test_config_migration.py`, then the full suite.
+1. Stop the daemon and open `trackball_daemon/system_defaults.json`.
+2. Change `global` for the installed base value. Every registered non-device setting must remain
+   present, including settings that only some applications expose.
+3. Add a stable setting ID beneath one app only when that host intentionally ships with a different
+   concrete value. Omission inherits the System global value; never write `0`, `"default"`, or null
+   to mean inheritance.
+4. Restart the daemon. Existing Global and app overrides remain user-owned; resets resolve against
+   the revised System layer.
+5. Run `pytest -q tests/test_system_defaults.py tests/test_config_migration.py`, then the full suite.
 
 Change `host_profiles.json` only for software-convention/suite-alignment corrections. Change
-`default_profiles.json` for intuitive user-facing defaults. Do not reintroduce non-neutral
+`system_defaults.json` for intuitive user-facing defaults. Keep `default_profiles.json` unchanged
+unless the v8 migration contract itself is deliberately versioned. Do not reintroduce non-neutral
 sign/scale constants in integration camera math.
