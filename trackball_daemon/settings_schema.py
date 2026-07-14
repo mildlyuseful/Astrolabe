@@ -446,6 +446,14 @@ COMMAND_SPECS = (
     CommandSpec("navigation.layer.set", "Set navigation layer",
                 "Set the primary or secondary action layer.", "navigation",
                 targets=("primary", "secondary"), value_kind=ValueKind.ENUM),
+    CommandSpec("pointer.button.press", "Press pointer button",
+                "Press one bounded OS pointer button through the Phase 8 output sink.", "pointer",
+                targets=("left", "right", "middle", "x1", "x2"),
+                value_kind=ValueKind.ENUM),
+    CommandSpec("pointer.button.release", "Release pointer button",
+                "Release one bounded OS pointer button through the Phase 8 output sink.", "pointer",
+                targets=("left", "right", "middle", "x1", "x2"),
+                value_kind=ValueKind.ENUM),
 )
 COMMAND_SPECS_BY_ID = MappingProxyType({spec.command_id: spec for spec in COMMAND_SPECS})
 

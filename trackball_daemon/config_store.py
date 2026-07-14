@@ -29,6 +29,10 @@ from .config_resolver import (
     validate_override_maps,
 )
 from .paths import config_path
+from .input.bindings import (
+    SYSTEM_INPUT_PROFILE_IDS,
+    validate_keybinding_override_suite,
+)
 from .settings_schema import (
     APP_INTERNAL_PROFILE_PATHS,
     SETTING_SPECS,
@@ -42,7 +46,7 @@ from .system_defaults import SYSTEM_DEFAULTS
 
 CONFIG_VERSION = 9
 DEFAULT_INPUT_PROFILE = "astrolabe_5way"
-INPUT_PROFILES = (DEFAULT_INPUT_PROFILE, "keyboard_only")
+INPUT_PROFILES = SYSTEM_INPUT_PROFILE_IDS
 logger = logging.getLogger("trackball_daemon.config_store")
 
 APP_OPERATIONAL_FIELDS = ("enabled", "installed", "addin_version")
@@ -311,10 +315,7 @@ def validate_v9_state(state):
         raise ValueError("invalid selected app")
     if state["input_profile"] not in INPUT_PROFILES:
         raise ValueError("invalid input profile")
-    if (not isinstance(state["keybinding_overrides"], dict) or
-            set(state["keybinding_overrides"]) != set(INPUT_PROFILES) or
-            not all(isinstance(value, dict) for value in state["keybinding_overrides"].values())):
-        raise ValueError("invalid keybinding override suite")
+    validate_keybinding_override_suite(state["keybinding_overrides"])
     resolved_globals = resolve_all_globals(state["global_overrides"])
     physical_sources = [
         resolved_globals[f"input.axis_orientation.{axis}.source"].value
@@ -464,6 +465,19 @@ class ConfigTransaction:
 
     def set_selected_app(self, app_id):
         self._operations.append(("set_selected_app", app_id))
+        return self
+
+    def set_input_profile(self, profile_id):
+        self._operations.append(("set_input_profile", profile_id))
+        return self
+
+    def set_keybinding_override(self, profile_id, binding_id, patch):
+        self._operations.append((
+            "set_keybinding_override", profile_id, binding_id, copy.deepcopy(patch)))
+        return self
+
+    def clear_keybinding_override(self, profile_id, binding_id):
+        self._operations.append(("clear_keybinding_override", profile_id, binding_id))
         return self
 
     def set_bridge_port(self, port):
@@ -699,6 +713,14 @@ class ConfigStore:
             state["apps"][app_id].update(values)
         elif kind == "set_selected_app":
             state["ui_state"]["selected_app"] = operation[1]
+        elif kind == "set_input_profile":
+            state["input_profile"] = operation[1]
+        elif kind == "set_keybinding_override":
+            profile_id, binding_id, patch = operation[1:]
+            state["keybinding_overrides"][profile_id][binding_id] = patch
+        elif kind == "clear_keybinding_override":
+            profile_id, binding_id = operation[1:]
+            state["keybinding_overrides"][profile_id].pop(binding_id, None)
         elif kind == "set_bridge_port":
             state["bridge"]["port"] = operation[1]
         elif kind == "set_onshape":
@@ -759,6 +781,16 @@ class ConfigStore:
 
     def set_selected_app(self, app_id):
         return self.transaction().set_selected_app(app_id).commit()
+
+    def set_input_profile(self, profile_id):
+        return self.transaction().set_input_profile(profile_id).commit()
+
+    def set_keybinding_override(self, profile_id, binding_id, patch):
+        return self.transaction().set_keybinding_override(
+            profile_id, binding_id, patch).commit()
+
+    def clear_keybinding_override(self, profile_id, binding_id):
+        return self.transaction().clear_keybinding_override(profile_id, binding_id).commit()
 
 
 # Short compatibility spelling for imports while consumers move to the store boundary.

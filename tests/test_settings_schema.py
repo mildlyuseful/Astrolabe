@@ -155,6 +155,7 @@ def test_command_allowlist_contains_no_setup_lifecycle_or_arbitrary_execution_su
     expected = {
         "state.request", "state.release", "input.mode.set", "input.mode.toggle",
         "navigation.mode.set", "navigation.mode.cycle", "navigation.layer.set",
+        "pointer.button.press", "pointer.button.release",
     }
     assert set(COMMAND_SPECS_BY_ID) == expected
     forbidden = {"install", "setup", "certificate", "network", "shell", "python", "eval",
