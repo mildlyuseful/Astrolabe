@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation design only
+Status: implementation in progress (Phases 0–1 complete)
 
 Target branch: `rich-keybindings`
 
@@ -68,7 +68,7 @@ commit only the intended files, record the commit in this table, and wait.
 | Phase | Status | Checkpoint | Next exact action |
 |---|---|---|---|
 | 0 — Baseline contracts and Windows-input spike | COMPLETE | Start `d25944d`; checkpoint `cf9d116`; items 0.1–0.5 complete | Wait for explicit `START PHASE 1` or independently authorized `START PHASE 4`. |
-| 1 — App and setting registries | IN_PROGRESS | Start `30b1598`; no checkpoint commit yet | Inventory app/setting metadata owners, then implement immutable registries and migrate consumers. |
+| 1 — App and setting registries | COMPLETE | Start `30b1598`; registries `2183f45`; consumer cutover `0c23104`; items 1.1–1.4 complete | Wait for explicit `START PHASE 2`. |
 | 2 — Sparse System→Global→app config | NOT_STARTED | — | Start only after Phase 1 is COMPLETE. |
 | 3 — Runtime state and dependency closure | NOT_STARTED | — | Start only after Phase 2 is COMPLETE. |
 | 4 — Target-isolated navigation transport | NOT_STARTED | — | May be split/merged independently only after Phase 0 contracts exist. |
@@ -127,6 +127,54 @@ treating that review as an authority:
   acceptance. Synthetic F24 was not treated as proof of those cases.
 - **Next exact action:** stop. On `START PHASE 1`, run the full bootstrap and Phase 1 start gate. If
   the user instead chooses the independent broker fix, require `START PHASE 4` and run its gate.
+
+### 0.7 Phase 1 checkpoint
+
+- **Status:** `COMPLETE` from starting commit `30b1598`; registry checkpoint `2183f45`; complete
+  consumer-cutover checkpoint `0c23104`.
+- **Completed work:** 1.1 immutable `AppSpec` registry; 1.2 exhaustive `SettingSpec` and allowlisted
+  `CommandSpec` registries; 1.3 registry-owned process/transport routing plus explicit Onshape
+  disconnected, connected-background, and connected-foreground resolution; 1.4 identity,
+  capability, default-value, path-coverage, command-security, and immutability tests.
+- **Canonical ownership decisions:** `app_registry.APP_SPECS` is the sole code-owned app identity and
+  order table. `integrations.AppDef` retains setup/detection/install behavior but references the
+  exact immutable `AppSpec`; `config.HOST_PROFILE_APP_KEYS` derives from `APP_IDS`. App capability
+  profiles and option restrictions live under `AppSpec`, while `settings_schema.py` owns stable
+  setting/command IDs, types, validators, scope, System-default source metadata, capability
+  predicates, UI metadata, and allowed operations. The temporary `binding_schema.py` facade was
+  deleted after all production, test, documentation, and UI-demo consumers migrated.
+- **Coverage/classification:** all 85 leaf paths in the resolved v8 app-profile superset are either
+  registered user settings, capability-inactive for the specific app, or one of ten explicitly
+  internal runtime parameters. `enabled`, `installed`, and `addin_version` remain operational.
+  Every current Global-page path is registered except the three proven-unused `general.buttons`
+  leaves, which are explicitly classified as deprecated for the tested Phase 2 v9 removal.
+  Device name/address remain persistent UI settings but are not keybindable. The non-setting
+  command allowlist contains state/input/navigation actions only and exposes no setup, install,
+  certificate, network, shell, Python, startup, or device-identity action.
+- **Behavior preserved:** executable matching remains case-insensitive substring matching of the
+  same process hints; all desktop transports retain their prior route. A connected Onshape bridge
+  does not select Onshape unless a registered browser process is foreground; the bridge's own
+  viewport-focus signal remains the fine gate. No config version, config shape, user value,
+  navigation math, UI behavior, host add-on, firmware, or daemon version changed.
+- **Files changed:** new `trackball_daemon/app_registry.py` and `settings_schema.py`; registry
+  consumers in `app.py`, `config.py`, `integrations.py`, `output.py`, and `ui.py`; deletion of
+  `binding_schema.py`; focused registry/routing/default/parity tests; `HANDOFF.md`, feature/app
+  maintainer docs, and the non-runtime Fable v2 metadata references.
+- **User-owned files left untouched:** `.claude/` and
+  `docs/rich_keybindings_plan_revisions.md` remain untracked and were not staged.
+- **Verification:** initial untouched Phase 1 focus suite = 66 passed; final focused registry and
+  consumer suite = 106 passed; final `python -m pytest -q` = 424 passed. The complete
+  `python -m compileall -q trackball_daemon tests`, AutoCAD NavMath `ALL PASS`, and
+  `git diff --check` checks also passed.
+- **Deferred boundary:** `SystemDefaultSource` records the current v8 packaged/Python source paths;
+  Phase 2 must repoint them to validated `system_defaults.json` while preserving the stable IDs.
+  Legacy `cube`/`cursor`, materialized profiles, inheritance sentinels, and deprecated buttons are
+  deliberately unchanged until the v8→v9 migration. No live-host verification was required because
+  routing semantics were preserved and covered at the packet/focus boundary.
+- **Next exact action:** stop. On `START PHASE 2`, rerun the complete bootstrap, confirm this
+  checkpoint, mark Phase 2 `IN_PROGRESS`, and freeze v8 fixtures for every inheritance sentinel,
+  equal/different app value, malformed file, operational field, and legacy name before changing
+  config storage.
 
 ## 1. Product goals
 
