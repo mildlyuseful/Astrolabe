@@ -69,7 +69,7 @@ commit only the intended files, record the commit in this table, and wait.
 |---|---|---|---|
 | 0 — Baseline contracts and Windows-input spike | COMPLETE | Start `d25944d`; checkpoint `cf9d116`; items 0.1–0.5 complete | Wait for explicit `START PHASE 1` or independently authorized `START PHASE 4`. |
 | 1 — App and setting registries | COMPLETE | Start `30b1598`; registries `2183f45`; consumer cutover `0c23104`; items 1.1–1.4 complete | Wait for explicit `START PHASE 2`. |
-| 2 — Sparse System→Global→app config | NOT_STARTED | — | Start only after Phase 1 is COMPLETE. |
+| 2 — Sparse System→Global→app config | IN_PROGRESS | Start `de0f42f`; no checkpoint commit yet | Freeze complete v8 migration fixtures before implementing System defaults or v9 storage. |
 | 3 — Runtime state and dependency closure | NOT_STARTED | — | Start only after Phase 2 is COMPLETE. |
 | 4 — Target-isolated navigation transport | NOT_STARTED | — | May be split/merged independently only after Phase 0 contracts exist. |
 | 5 — Input providers and Windows keyboard | NOT_STARTED | — | Start after Phases 0 and 3 are COMPLETE. |

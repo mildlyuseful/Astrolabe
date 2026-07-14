@@ -1,0 +1,8 @@
+{
+  "version": 8,
+  "general": {"default_mode": "cursor"},
+  "active_app": "rhino",
+  "apps": {
+    "rhino": {"enabled": true, "installed": false, "addin_version": ""}
+  }
+}
