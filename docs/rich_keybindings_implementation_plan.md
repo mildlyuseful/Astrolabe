@@ -319,6 +319,51 @@ treating that review as an authority:
   3 are complete, reread the Phase 0 Windows-input decision, mark Phase 5 `IN_PROGRESS`, and begin
   the provider/aggregator contract without starting Phase 6.
 
+### 0.11 Phase 5 in-progress checkpoint
+
+- **Status:** `IN_PROGRESS` from starting commit `2aa1c9b`; normalized provider foundation
+  checkpoint `19c9ad1`; Raw Input/foreground lifecycle checkpoint `e16e340`.
+- **Completed work:** 5.1 immutable `InputEvent`, `InputControlDescriptor`, provider health/status,
+  provider lifecycle interface, and atomic cross-provider pressed-set aggregation; 5.2 lazy
+  message-only Raw Input receiver using `RIDEV_INPUTSINK` without `RIDEV_NOLEGACY`, a bounded
+  enqueue-only native callback path, and daemon startup/shutdown ownership; 5.3 generic and
+  left/right modifier descriptors, configured-control filtering, repeat-edge rejection, known
+  internal injection-marker filtering, and pass-through registration; 5.4 atomic release on profile
+  reload/disable, failure, lock, suspend, unregister, and shutdown plus input-desktop-gated
+  `GetAsyncKeyState` reconciliation on resume/restart; 5.5 an independent foreground monitor routed
+  through the same runtime/app context boundary as BLE packets; 5.6 security/runtime inventory and
+  a production-provider acceptance tool.
+- **Backend decision preserved:** Raw Input remains primary. No physical failure has been observed,
+  so the documented low-level-hook fallback is not authorized. Raw Input has no universal injected
+  provenance flag; the initial command surface does not inject keyboard input, while explicit known
+  `ExtraInformation` markers can be filtered without claiming arbitrary injection detection.
+- **Files changed:** new `trackball_daemon/input/` model, aggregator, and Windows provider;
+  `app.py` lifecycle wiring; `winfocus.py` monitor; focused provider/foreground/security tests;
+  `tools/windows_input_acceptance.py`; `docs/security.md`; `HANDOFF.md`; and this ledger.
+- **User-owned files left untouched:** `.claude/` and
+  `docs/rich_keybindings_plan_revisions.md` remain untracked and were not staged.
+- **Verification:** untouched Phase 5 baseline `python -m pytest -q` = 502 passed; Phase 5.1 focus =
+  27 passed; provider/native focus = 19 passed; lifecycle/runtime focus = 71 passed; security and
+  input focus = 58 passed; current full suite = 530 passed. `python -m compileall -q
+  trackball_daemon tests tools/windows_input_acceptance.py` and `git diff --check` passed. Native
+  message-window registration/unregistration passed. Elevated automated F24 acceptance passed with
+  one background `input_sink` press, repeat suppression, one release, unchanged foreground, and no
+  held shutdown state. The first sandboxed injector attempt received WinError 5 and is not counted
+  as backend evidence; the explicitly approved elevated run passed.
+- **Manual gate still required:** from a non-elevated terminal, run
+  `python tools/windows_input_acceptance.py --interactive --seconds 20` twice: first with ordinary
+  Notepad foreground, then with an Administrator/elevated Notepad foreground. In each run press and
+  release left/right Ctrl, Shift, and Alt, type `A`, and optionally press F12. Confirm `A` reaches
+  Notepad and return the JSON plus the pass-through result. Do not mark Phase 5 complete from
+  synthetic F24 or source inspection.
+- **Tests still required after manual evidence:** record the exact ordinary/elevated result, rerun
+  the full suite, compileall, AutoCAD NavMath, automated production-provider F24 acceptance, and
+  `git diff --check`; then update this section and the ledger row to `COMPLETE` or diagnose a
+  physical Raw Input failure before reconsidering the Phase 0 backend decision.
+- **Next exact action:** wait for the two physical acceptance results. On success, close Phase 5 and
+  set the next command to `START PHASE 6`. On failure, reproduce and classify normalization versus
+  Raw Input/access behavior; do not switch to a low-level hook silently.
+
 ## 1. Product goals
 
 The finished control system should support:
