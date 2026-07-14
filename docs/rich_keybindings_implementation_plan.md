@@ -12,9 +12,97 @@ This document supersedes the earlier conversational plan for rich keybindings. I
 dependent control states, keyboard and BLE-device buttons, system keybinding presets, sparse
 Global-to-app inheritance, a declarative macro DSL, and a deliberately minimal text UI/HUD.
 
-The work should be implemented incrementally on one branch. Refactor-only commits should preserve
-current behavior before new behavior is enabled. A realistic estimate for one experienced engineer
-is 7–11 engineer-weeks plus live host and hardware verification.
+The work should be implemented as checkpointed phases on `rich-keybindings`. Refactor-only commits
+must preserve current behavior before new behavior is enabled. Each completed delivery gate is a
+merge candidate; merging, rebasing, or opening a PR happens only on explicit user instruction so
+the implementation can remain reviewable without forcing one long-lived integration strategy.
+
+A realistic estimate for one experienced engineer is **10–16 engineer-weeks**, including the live
+Windows, firmware, hardware, packaged-build, and five-host verification required by this plan.
+Export/import and a visual priority editor are post-MVP unless explicitly pulled into scope.
+
+## 0. Execution protocol and durable handoff ledger
+
+This section is the authority for continuing work after a context compaction or a new session. Do
+not infer progress from conversation memory alone.
+
+### 0.1 Start and stop commands
+
+- `START PHASE N` authorizes only Phase N and its listed incidental debt fixes.
+- `CONTINUE PHASE N` resumes an already-started phase from the ledger's **Next exact action**.
+- `STOP AFTER CHECKPOINT` finishes the smallest currently safe substep, runs its stated focused
+  verification, updates this ledger, and waits.
+- Completing a phase does **not** authorize starting the next phase. After recording the checkpoint,
+  stop and wait for the next `START PHASE N` command.
+- The only valid first implementation command is **`START PHASE 0`**.
+
+### 0.2 Mandatory session bootstrap
+
+At the beginning of every implementation or continuation session:
+
+1. Read this entire document, especially this ledger and the active phase's start/stop gate.
+2. Read `HANDOFF.md`, `TODO.md`, and any files named in **Files in scope** for the active phase.
+3. Run `git status --short --branch`, `git log -5 --oneline --decorate`, and inspect existing diffs.
+4. Preserve unrelated user changes. Never assume an uncommitted file belongs to this feature.
+5. Confirm that the prior phase's required checkpoint exists before editing a later phase.
+6. Update the ledger to `IN_PROGRESS` before the first code edit.
+
+### 0.3 Mandatory checkpoint record
+
+Before ending a phase, pausing for compaction, or yielding because of a blocker, update the active
+ledger row with:
+
+- Status: `NOT_STARTED`, `IN_PROGRESS`, `COMPLETE`, or `BLOCKED`.
+- Starting commit and latest checkpoint commit, if any.
+- Completed numbered work items and the first incomplete item.
+- Files changed and any user-owned files deliberately left untouched.
+- Exact tests run, their results, and tests still required.
+- Decisions made, rejected alternatives, migration/protocol versions, and unresolved risks.
+- One **Next exact action** that can be followed without reconstructing prior reasoning.
+
+When a phase is complete, update the relevant repository docs/TODO ledgers in the same checkpoint,
+commit only the intended files, record the commit in this table, and wait.
+
+### 0.4 Execution ledger
+
+| Phase | Status | Checkpoint | Next exact action |
+|---|---|---|---|
+| 0 — Baseline contracts and Windows-input spike | IN_PROGRESS | Start `d25944d`; items 0.1–0.5 complete; checkpoint commit pending | Audit the intended diff, commit Phase 0 tests/docs/tool, then record the checkpoint hash and mark COMPLETE. |
+| 1 — App and setting registries | NOT_STARTED | — | Start only after Phase 0 is COMPLETE. |
+| 2 — Sparse System→Global→app config | NOT_STARTED | — | Start only after Phase 1 is COMPLETE. |
+| 3 — Runtime state and dependency closure | NOT_STARTED | — | Start only after Phase 2 is COMPLETE. |
+| 4 — Target-isolated navigation transport | NOT_STARTED | — | May be split/merged independently only after Phase 0 contracts exist. |
+| 5 — Input providers and Windows keyboard | NOT_STARTED | — | Start after Phases 0 and 3 are COMPLETE. |
+| 6 — BLE five-way protocol and adapter | NOT_STARTED | — | Start after Phase 5 provider contract is COMPLETE. |
+| 7 — Binding compiler, DSL, and system profiles | NOT_STARTED | — | Start after Phases 2, 3, 5, and 6 are COMPLETE. |
+| 8 — Motion/output integration | NOT_STARTED | — | Start after Phases 4 and 7 are COMPLETE. |
+| 9 — Barebones settings UX | NOT_STARTED | — | Start after Phases 2 and 7 are COMPLETE. |
+| 10 — Text HUD | NOT_STARTED | — | Start after Phase 8 runtime snapshots are COMPLETE. |
+| 11 — Full verification and release docs | NOT_STARTED | — | Start after Phases 0–10 are COMPLETE. |
+
+The dependencies above are stricter than numeric order where necessary. Phase 4 is an existing bug
+fix and may be implemented or merged earlier, but its code must still honor the Phase 0 contracts.
+
+### 0.5 Review dispositions that future sessions must preserve
+
+These decisions incorporate the useful parts of `rich_keybindings_plan_revisions.md` without
+treating that review as an authority:
+
+- Accept identity-owned hold tokens, deterministic most-recent fallback, profile-keyed binding
+  overrides, bounded v8 link inference, BLE serial-number arithmetic, lazy keyboard registration,
+  foreground-monitor HUD placement, latest-state-wins UI coalescing, and same-phase TODO/version
+  cleanup.
+- Correct the review's physical-state recommendation: `GetKeyState` is message-queue state and is
+  not suitable for reconciliation. Raw Input is the preferred event backend, with
+  `GetAsyncKeyState` used only for lifecycle reconciliation; Phase 0 may select a low-level hook only
+  with recorded evidence and the required watchdog.
+- Keep `astrolabe_5way` as the installed product default because this daemon primarily exists for
+  that hardware. Offer `keyboard_only` explicitly and show missing-device capability state; do not
+  silently choose or switch profiles based on transient BLE detection.
+- Treat delivery gates as optional merge candidates, not mandatory integration events. Git history
+  operations remain user-directed.
+- Keep export/import and a visual priority editor post-MVP; retain non-running DSL validation because
+  it materially supports safe open-source contribution.
 
 ## 1. Product goals
 
@@ -60,7 +148,9 @@ cannot represent press/release transitions, chords, current-held HUD state, or a
 changes settings while the ball is stationary.
 
 **Required fix:** remove keyboard inspection from motion mapping and introduce event-producing input
-providers plus an input-state aggregator.
+providers plus an input-state aggregator. On Windows, prefer Raw Input on a dedicated message-only
+window: it produces transitions while the daemon is unfocused without suppressing ordinary app
+input. Phase 0 must validate that choice before it becomes a permanent dependency.
 
 ### 3.2 Controller-mode buttons disappear
 
@@ -131,9 +221,9 @@ Blender’s local override through the daemon.
 The daemon calls 3D mode `cube` because of the old debug window. `active_app` also means the app
 selected in settings/fallback profile in some places, not necessarily the foreground app.
 
-**Incidental fixes:** migrate `cube` to `3d`, retain backward compatibility at config load, and
-rename `active_app` to an explicit UI/fallback field. Runtime foreground app must never come from
-that value.
+**Incidental fixes:** migrate `cube` to `3d` and `cursor` to `pointer`, retain backward compatibility
+at config load, and rename `active_app` to an explicit UI/fallback field. Runtime foreground app
+must never come from that value.
 
 ## 4. Architectural decisions
 
@@ -185,6 +275,21 @@ transaction.
 Dependencies are held overrides, not destructive writes. Releasing a leaf removes its derived
 dependency token and reveals any remaining request or base state.
 
+Contradictory requests use one deterministic precedence tuple:
+
+1. Explicit binding priority.
+2. Context specificity: executable/app/profile-specific conditions outrank broader conditions.
+3. Chord specificity: exact matches outrank permissive matches, then more-specific chords outrank
+   less-specific chords.
+4. Activation serial: the most recently activated request wins when the first three fields tie.
+
+A derived dependency inherits its leaf request's entire precedence tuple and activation identity.
+For example, if an older `orbit.secondary` hold and a newer `fly.primary` hold are both active, the
+newer contradictory Fly request wins; releasing it reveals the still-held Orbit secondary request.
+This is stack-like fallback, not destruction of the older request. The compiler still rejects
+duplicate bindings with the same chord, context, and priority, because those would activate in the
+same event and have no meaningful recency distinction.
+
 ### 4.2 Keep exact matching but make it a binding policy
 
 The default policy should remain exact modifier matching because it is predictable. Each binding
@@ -200,6 +305,12 @@ stores its resolved policy.
 
 Specific exact chords outrank permissive matches. Equal-specificity conflicts are rejected unless
 the user assigns an explicit priority.
+
+Dependency closure does not secretly weaken exact matching. If separate exact `Ctrl` and exact
+`Shift` bindings exist with no `Ctrl+Shift` binding, the combined chord is intentionally uncovered.
+The editor/compiler should warn about that reachable gap. A shipped profile must avoid a surprising
+no-op by either defining explicit `Ctrl+Shift` Pan or marking the Shift Pan binding
+`allow_extra_modifiers`; the choice remains visible and user-editable.
 
 ### 4.3 Use one normalized input model for keyboard and device controls
 
@@ -231,8 +342,23 @@ The aggregator owns the complete pressed set across providers. Cross-provider ch
 although device capability metadata may warn when a physical switch cannot produce certain
 simultaneous directions.
 
-Provider disconnect, daemon shutdown, profile reload, session lock, and hook failure synthesize
-releases for every control owned by that provider.
+The Windows keyboard provider should use Raw Input (`RIDEV_INPUTSINK`) on a dedicated message-only
+window, without `RIDEV_NOLEGACY`, so configured keys remain pass-through to the active app. Register
+it lazily only while the compiled profile contains enabled keyboard bindings. Its window procedure
+must enqueue compact events and return quickly; normalization, matching, and command execution run
+off the message callback. Reconcile configured controls outside that callback with
+`GetAsyncKeyState` after lifecycle discontinuities. If physical state cannot be read reliably—for
+example across a locked/inactive desktop or an access boundary—release all keyboard-owned controls
+rather than risk a stuck hold.
+
+A low-level keyboard hook is a fallback only if the Phase 0 spike proves Raw Input cannot satisfy an
+acceptance case. That fallback requires a dedicated hook thread, a heartbeat/watchdog that detects
+silent hook removal, reinstallation followed by state reconciliation, and the same fail-safe release
+behavior. `GetKeyState` is not the reconciliation API: it reports message-queue state rather than
+the immediate physical state needed here.
+
+Provider disconnect, daemon shutdown, profile reload, session lock, receiver failure/restart, and
+device removal synthesize releases for every control owned by that provider.
 
 ### 4.4 Separate persisted base settings from runtime overrides
 
@@ -249,6 +375,11 @@ Host baselines are not user defaults and remain separately immutable.
 
 Hold actions never write the config file. Runtime toggles also default to non-persistent. A macro
 may explicitly request a persistent setting change, but the UI should label that action clearly.
+Each hold owns an override token keyed by binding ID, activation instance, target, and source. Two
+holds affecting the same setting therefore remain independently removable. The base resolver takes
+the current app/context as input instead of treating Pointer/3D or any other base setting as a
+process-wide scalar; that keeps the state interface open to future per-app automatic Pointer/3D
+selection without another ownership refactor.
 
 ### 4.5 Use sparse overrides to represent links
 
@@ -263,7 +394,10 @@ Proposed user config shape:
     "fusion360": {}
   },
   "input_profile": "astrolabe_5way",
-  "keybinding_overrides": {},
+  "keybinding_overrides": {
+    "astrolabe_5way": {},
+    "keyboard_only": {}
+  },
   "ui_state": {
     "selected_app": "blender"
   }
@@ -288,7 +422,7 @@ that apply only to capable apps.
 Macros and UI-created bindings compile into the same command model. Initial operations:
 
 - `set`
-- `toggle`
+- boolean or explicit two-value `toggle`
 - `cycle`
 - numeric `add`
 - numeric `multiply`
@@ -298,6 +432,10 @@ Macros and UI-created bindings compile into the same command model. Initial oper
 
 Every target is a stable `SettingSpec` or `CommandSpec` identifier. JSON pointers into raw config
 and Python function names are forbidden.
+
+`restore_previous` is declarative sugar for removing the current binding activation's own runtime
+override token. It must never write a value captured at press time: another hold, app-focus change,
+Global edit, or profile change may have altered the correct underlying value while the key was held.
 
 ## 5. System defaults, Global settings, and per-app UX
 
@@ -334,13 +472,17 @@ profile for a later switch back.
 
 - `global_overrides` starts empty: every Global setting displays its System-default value.
 - Every app override map starts empty: all applicable app settings are linked to Global.
-- The installer/first-run selection chooses `astrolabe_5way` when the compatible control service is
-  detected, otherwise `keyboard_only`. The user can always switch manually.
+- The installed product default is `astrolabe_5way`, even when the device is not currently present;
+  first-run setup also offers an explicit `keyboard_only` choice. The chosen profile persists and
+  must not auto-switch behind the user as BLE availability changes. The Astrolabe profile may ship
+  useful keyboard fallbacks, and the UI reports unavailable device controls as capability status.
 
 ### 5.4 Global page behavior
 
 - Global must be generated from the setting registry and exhaustively include every user-tunable
-  per-app setting, grouped by category. Capability-specific settings say where they apply.
+  per-app setting. Render registry categories as ordinary Tk sub-tabs so one exhaustive page does
+  not become an unbounded form; a category may scroll when necessary. Capability-specific settings
+  say where they apply.
 - A Global control inheriting System default displays the resolved value and a `System default`
   marker.
 - Editing creates a Global override.
@@ -351,8 +493,10 @@ profile for a later switch back.
 
 ### 5.5 Per-app setting behavior
 
-- Linked settings are visually distinct using plain controls: prefix `🔗`, disable the editor, and
-  show the effective Global value in the disabled control. No custom artwork is required.
+- Linked settings are visually distinct using plain controls: prefix `🔗`, use a subdued linked
+  style, and show the effective Global value. Do not make the editor truly non-interactive: its
+  first edit must be able to atomically unlink and apply the new value. No custom artwork is
+  required.
 - Clicking the link marker while linked unlinks and copies the current effective Global value.
 - Clicking it while unlinked relinks and deletes the local override.
 - Attempting to edit a linked control unlinks first and applies the chosen value.
@@ -363,7 +507,7 @@ profile for a later switch back.
 
 Per-app header controls:
 
-- **Link all** indicator/button in the top-right:
+- **Link all** indicator/button in the top-right, grouped with the reset as compact red actions:
   - Unbroken when all applicable settings follow Global; clicking it breaks all links by
     materializing current effective Global values.
   - Broken when any setting is local; clicking it deletes every app override and restores all
@@ -407,6 +551,12 @@ Benefits:
 The initial Astrolabe device descriptor maps five bits to Up, Down, Left, Right, and Center.
 Legacy three-button test-bench hardware can receive its own descriptor without changing the
 binding engine.
+
+Treat the sequence as an unsigned 16-bit serial number. Given `delta = (incoming - last) & 0xffff`,
+`delta == 0` is a duplicate, `1..0x7fff` is newer (including wraparound), and `0x8000..0xffff` is
+stale/out of order and must be discarded. A new subscription/reconnect session resets the baseline
+and accepts its first well-formed snapshot unconditionally. The protocol must not reuse a prior
+session's baseline to judge a restarted device.
 
 ### 6.3 Add a device adapter boundary
 
@@ -512,6 +662,8 @@ Keep Tk and standard widgets. Add only the minimum framework required:
 - Per-app page generated from the same metadata plus app capability predicates.
 - Keybindings page with profile selector, binding list, record-chord action, activation type,
   context, values/actions, match policy, enable/delete, and validation text.
+- Show a concise pass-through warning when a keyboard chord contains non-modifier keys: activating
+  the binding does not prevent the foreground app from receiving those keys.
 - An Advanced button that opens the declarative JSON source or its folder.
 - Link/reset text or Unicode markers. Do not create image assets.
 
@@ -520,8 +672,9 @@ foundation a later top-layer redesign will consume.
 
 ### 8.2 Persistent text HUD
 
-Implement a separate non-activating Tk `Toplevel` anchored to the current monitor’s work area. Use
-plain labels only, for example:
+Implement a separate non-activating Tk `Toplevel` anchored to the work area of the monitor containing
+the foreground window. Fall back to the cursor monitor and then the primary monitor only when there
+is no valid foreground window. Use plain labels only, for example:
 
 ```text
 Astrolabe · 3D
@@ -539,7 +692,9 @@ Required Windows behavior:
 - Optional always-on-top and click-through settings.
 - Primary/current-monitor anchor, margin, opacity, show/hide, and last-binding timeout.
 - Reposition on work-area, display, foreground-window, and DPI changes.
-- UI updates through a thread-safe event queue drained on the Tk thread.
+- UI updates through a bounded, coalescing queue drained on the Tk thread. Runtime snapshots use
+  latest-state-wins semantics so a burst cannot create a stale HUD backlog; discrete diagnostic
+  messages, if any, use a separately bounded path.
 
 Store semantic text descriptors such as `primary_help` and `secondary_help` in the control-state
 metadata. A future visual UI can replace the text renderer without changing the state engine.
@@ -549,202 +704,580 @@ metadata. A future visual UI can replace the text renderer without changing the 
 Complexity uses 1 = small and 5 = very difficult. Feasibility uses 1 = doubtful and 5 = high
 confidence for this project.
 
+Every phase below is a bounded authorization unit. **Files in scope** names the expected ownership
+area, not permission to rewrite an entire file unnecessarily. If implementation discovers a change
+outside that area, record it as a follow-up unless it is required to meet the phase's stop gate.
+Safe internal checkpoints are valid places to honor `STOP AFTER CHECKPOINT` or survive compaction.
+At a stop gate, commit the phase's intended changes locally, update the execution ledger, report the
+exact verification, and wait; do not push, merge, open a PR, or start another phase without explicit
+instruction.
+
 ### Phase 0 — Baseline and behavior contracts
 
 **Complexity 2/5 · Feasibility 5/5**
 
-1. Create the feature branch and record current automated results.
-2. Add architecture-decision tests around current Shift behavior, mode changes, app profile
-   inheritance, config preservation, and broker routing before refactoring.
-3. Add explicit tests proving `general.buttons` currently has no runtime consumer, then remove that
-   obsolete UI/config contract only when the new input profile migration lands.
-4. Define stable vocabulary: System default, Global, linked, app override, host baseline, input
-   mode, navigation mode, action layer, input profile, and binding context.
+**Start gate**
 
-Exit: current behavior is captured and the refactor can be reviewed as behavior-preserving.
+- Required command: `START PHASE 0`.
+- Confirm branch `rich-keybindings`, perform the section 0.2 bootstrap, and set ledger Phase 0 to
+  `IN_PROGRESS` with the current commit as its starting point.
+- No later phase may be started in the same authorization.
+- Files in scope: existing tests, `docs/`, `HANDOFF.md`, `TODO.md`, and a disposable diagnostic under
+  `tools/` if the Windows-input spike needs one. Production behavior is not changed in this phase.
+
+**Work**
+
+0.1 Run and record the complete existing automated suite plus packaged/static checks that already
+exist. Classify any pre-existing failure; do not silently normalize it into the feature baseline.
+
+0.2 Add behavior-contract tests for current Shift sampling, Pointer/3D changes, app setting
+inheritance, corruption-preserving config recovery, host-baseline ownership, focus identity, and
+broker routing. Do **not** add a misleading test that merely proves `general.buttons` has no
+consumer; record that verified debt and test its removal in the v9 migration instead.
+
+0.3 Write the stable glossary used by later APIs: System default, Global, linked, app override,
+host baseline, input mode, navigation mode, action layer, input profile, binding context, requested
+state, effective state, and foreground app.
+
+0.4 Run a small Windows input spike comparing Raw Input on a dedicated message-only window with the
+low-level keyboard-hook fallback. Acceptance cases:
+
+- Background press/release and modifier-only chords while another ordinary app has focus.
+- Left/right modifier identity, repeats, AltGr/layout behavior, and pass-through behavior.
+- No focus steal and no use of key suppression.
+- Registration/unregistration and synthetic release on profile disable, session lock, and shutdown.
+- A documented elevated-app/access-boundary result; inability to observe safely must release state.
+- Callback work limited to decoding/enqueueing, with observable provider heartbeat/lifecycle.
+
+Prefer Raw Input with `RIDEV_INPUTSINK` and no `RIDEV_NOLEGACY`. Choose the low-level hook only when
+the spike records a concrete failed acceptance case that Raw Input cannot meet. If the hook wins,
+the architecture decision must require a heartbeat/watchdog, automatic reinstall, and
+`GetAsyncKeyState` reconciliation; it must not use `GetKeyState` as physical-state truth.
+
+0.5 Record the input-backend decision and its evidence in `docs/` so Phase 5 can implement it without
+reopening the design. Update the ledger with the selected backend and any manual tests that could
+not be automated.
+
+**Safe internal checkpoints:** after 0.1 baseline capture; after 0.3 contract tests/glossary; after
+0.4 spike evidence.
+
+**Stop gate**
+
+- The original full suite and the new contract tests pass, or every pre-existing exception is
+  explicitly recorded.
+- The Raw Input versus hook decision, lifecycle contract, and fallback conditions are durable docs.
+- No production control behavior changed.
+- Commit only baseline tests/docs/tools, mark Phase 0 `COMPLETE`, set the next action to wait for
+  either `START PHASE 1` or the independently authorized `START PHASE 4`, then stop.
 
 ### Phase 1 — App and setting registries
 
 **Complexity 4/5 · Feasibility 5/5**
 
-1. Introduce `AppSpec`, consolidating app key/name, process selectors, supported modes, setting
-   capabilities, and transport type.
-2. Keep installer functions in `integrations.py`, but have setup metadata reference the registry
-   rather than duplicating identity.
-3. Introduce exhaustive `SettingSpec` and `CommandSpec` registries.
-4. Generate both Global and per-app applicability from these registries.
-5. Move process hints out of `App` and expose an accurate Onshape focus state.
+**Start gate**
 
-Debt paid: duplicated app identity/capability sources and hand-coded field applicability.
+- Required command: `START PHASE 1`; Phase 0 must be `COMPLETE`.
+- Files in scope: `trackball_daemon/app.py`, `binding_schema.py`, `integrations.py`, `winfocus.py`,
+  expected new `app_registry.py`, `settings_schema.py`, and their focused tests.
+- Capture the existing app IDs, process hints, setting paths, capability predicates, setup metadata,
+  and Onshape browser-focus special case before moving ownership.
 
-Exit: every user-tunable setting has one stable ID, validator, scope, capability rule, System
-default source, and permitted keybinding operations.
+**Work**
+
+1.1 Introduce immutable `AppSpec` records that own stable app ID/display name, process selectors,
+supported modes, setting capabilities, transport kind, and special focus resolution. Installer
+functions stay in `integrations.py` but reference registry identity.
+
+1.2 Introduce exhaustive `SettingSpec` records with stable ID, type, validator, category, scope,
+capability predicate, System-default source, UI metadata, and allowed runtime/persistent operations.
+Introduce `CommandSpec` for non-setting actions and exclude sensitive lifecycle/setup operations.
+
+1.3 Move `App._APP_PROC_HINTS` and other duplicated metadata behind the registry. Model Onshape as
+connected-versus-foreground states explicitly rather than treating a connected browser as active.
+
+1.4 Add registry integrity tests: unique stable IDs, full default coverage, valid capabilities,
+known process selectors, no duplicate owners, and every current user-tunable per-app field either
+registered or deliberately classified as operational/non-user-tunable.
+
+**Safe internal checkpoints:** AppSpec and identity tests; SettingSpec/CommandSpec coverage;
+consumer migration with old compatibility shims removed.
+
+**Stop gate**
+
+- Existing integration metadata/routing tests and new registry integrity tests pass.
+- Every user-tunable setting has one registry owner; app identity and process selection no longer
+  have competing tables.
+- Update relevant documentation, commit the registry boundary, mark Phase 1 `COMPLETE`, set next
+  action to `START PHASE 2`, and stop.
 
 ### Phase 2 — Sparse System→Global→app configuration
 
 **Complexity 5/5 · Feasibility 4/5**
 
-1. Add `system_defaults.json` and validate full setting coverage.
-2. Add sparse `global_overrides` and `app_overrides` storage.
-3. Replace `"default"`, absent-special-case, and numeric-sentinel inheritance with one resolver.
-4. Rename the UI/config concept General→Global and legacy `cube`→`3d`.
-5. Rename ambiguous `active_app` to `ui_state.selected_app` or an equally explicit field.
-6. Add typed, locked config transactions and immutable published snapshots.
-7. Replace silently swallowed listener errors with logged subscriber failures and observable config
-   validation errors.
-8. Implement v8→v9 migration that preserves effective existing behavior:
-   - Convert values equal to their old inherited value into links.
-   - Materialize only actual differences as sparse overrides.
-   - Preserve installation/enable/version state.
-   - Preserve malformed source files under the established recovery policy.
+**Start gate**
 
-Debt paid: inconsistent inheritance, unsafe mutable config writes, ambiguous names, and broad
-silent notifications.
+- Required command: `START PHASE 2`; Phase 1 must be `COMPLETE`.
+- Files in scope: `trackball_daemon/config.py`, `default_profiles.json`, expected
+  `config_store.py`/`system_defaults.json`, config/default/profile tests, package manifests, and
+  terminology docs. UI rendering itself remains Phase 9.
+- Freeze v8 fixtures covering every inheritance sentinel, equal/different app values, malformed
+  files, operational fields, and legacy `cube`/`cursor` names before writing migration code.
 
-Exit: fresh installs are System→Global→app linked; migrations are behavior-preserving and fully
-tested.
+**Work**
+
+2.1 Add validated `system_defaults.json` with complete registry coverage, including app-specific
+System defaults where needed. Add package-data assertions before consumers switch to it.
+
+2.2 Implement one pure resolver for System→Global→app precedence. Missing override means inherit;
+remove `"default"`, missing-field exceptions, and numeric sentinels from the new model.
+
+2.3 Add typed, locked transactions, copy-on-publish immutable snapshots, structured change events,
+and logged subscriber failures. Convert callers away from direct `config.data` mutation in bounded
+consumer groups; compatibility reads may exist only inside the store until all consumers migrate.
+
+2.4 Implement v8→v9 as a one-time, source-aware migration:
+
+- Reconstruct the v8 inherited value using the exact shipped v8 defaults and legacy rules.
+- If a materialized app value equals that inherited value, omit it in v9 so it follows Global.
+- If it differs, pin it as an explicit app override, even if a future System default happens to
+  match. This is the bounded heuristic: migration preserves current behavior and cannot infer old
+  user intent beyond equality to the old inherited value.
+- Preserve installation/enabled/version and other operational state outside the setting hierarchy.
+- Translate `cube`→`3d`, `cursor`→`pointer`, and `active_app`→`ui_state.selected_app`; accept legacy
+  names on read for one compatibility cycle but write only canonical names.
+- Remove obsolete `general.buttons` data only under an explicit v9 migration rule and test that v9
+  never writes it.
+- Write v9 only after full validation; retain the original file under the established recovery
+  policy if migration fails.
+
+2.5 Add transaction concurrency/reentrancy tests, listener-failure observability tests, exhaustive
+resolver tables, fresh-install empty maps, and both migration branches: equal becomes linked,
+different remains pinned.
+
+**Safe internal checkpoints:** System-default schema; pure resolver; transaction store; migration
+fixtures and compatibility aliases; final consumer cutover.
+
+**Stop gate**
+
+- Fresh installs resolve every Global value from System defaults and every app value through
+  Global, with empty override maps.
+- v8 fixtures preserve effective values, both link/pin heuristic branches pass, malformed input is
+  preserved, and v9 output contains no old sentinels/buttons or legacy names.
+- No remaining feature consumer mutates raw config dictionaries; subscriber errors are observable.
+- Commit the complete schema/migration boundary, mark Phase 2 `COMPLETE`, set next action to
+  `START PHASE 3`, and stop.
 
 ### Phase 3 — Runtime state, commands, and dependency closure
 
 **Complexity 5/5 · Feasibility 4/5**
 
-1. Implement the serialized control runtime and immutable `RuntimeSnapshot`.
-2. Implement requested-state tokens, dependency closure, priorities, and release/fallback.
-3. Add a single command path used by tray, settings, keybindings, and later BLE input.
-4. Publish focused app, effective input/nav/layer state, active bindings, and last action through a
-   typed event bus.
-5. Add cycle detection and deterministic conflict rules to the state graph.
+**Start gate**
 
-Debt paid: scattered runtime authority and direct tray/engine mutation.
+- Required command: `START PHASE 3`; Phase 2 must be `COMPLETE`.
+- Files in scope: expected `runtime_state.py`, `commands.py`, `tray.py`, relevant state/config/app
+  consumers, and focused runtime tests. Real keyboard/BLE providers remain out of scope; use fakes.
+- Freeze current tray mode changes and OutputEngine mode ownership in tests before rerouting them.
 
-Exit: unit tests demonstrate Shift-alone cascading Pan, explicit Ctrl+Shift Pan, atomic transition
-back to Ctrl-held Orbit, overlapping holds, and no stuck dependencies.
+**Work**
+
+3.1 Implement a serialized command queue/runtime store and immutable `RuntimeSnapshot` containing
+focused context, base/effective Pointer/3D, navigation mode/layer, held binding identities, latched
+overrides, last binding event, and monotonically increasing revision.
+
+3.2 Implement identity-owned request tokens and transitive dependency closure from section 4.1.
+Derived prerequisites inherit the leaf token's precedence. Detect cycles at graph construction.
+
+3.3 Apply the exact precedence tuple from section 4.1. Test contradictory holds in both activation
+orders and prove release reveals the older still-held request. Test two independent holds on the
+same setting so `restore_previous` removes only its own token.
+
+3.4 Implement one typed command path for tray, settings, future bindings, and providers. Route
+existing tray/state mutation through it; command transactions publish one coherent snapshot rather
+than observable intermediate dependency states.
+
+3.5 Keep base resolution context-aware even if initial Pointer/3D defaults are global. This is the
+extension seam for later per-app automatic Pointer/3D selection.
+
+**Safe internal checkpoints:** serialized store/snapshots; dependency/token engine; command consumer
+cutover and event publication.
+
+**Stop gate**
+
+- Pure tests cover Shift-alone cascading Pan, explicit Ctrl+Shift Pan in both key orders, fallback
+  to Ctrl-held Orbit, contradictory Fly/Orbit holds, same-setting overlapping holds, cycles,
+  priorities, context changes, and release-all.
+- Tray and fake-provider commands have one runtime authority; no camera motion is required.
+- Commit the runtime/command boundary, mark Phase 3 `COMPLETE`, set next action to either
+  `START PHASE 4` if not complete or `START PHASE 5`, and stop.
 
 ### Phase 4 — Target-isolated navigation transport
 
 **Complexity 4/5 · Feasibility 5/5**
 
-1. Introduce a target-aware navigation envelope.
-2. Maintain per-app broker accumulator, scheme/profile revision, and rate.
-3. Deliver only to matching client handshakes.
-4. Adapt SolidWorks and Onshape behind the same router interface without rewriting their camera
-   math.
-5. Drop or finish old-target accumulation deterministically on focus changes.
+**Start gate**
 
-Debt paid: the existing multi-client background-viewport bug and one-global-scheme leakage.
+- Required command: `START PHASE 4`; Phase 0 must be `COMPLETE`. This phase may run before Phases
+  1–3 only as a separately reviewed transport fix.
+- Files in scope: `navbroker.py`, `app.py`, `output.py`, `onshape_bridge.py`,
+  `solidworks_driver.py`, affected plugin handshake code, routing tests, `TODO.md`, and protocol docs.
+- Record all current client handshake/wire versions and foreground routing behavior. Any wire change
+  must be additive and versioned.
 
-Exit: multi-client tests prove foreground isolation and no profile/delta mixing.
+**Work**
+
+4.1 Add a target-aware navigation envelope and per-target accumulator, rate, scheme/profile
+revision, and delivery state. A submitted sample is associated with one resolved target.
+
+4.2 Deliver only to clients whose handshake matches that target. Define deterministic focus-change
+behavior: finish or discard the old accumulator according to a tested rule; never relabel old deltas
+as the new target.
+
+4.3 Adapt SolidWorks and Onshape to the same router boundary without changing host camera math.
+Preserve connected-but-unfocused Onshape behavior explicitly.
+
+4.4 Add simultaneous/multiple-client, rapid-focus, reconnect, stale-revision, and no-target tests.
+Remove the corresponding broker-isolation item from `TODO.md` when—and only when—the fix lands.
+
+**Safe internal checkpoints:** envelope/handshake; per-target accumulation; host adapters and docs.
+
+**Stop gate**
+
+- Multi-client tests prove no background viewport receives motion and no delta/rate/scheme revision
+  crosses targets; all existing camera-math tests remain green.
+- Add-on protocol/version markers are updated together with any changed consumer, never in a later
+  unrelated phase.
+- Commit this independently reviewable fix, mark Phase 4 `COMPLETE`, set the next action according
+  to the first incomplete dependency in the ledger, and stop.
 
 ### Phase 5 — Input provider framework and Windows keyboard backend
 
-**Complexity 4/5 · Feasibility 5/5**
+**Complexity 4/5 · Feasibility 4/5**
 
-1. Implement `InputProvider`, `InputEvent`, `InputControlDescriptor`, and the central pressed-set
-   aggregator.
-2. Add a Windows low-level keyboard hook on a dedicated message-loop thread.
-3. Filter injected events, normalize modifiers, ignore repeats, and remain pass-through.
-4. Add foreground context events independent of BLE packets.
-5. Synthesize releases on shutdown, session lock, hook restart, config/profile swap, and provider
-   disconnect.
+**Start gate**
 
-Debt paid: packet-time Shift polling and BLE-packet-bound focus state.
+- Required command: `START PHASE 5`; Phases 0 and 3 must be `COMPLETE`, including the Phase 0 input
+  backend decision.
+- Files in scope: expected `input/model.py`, `input/aggregator.py`,
+  `input/windows_raw_input.py` (or the documented fallback module), `winfocus.py`, runtime startup/
+  shutdown wiring, `docs/security.md`, and provider tests.
+- Re-read the Phase 0 evidence; changing the selected backend requires stopping and recording a new
+  architecture decision, not silently switching during implementation.
 
-Exit: a fake provider and the real Windows backend pass chord/hold/release tests without moving any
-host camera.
+**Work**
+
+5.1 Implement `InputProvider`, `InputEvent`, `InputControlDescriptor`, provider health, and a central
+pressed-set aggregator. Events carry source identity, stable control ID, phase, time, optional
+sequence, and metadata but no raw config path.
+
+5.2 Implement the chosen Windows backend. For Raw Input, use a dedicated message-only window,
+`RIDEV_INPUTSINK`, no `RIDEV_NOLEGACY`, compact callback enqueueing, and lazy registration only when
+an enabled compiled binding references keyboard controls. For a hook fallback, include the Phase 0
+watchdog/reinstall contract and keep the hook callback enqueue-only.
+
+5.3 Normalize generic and left/right modifiers, filter injected events where the backend exposes
+that metadata, reject repeat activations while preserving pressed state, and keep all keys
+pass-through.
+
+5.4 Reconcile configured controls with `GetAsyncKeyState` after receiver restart, resume, profile
+swap, or suspected loss. On session lock/inactive desktop, access ambiguity, receiver failure,
+shutdown, or unregister, synthesize releases for all keyboard-owned controls before continuing.
+
+5.5 Publish foreground-context changes independently of BLE motion. The runtime, not the selected
+settings page, resolves the foreground app.
+
+5.6 Update the runtime/installation inventory in `docs/security.md` and document exactly what
+keyboard input is registered/observed, when the provider is active, that raw keystrokes are not
+logged, the pass-through model, and the elevated-app limitation/fail-safe.
+
+**Safe internal checkpoints:** provider/aggregator fakes; Windows receiver; reconciliation and
+foreground lifecycle; security documentation.
+
+**Stop gate**
+
+- Fake and real providers pass press/hold/release, repeat, modifier side, lazy lifecycle,
+  profile-reload, shutdown, receiver-restart, lock/resume, and fail-safe release tests without
+  moving a host camera.
+- Manual results cover background pass-through and the documented access-boundary case. No raw-key
+  logging is present.
+- Commit provider/security work, mark Phase 5 `COMPLETE`, set next action to `START PHASE 6`, and
+  stop.
 
 ### Phase 6 — BLE input protocol and Astrolabe five-way adapter
 
 **Complexity 5/5 · Feasibility 4/5**
 
-1. Split BLE transport from Astrolabe protocol decoding.
-2. Support multiple characteristic subscriptions per adapter.
-3. Add the versioned input-state characteristic to firmware while preserving rotation v1.
-4. Add legacy and five-way Astrolabe adapters.
-5. Map bit states into the same normalized input events as the keyboard.
-6. Send initial snapshots, sequences, and disconnect releases.
-7. Document the adapter/descriptor contract for other BLE hardware.
+**Start gate**
 
-Debt paid: single hardcoded characteristic/callback, lost controller buttons, and unused
-`general.buttons` configuration.
+- Required command: `START PHASE 6`; Phase 5's normalized provider contract must be `COMPLETE`.
+- Files in scope: `ble.py`, expected `devices/` adapters, `firmware/Astrolabe/Astrolabe.ino`, BLE/
+  provider tests, protocol docs, `TODO.md`, and firmware/version markers. Preserve unrelated
+  `firmware/XIAO3389` behavior unless it is explicitly used as a test-bench adapter.
+- Record current characteristic UUIDs, the 12-byte rotation vector, controller/HID transitions,
+  debounce behavior, and daemon-absent behavior before firmware edits.
 
-Exit: hardware Up/Down/Left/Right/Center appears in chord capture and behaves identically to a
-keyboard control. Legacy rotation-only firmware remains functional.
+**Work**
+
+6.1 Split generic scan/connect/reconnect/subscription transport from device protocol adapters. Allow
+one adapter to subscribe to motion plus input-state characteristics and declare named controls.
+
+6.2 Specify and packet-vector-test the versioned input-state snapshot, unsigned 16-bit sequence
+arithmetic, initial-snapshot baseline, wraparound, duplicate/stale rejection, malformed lengths,
+and reconnect baseline reset from section 6.2.
+
+6.3 Preserve the existing rotation characteristic byte-for-byte. Add a separate input-state
+characteristic to Astrolabe firmware and emit the five-direction bitset on changes plus an initial
+snapshot after subscription/reconnect.
+
+6.4 Ship legacy rotation-only and five-way adapters. Diff accepted snapshots into normalized
+press/release events; disconnect always releases every control owned by that device instance.
+
+6.5 Preserve controller-mode HID suppression and transition releases. When the daemon is absent,
+ordinary HID operation remains available. Hardware-test debounce and physically possible switch
+combinations rather than guessing them into schema logic.
+
+6.6 Document a data-only device descriptor/adapter registration boundary for other BLE hardware.
+Remove the lost-controller-buttons TODO only when hardware and packet-vector tests pass. Update
+firmware protocol/version markers in this same phase.
+
+**Safe internal checkpoints:** transport/adapter split; packet spec and host decoder; firmware
+publisher; live five-way and legacy compatibility.
+
+**Stop gate**
+
+- Automated vectors cover sequence wraparound, duplicates, stale packets, missed transitions,
+  reconnect, malformed input, and disconnect-held release.
+- Live Up/Down/Left/Right/Center events are indistinguishable from keyboard controls to the fake
+  binding consumer; legacy rotation-only and daemon-absent HID paths still work.
+- Commit host+firmware+protocol work as one compatible boundary, mark Phase 6 `COMPLETE`, set next
+  action to `START PHASE 7`, and stop.
 
 ### Phase 7 — Binding compiler, DSL, and system input profiles
 
 **Complexity 5/5 · Feasibility 4/5**
 
-1. Add and validate `system_keybinding_profiles.json`.
-2. Implement `astrolabe_5way` and `keyboard_only` bases plus per-profile sparse user overrides.
-3. Implement chord matching, exact/permissive policies, context precedence, repeats, priorities,
-   hold/toggle behavior, and press/release actions.
-4. Implement the declarative macro compiler and validation diagnostics.
-5. Recompile atomically on profile/config change after releasing the prior active set.
-6. Add export/import and a non-running validation command.
+**Start gate**
 
-Exit: keyboard and five-way profiles can be switched without losing customizations or leaving held
-state behind.
+- Required command: `START PHASE 7`; Phases 2, 3, 5, and 6 must be `COMPLETE`.
+- Files in scope: expected `input/bindings.py`, `input/macros.py`,
+  `system_keybinding_profiles.json`, config integration, schemas/docs, and compiler/runtime tests.
+- Export/import and a visual priority editor remain post-MVP; do not expand this phase without a new
+  user instruction.
+
+**Work**
+
+7.1 Define and validate developer-owned base profiles `astrolabe_5way` and `keyboard_only`.
+`astrolabe_5way` may include keyboard fallbacks. Store sparse user overrides under the selected
+base-profile ID so switching away and back restores the correct customizations.
+
+7.2 Compile normalized chords and indexes by source token/context. Implement exact and
+allow-extra-modifier policies, generic/left-right modifiers, modifier-only and cross-provider
+chords, context specificity, explicit priority, activation serial, and OS-repeat rejection.
+
+7.3 Implement hold and toggle activation, distinct press/release action lists, atomic active-set
+recomputation after every event, and release-all before profile/config recompilation.
+
+7.4 Implement the allowlisted declarative DSL: stable command/setting IDs; `set`, boolean or
+explicit two-value `toggle` (including numeric sensitivity presets), `cycle`, numeric
+`add`/`multiply`, identity-based `restore_previous`, and atomic action lists; app,
+executable, and input-profile conditions; capability/type/value validation; no Python/eval/shell or
+raw JSON-pointer targets.
+
+7.5 Disable invalid entries individually with actionable diagnostics. Add a non-running validation
+command suitable for contributors and packaged-build tests.
+
+**Safe internal checkpoints:** schema/base profile loading; chord/context compiler; activation state
+machine; macro operations/diagnostics; atomic reload.
+
+**Stop gate**
+
+- Tests cover both base profiles, profile-scoped overrides, every chord order, exact/permissive
+  precedence, duplicate rejection, contradictory hold recency, toggle edges, explicit release
+  values, identity-safe `restore_previous`, invalid-entry isolation, and atomic reload release.
+- Switching profiles does not lose either profile's overrides or leave controls held.
+- Commit compiler/DSL/profiles, mark Phase 7 `COMPLETE`, set next action according to the first
+  incomplete Phase 8/9 dependency, and stop.
 
 ### Phase 8 — Motion/output integration and requested feature commands
 
 **Complexity 4/5 · Feasibility 5/5**
 
-1. Remove `shift_held()` from `OutputEngine`.
-2. Split pure motion transformation from pointer injection and navigation routing where practical.
-3. Consume one immutable effective state/profile snapshot per BLE rotation packet.
-4. Recreate current Shift Pan/Zoom behavior as a system keybinding profile entry.
-5. Add Pointer/3D toggle/hold commands.
-6. Add focused-app Orbit/Fly/Walk set/cycle/hold commands with capability validation.
-7. Add generic setting toggle/hold actions for eligible booleans, enums, and numbers.
-8. Remove Blender’s independent local mode override or route it back through the daemon protocol.
+**Start gate**
 
-Debt paid: keyboard knowledge in output math, legacy cube terminology, and competing navigation
-mode authorities.
+- Required command: `START PHASE 8`; Phases 4 and 7 must be `COMPLETE`.
+- Files in scope: `output.py`, `app.py`, `navbroker.py`, `tray.py`, affected host/add-on state
+  protocol, system profile data, output/routing tests, and version docs. Do not rewrite host camera
+  math unless a focused regression proves the state boundary requires it.
+- Record bit-exact output and current Shift Pan/Zoom behavior immediately before integration.
 
-Exit: existing bit-exact motion tests remain green, and all requested state changes work while the
-ball is stationary.
+**Work**
+
+8.1 Remove `shift_held()` and all packet-time keyboard inspection from `OutputEngine`. Consume one
+immutable effective runtime/profile snapshot per motion sample.
+
+8.2 Split pure motion transformation from pointer injection and navigation routing where the new
+boundary is real. Preserve all bit-exact coordinate/quaternion and host-baseline behavior.
+
+8.3 Recreate current Shift Pan/Zoom as profile data, then add Pointer/3D toggle/hold and focused-app
+Orbit/Fly/Walk set/cycle/hold commands. Validate unsupported app modes rather than silently applying
+them.
+
+8.4 Enable generic setting hold/toggle actions only for registry-approved booleans, enums, and
+numbers, including sensitivity/gain. Persistent macro writes remain visibly explicit.
+
+8.5 Remove Blender's independent local mode authority or version the daemon/add-on protocol so the
+daemon remains authoritative. Update Blender version markers and bundled metadata in the same
+commit if its add-on changes.
+
+**Safe internal checkpoints:** OutputEngine snapshot consumption; feature command integration;
+host-local state authority/versioning.
+
+**Stop gate**
+
+- Existing bit-exact output, cursor/pointer-pivot, quaternion, and host camera tests remain green.
+- All requested mode/setting transitions work while the ball is stationary and affect only the
+  foreground target; focus change during a hold resolves safely.
+- Commit integration and any synchronized add-on version change, mark Phase 8 `COMPLETE`, set next
+  action according to the first incomplete Phase 9/10 dependency, and stop.
 
 ### Phase 9 — Barebones settings UX
 
 **Complexity 4/5 · Feasibility 4/5**
 
-1. Rename General to Global and render the complete registry.
-2. Implement per-setting and page-level Global reset behavior.
-3. Implement linked per-app controls, link/unlink, setting reset, Link all/Break all, and Reset app
-   to System defaults exactly as specified in section 5.
-4. Add system input-profile selection and the minimal binding editor.
-5. Route all edits through commands and transactions.
-6. Keep status text explicit; do not spend time on final visual polish.
+**Start gate**
 
-Exit: every link/reset transition has a UI-independent test plus a Tk smoke pass.
+- Required command: `START PHASE 9`; Phases 2 and 7 must be `COMPLETE`.
+- Files in scope: `ui.py`, `tray.py` only where it opens/settings state, UI metadata in registries,
+  config/command calls, and UI-independent plus Tk smoke tests. No SVGs, diagrams, animation,
+  theming, or web UI.
+- Re-read section 5's exact reset/link semantics; they are acceptance requirements, not visual
+  suggestions.
+
+**Work**
+
+9.1 Rename General→Global and render the exhaustive SettingSpec registry in ordinary category
+sub-tabs, with optional per-category scrolling and capability labels.
+
+9.2 Implement Global controls, `System default` markers, per-setting circle-arrow reset, and the
+bottom **Reset all Global settings to System defaults** action.
+
+9.3 Implement linked per-app display and link toggles. Editing a linked value unlinks and writes;
+relink deletes the app override; the setting reset creates an unlinked app System-default override.
+Implement header Link all/Break all and red Reset app exactly as section 5.5 specifies.
+
+9.4 Add system input-profile selection, capability status for absent controls, and a minimal binding
+editor for chord capture, activation, actions/values, context, match policy, enable/delete, and
+validation. Explicit non-default priority remains editable through the Advanced
+DSL in MVP; a visual priority editor is post-MVP. Show the pass-through warning for non-modifier
+keyboard chords.
+
+9.5 Route every edit through typed transactions/commands. Use text/Unicode markers and explicit
+status; leave the renderer driven by semantic metadata so a future UI can replace it.
+
+**Safe internal checkpoints:** generated Global categories; per-app link/reset behavior; profile and
+binding editor; Tk smoke/accessibility pass.
+
+**Stop gate**
+
+- UI-independent tests cover every link/reset transition and header bulk action; Tk smoke confirms
+  the effective values/subdued linked state update when Global changes.
+- All registered settings are reachable in Global, unsupported app settings are correctly handled,
+  and no UI code mutates raw config dictionaries.
+- Commit the barebones UX, mark Phase 9 `COMPLETE`, set next action according to the first incomplete
+  dependency (usually `START PHASE 10` after Phase 8), and stop.
 
 ### Phase 10 — Text HUD
 
 **Complexity 3/5 · Feasibility 5/5**
 
-1. Add the text-only persistent panel and tray visibility toggle.
-2. Subscribe it to runtime snapshots rather than polling engine/config internals.
-3. Show mode, focused app, nav mode, layer, semantic movement help, and held/last binding.
-4. Add no-activate, work-area anchoring, DPI, monitor, and click-through handling.
+**Start gate**
 
-Exit: the panel updates on keyboard/BLE events without BLE motion and never steals host focus.
+- Required command: `START PHASE 10`; Phase 8 must be `COMPLETE`.
+- Files in scope: expected `control_hud.py`, tray visibility wiring, semantic runtime/help metadata,
+  UI queue helpers, HUD tests, and packaging data. Do not add image assets.
+- Freeze a small snapshot-to-text table before building the window so renderer behavior is testable
+  without Tk/Windows.
+
+**Work**
+
+10.1 Build a plain-label, non-activating Tk `Toplevel` subscribed only to immutable runtime
+snapshots. Show product/input mode, foreground app, nav mode/layer, semantic movement help, and
+current-held or timed last-used binding.
+
+10.2 Use a bounded/coalescing cross-thread queue: state snapshots are latest-state-wins, with no
+unbounded stale backlog. Drain and render only on the Tk thread.
+
+10.3 Anchor to the work area of the monitor containing the foreground window; fall back to cursor
+then primary monitor only when necessary. Reposition on foreground, work-area, display, and DPI
+changes.
+
+10.4 Add tool-window/no-activate behavior, optional always-on-top/click-through, margin, opacity,
+show/hide, timeout, and tray visibility control. Verify the panel never changes active host focus.
+
+**Safe internal checkpoints:** pure text projection; coalescing subscriber; native window behavior;
+multi-monitor/DPI pass.
+
+**Stop gate**
+
+- Pure tests prove text and held/last precedence; stress tests prove snapshot bursts coalesce to the
+  latest revision.
+- Live keyboard and BLE state changes update without ball motion; focus, monitor, DPI, and
+  click-through checks pass without focus steal.
+- Commit HUD/framework work, mark Phase 10 `COMPLETE`, set next action to `START PHASE 11` only when
+  all Phases 0–9 are also complete, and stop.
 
 ### Phase 11 — Verification, documentation, and release hardening
 
 **Complexity 4/5 · Feasibility 4/5**
 
-1. Update README, HANDOFF, security docs, default/profile docs, protocol docs, and host guides.
-2. Add JSON schemas and sample macros for contributors.
-3. Add package-data and Nuitka checks for the new System-default/profile files.
-4. Live-test rich navigation transitions in Blender, SketchUp, Unreal, Unity, and Godot.
-5. Live-test keyboard hooks with layouts/AltGr, Sticky Keys, sleep/resume, session lock, Remote
-   Desktop, elevated hosts, and key repeat.
-6. Live-test firmware reconnect, missed notifications, debounce, simultaneous five-way behavior,
-   and daemon-absent HID fallback.
-7. Live-test HUD placement at multiple DPI settings and monitors.
+**Start gate**
 
-Exit: automated checks, hardware smoke, host smoke, migrations, packaged build, and rollback are
-documented honestly.
+- Required command: `START PHASE 11`; Phases 0–10 must all be `COMPLETE` with no undocumented
+  skipped stop-gate test.
+- Files in scope: all automated tests, `README.md`, `HANDOFF.md`, `TODO.md`, `docs/`, schemas/samples,
+  packaging manifests/config, version metadata, and only defect fixes discovered by verification.
+  New product features are out of scope.
+- Build a release checklist from the ledger's unresolved/manual items before changing code.
+
+**Work**
+
+11.1 Run the full automated suite, migration fixtures, package-data checks, packaged executable
+build, rollback/recovery checks, and static/security posture tests. Add JSON schemas and contributor
+examples for profiles, device descriptors, and macros.
+
+11.2 Audit docs against actual behavior: System/Global/app semantics, both system profiles,
+pass-through keyboard capture and lazy registration, no raw-key logging, elevated/access-boundary
+fail-safe, BLE packet trust boundary, declarative-DSL limits, and third-party adapter trust model.
+
+11.3 Live-test keyboard behavior across layouts/AltGr, Sticky Keys, repeat, rapid key order,
+sleep/resume, session lock, Remote Desktop, elevated foreground apps, profile reload, and daemon
+shutdown. Use the selected backend's name, not the generic phrase “keyboard hook.”
+
+11.4 Live-test firmware reconnect, missed/duplicate/out-of-order/wrapped sequences, disconnect while
+held, debounce, simultaneous five-way behavior, legacy rotation, and daemon-absent HID fallback.
+
+11.5 Live-test Pointer/3D, cascading Pan, Ctrl+Shift, Orbit/Fly/Walk, sensitivity holds, app-focus
+switch while held, and target isolation in Blender, SketchUp, Unreal, Unity, and Godot. Verify
+Onshape and other supported drivers according to available host access; record unavailable hosts
+honestly rather than marking them passed.
+
+11.6 Live-test the HUD on multiple monitors/DPI/work-area changes and verify no activation/focus
+steal. Verify the barebones UI's exhaustive Global categories and all reset/link flows.
+
+11.7 Update `HANDOFF.md`, `TODO.md`, protocol/default-profile/host docs, package metadata, and all
+changed firmware/add-on version markers. Produce a concise list of post-MVP work, including
+export/import and visual priority editing.
+
+**Safe internal checkpoints:** automated/package verification; docs/security audit; keyboard and
+hardware matrix; host matrix; HUD/UI matrix and final handoff.
+
+**Stop gate**
+
+- Every automated check and available live test has an exact recorded result; skipped hardware or
+  host checks name the reason and release impact.
+- Packaged resources load, v8 rollback/recovery is proven, legacy firmware/add-ons remain within the
+  documented compatibility envelope, and no stale TODO claims a completed debt item.
+- Commit only release hardening/docs/defect fixes, mark Phase 11 `COMPLETE`, record the final commit
+  and residual risks, then stop. Do not merge, push, publish, or open a PR without a separate command.
 
 ## 10. Test matrix
 
@@ -753,15 +1286,22 @@ documented honestly.
 - Chord canonicalization, modifier sides, exact/permissive matching, and modifier-only chords.
 - Atomic active-set recomputation for every key order.
 - Toggle edge behavior and OS-repeat rejection.
-- Hold press/release, explicit release value, restore previous, overlapping holds, and priorities.
-- Dependency closure, conflict resolution, cycle rejection, and fallback after release.
-- Cross-provider chords and provider disconnect release.
+- Hold press/release, explicit release value, identity-based `restore_previous`, two holds on the same
+  setting, and every priority/activation ordering.
+- Dependency closure, contradictory leaf conflict resolution, cycle rejection, most-recent tie
+  breaking, and reveal-older fallback after release.
+- Cross-provider chords, provider registration/restart, lifecycle reconciliation, and disconnect
+  release.
 - Setting capability and keybindability validation.
 - Sparse System→Global→app resolution and link/reset operations.
-- System profile plus per-profile user override composition.
+- v8 equal-to-inherited→linked and different→pinned migration branches, plus removal of obsolete
+  buttons and legacy-name aliases from v9 output.
+- System profile plus profile-keyed sparse user override composition.
 - DSL validation, unknown commands, invalid values, and partial-file failure isolation.
-- BLE packet decoding, sequences, snapshot diffs, malformed lengths, and reconnect state.
+- BLE packet decoding, unsigned sequence wraparound/duplicate/stale rules, snapshot diffs, malformed
+  lengths, initial snapshot, and reconnect baseline reset.
 - Broker target isolation and state-revision integrity.
+- HUD snapshot coalescing, monotonic revision handling, and held-versus-last text projection.
 
 ### Existing regression suites to preserve
 
@@ -795,7 +1335,8 @@ trackball_daemon/
   input/
     model.py                   InputEvent and InputControlDescriptor
     aggregator.py              pressed set and provider lifecycle
-    windows_keyboard.py        global Windows backend
+    windows_raw_input.py       preferred lazy Windows Raw Input backend
+    windows_keyboard_hook.py   optional spike-selected fallback only
     bindings.py                chord compiler and state machine
     macros.py                  declarative DSL loader/compiler
   devices/
@@ -815,43 +1356,62 @@ files should be split only where the new ownership boundary is real.
 
 - Read v8 configuration and write v9 only after a fully successful migration.
 - Preserve the old source on failure; do not overwrite structurally invalid config.
-- Preserve effective settings rather than literal legacy sentinels.
-- Convert identical app values into Global links where doing so preserves behavior.
-- Preserve user-edited differences as explicit app overrides.
-- Remove `general.buttons` only after translating any meaningful legacy mappings or documenting
-  that the field never had a controller-mode consumer.
-- Accept `cube` as an input alias for `3d` during migration and macro validation for at least one
-  release cycle; write only `3d`.
+- Preserve effective settings rather than literal legacy sentinels. Reconstruct the exact v8
+  inherited value: equality becomes a Global link, while inequality remains an explicit app
+  override. This bounded heuristic deliberately makes no stronger claim about historical user
+  intent.
+- Remove `general.buttons` under a tested v9 rule; it was reserved UI/config state with no
+  controller-mode runtime consumer, not a binding that can be faithfully translated.
+- Accept `cube`/`cursor` as input aliases for `3d`/`pointer` during migration and macro validation
+  for at least one release cycle; write only canonical names.
+- Default a fresh install to `astrolabe_5way`, offer `keyboard_only` explicitly, persist the user's
+  choice, and never switch profiles merely because BLE presence changes.
 - Legacy firmware remains rotation-only, uses keyboard bindings, and does not expose phantom
   buttons.
 - New daemon with old add-ons keeps the existing wire frame fields. Broker target isolation is
-  server-side. Any add-on protocol extension remains additive and versioned.
+  server-side. Any add-on protocol extension remains additive and versioned; firmware/add-on version
+  markers change in the same commit as their protocol consumer.
 - Input-profile switching and config reload synthesize releases before swapping compiled state.
 
 ## 13. Security and open-source considerations
 
-- Global keyboard capture must be documented and user-disableable.
+- Global keyboard reception must be documented and user-disableable. Register it lazily only when
+  at least one enabled binding in the compiled profile uses a keyboard control.
 - Do not log raw keystroke streams. Log only configured binding activations and validation errors.
-- Pass through keys by default; suppression, if ever added, requires explicit per-binding consent.
-- Filter injected keyboard events so future output commands cannot recursively trigger bindings.
+- Pass through keys by default and warn in the editor that non-modifier binding keys also reach the
+  foreground app. Suppression, if ever added, requires explicit per-binding consent.
+- Filter injected keyboard events when the selected backend exposes reliable provenance. Also keep
+  keyboard injection out of the initial command surface and add command-origin recursion guards;
+  Raw Input itself does not provide a universal trustworthy “injected” flag.
 - The macro DSL is an allowlisted command language, not `eval`, Python import, or shell execution.
 - Sensitive setup commands are not registered as keybindable commands.
 - Community device descriptors are data. Code adapters, if later supported, are explicitly trusted
   plug-ins and should be isolated from the core macro path.
 - BLE input packets are untrusted: validate version, kind, lengths, control count, and sequence
-  before updating pressed state.
+  before updating pressed state; discard duplicate or regressed sequences under the wrap-aware rule
+  in section 6.2.
 - A provider failure releases its held controls and cannot leave a permanent forced state.
+
+Relevant Windows platform references for the Phase 0 decision are Microsoft's documentation for
+[Raw Input](https://learn.microsoft.com/en-us/windows/win32/inputdev/about-raw-input),
+[`WM_INPUT`](https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-input),
+[`RegisterRawInputDevices`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerrawinputdevices),
+[`LowLevelKeyboardProc`](https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc),
+and [`GetAsyncKeyState`](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getasynckeystate).
 
 ## 14. Delivery gates
 
-Do not proceed to the next product-facing layer until the preceding gate is met:
+Do not proceed to the next product-facing layer until the preceding gate is met. Each satisfied gate
+is a reasonable merge candidate, but whether to merge or keep accumulating on the feature branch is
+the user's decision:
 
 1. **Configuration gate:** sparse inheritance and migration are stable before keybindings persist.
-2. **State gate:** dependency closure and release behavior are deterministic before global hooks.
+2. **State gate:** dependency closure and release behavior are deterministic before global keyboard
+   reception.
 3. **Routing gate:** target isolation is complete before app-dependent binding rollout.
 4. **Input gate:** keyboard provider lifecycle is safe before BLE buttons join it.
-5. **Hardware gate:** versioned snapshots and disconnect release pass before the five-way profile is
-   a default option.
+5. **Hardware gate:** versioned snapshots and disconnect release pass before the five-way device
+   bindings are enabled in a shipped product-default profile.
 6. **UX gate:** commands and registries are complete before the Global/per-app editor is rebuilt.
 7. **Release gate:** both profiles, migrations, multi-host isolation, and live rich-mode transitions
    pass before the feature is enabled by default.
@@ -862,7 +1422,7 @@ Do not proceed to the next product-facing layer until the preceding gate is met:
 |---|---:|---:|---|
 | Dependency-aware runtime state | 5/5 | 4/5 | Overlapping hold/conflict semantics |
 | Sparse System/Global/app settings | 5/5 | 4/5 | Behavior-preserving v8 migration |
-| Keyboard chords | 4/5 | 5/5 | Windows lifecycle and layout edge cases |
+| Keyboard chords | 4/5 | 4/5 | Raw Input lifecycle, access boundaries, and layout edge cases |
 | BLE five-way controls | 5/5 | 4/5 | Firmware compatibility and lost-release recovery |
 | Other BLE-device foundation | 4/5 | 4/5 | Keeping adapter API small and stable |
 | Declarative DSL | 4/5 | 5/5 | Stable public command/setting IDs |
