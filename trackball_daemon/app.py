@@ -30,7 +30,13 @@ from .devices import (
     SnapshotInputProvider,
     builtin_device_descriptors,
 )
-from .input import InputAggregator
+from .input import (
+    BindingController,
+    InputAggregator,
+    compile_binding_profile,
+    compose_binding_profile,
+    load_system_binding_profiles,
+)
 from .input.windows_raw_input import WindowsRawInputProvider
 from .navbroker import NavBroker
 from .navigation_router import NavigationEnvelope, NavigationRouter
@@ -71,12 +77,17 @@ class App:
                 self.input_aggregator.update_health,
             )
             self.input_aggregator.register_provider(provider)
-            # Phase 6 observes the built-in hardware controls immediately because the BLE motion
-            # connection already exists. Phase 7 will narrow these sets to compiled bindings.
-            provider.configure(control.control_id for control in descriptor.controls)
             self.ble_input_providers[descriptor.source_id] = provider
         self.device_adapters = DeviceAdapterRegistry(
             device_descriptors, self.ble_input_providers)
+        self.binding_catalog = load_system_binding_profiles()
+        self.binding_controller = BindingController(
+            self._compiled_binding_profile(), self.commands, self.runtime,
+            config_store=self.config)
+        self._binding_context = self.runtime.snapshot().focused_context
+        self.input_aggregator.add_listener(self.binding_controller.handle_transition)
+        self.runtime.add_listener(self._on_runtime_binding_context_changed)
+        self._configure_binding_controls()
         self.stop_event = threading.Event()
         self._status = "starting"
         self._last_pushed = None
@@ -155,6 +166,13 @@ class App:
         return self._status.startswith(("connected", "subscribed"))
 
     def on_config_changed(self, _event):
+        bindings = getattr(self, "binding_controller", None)
+        if bindings is not None:
+            # No activation survives a configuration generation. Compile only after the owned
+            # runtime/external resources have been released.
+            bindings.release_all("binding_config_reload")
+            bindings.reload(self._compiled_binding_profile())
+            self._configure_binding_controls()
         self.engine.apply_config()
         self._apply_service_gates()
         self._apply_rates()
@@ -172,6 +190,26 @@ class App:
         if source_id not in self.ble_input_providers:
             raise ValueError(f"unknown BLE input provider: {source_id}")
         return self.input_aggregator.configure_provider(source_id, control_ids)
+
+    def _compiled_binding_profile(self):
+        snapshot = self.config.snapshot()
+        profile = compose_binding_profile(
+            self.binding_catalog, snapshot.input_profile,
+            snapshot.keybinding_overrides[snapshot.input_profile])
+        return compile_binding_profile(profile, self.binding_catalog)
+
+    def _configure_binding_controls(self):
+        required = self.binding_controller.compiled_profile.required_controls
+        self.configure_keyboard_controls(required.get("keyboard", ()))
+        for source_id in self.ble_input_providers:
+            self.configure_ble_controls(source_id, required.get(source_id, ()))
+
+    def _on_runtime_binding_context_changed(self, event):
+        context = event.snapshot.focused_context
+        if context == self._binding_context:
+            return
+        self._binding_context = context
+        self.binding_controller.context_changed()
 
     def _service_allowed(self, key):
         """Sensitive in-process services require both successful setup and Enabled=true."""
@@ -459,6 +497,8 @@ class App:
     def quit(self):
         # Called from the tray thread.
         self.stop_event.set()
+        if getattr(self, "binding_controller", None) is not None:
+            self.binding_controller.release_all("daemon_shutdown")
         if getattr(self, "input_aggregator", None) is not None:
             self.input_aggregator.shutdown("daemon_shutdown")
         if getattr(self, "foreground_monitor", None) is not None:

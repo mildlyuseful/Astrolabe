@@ -11,6 +11,7 @@ from trackball_daemon.input import (
     compose_binding_profile,
     load_system_binding_profiles,
 )
+from trackball_daemon.validate_bindings import validate as validate_bindings_offline
 
 
 PROFILE_PATH = Path("trackball_daemon/system_keybinding_profiles.json")
@@ -128,3 +129,8 @@ def test_system_profile_package_data_is_declared():
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
     assert '"system_keybinding_profiles.json"' in pyproject
 
+
+def test_offline_validator_checks_both_profiles_without_starting_daemon():
+    result = validate_bindings_offline()
+    assert set(result) == {"astrolabe_5way", "keyboard_only"}
+    assert all(not row["diagnostics"] for row in result.values())

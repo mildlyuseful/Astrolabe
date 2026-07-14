@@ -80,11 +80,17 @@ class SetNavigationMode(RuntimeCommand):
 
 @dataclass(frozen=True)
 class CycleNavigationMode(RuntimeCommand):
+    modes: tuple = NAVIGATION_MODES
     command_id = "navigation.mode.cycle"
 
     def apply(self, draft, previous):
-        index = NAVIGATION_MODES.index(previous.effective_navigation_mode)
-        draft.set_state_latch("navigation.mode", NAVIGATION_MODES[(index + 1) % len(NAVIGATION_MODES)])
+        modes = tuple(self.modes)
+        if (not modes or len(set(modes)) != len(modes) or
+                any(mode not in NAVIGATION_MODES for mode in modes)):
+            raise ValueError("navigation cycle modes must be distinct supported modes")
+        current = previous.effective_navigation_mode
+        index = modes.index(current) if current in modes else -1
+        draft.set_state_latch("navigation.mode", modes[(index + 1) % len(modes)])
         draft.set_state_latch("input.mode", "3d")
 
 

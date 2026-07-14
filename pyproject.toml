@@ -23,6 +23,9 @@ onshape = ["cryptography>=41.0; sys_platform == 'win32'"]
 [project.gui-scripts]
 trackball-daemon = "trackball_daemon.__main__:main"
 
+[project.scripts]
+trackball-validate-bindings = "trackball_daemon.validate_bindings:main"
+
 [tool.setuptools.packages.find]
 include = ["trackball_daemon*"]
 
