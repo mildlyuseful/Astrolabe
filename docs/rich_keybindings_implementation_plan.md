@@ -73,7 +73,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 3 — Runtime state and dependency closure | COMPLETE | Start `91e5a09`; frozen ownership `a2310e8`; serialized store `4c94301`; dependency engine `a58c652`; consumer cutover `a39e81e`; items 3.1–3.5 complete | Wait for explicit `START PHASE 4`. |
 | 4 — Target-isolated navigation transport | COMPLETE | Start `43832a7`; protocol `abe757e`; implementation `23bc53e`; items 4.1–4.4 complete | Wait for explicit `START PHASE 5`. |
 | 5 — Input providers and Windows keyboard | COMPLETE | Start `2aa1c9b`; provider foundation `19c9ad1`; Raw Input/foreground `e16e340`; acceptance gate `d99a0de`; boundary reconciliation `0b99a6f`; hidden-release fail-safe `ce07604`; items 5.1–5.6 complete | Wait for explicit `START PHASE 6`. |
-| 6 — BLE five-way protocol and adapter | IN_PROGRESS | Start `af373fa`; frozen baseline `07b9450`; items 6.1–6.2 and host side of 6.4 implemented | Add the compatible firmware input-state publisher without changing rotation or HID fallback behavior. |
+| 6 — BLE five-way protocol and adapter | IN_PROGRESS | Start `af373fa`; frozen baseline `07b9450`; host protocol/adapters `b7aec6d`; items 6.1–6.6 implemented for host and working test bench | Flash and run the live input/disconnect/reconnect/HID acceptance matrix; obtain the production five-way pin contract. |
 | 7 — Binding compiler, DSL, and system profiles | NOT_STARTED | — | Start after Phases 2, 3, 5, and 6 are COMPLETE. |
 | 8 — Motion/output integration | NOT_STARTED | — | Start after Phases 4 and 7 are COMPLETE. |
 | 9 — Barebones settings UX | NOT_STARTED | — | Start after Phases 2 and 7 are COMPLETE. |
@@ -387,6 +387,13 @@ treating that review as an authority:
   production placeholder state, and package-discovery debt; 6.1 generic multi-characteristic
   transport plus data-descriptor adapter selection; 6.2 protocol codec and sequence gate; host side
   of 6.4 legacy/five-way adapters, normalized motion, snapshot diffing, and disconnect release.
+- **Firmware and extensibility work:** 6.3 preserves the fixed rotation characteristic and adds the
+  separate v1 input-state characteristic to the working XIAO3389 firmware; 6.5 leaves controller
+  ownership tied to rotation subscription, retains HID suppression/release and daemon-absent HID,
+  and publishes debounced three-button snapshots; 6.6 documents the validated data-only descriptor
+  registration boundary and rejects executable descriptor fields. The production Astrolabe sketch
+  remains an honest placeholder because no five-way pins, polarity, or debounce contract exists in
+  repository data.
 - **Compatibility decisions:** keep the service and 12-byte rotation characteristic unchanged;
   reserve additive input characteristic `2cad0003-6e64-0146-b139-9cf2a4cd57fc`; use protocol v1,
   snapshot kind 1, little-endian unsigned 16-bit serial arithmetic, and descriptor-owned bit
@@ -395,14 +402,24 @@ treating that review as an authority:
   `docs/rich_keybindings_plan_revisions.md` remain untracked and were not staged.
 - **Files changed after the baseline:** new `trackball_daemon/devices/` models, descriptor loader,
   packet protocol, snapshot provider, adapters, registry, transport, and built-in descriptor data;
-  `ble.py` compatibility facade; App wiring; subpackage/data packaging; and focused tests.
+  `ble.py` compatibility facade; App wiring; subpackage/data packaging; XIAO3389 additive firmware
+  publisher and production-placeholder marker; BLE adapter/security/user docs; acceptance tool;
+  `TODO.md`; and focused tests.
 - **Verification:** untouched `python -m pytest -q` = 532 passed; descriptor/provider/transport
-  focus = 63 passed; current full suite = 555 passed; compileall and `git diff --check` passed.
+  focus = 63 passed; firmware/protocol focus = 24 passed; current full suite = 561 passed;
+  compileall and `git diff --check` passed.
   Setuptools discovery now includes `trackball_daemon`, `trackball_daemon.input`, and
-  `trackball_daemon.devices`.
-- **Next exact action:** implement protocol v1 publication in the working XIAO3389 test-bench
-  firmware, preserving the exact rotation characteristic and existing HID behavior. Keep the empty
-  production placeholder honest until its five-way pin/electrical mapping is supplied.
+  `trackball_daemon.devices`. `arduino-cli` is not installed in this workspace, so the sketch has
+  static compatibility coverage but still requires the documented board-toolchain compile/flash.
+- **Manual gate still required:** compile/flash `firmware/XIAO3389/XIAO3389.ino`; run
+  `python tools/ble_input_acceptance.py --name "Trackball BLE" --seconds 60`; exercise initial
+  state, Left/Right/Middle press-hold-release, rapid and simultaneous transitions, move the ball,
+  disconnect while held, reconnect, and press again. Return the JSON and separately confirm that
+  closing the daemon/tool restores ordinary HID motion and buttons. The production five-way gate
+  additionally requires the real Up/Down/Left/Right/Center pin/polarity mapping.
+- **Next exact action:** checkpoint the compatible firmware/docs, then wait for the live test and
+  production hardware mapping. Do not remove the hardware TODO or mark Phase 6 complete from static
+  packet vectors alone.
 
 ## 1. Product goals
 

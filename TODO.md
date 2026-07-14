@@ -6,7 +6,10 @@ here.
 
 ## Highest priority
 
-No open items currently.
+- Flash and hardware-verify the Phase 6 input-state firmware: initial snapshot, three-button
+  press/hold/release, rapid transitions, disconnect while held, reconnect, unchanged rotation, and
+  daemon-absent HID fallback. Supply and verify the production board's Up/Down/Left/Right/Center pin
+  and polarity mapping before replacing the honest `firmware/Astrolabe` placeholder.
 
 ## Host feature parity
 
@@ -82,9 +85,6 @@ High-risk app-specific checks:
 
 ## Product and integration backlog
 
-- Add a controller-mode button-event message so integrations can implement Frame/View Selected,
-  orthographic view snaps, fixed-angle steps, and recenter-on-cursor. HID-only button handling cannot
-  trigger these operations today.
 - Improve Onshape pointer-userscript installation and updates without silently installing browser
   code or certificate trust.
 - Add automatic pointer/3D mode switching based on the foreground app, while retaining a predictable

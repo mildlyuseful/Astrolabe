@@ -175,8 +175,13 @@ restore three-axis orbit without overwriting the user's choice.
 The active test-bench firmware is
 [`firmware/XIAO3389/XIAO3389.ino`](firmware/XIAO3389/XIAO3389.ino). It reads two PMW3389 sensors,
 fuses their measurements, exposes BLE HID input, and publishes the custom rotation characteristic
-used by the daemon. [`firmware/Astrolabe/Astrolabe.ino`](firmware/Astrolabe/Astrolabe.ino) is the
-production-hardware placeholder and is not yet a replacement for the test-bench firmware.
+used by the daemon. Input-capable firmware publishes a separate versioned full-state characteristic;
+legacy rotation-only firmware remains supported. The current XIAO sketch maps its three existing
+buttons through the test-bench descriptor. See
+[`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) for the packet and descriptor contract.
+[`firmware/Astrolabe/Astrolabe.ino`](firmware/Astrolabe/Astrolabe.ino) is the production-hardware
+placeholder and is not yet a replacement for the test-bench firmware; its five-way pin/polarity map
+must be supplied from the real board rather than inferred from the bench sketch.
 
 ## Development and project documentation
 

@@ -103,6 +103,14 @@ The receiver never owns foreground focus. Foreground app identity is published b
 read-only monitor, so stationary keyboard controls can resolve app context without trackball motion
 and without using the app selected in Settings as a runtime fallback.
 
+BLE input-state packets are untrusted. The daemon validates protocol version, message kind, exact
+length, descriptor bit range, and unsigned wrap-aware sequence ordering before changing normalized
+pressed state. Invalid, duplicate, and stale packets cannot activate or release controls. A new
+connection resets only the sequence baseline; disconnect releases the complete device-owned pressed
+set. Community control descriptors are validated JSON data and cannot name Python modules,
+callbacks, commands, config paths, or executable code. Automatic third-party adapter-code loading
+is not supported.
+
 ## Release hardening before alpha distribution
 
 1. Build a per-user **Nuitka onedir** package. Avoid self-extracting one-file packers, which are more
