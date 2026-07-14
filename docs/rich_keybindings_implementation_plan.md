@@ -72,7 +72,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 2 — Sparse System→Global→app config | COMPLETE | Start `de0f42f`; fixtures `67f6710`; System defaults `1af1368`; resolver `da8e219`; store/migration `ecbeb3b`; consumer cutover `e70ea68`; items 2.1–2.5 complete | Wait for explicit `START PHASE 3`. |
 | 3 — Runtime state and dependency closure | COMPLETE | Start `91e5a09`; frozen ownership `a2310e8`; serialized store `4c94301`; dependency engine `a58c652`; consumer cutover `a39e81e`; items 3.1–3.5 complete | Wait for explicit `START PHASE 4`. |
 | 4 — Target-isolated navigation transport | COMPLETE | Start `43832a7`; protocol `abe757e`; implementation `23bc53e`; items 4.1–4.4 complete | Wait for explicit `START PHASE 5`. |
-| 5 — Input providers and Windows keyboard | IN_PROGRESS | Start `2aa1c9b`; provider foundation `19c9ad1`; items 5.1–5.6 implemented, manual gate pending | Run the physical background/pass-through and elevated access-boundary acceptance tool, record exact results, then close Phase 5. |
+| 5 — Input providers and Windows keyboard | IN_PROGRESS | Start `2aa1c9b`; provider foundation `19c9ad1`; items 5.1–5.6 implemented; ordinary/elevated foreground evidence recorded | Run the hold-across-elevation acceptance case, record exact results, then close Phase 5. |
 | 6 — BLE five-way protocol and adapter | NOT_STARTED | — | Start after Phase 5 provider contract is COMPLETE. |
 | 7 — Binding compiler, DSL, and system profiles | NOT_STARTED | — | Start after Phases 2, 3, 5, and 6 are COMPLETE. |
 | 8 — Motion/output integration | NOT_STARTED | — | Start after Phases 4 and 7 are COMPLETE. |
@@ -344,25 +344,33 @@ treating that review as an authority:
   `docs/rich_keybindings_plan_revisions.md` remain untracked and were not staged.
 - **Verification:** untouched Phase 5 baseline `python -m pytest -q` = 502 passed; Phase 5.1 focus =
   27 passed; provider/native focus = 19 passed; lifecycle/runtime focus = 71 passed; security and
-  input focus = 58 passed; current full suite = 530 passed. `python -m compileall -q
+  input focus = 58 passed; current full suite after access-boundary hardening = 531 passed.
+  `python -m compileall -q
   trackball_daemon tests tools/windows_input_acceptance.py` and `git diff --check` passed. Native
   message-window registration/unregistration passed. Elevated automated F24 acceptance passed with
   one background `input_sink` press, repeat suppression, one release, unchanged foreground, and no
-  held shutdown state. The first sandboxed injector attempt received WinError 5 and is not counted
-  as backend evidence; the explicitly approved elevated run passed.
-- **Manual gate still required:** from a non-elevated terminal, run
-  `python tools/windows_input_acceptance.py --interactive --seconds 20` twice: first with ordinary
-  Notepad foreground, then with an Administrator/elevated Notepad foreground. In each run press and
-  release left/right Ctrl, Shift, and Alt, type `A`, and optionally press F12. Confirm `A` reaches
-  Notepad and return the JSON plus the pass-through result. Do not mark Phase 5 complete from
-  synthetic F24 or source inspection.
+  held shutdown state, including the rerun after foreground reconciliation was added. The first
+  sandboxed injector attempt received WinError 5 and is not counted as backend evidence; the
+  explicitly approved elevated runs passed.
+- **Manual evidence recorded:** with ordinary Notepad foreground, the production provider observed
+  left Ctrl, left/right Shift, left/right Alt, `Shift+A`, and F12 press/release edges through
+  `input_sink`; `A` still reached Notepad, foreground was unchanged, and shutdown left no pressed
+  controls. Right Ctrl could not be exercised because the test keyboard has no right Ctrl key; its
+  E0 normalization remains covered by the pure provider test. With Administrator/elevated Notepad
+  foreground, the non-elevated receiver observed no transitions while `A` still passed through;
+  this confirms the documented integrity limitation rather than a reason to replace Raw Input.
+- **Manual gate still required:** run `python tools/windows_input_acceptance.py --access-boundary
+  --seconds 20` from a non-elevated terminal. In ordinary Notepad hold left Ctrl, click elevated
+  Notepad while still holding it, wait two seconds, release it there, and leave elevated Notepad
+  focused. The report must show the ordinary press, a fail-safe synthetic `foreground_change`
+  release, and no final pressed controls.
 - **Tests still required after manual evidence:** record the exact ordinary/elevated result, rerun
   the full suite, compileall, AutoCAD NavMath, automated production-provider F24 acceptance, and
   `git diff --check`; then update this section and the ledger row to `COMPLETE` or diagnose a
   physical Raw Input failure before reconsidering the Phase 0 backend decision.
-- **Next exact action:** wait for the two physical acceptance results. On success, close Phase 5 and
-  set the next command to `START PHASE 6`. On failure, reproduce and classify normalization versus
-  Raw Input/access behavior; do not switch to a low-level hook silently.
+- **Next exact action:** wait for the hold-across-elevation acceptance result. On success, close
+  Phase 5 and set the next command to `START PHASE 6`. On failure, reproduce and classify
+  reconciliation versus Raw Input/access behavior; do not switch to a low-level hook silently.
 
 ## 1. Product goals
 

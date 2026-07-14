@@ -215,6 +215,25 @@ def test_inaccessible_desktop_fails_safe_to_release_all():
     provider.stop()
 
 
+def test_foreground_reconcile_closes_a_hold_when_key_state_is_no_longer_visible():
+    provider, aggregator, _state = _provider()
+    provider.configure(("ctrl",))
+    native = _FakeNative.instances[-1]
+    native.on_packet(_packet(VK_CONTROL))
+    _wait_until(lambda: aggregator.snapshot().pressed_tokens == ("keyboard:ctrl.left",))
+    changes = []
+    aggregator.add_listener(changes.append)
+
+    provider.reconcile("foreground_change")
+
+    assert aggregator.snapshot().pressed_tokens == ()
+    assert provider.health.status is ProviderStatus.RUNNING
+    assert changes[-1].reason == "foreground_change"
+    assert changes[-1].events[0].metadata == {
+        "synthetic": True, "reason": "foreground_change"}
+    provider.stop()
+
+
 def test_receiver_failure_releases_and_explicit_restart_reconciles():
     provider, aggregator, state = _provider()
     provider.configure(("ctrl.left",))

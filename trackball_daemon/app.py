@@ -266,6 +266,9 @@ class App:
 
     def _on_foreground_process_changed(self, process_name):
         self._apply_foreground_context(self._foreground_context_for_process(process_name))
+        keyboard = getattr(self, "keyboard_provider", None)
+        if keyboard is not None:
+            keyboard.reconcile("foreground_change")
 
     def _activate_nav_app(self, key):
         """Switch mappings before transforming the focused app's next complete packet."""

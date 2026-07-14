@@ -77,16 +77,22 @@ def test_app_foreground_change_updates_runtime_without_a_ble_packet():
     app.navigation = SimpleNamespace(targets=[], activate=lambda key: app.navigation.targets.append(key))
     app.engine = SimpleNamespace(bound=[], set_active_bindings=lambda key: app.engine.bound.append(key))
     app._engine_app = None
+    app.keyboard_provider = SimpleNamespace(
+        reconciliations=[],
+        reconcile=lambda reason: app.keyboard_provider.reconciliations.append(reason))
 
     app._on_foreground_process_changed("blender.exe")
 
     assert app.runtime.snapshot().focused_context == FocusedContext("blender", "blender.exe")
     assert app.navigation.targets == ["blender"]
     assert app.engine.bound == ["blender"]
+    assert app.keyboard_provider.reconciliations == ["foreground_change"]
 
     app._on_foreground_process_changed("notes.exe")
     assert app.runtime.snapshot().focused_context == FocusedContext(None, "notes.exe")
     assert app.navigation.targets[-1] is None
+    assert app.keyboard_provider.reconciliations == [
+        "foreground_change", "foreground_change"]
 
 
 def test_app_shutdown_releases_inputs_before_stopping_focus_and_transports():

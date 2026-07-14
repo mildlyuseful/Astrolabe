@@ -92,6 +92,9 @@ inactive-desktop, and otherwise ambiguous access paths release every keyboard-ow
 mark the provider suspended instead of trusting a potentially false all-up observation. The daemon
 is per-user and non-elevated, so observation while a higher-integrity application is foreground is
 an explicit acceptance case; inability to observe or reconcile safely degrades to release-all.
+Every foreground transition also triggers reconciliation. When Windows no longer reports a held
+control across an integrity boundary, the provider closes it with a synthetic release instead of
+preserving stale state while the eventual physical release is hidden.
 
 The receiver never owns foreground focus. Foreground app identity is published by a separate
 read-only monitor, so stationary keyboard controls can resolve app context without trackball motion
