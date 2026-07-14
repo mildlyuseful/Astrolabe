@@ -11,6 +11,7 @@ from trackball_daemon.input import (
     InputPhase,
     ProviderHealth,
     ProviderStatus,
+    InputProvider,
 )
 
 
@@ -125,6 +126,25 @@ def test_release_all_is_one_final_state_for_cross_provider_chords():
     assert {event.source_id for event in transition.events} == {"keyboard", "ble:unit"}
 
 
+def test_reconciliation_batch_publishes_only_the_final_chord_state():
+    aggregator = InputAggregator()
+    aggregator.register_controls((
+        _descriptor("keyboard", "ctrl.left"),
+        _descriptor("keyboard", "shift.left"),
+    ))
+    changes = []
+    aggregator.add_listener(changes.append)
+    transition = aggregator.accept_many((
+        _event("keyboard", "ctrl.left", "pressed"),
+        _event("keyboard", "shift.left", "pressed"),
+    ), "resume_reconcile")
+
+    assert len(changes) == 1
+    assert transition.reason == "resume_reconcile"
+    assert transition.snapshot.pressed_tokens == (
+        "keyboard:ctrl.left", "keyboard:shift.left")
+
+
 def test_listener_failure_does_not_block_other_listeners_or_reentrant_reads(caplog):
     aggregator = InputAggregator()
     aggregator.register_controls((_descriptor("keyboard", "f24"),))
@@ -152,3 +172,52 @@ def test_generic_modifier_alias_can_describe_both_physical_sides():
         "keyboard:ctrl.left", "keyboard:ctrl.right"}
     with pytest.raises(ValueError, match="unregistered"):
         aggregator.accept(_event("keyboard", "shift.left", "pressed"))
+
+
+class _FakeProvider(InputProvider):
+    def __init__(self, aggregator):
+        self._aggregator = aggregator
+        self.configurations = []
+        self.stops = []
+        self._health = ProviderHealth("fake", ProviderStatus.DISABLED)
+
+    @property
+    def source_id(self):
+        return "fake"
+
+    @property
+    def controls(self):
+        return (_descriptor("fake", "button"),)
+
+    @property
+    def health(self):
+        return self._health
+
+    def configure(self, required_control_ids):
+        self.configurations.append(frozenset(required_control_ids))
+        self._health = ProviderHealth("fake", ProviderStatus.RUNNING)
+        self._aggregator.update_health(self._health)
+        return self._health
+
+    def reconcile(self, reason="manual"):
+        return reason
+
+    def stop(self, reason="shutdown"):
+        self.stops.append(reason)
+        self._health = ProviderHealth("fake", ProviderStatus.STOPPED)
+        self._aggregator.update_health(self._health)
+
+
+def test_aggregator_manages_provider_configuration_and_shutdown():
+    aggregator = InputAggregator()
+    provider = _FakeProvider(aggregator)
+    aggregator.register_provider(provider)
+    assert aggregator.snapshot().provider_health["fake"].status is ProviderStatus.DISABLED
+
+    aggregator.configure_provider("fake", ("button",))
+    aggregator.accept(_event("fake", "button", "pressed"))
+    aggregator.shutdown("test_shutdown")
+
+    assert provider.configurations == [frozenset({"button"})]
+    assert provider.stops == ["test_shutdown"]
+    assert aggregator.snapshot().pressed_tokens == ()

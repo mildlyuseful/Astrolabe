@@ -54,3 +54,19 @@ def test_release_packages_exclude_interpreter_cache_files():
     assert "global-exclude __pycache__" in manifest
     assert "global-exclude *.py[cod]" in manifest
     assert "global-exclude *.py[cod].*" in manifest
+
+
+def test_keyboard_observation_is_lazy_pass_through_and_has_no_raw_logging():
+    provider = _source("trackball_daemon/input/windows_raw_input.py")
+    app = _source("trackball_daemon/app.py")
+    security = _source("docs/security.md")
+
+    assert "RIDEV_INPUTSINK" in provider
+    assert "RIDEV_NOLEGACY =" not in provider
+    assert "def configure(self, required_control_ids)" in provider
+    assert "if not expanded:" in provider
+    assert "self.input_aggregator.shutdown" in app
+    assert "does not log raw keyboard packets" in security
+    assert "Keys remain pass-through" in security
+    assert "GetAsyncKeyState" in security
+    assert "logger." not in provider and "print(" not in provider

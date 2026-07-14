@@ -40,6 +40,9 @@ trackball_daemon/
   output.py                  pointer/cube math and global/app mapping boundary
   commands.py                typed live-state commands and serialized dispatch queue
   runtime_state.py           dependency-resolved live authority and immutable snapshots
+  input/model.py             immutable normalized controls, events, health, and transitions
+  input/aggregator.py        provider registry and atomic cross-provider pressed set
+  input/windows_raw_input.py lazy pass-through Windows keyboard receiver and reconciliation
   config_store.py            transactional v9 loading, migration, snapshots, and events
   config_resolver.py         pure System -> Global -> app setting resolution
   config.py                  host/default helpers and historical migration machinery
@@ -54,6 +57,7 @@ trackball_daemon/
   autocad_driver.py          AutoCAD discovery, staging, trust, and NETLOAD delivery only
   integrations.py            host detection, setup metadata, copy/install/update operations
   tray.py / ui.py            tray lifecycle and settings interface
+  winfocus.py                foreground process query and motion-independent monitor
   plugins/                   bundled host add-ons and manifests
 
 plugin_src/autocad/          C# source and console math tests for the bundled AutoCAD plugin
@@ -145,6 +149,9 @@ Daemon-side ownership:
 - Main thread: hidden Tk root and all GUI work.
 - Tray thread: `pystray`; callbacks marshal to Tk.
 - BLE thread: asyncio/bleak subscription and packet delivery.
+- Raw Input window thread: message-only global keyboard receipt while keyboard bindings require it.
+- Input worker: normalization, reconciliation, and pressed-set publication outside native callbacks.
+- Foreground monitor: publishes process/app context independently of BLE motion.
 - Broker accept/sender threads: socket add-on connections and coalesced flushes.
 - SolidWorks worker: COM-initialized driver thread.
 - AutoCAD worker: COM-initialized loader/delivery thread; not the navigation transport.
@@ -175,6 +182,16 @@ unflushed deltas loses physical rotation.
 
 The process remains alive on Tk's mainloop. Closing Settings hides it; tray → **Quit** performs the
 only normal shutdown.
+
+The normalized input boundary is intentionally active before binding compilation. `InputAggregator`
+owns the complete pressed set across providers and publishes atomic batches, so disconnect or
+release-all cannot expose a half-released chord. `WindowsRawInputProvider` is registered with that
+boundary at daemon construction but does not start its native receiver until the Phase 7 compiler
+requests at least one keyboard control. Repeats preserve pressed state without emitting another
+activation edge. Profile swap, receiver failure/restart, lock/suspend, and shutdown release safely;
+resume/restart reconcile configured controls with `GetAsyncKeyState` only when the input desktop is
+accessible. `ForegroundMonitor` drives the same runtime context path as BLE packet routing, allowing
+stationary inputs to resolve the actual foreground app.
 
 ## 5. Pointer, 3D, and mapping semantics
 

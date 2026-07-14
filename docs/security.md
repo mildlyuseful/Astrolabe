@@ -2,9 +2,10 @@
 
 This project controls local desktop applications and therefore does several things that security
 products reasonably inspect: Bluetooth input, loopback listeners, COM automation, host-loaded
-scripts, one compiled AutoCAD add-in, and an optional self-signed loopback certificate. None of the
-runtime paths require unrestricted inbound network access, silently install a certificate, disable
-antivirus, or launch a supported 3D application.
+scripts, one compiled AutoCAD add-in, optional global Raw Input keyboard observation, and an
+optional self-signed loopback certificate. None of the runtime paths require unrestricted inbound
+network access, silently install a certificate, suppress keyboard input, disable antivirus, or
+launch a supported 3D application.
 
 ## Expected Windows and antivirus UX
 
@@ -37,6 +38,7 @@ antivirus, or launch a supported 3D application.
 | Component | Action | Scope and reversal |
 |---|---|---|
 | BLE input | Connects to the configured Trackball BLE device. | No driver or service installed. Remove/forget the device normally. |
+| Keyboard bindings | Lazily registers the standard Windows keyboard device class through Raw Input only while an enabled compiled binding references keyboard controls. | No driver, hook, service, key suppression, or startup registration. Disable all keyboard bindings or stop the daemon to unregister it and synthesize releases. |
 | Start at login | When explicitly toggled in the tray, writes `TrackballDaemon` under the current user's Windows `Run` key. | No service or scheduled task. Toggle it off or delete the HKCU value. |
 | Navigation broker | TCP JSON listener on `127.0.0.1:<configured port>`. | Loopback only; stops with the daemon. No firewall rule created. |
 | Blender | Copies Python add-on and, only after a separate confirmation, an auto-enable startup shim. | Current-user Blender scripts. Delete `trackball_nav` and `trackball_nav_startup.py`. |
@@ -61,6 +63,40 @@ AutoCAD remains loaded until AutoCAD exits.
 The Onshape HTTP/WebSocket service also rejects browser origins outside HTTPS `onshape.com` (plus
 its own local status page), limits request bodies, and never returns permissive wildcard CORS.
 
+## Global keyboard input
+
+Rich keyboard bindings use one daemon-owned, message-only Raw Input window registered for keyboard
+usage page `0x01`, usage `0x06`, with `RIDEV_INPUTSINK`. Registration is lazy: an empty or
+device-only compiled profile does not start the receiver. Profile disable/reload, receiver failure,
+session lock, suspend, shutdown, and unregister synthesize releases before state is discarded.
+Resume, receiver restart, and profile changes reconcile only configured controls with the most
+significant state bit from `GetAsyncKeyState`.
+
+Raw Input registration is device-class-wide, so Windows delivers keyboard packets for all keys
+while the receiver is enabled. The callback copies compact native fields into a bounded in-memory
+queue and returns. Outside the callback, the provider immediately ignores controls not referenced
+by the active compiled profile; only normalized configured-control transitions reach the pressed
+set. The daemon does not log raw keyboard packets or unrelated keys. Provider health and configured
+binding activations may be logged without the raw stream.
+
+Keys remain pass-through. The daemon does not request `RIDEV_NOLEGACY`, return suppression results,
+install a keyboard hook, or inject keyboard input through its command surface. Raw Input does not
+provide a universal trustworthy injected-event flag. The provider can reject explicitly known
+internal `ExtraInformation` markers, and keyboard injection is excluded from the initial command
+surface to avoid recursion; it does not pretend that arbitrary third-party injection is physically
+provenance-tagged.
+
+`GetAsyncKeyState` can return zero when the input desktop is inactive or access is unavailable, not
+only when a key is up. Reconciliation first checks access to the current input desktop. Lock,
+inactive-desktop, and otherwise ambiguous access paths release every keyboard-owned control and
+mark the provider suspended instead of trusting a potentially false all-up observation. The daemon
+is per-user and non-elevated, so observation while a higher-integrity application is foreground is
+an explicit acceptance case; inability to observe or reconcile safely degrades to release-all.
+
+The receiver never owns foreground focus. Foreground app identity is published by a separate
+read-only monitor, so stationary keyboard controls can resolve app context without trackball motion
+and without using the app selected in Settings as a runtime fallback.
+
 ## Release hardening before alpha distribution
 
 1. Build a per-user **Nuitka onedir** package. Avoid self-extracting one-file packers, which are more
@@ -80,6 +116,9 @@ its own local status page), limits request bodies, and never returns permissive 
    exclusions.
 6. Do not auto-install the Onshape certificate. If a future signed installer offers certificate
    setup, keep it an explicit, reversible checkbox and show the certificate fingerprint first.
+7. Verify Raw Input lazy registration, pass-through/no-focus behavior, lock/suspend releases, and
+   the elevated-app access boundary against the exact packaged build. Do not add key suppression or
+   raw-keystroke logging as a workaround for an access limitation.
 
 Packaged GUI behavior, SmartScreen reputation, AutoCAD/SketchUp trust prompts, and third-party AV
 classification require testing against the exact signed release artifact; source inspection cannot

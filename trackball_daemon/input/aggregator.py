@@ -12,6 +12,7 @@ from .model import (
     InputTransition,
     ProviderHealth,
     ProviderStatus,
+    InputProvider,
 )
 
 
@@ -27,6 +28,7 @@ class InputAggregator:
         self._descriptors = {}
         self._health = {}
         self._listeners = []
+        self._providers = {}
         self._revision = 0
         self._snapshot = InputSnapshot(0, (), {})
 
@@ -58,6 +60,35 @@ class InputAggregator:
             if conflicts:
                 raise ValueError(f"input controls already registered: {sorted(conflicts)}")
             self._descriptors.update(incoming)
+
+    def register_provider(self, provider):
+        if not isinstance(provider, InputProvider):
+            raise TypeError("registered provider must implement InputProvider")
+        with self._lock:
+            if provider.source_id in self._providers:
+                raise ValueError(f"input provider already registered: {provider.source_id}")
+            self.register_controls(provider.controls)
+            self._providers[provider.source_id] = provider
+        self.update_health(provider.health)
+
+    def configure_provider(self, source_id, required_control_ids):
+        with self._lock:
+            try:
+                provider = self._providers[source_id]
+            except KeyError as exc:
+                raise ValueError(f"unknown input provider: {source_id}") from exc
+        return provider.configure(required_control_ids)
+
+    def shutdown(self, reason="shutdown"):
+        with self._lock:
+            providers = tuple(self._providers.values())
+        for provider in providers:
+            try:
+                provider.stop(reason)
+            except Exception:
+                logger.exception("Input provider %s failed to stop", provider.source_id)
+                self.release_source(provider.source_id, f"{reason}_stop_failure")
+        self.release_all(reason)
 
     def descriptors(self, source_id=None):
         with self._lock:
@@ -91,21 +122,48 @@ class InputAggregator:
     def accept(self, event):
         if not isinstance(event, InputEvent):
             raise TypeError("input aggregator accepts InputEvent values")
-        if event.phase is InputPhase.DISCONNECTED:
-            return self.release_source(event.source_id, "disconnected", include_disconnect=True,
-                                       disconnected_event=event)
+        return self.accept_many((event,), "event")
+
+    def accept_many(self, events, reason="event"):
+        """Apply a provider batch against one final pressed set and publish at most once."""
+        events = tuple(events)
+        if any(not isinstance(event, InputEvent) for event in events):
+            raise TypeError("input aggregator accepts InputEvent values")
+        if not events:
+            return None
         with self._lock:
-            if event.token not in self._descriptors:
-                raise ValueError(f"unregistered input control: {event.token}")
-            if event.phase is InputPhase.PRESSED:
-                if event.token in self._pressed:
-                    return None
-                self._pressed[event.token] = event
-            else:
-                if event.token not in self._pressed:
-                    return None
-                self._pressed.pop(event.token)
-            transition = self._commit_unlocked((event,), "event")
+            accepted = []
+            for event in events:
+                if event.phase is InputPhase.DISCONNECTED:
+                    now = event.timestamp
+                    for token in sorted(
+                            token for token, pressed in self._pressed.items()
+                            if pressed.source_id == event.source_id):
+                        pressed = self._pressed.pop(token)
+                        accepted.append(InputEvent(
+                            source_id=pressed.source_id,
+                            control_id=pressed.control_id,
+                            phase=InputPhase.RELEASED,
+                            timestamp=now,
+                            sequence=pressed.sequence,
+                            metadata={"synthetic": True, "reason": reason},
+                        ))
+                    accepted.append(event)
+                    continue
+                if event.token not in self._descriptors:
+                    raise ValueError(f"unregistered input control: {event.token}")
+                if event.phase is InputPhase.PRESSED:
+                    if event.token in self._pressed:
+                        continue
+                    self._pressed[event.token] = event
+                else:
+                    if event.token not in self._pressed:
+                        continue
+                    self._pressed.pop(event.token)
+                accepted.append(event)
+            if not accepted:
+                return None
+            transition = self._commit_unlocked(accepted, reason)
             listeners = tuple(self._listeners)
         self._publish(transition, listeners)
         return transition

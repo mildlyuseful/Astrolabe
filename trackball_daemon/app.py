@@ -24,6 +24,8 @@ from .commands import SerializedCommandQueue, SetFocusedContext
 from .config import (compose_advanced_with_host_baseline, host_baseline_payload,
                      normalize_orbit_pivot_fallbacks, orbit_pivot_candidates)
 from .config_store import ConfigStore
+from .input import InputAggregator
+from .input.windows_raw_input import WindowsRawInputProvider
 from .navbroker import NavBroker
 from .navigation_router import NavigationEnvelope, NavigationRouter
 from .onshape_bridge import OnshapeBridge
@@ -34,7 +36,7 @@ from .runtime_state import ConfigRuntimeBaseResolver, FocusedContext, RuntimeSto
 from .tray import TrayController
 from .ui import SettingsWindow
 from .util import get_logger
-from .winfocus import foreground_process_name
+from .winfocus import ForegroundMonitor, foreground_process_name
 
 
 _NO_PACKET_APP = object()
@@ -50,6 +52,10 @@ class App:
         self.runtime = RuntimeStore(ConfigRuntimeBaseResolver(self.config))
         self.commands = SerializedCommandQueue(self.runtime)
         self.engine = OutputEngine(self.config, self.runtime, self.commands)
+        self.input_aggregator = InputAggregator()
+        self.keyboard_provider = WindowsRawInputProvider(
+            self.input_aggregator.accept_many, self.input_aggregator.update_health)
+        self.input_aggregator.register_provider(self.keyboard_provider)
         self.stop_event = threading.Event()
         self._status = "starting"
         self._last_pushed = None
@@ -106,6 +112,7 @@ class App:
         self._packet_app_key = _NO_PACKET_APP
         self._packet_state_revision = _NO_PACKET_REVISION
         self._last_scheme_pushed = {}
+        self.foreground_monitor = ForegroundMonitor(self._on_foreground_process_changed)
         self._apply_rates()
         self._apply_schemes()
 
@@ -131,6 +138,13 @@ class App:
         self._apply_service_gates()
         self._apply_rates()
         self._apply_schemes()
+        monitor = getattr(self, "foreground_monitor", None)
+        if monitor is not None:
+            monitor.refresh()
+
+    def configure_keyboard_controls(self, control_ids):
+        """Phase 7 compiler seam; an empty set keeps global keyboard reception unregistered."""
+        return self.input_aggregator.configure_provider("keyboard", control_ids)
 
     def _service_allowed(self, key):
         """Sensitive in-process services require both successful setup and Enabled=true."""
@@ -213,7 +227,9 @@ class App:
 
     # --- 3D-app nav routing -------------------------------------------------------
     def _foreground_app_context(self):
-        proc = foreground_process_name()
+        return self._foreground_context_for_process(foreground_process_name())
+
+    def _foreground_context_for_process(self, proc):
         connected = bool(self.onshape_bridge is not None and self.onshape_bridge.is_connected())
         return resolve_foreground_context(proc, onshape_connected=connected)
 
@@ -240,6 +256,17 @@ class App:
         if self.runtime.snapshot().focused_context != context:
             commands.dispatch(SetFocusedContext(origin="foreground", context=context))
 
+    def _apply_foreground_context(self, context):
+        key = self._active_app_key_from_context(context)
+        self._publish_runtime_context(context.app_id, context.process_name)
+        if key is not None:
+            self._activate_nav_app(key)
+        self.navigation.activate(key)
+        return key
+
+    def _on_foreground_process_changed(self, process_name):
+        self._apply_foreground_context(self._foreground_context_for_process(process_name))
+
     def _activate_nav_app(self, key):
         """Switch mappings before transforming the focused app's next complete packet."""
         if key != self._engine_app:
@@ -252,11 +279,7 @@ class App:
     def _handle_ble_packet(self, data):
         """Choose one focused app for both mapping and routing of this complete BLE packet."""
         context = self._foreground_app_context()
-        key = self._active_app_key_from_context(context)
-        self._publish_runtime_context(context.app_id, context.process_name)
-        if key is not None:
-            self._activate_nav_app(key)
-        self.navigation.activate(key)
+        key = self._apply_foreground_context(context)
         previous = getattr(self, "_packet_app_key", _NO_PACKET_APP)
         previous_revision = getattr(self, "_packet_state_revision", _NO_PACKET_REVISION)
         self._packet_app_key = key
@@ -307,6 +330,9 @@ class App:
         with self._apps_lock:
             self._onshape_apps = [("onshape", version or "web", 0)] if connected else []
             self._refresh_connected_apps()
+        monitor = getattr(self, "foreground_monitor", None)
+        if monitor is not None:
+            monitor.refresh()
 
     def _refresh_connected_apps(self):
         # Caller holds _apps_lock. Rebuild the combined list (a new object => lockless readers ok).
@@ -348,6 +374,7 @@ class App:
         self.sw_driver.start()
         self.onshape_bridge.start()
         self.acad_loader.start()
+        self.foreground_monitor.start()
 
         # One-click-free add-in refresh: re-copy any installed add-in the daemon now ships a
         # newer version of (e.g. this release's viewport-refresh fix). Takes effect on the
@@ -394,6 +421,10 @@ class App:
     def quit(self):
         # Called from the tray thread.
         self.stop_event.set()
+        if getattr(self, "input_aggregator", None) is not None:
+            self.input_aggregator.shutdown("daemon_shutdown")
+        if getattr(self, "foreground_monitor", None) is not None:
+            self.foreground_monitor.stop()
         if self.broker is not None:
             self.broker.stop()
         if self.sw_driver is not None:
