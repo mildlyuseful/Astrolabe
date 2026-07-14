@@ -71,7 +71,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 1 — App and setting registries | COMPLETE | Start `30b1598`; registries `2183f45`; consumer cutover `0c23104`; items 1.1–1.4 complete | Wait for explicit `START PHASE 2`. |
 | 2 — Sparse System→Global→app config | COMPLETE | Start `de0f42f`; fixtures `67f6710`; System defaults `1af1368`; resolver `da8e219`; store/migration `ecbeb3b`; consumer cutover `e70ea68`; items 2.1–2.5 complete | Wait for explicit `START PHASE 3`. |
 | 3 — Runtime state and dependency closure | COMPLETE | Start `91e5a09`; frozen ownership `a2310e8`; serialized store `4c94301`; dependency engine `a58c652`; consumer cutover `a39e81e`; items 3.1–3.5 complete | Wait for explicit `START PHASE 4`. |
-| 4 — Target-isolated navigation transport | NOT_STARTED | — | May be split/merged independently only after Phase 0 contracts exist. |
+| 4 — Target-isolated navigation transport | IN_PROGRESS | Start `43832a7`; bootstrap complete | Freeze broker hello/frame versions and packet-boundary foreground routing before adding the target-aware envelope/router. |
 | 5 — Input providers and Windows keyboard | NOT_STARTED | — | Start after Phases 0 and 3 are COMPLETE. |
 | 6 — BLE five-way protocol and adapter | NOT_STARTED | — | Start after Phase 5 provider contract is COMPLETE. |
 | 7 — Binding compiler, DSL, and system profiles | NOT_STARTED | — | Start after Phases 2, 3, 5, and 6 are COMPLETE. |
