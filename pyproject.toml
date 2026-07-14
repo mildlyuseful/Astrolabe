@@ -23,8 +23,8 @@ onshape = ["cryptography>=41.0; sys_platform == 'win32'"]
 [project.gui-scripts]
 trackball-daemon = "trackball_daemon.__main__:main"
 
-[tool.setuptools]
-packages = ["trackball_daemon"]
+[tool.setuptools.packages.find]
+include = ["trackball_daemon*"]
 
 [tool.setuptools.dynamic]
 version = {attr = "trackball_daemon.__version__"}
@@ -32,7 +32,7 @@ version = {attr = "trackball_daemon.__version__"}
 # Ship the bundled CAD add-ins (e.g. the Fusion 360 add-in) inside the package so
 # "Set up" can copy them out, and so Nuitka onedir includes them.
 [tool.setuptools.package-data]
-trackball_daemon = ["host_profiles.json", "default_profiles.json", "system_defaults.json", "plugins/**/*"]
+trackball_daemon = ["host_profiles.json", "default_profiles.json", "system_defaults.json", "plugins/**/*", "devices/descriptor_data/*.json"]
 
 [tool.setuptools.exclude-package-data]
 trackball_daemon = ["**/__pycache__/*", "**/*.pyc", "**/*.pyc.*", "**/*.pyo"]

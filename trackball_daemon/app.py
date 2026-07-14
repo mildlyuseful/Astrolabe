@@ -24,6 +24,12 @@ from .commands import SerializedCommandQueue, SetFocusedContext
 from .config import (compose_advanced_with_host_baseline, host_baseline_payload,
                      normalize_orbit_pivot_fallbacks, orbit_pivot_candidates)
 from .config_store import ConfigStore
+from .devices import (
+    DeviceAdapterRegistry,
+    MotionSample,
+    SnapshotInputProvider,
+    builtin_device_descriptors,
+)
 from .input import InputAggregator
 from .input.windows_raw_input import WindowsRawInputProvider
 from .navbroker import NavBroker
@@ -56,6 +62,21 @@ class App:
         self.keyboard_provider = WindowsRawInputProvider(
             self.input_aggregator.accept_many, self.input_aggregator.update_health)
         self.input_aggregator.register_provider(self.keyboard_provider)
+        device_descriptors = builtin_device_descriptors()
+        self.ble_input_providers = {}
+        for descriptor in device_descriptors:
+            provider = SnapshotInputProvider(
+                descriptor,
+                self.input_aggregator.accept_many,
+                self.input_aggregator.update_health,
+            )
+            self.input_aggregator.register_provider(provider)
+            # Phase 6 observes the built-in hardware controls immediately because the BLE motion
+            # connection already exists. Phase 7 will narrow these sets to compiled bindings.
+            provider.configure(control.control_id for control in descriptor.controls)
+            self.ble_input_providers[descriptor.source_id] = provider
+        self.device_adapters = DeviceAdapterRegistry(
+            device_descriptors, self.ble_input_providers)
         self.stop_event = threading.Event()
         self._status = "starting"
         self._last_pushed = None
@@ -145,6 +166,12 @@ class App:
     def configure_keyboard_controls(self, control_ids):
         """Phase 7 compiler seam; an empty set keeps global keyboard reception unregistered."""
         return self.input_aggregator.configure_provider("keyboard", control_ids)
+
+    def configure_ble_controls(self, source_id, control_ids):
+        """Phase 7 compiler seam for one stable data-descriptor control namespace."""
+        if source_id not in self.ble_input_providers:
+            raise ValueError(f"unknown BLE input provider: {source_id}")
+        return self.input_aggregator.configure_provider(source_id, control_ids)
 
     def _service_allowed(self, key):
         """Sensitive in-process services require both successful setup and Enabled=true."""
@@ -294,6 +321,11 @@ class App:
             self._packet_app_key = previous
             self._packet_state_revision = previous_revision
 
+    def _handle_ble_motion(self, sample):
+        if not isinstance(sample, MotionSample):
+            raise TypeError("BLE device adapters must emit MotionSample values")
+        self._handle_ble_packet(sample.payload)
+
     def _nav_sink(self, ox, oy, oz, px, py, zoom):
         # Called synchronously by _handle_ble_packet after that method selected the app whose
         # mapping produced these values. Direct callers (including tests/debug helpers) fall back
@@ -385,10 +417,13 @@ class App:
         for key, old, new in integrations.auto_update(self.config):
             self.log.info(f"updated {key} add-in {old} -> {new} (restart {key} to apply)")
 
-        def notify_cb(sender, data):
-            self._handle_ble_packet(data)
-
-        start_ble_thread(self.get_ble_params, notify_cb, self.set_status, self.stop_event)
+        start_ble_thread(
+            self.get_ble_params,
+            self.device_adapters,
+            self._handle_ble_motion,
+            self.set_status,
+            self.stop_event,
+        )
 
         if self.debug:
             from .debugview import start_debug_view

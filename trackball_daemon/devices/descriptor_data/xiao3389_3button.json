@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "device_id": "xiao3389_3button",
+  "source_id": "ble.xiao3389",
+  "label": "XIAO3389 three-button test bench",
+  "match": {
+    "advertised_names": ["Trackball BLE"]
+  },
+  "service_uuid": "2cad0001-6e64-0146-b139-9cf2a4cd57fc",
+  "motion_characteristic": "2cad0002-6e64-0146-b139-9cf2a4cd57fc",
+  "input_characteristic": "2cad0003-6e64-0146-b139-9cf2a4cd57fc",
+  "controls": [
+    {"id": "button.left", "label": "Test-bench Left", "bit": 0, "kind": "button"},
+    {"id": "button.right", "label": "Test-bench Right", "bit": 1, "kind": "button"},
+    {"id": "button.middle", "label": "Test-bench Middle", "bit": 2, "kind": "button"}
+  ],
+  "metadata": {
+    "simultaneous_controls": "independent",
+    "protocol_version": 1,
+    "hardware_role": "test_bench"
+  }
+}

@@ -73,7 +73,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 3 — Runtime state and dependency closure | COMPLETE | Start `91e5a09`; frozen ownership `a2310e8`; serialized store `4c94301`; dependency engine `a58c652`; consumer cutover `a39e81e`; items 3.1–3.5 complete | Wait for explicit `START PHASE 4`. |
 | 4 — Target-isolated navigation transport | COMPLETE | Start `43832a7`; protocol `abe757e`; implementation `23bc53e`; items 4.1–4.4 complete | Wait for explicit `START PHASE 5`. |
 | 5 — Input providers and Windows keyboard | COMPLETE | Start `2aa1c9b`; provider foundation `19c9ad1`; Raw Input/foreground `e16e340`; acceptance gate `d99a0de`; boundary reconciliation `0b99a6f`; hidden-release fail-safe `ce07604`; items 5.1–5.6 complete | Wait for explicit `START PHASE 6`. |
-| 6 — BLE five-way protocol and adapter | IN_PROGRESS | Start `af373fa`; bootstrap and current protocol inventory in progress | Freeze the transport, firmware, HID/controller, debounce, and compatibility baseline before the first implementation checkpoint. |
+| 6 — BLE five-way protocol and adapter | IN_PROGRESS | Start `af373fa`; frozen baseline `07b9450`; items 6.1–6.2 and host side of 6.4 implemented | Add the compatible firmware input-state publisher without changing rotation or HID fallback behavior. |
 | 7 — Binding compiler, DSL, and system profiles | NOT_STARTED | — | Start after Phases 2, 3, 5, and 6 are COMPLETE. |
 | 8 — Motion/output integration | NOT_STARTED | — | Start after Phases 4 and 7 are COMPLETE. |
 | 9 — Barebones settings UX | NOT_STARTED | — | Start after Phases 2 and 7 are COMPLETE. |
@@ -384,19 +384,25 @@ treating that review as an authority:
 - **Completed work:** mandatory bootstrap; Phase 5 dependency confirmation; 532-test untouched
   baseline; inventory of GATT UUIDs, byte-exact rotation packets, BLE transport ownership,
   controller/HID transitions, three-button test-bench pins and debounce, daemon-absent fallback,
-  production placeholder state, and package-discovery debt. Work item 6.1 is next.
+  production placeholder state, and package-discovery debt; 6.1 generic multi-characteristic
+  transport plus data-descriptor adapter selection; 6.2 protocol codec and sequence gate; host side
+  of 6.4 legacy/five-way adapters, normalized motion, snapshot diffing, and disconnect release.
 - **Compatibility decisions:** keep the service and 12-byte rotation characteristic unchanged;
   reserve additive input characteristic `2cad0003-6e64-0146-b139-9cf2a4cd57fc`; use protocol v1,
   snapshot kind 1, little-endian unsigned 16-bit serial arithmetic, and descriptor-owned bit
   meanings. Do not invent production five-way pins absent from repository hardware documentation.
 - **User-owned files left untouched:** `.claude/` and
   `docs/rich_keybindings_plan_revisions.md` remain untracked and were not staged.
-- **Verification:** untouched `python -m pytest -q` = 532 passed. Setuptools discovery currently
-  finds `trackball_daemon` and `trackball_daemon.input`; Phase 6 must replace the explicit root-only
-  package declaration before adding `trackball_daemon.devices`.
-- **Next exact action:** implement the generic multi-characteristic transport and validated
-  data-descriptor/device-adapter boundary, preserving the legacy App motion callback until the new
-  normalized `MotionSample` seam is wired.
+- **Files changed after the baseline:** new `trackball_daemon/devices/` models, descriptor loader,
+  packet protocol, snapshot provider, adapters, registry, transport, and built-in descriptor data;
+  `ble.py` compatibility facade; App wiring; subpackage/data packaging; and focused tests.
+- **Verification:** untouched `python -m pytest -q` = 532 passed; descriptor/provider/transport
+  focus = 63 passed; current full suite = 555 passed; compileall and `git diff --check` passed.
+  Setuptools discovery now includes `trackball_daemon`, `trackball_daemon.input`, and
+  `trackball_daemon.devices`.
+- **Next exact action:** implement protocol v1 publication in the working XIAO3389 test-bench
+  firmware, preserving the exact rotation characteristic and existing HID behavior. Keep the empty
+  production placeholder honest until its five-way pin/electrical mapping is supplied.
 
 ## 1. Product goals
 

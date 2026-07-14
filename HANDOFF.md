@@ -129,6 +129,9 @@ Protocol contract:
 - Rotation characteristic: `2cad0002-6e64-0146-b139-9cf2a4cd57fc`.
 - Packet: 12 bytes, three little-endian `float32` values `(rx, ry, rz)` in radians since the prior
   notification.
+- Input-state characteristic: `2cad0003-6e64-0146-b139-9cf2a4cd57fc`. Protocol v1 kind 1 is a
+  full-state snapshot: version, kind, little-endian `uint16` sequence, payload byte count, then the
+  descriptor-mapped pressed bitset. The rotation characteristic remains unchanged.
 - Bluefruit stores the 128-bit UUID byte arrays in reverse order.
 - Firmware accumulates float deltas and clears them only after notification, so polling/notify
   cadence does not quantize away motion.
@@ -137,10 +140,13 @@ The raw-sensor IPS report is measured before `IPS_CAP`; the cap uses actual elap
 currently a test knob for emulating a lower-performance sensor, not the reported hardware limit.
 Set it high to disable the emulation during sensor characterization.
 
-The daemon's BLE reader is intentionally thin: it scans by configured name or connects by address,
-subscribes, and passes each byte packet to `App._handle_ble_packet`. That boundary captures the
-foreground app, activates its output mapping, and then calls `OutputEngine.handle_packet`. Device
-identity changes apply on the next reconnect.
+The daemon's generic BLE transport scans by configured name or connects by address, inventories
+GATT, selects a data-descriptor-backed adapter, and subscribes to every characteristic that adapter
+requests. Legacy firmware subscribes only to rotation. Input-capable firmware keeps the same motion
+path and additionally diffs accepted full-state snapshots into normalized `InputEvent` batches.
+Duplicate/stale/malformed snapshots cannot change pressed state; reconnect resets the sequence
+baseline, and disconnect releases every control owned by that provider. Device identity changes
+apply on the next reconnect.
 
 ## 4. Daemon threads and data flow
 
