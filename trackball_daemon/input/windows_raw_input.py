@@ -422,7 +422,7 @@ class WindowsRawInputProvider(InputProvider):
 
     def __init__(self, publish_events, publish_health, *, native_factory=None,
                  key_state=None, desktop_accessible=None, queue_capacity=512,
-                 ignored_extra_information=()):
+                 ignored_extra_information=(), held_release_poll_interval=0.1):
         if not callable(publish_events) or not callable(publish_health):
             raise TypeError("Raw Input provider callbacks must be callable")
         self._publish_events = publish_events
@@ -432,6 +432,10 @@ class WindowsRawInputProvider(InputProvider):
         self._desktop_accessible = desktop_accessible or input_desktop_accessible
         self._queue_capacity = max(8, int(queue_capacity))
         self._ignored_extra = frozenset(int(value) for value in ignored_extra_information)
+        self._held_release_poll_interval = (
+            None if held_release_poll_interval is None
+            else max(0.05, float(held_release_poll_interval)))
+        self._next_held_release_poll = 0.0
         self._lock = threading.RLock()
         self._lifecycle_lock = threading.Lock()
         self._required_requested = frozenset()
@@ -589,6 +593,7 @@ class WindowsRawInputProvider(InputProvider):
                 self._release_pressed("queue_overflow")
                 self.reconcile("queue_overflow")
             if item is None:
+                self._poll_held_releases_if_due()
                 continue
             kind, value = item
             if kind == "packet":
@@ -607,6 +612,49 @@ class WindowsRawInputProvider(InputProvider):
                     except Exception:
                         pass
                 self._set_health(ProviderStatus.FAILED, value)
+
+    def _poll_held_releases_if_due(self):
+        interval = self._held_release_poll_interval
+        if interval is None or self._worker_stop.is_set():
+            return
+        now = time.monotonic()
+        with self._lock:
+            held = tuple(sorted(self._pressed))
+            should_poll = bool(held and self._native is not None and not self._suspended)
+        if not should_poll:
+            self._next_held_release_poll = now + interval
+            return
+        if now < self._next_held_release_poll:
+            return
+        self._next_held_release_poll = now + interval
+        if not self._desktop_accessible():
+            with self._lock:
+                self._suspended = True
+            self._release_pressed("access_ambiguous")
+            self._set_health(
+                ProviderStatus.SUSPENDED,
+                "held_state_poll: input desktop or key state is inaccessible")
+            return
+        try:
+            released = {
+                control_id for control_id in held
+                if not self._key_state(_vk_for_control(control_id))}
+        except Exception as exc:
+            with self._lock:
+                self._suspended = True
+            self._release_pressed("access_ambiguous")
+            self._set_health(
+                ProviderStatus.SUSPENDED,
+                f"held_state_poll: key state failed: {exc}")
+            return
+        with self._lock:
+            released.intersection_update(self._pressed)
+            self._pressed.difference_update(released)
+        if released:
+            self._publish_events(tuple(InputEvent(
+                SOURCE_ID, control_id, InputPhase.RELEASED, now,
+                metadata={"synthetic": True, "reason": "held_state_poll"})
+                for control_id in sorted(released)), "held_state_poll")
 
     def _handle_packet(self, packet):
         if packet.extra_information in self._ignored_extra:

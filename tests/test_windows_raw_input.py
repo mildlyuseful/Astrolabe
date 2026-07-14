@@ -65,6 +65,7 @@ def _provider(*, down=(), accessible=True, ignored=()):
         key_state=lambda vk: vk in state,
         desktop_accessible=lambda: accessible,
         ignored_extra_information=ignored,
+        held_release_poll_interval=None,
     )
     aggregator.register_controls(provider.controls)
     return provider, aggregator, state
@@ -200,7 +201,8 @@ def test_inaccessible_desktop_fails_safe_to_release_all():
     provider = WindowsRawInputProvider(
         aggregator.accept_many, aggregator.update_health,
         native_factory=_FakeNative, key_state=lambda _vk: False,
-        desktop_accessible=lambda: accessible[0])
+        desktop_accessible=lambda: accessible[0],
+        held_release_poll_interval=None)
     aggregator.register_controls(provider.controls)
     provider.configure(("alt",))
     native = _FakeNative.instances[-1]
@@ -231,6 +233,39 @@ def test_foreground_reconcile_closes_a_hold_when_key_state_is_no_longer_visible(
     assert changes[-1].reason == "foreground_change"
     assert changes[-1].events[0].metadata == {
         "synthetic": True, "reason": "foreground_change"}
+    provider.stop()
+
+
+def test_held_state_poll_closes_a_release_hidden_from_raw_input():
+    _FakeNative.instances.clear()
+    aggregator = InputAggregator()
+    state = set()
+    provider = WindowsRawInputProvider(
+        aggregator.accept_many, aggregator.update_health,
+        native_factory=_FakeNative,
+        key_state=lambda vk: vk in state,
+        desktop_accessible=lambda: True,
+        held_release_poll_interval=0.05,
+    )
+    aggregator.register_controls(provider.controls)
+    provider.configure(("ctrl", "shift"))
+    native = _FakeNative.instances[-1]
+    state.add(0xA2)  # VK_LCONTROL
+    state.add(0xA0)  # VK_LSHIFT, deliberately absent from the Raw Input stream
+    native.on_packet(_packet(VK_CONTROL))
+    _wait_until(lambda: aggregator.snapshot().pressed_tokens == ("keyboard:ctrl.left",))
+    changes = []
+    aggregator.add_listener(changes.append)
+
+    time.sleep(0.2)
+    assert aggregator.snapshot().pressed_tokens == ("keyboard:ctrl.left",)
+
+    state.clear()  # the elevated foreground hides the corresponding Raw Input release
+
+    _wait_until(lambda: aggregator.snapshot().pressed_tokens == ())
+    assert changes[-1].reason == "held_state_poll"
+    assert changes[-1].events[0].metadata == {
+        "synthetic": True, "reason": "held_state_poll"}
     provider.stop()
 
 

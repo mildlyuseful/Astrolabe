@@ -72,7 +72,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 2 — Sparse System→Global→app config | COMPLETE | Start `de0f42f`; fixtures `67f6710`; System defaults `1af1368`; resolver `da8e219`; store/migration `ecbeb3b`; consumer cutover `e70ea68`; items 2.1–2.5 complete | Wait for explicit `START PHASE 3`. |
 | 3 — Runtime state and dependency closure | COMPLETE | Start `91e5a09`; frozen ownership `a2310e8`; serialized store `4c94301`; dependency engine `a58c652`; consumer cutover `a39e81e`; items 3.1–3.5 complete | Wait for explicit `START PHASE 4`. |
 | 4 — Target-isolated navigation transport | COMPLETE | Start `43832a7`; protocol `abe757e`; implementation `23bc53e`; items 4.1–4.4 complete | Wait for explicit `START PHASE 5`. |
-| 5 — Input providers and Windows keyboard | IN_PROGRESS | Start `2aa1c9b`; provider foundation `19c9ad1`; items 5.1–5.6 implemented; ordinary/elevated foreground evidence recorded | Run the hold-across-elevation acceptance case, record exact results, then close Phase 5. |
+| 5 — Input providers and Windows keyboard | IN_PROGRESS | Start `2aa1c9b`; provider foundation `19c9ad1`; foreground hardening `0b99a6f`; first hold-boundary run exposed release only at shutdown; release-only held-state fail-safe implemented | Rerun the hold-across-elevation acceptance case. |
 | 6 — BLE five-way protocol and adapter | NOT_STARTED | — | Start after Phase 5 provider contract is COMPLETE. |
 | 7 — Binding compiler, DSL, and system profiles | NOT_STARTED | — | Start after Phases 2, 3, 5, and 6 are COMPLETE. |
 | 8 — Motion/output integration | NOT_STARTED | — | Start after Phases 4 and 7 are COMPLETE. |
@@ -344,7 +344,7 @@ treating that review as an authority:
   `docs/rich_keybindings_plan_revisions.md` remain untracked and were not staged.
 - **Verification:** untouched Phase 5 baseline `python -m pytest -q` = 502 passed; Phase 5.1 focus =
   27 passed; provider/native focus = 19 passed; lifecycle/runtime focus = 71 passed; security and
-  input focus = 58 passed; current full suite after access-boundary hardening = 531 passed.
+  input focus = 58 passed; current full suite after release-only held-state polling = 532 passed.
   `python -m compileall -q
   trackball_daemon tests tools/windows_input_acceptance.py` and `git diff --check` passed. Native
   message-window registration/unregistration passed. Elevated automated F24 acceptance passed with
@@ -362,8 +362,16 @@ treating that review as an authority:
 - **Manual gate still required:** run `python tools/windows_input_acceptance.py --access-boundary
   --seconds 20` from a non-elevated terminal. In ordinary Notepad hold left Ctrl, click elevated
   Notepad while still holding it, wait two seconds, release it there, and leave elevated Notepad
-  focused. The report must show the ordinary press, a fail-safe synthetic `foreground_change`
-  release, and no final pressed controls.
+  focused. The report must show the ordinary press, a fail-safe synthetic `held_state_poll` or
+  `foreground_change` release before shutdown, and no final pressed controls.
+- **First boundary result:** the ordinary Ctrl press arrived through `input_sink`, but switching
+  between ordinary and elevated Notepad did not publish a foreground change because both processes
+  have the same executable name. The hidden release was therefore synthesized only by
+  `acceptance_complete`; this does not satisfy the live-session fail-safe gate. The provider now
+  performs a low-rate `GetAsyncKeyState` reconciliation only while configured controls are believed
+  held, allowing a hidden release to close without relying on executable-name changes. Rerun the
+  same boundary command and require `held_state_poll` or `foreground_change`—never
+  `acceptance_complete`—as the release reason.
 - **Tests still required after manual evidence:** record the exact ordinary/elevated result, rerun
   the full suite, compileall, AutoCAD NavMath, automated production-provider F24 acceptance, and
   `git diff --check`; then update this section and the ledger row to `COMPLETE` or diagnose a

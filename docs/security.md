@@ -95,6 +95,9 @@ an explicit acceptance case; inability to observe or reconcile safely degrades t
 Every foreground transition also triggers reconciliation. When Windows no longer reports a held
 control across an integrity boundary, the provider closes it with a synthetic release instead of
 preserving stale state while the eventual physical release is hidden.
+While the provider believes a configured control is held, it also rechecks only that held control
+at a low rate. This is a release-loss fail-safe—not a keyboard scanner—and it neither inspects
+unconfigured keys nor creates repeated activation edges.
 
 The receiver never owns foreground focus. Foreground app identity is published by a separate
 read-only monitor, so stationary keyboard controls can resolve app context without trackball motion
