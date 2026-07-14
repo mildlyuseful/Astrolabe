@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation in progress (Phases 0–6 complete; Phase 7 awaiting authorization)
+Status: implementation in progress (Phases 0–6 complete; Phase 7 in progress)
 
 Target branch: `rich-keybindings`
 
@@ -74,7 +74,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 4 — Target-isolated navigation transport | COMPLETE | Start `43832a7`; protocol `abe757e`; implementation `23bc53e`; items 4.1–4.4 complete | Wait for explicit `START PHASE 5`. |
 | 5 — Input providers and Windows keyboard | COMPLETE | Start `2aa1c9b`; provider foundation `19c9ad1`; Raw Input/foreground `e16e340`; acceptance gate `d99a0de`; boundary reconciliation `0b99a6f`; hidden-release fail-safe `ce07604`; items 5.1–5.6 complete | Wait for explicit `START PHASE 6`. |
 | 6 — BLE five-way protocol and adapter | COMPLETE | Start `af373fa`; frozen baseline `07b9450`; host protocol/adapters `b7aec6d`; firmware/docs `26146d1`; hardware contract `dd9bb48`; completion `d569d31`; items 6.1–6.6 complete | Wait for explicit `START PHASE 7`. Final five-way pins and physical qualification remain Phase 11/release work. |
-| 7 — Binding compiler, DSL, and system profiles | NOT_STARTED | — | Start after Phases 2, 3, 5, and 6 are COMPLETE. |
+| 7 — Binding compiler, DSL, and system profiles | IN_PROGRESS | Start `7a0ae3d`; bootstrap and untouched baseline complete | Implement 7.1 packaged system profiles and profile-scoped sparse override validation without starting Phase 8. |
 | 8 — Motion/output integration | NOT_STARTED | — | Start after Phases 4 and 7 are COMPLETE. |
 | 9 — Barebones settings UX | NOT_STARTED | — | Start after Phases 2 and 7 are COMPLETE. |
 | 10 — Text HUD | NOT_STARTED | — | Start after Phase 8 runtime snapshots are COMPLETE. |
@@ -442,6 +442,21 @@ treating that review as an authority:
 - **Next exact action:** stop. On explicit `START PHASE 7`, rerun the mandatory bootstrap, confirm
   Phase 6 is `COMPLETE`, and implement the binding compiler/DSL/profile work including the bounded
   momentary pointer-button action. Do not start Phase 8.
+
+### 0.13 Phase 7 in-progress checkpoint
+
+- **Status:** `IN_PROGRESS` from starting commit `7a0ae3d`.
+- **Bootstrap:** complete plan/HANDOFF/TODO reread; Phase 2/3/5/6 dependency confirmation; clean
+  tracked worktree; user-owned `.claude/` and `docs/rich_keybindings_plan_revisions.md` remain
+  untracked and untouched.
+- **Untouched baseline:** `python -m pytest -q` = 562 passed.
+- **Boundary decision:** reuse Phase 3's runtime request/dependency/precedence authority and Phase
+  5/6's normalized provider aggregation. Phase 7 owns declarative profile composition, validation,
+  chord/context matching, activation identity, macro compilation, diagnostics, and provider
+  configuration; it does not add Phase 8 motion or SendInput delivery.
+- **Next exact action:** implement and validate 7.1 `system_keybinding_profiles.json`, immutable
+  profile models/loading, package-data coverage, and profile-keyed sparse overrides. Then checkpoint
+  before the chord state machine.
 
 ## 1. Product goals
 
