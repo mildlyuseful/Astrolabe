@@ -72,7 +72,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 2 — Sparse System→Global→app config | COMPLETE | Start `de0f42f`; fixtures `67f6710`; System defaults `1af1368`; resolver `da8e219`; store/migration `ecbeb3b`; consumer cutover `e70ea68`; items 2.1–2.5 complete | Wait for explicit `START PHASE 3`. |
 | 3 — Runtime state and dependency closure | COMPLETE | Start `91e5a09`; frozen ownership `a2310e8`; serialized store `4c94301`; dependency engine `a58c652`; consumer cutover `a39e81e`; items 3.1–3.5 complete | Wait for explicit `START PHASE 4`. |
 | 4 — Target-isolated navigation transport | COMPLETE | Start `43832a7`; protocol `abe757e`; implementation `23bc53e`; items 4.1–4.4 complete | Wait for explicit `START PHASE 5`. |
-| 5 — Input providers and Windows keyboard | IN_PROGRESS | Start `2aa1c9b`; provider foundation `19c9ad1`; foreground hardening `0b99a6f`; first hold-boundary run exposed release only at shutdown; release-only held-state fail-safe implemented | Rerun the hold-across-elevation acceptance case. |
+| 5 — Input providers and Windows keyboard | COMPLETE | Start `2aa1c9b`; provider foundation `19c9ad1`; Raw Input/foreground `e16e340`; acceptance gate `d99a0de`; boundary reconciliation `0b99a6f`; hidden-release fail-safe `ce07604`; items 5.1–5.6 complete | Wait for explicit `START PHASE 6`. |
 | 6 — BLE five-way protocol and adapter | NOT_STARTED | — | Start after Phase 5 provider contract is COMPLETE. |
 | 7 — Binding compiler, DSL, and system profiles | NOT_STARTED | — | Start after Phases 2, 3, 5, and 6 are COMPLETE. |
 | 8 — Motion/output integration | NOT_STARTED | — | Start after Phases 4 and 7 are COMPLETE. |
@@ -319,10 +319,11 @@ treating that review as an authority:
   3 are complete, reread the Phase 0 Windows-input decision, mark Phase 5 `IN_PROGRESS`, and begin
   the provider/aggregator contract without starting Phase 6.
 
-### 0.11 Phase 5 in-progress checkpoint
+### 0.11 Phase 5 complete checkpoint
 
-- **Status:** `IN_PROGRESS` from starting commit `2aa1c9b`; normalized provider foundation
-  checkpoint `19c9ad1`; Raw Input/foreground lifecycle checkpoint `e16e340`.
+- **Status:** `COMPLETE` from starting commit `2aa1c9b`; normalized provider foundation
+  `19c9ad1`; Raw Input/foreground lifecycle `e16e340`; physical acceptance checkpoint `d99a0de`;
+  foreground reconciliation `0b99a6f`; hidden-release fail-safe `ce07604`.
 - **Completed work:** 5.1 immutable `InputEvent`, `InputControlDescriptor`, provider health/status,
   provider lifecycle interface, and atomic cross-provider pressed-set aggregation; 5.2 lazy
   message-only Raw Input receiver using `RIDEV_INPUTSINK` without `RIDEV_NOLEGACY`, a bounded
@@ -330,9 +331,10 @@ treating that review as an authority:
   left/right modifier descriptors, configured-control filtering, repeat-edge rejection, known
   internal injection-marker filtering, and pass-through registration; 5.4 atomic release on profile
   reload/disable, failure, lock, suspend, unregister, and shutdown plus input-desktop-gated
-  `GetAsyncKeyState` reconciliation on resume/restart; 5.5 an independent foreground monitor routed
-  through the same runtime/app context boundary as BLE packets; 5.6 security/runtime inventory and
-  a production-provider acceptance tool.
+  `GetAsyncKeyState` reconciliation on resume/restart and release-only polling while a configured
+  control is believed held; 5.5 an independent foreground monitor routed through the same
+  runtime/app context boundary as BLE packets; 5.6 security/runtime inventory and a
+  production-provider acceptance tool.
 - **Backend decision preserved:** Raw Input remains primary. No physical failure has been observed,
   so the documented low-level-hook fallback is not authorized. Raw Input has no universal injected
   provenance flag; the initial command surface does not inject keyboard input, while explicit known
@@ -342,16 +344,13 @@ treating that review as an authority:
   `tools/windows_input_acceptance.py`; `docs/security.md`; `HANDOFF.md`; and this ledger.
 - **User-owned files left untouched:** `.claude/` and
   `docs/rich_keybindings_plan_revisions.md` remain untracked and were not staged.
-- **Verification:** untouched Phase 5 baseline `python -m pytest -q` = 502 passed; Phase 5.1 focus =
-  27 passed; provider/native focus = 19 passed; lifecycle/runtime focus = 71 passed; security and
-  input focus = 58 passed; current full suite after release-only held-state polling = 532 passed.
-  `python -m compileall -q
-  trackball_daemon tests tools/windows_input_acceptance.py` and `git diff --check` passed. Native
-  message-window registration/unregistration passed. Elevated automated F24 acceptance passed with
-  one background `input_sink` press, repeat suppression, one release, unchanged foreground, and no
-  held shutdown state, including the rerun after foreground reconciliation was added. The first
-  sandboxed injector attempt received WinError 5 and is not counted as backend evidence; the
-  explicitly approved elevated runs passed.
+- **Verification:** untouched Phase 5 baseline `python -m pytest -q` = 502 passed; final
+  `python -m pytest -q` = 532 passed; `python -m compileall -q trackball_daemon tests
+  tools/windows_input_acceptance.py` passed; AutoCAD NavMath Release runner = `ALL PASS`; native
+  message-window registration/unregistration passed; and `git diff --check` passed. Final approved
+  automated F24 acceptance produced one background `input_sink` press, repeat suppression, one
+  `input_sink` release, unchanged foreground, and no held shutdown state. Sandboxed SendInput
+  attempts returned WinError 5 and are not counted as backend evidence.
 - **Manual evidence recorded:** with ordinary Notepad foreground, the production provider observed
   left Ctrl, left/right Shift, left/right Alt, `Shift+A`, and F12 press/release edges through
   `input_sink`; `A` still reached Notepad, foreground was unchanged, and shutdown left no pressed
@@ -359,26 +358,24 @@ treating that review as an authority:
   E0 normalization remains covered by the pure provider test. With Administrator/elevated Notepad
   foreground, the non-elevated receiver observed no transitions while `A` still passed through;
   this confirms the documented integrity limitation rather than a reason to replace Raw Input.
-- **Manual gate still required:** run `python tools/windows_input_acceptance.py --access-boundary
-  --seconds 20` from a non-elevated terminal. In ordinary Notepad hold left Ctrl, click elevated
-  Notepad while still holding it, wait two seconds, release it there, and leave elevated Notepad
-  focused. The report must show the ordinary press, a fail-safe synthetic `held_state_poll` or
-  `foreground_change` release before shutdown, and no final pressed controls.
 - **First boundary result:** the ordinary Ctrl press arrived through `input_sink`, but switching
   between ordinary and elevated Notepad did not publish a foreground change because both processes
   have the same executable name. The hidden release was therefore synthesized only by
   `acceptance_complete`; this does not satisfy the live-session fail-safe gate. The provider now
   performs a low-rate `GetAsyncKeyState` reconciliation only while configured controls are believed
-  held, allowing a hidden release to close without relying on executable-name changes. Rerun the
-  same boundary command and require `held_state_poll` or `foreground_change`—never
+  held, allowing a hidden release to close without relying on executable-name changes. The rerun
+  acceptance criterion was therefore `held_state_poll` or `foreground_change`—never
   `acceptance_complete`—as the release reason.
-- **Tests still required after manual evidence:** record the exact ordinary/elevated result, rerun
-  the full suite, compileall, AutoCAD NavMath, automated production-provider F24 acceptance, and
-  `git diff --check`; then update this section and the ledger row to `COMPLETE` or diagnose a
-  physical Raw Input failure before reconsidering the Phase 0 backend decision.
-- **Next exact action:** wait for the hold-across-elevation acceptance result. On success, close
-  Phase 5 and set the next command to `START PHASE 6`. On failure, reproduce and classify
-  reconciliation versus Raw Input/access behavior; do not switch to a low-level hook silently.
+- **Final boundary result:** the rerun produced a physical `ctrl.left` `input_sink` press in ordinary
+  Notepad followed by a synthetic `held_state_poll` release while elevated Notepad remained
+  foreground. `final_pressed` was empty and the provider stopped cleanly. This closes the live
+  access-boundary gate without installing a low-level hook.
+- **Stop gate:** satisfied. Background pass-through, documented elevation behavior, modifier-side
+  normalization, repeat rejection, lazy lifecycle, loss reconciliation, and fail-safe release are
+  covered. No raw-key logging was introduced.
+- **Next exact action:** stop. On explicit `START PHASE 6`, rerun the mandatory bootstrap, confirm
+  Phase 5 is `COMPLETE`, and begin the BLE five-way protocol and adapter work without starting
+  Phase 7.
 
 ## 1. Product goals
 

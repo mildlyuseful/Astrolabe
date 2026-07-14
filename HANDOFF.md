@@ -191,7 +191,10 @@ requests at least one keyboard control. Repeats preserve pressed state without e
 activation edge. Profile swap, receiver failure/restart, lock/suspend, and shutdown release safely;
 resume/restart reconcile configured controls with `GetAsyncKeyState` only when the input desktop is
 accessible. `ForegroundMonitor` drives the same runtime context path as BLE packet routing, allowing
-stationary inputs to resolve the actual foreground app.
+stationary inputs to resolve the actual foreground app. Windows can hide Raw Input releases while a
+higher-integrity window is foreground, so the provider also polls only controls it already believes
+held and can synthesize releases only; it does not scan other configured keys or create activation
+edges from that fail-safe.
 
 ## 5. Pointer, 3D, and mapping semantics
 
