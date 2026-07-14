@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation in progress (Phases 0–2 complete)
+Status: implementation in progress (Phases 0–3 complete)
 
 Target branch: `rich-keybindings`
 
@@ -70,7 +70,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 0 — Baseline contracts and Windows-input spike | COMPLETE | Start `d25944d`; checkpoint `cf9d116`; items 0.1–0.5 complete | Wait for explicit `START PHASE 1` or independently authorized `START PHASE 4`. |
 | 1 — App and setting registries | COMPLETE | Start `30b1598`; registries `2183f45`; consumer cutover `0c23104`; items 1.1–1.4 complete | Wait for explicit `START PHASE 2`. |
 | 2 — Sparse System→Global→app config | COMPLETE | Start `de0f42f`; fixtures `67f6710`; System defaults `1af1368`; resolver `da8e219`; store/migration `ecbeb3b`; consumer cutover `e70ea68`; items 2.1–2.5 complete | Wait for explicit `START PHASE 3`. |
-| 3 — Runtime state and dependency closure | IN_PROGRESS | Start `91e5a09`; bootstrap complete | Freeze current tray mode changes and OutputEngine mode ownership in focused tests before adding the serialized runtime store. |
+| 3 — Runtime state and dependency closure | COMPLETE | Start `91e5a09`; frozen ownership `a2310e8`; serialized store `4c94301`; dependency engine `a58c652`; consumer cutover `a39e81e`; items 3.1–3.5 complete | Wait for explicit `START PHASE 4`. |
 | 4 — Target-isolated navigation transport | NOT_STARTED | — | May be split/merged independently only after Phase 0 contracts exist. |
 | 5 — Input providers and Windows keyboard | NOT_STARTED | — | Start after Phases 0 and 3 are COMPLETE. |
 | 6 — BLE five-way protocol and adapter | NOT_STARTED | — | Start after Phase 5 provider contract is COMPLETE. |
@@ -235,6 +235,50 @@ treating that review as an authority:
 - **Next exact action:** stop. On `START PHASE 3`, rerun the mandatory bootstrap, confirm this
   checkpoint and Phase 3's start gate, mark Phase 3 `IN_PROGRESS`, then freeze current tray mode
   changes and OutputEngine mode ownership before adding the runtime command/state store.
+
+### 0.9 Phase 3 checkpoint
+
+- **Status:** `COMPLETE` from starting commit `91e5a09`; frozen-ownership checkpoint `a2310e8`;
+  serialized-store checkpoint `4c94301`; dependency/token checkpoint `a58c652`; command-consumer
+  cutover checkpoint `a39e81e`.
+- **Completed work:** 3.1 one serialized typed-command queue, atomic command batches, immutable
+  `RuntimeSnapshot`, structured publication events, and monotonic revisions; 3.2 validated
+  transitive dependency graph plus cycle/conflict rejection and identity-owned request tokens; 3.3
+  exact priority→context→match-policy→chord-size→activation-serial precedence with
+  reveal-older release behavior; 3.4 shared tray/settings/config/output/future-provider command
+  authority; 3.5 focused-context-aware config base resolution.
+- **Runtime ownership:** `RuntimeStore` is the sole authority for live input mode, navigation mode
+  and layer, held requests, runtime setting overrides, and last binding event. Persistent
+  `ConfigStore` values are only the context-resolved base. `SerializedCommandQueue` publishes one
+  coherent snapshot after a command or batch; listeners cannot observe partial dependency closure.
+  `OutputEngine.mode` is derived from the runtime snapshot, and its legacy setter/toggle methods are
+  compatibility adapters that dispatch typed commands rather than owning a second mutable mode.
+- **Dependency decision:** leaf requests expand to assignments whose prerequisites inherit the
+  leaf token's complete precedence and activation identity. A leaf whose prerequisite loses a
+  conflict is suppressed as a whole, preventing impossible combinations such as Pointer plus an
+  orphaned Pan layer. App-specific tokens remain held but become inactive outside their matching
+  context, then resolve again if that context returns; provider-scoped release-all cannot remove
+  another provider's tokens.
+- **Files changed:** new `trackball_daemon/runtime_state.py`, `trackball_daemon/commands.py`, and
+  `tests/test_runtime_state.py`; runtime consumer changes in `app.py`, `output.py`, `tray.py`, and
+  the temporary settings callback; focused routing/output/tray contract tests; this plan and
+  `HANDOFF.md`.
+- **User-owned files left untouched:** `.claude/` and
+  `docs/rich_keybindings_plan_revisions.md` remain untracked and were not staged.
+- **Verification:** initial focused ownership baseline = 43 passed; frozen ownership checkpoint =
+  21 passed; serialized-store focus = 15 passed; dependency/registry focus = 36 passed; final
+  `python -m pytest -q` = 476 passed. `python -m compileall -q trackball_daemon tests`, AutoCAD
+  NavMath `ALL PASS`, and `git diff --check` also passed.
+- **Manual verification:** no hardware, keyboard provider, or camera test is required in this pure
+  state phase. An optional source-runtime smoke remains: launch the daemon, click the tray Mode item,
+  and confirm its text immediately alternates between Pointer and 3D navigation.
+- **Deliberate deferrals:** real keyboard/BLE providers and stationary-input delivery begin in
+  Phases 5–7. Packet-time legacy Shift sampling remains until Phase 8 replaces it with runtime layer
+  consumption. Foreground context is currently refreshed at the existing packet boundary; the
+  independent foreground service required for stationary keybinds lands in Phase 5.
+- **Next exact action:** stop. On `START PHASE 4`, rerun the mandatory bootstrap, freeze broker
+  handshake/wire versions and foreground routing, mark Phase 4 `IN_PROGRESS`, and implement target-
+  isolated navigation transport without changing runtime command semantics.
 
 ## 1. Product goals
 

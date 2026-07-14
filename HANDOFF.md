@@ -38,6 +38,8 @@ trackball_daemon/
   app.py                     lifecycle, focus routing, service gates, scheme/rate delivery
   ble.py                     scan/connect/subscribe/reconnect loop
   output.py                  pointer/cube math and global/app mapping boundary
+  commands.py                typed live-state commands and serialized dispatch queue
+  runtime_state.py           dependency-resolved live authority and immutable snapshots
   config_store.py            transactional v9 loading, migration, snapshots, and events
   config_resolver.py         pure System -> Global -> app setting resolution
   config.py                  host/default helpers and historical migration machinery
@@ -88,6 +90,16 @@ replacement, and publishes deeply immutable snapshots. Feature consumers use typ
 and snapshot/domain accessors; only the store's isolated legacy migration boundary materializes v8
 dictionaries. The test suite also enforces the ownership contract
 `rich_actions == not apply_in_daemon`, so each host baseline is applied exactly once.
+
+Persistent configuration is not live control state. `RuntimeStore` resolves a context-aware base
+from one immutable config snapshot, then layers runtime latches and identity-owned hold requests
+above it. `SerializedCommandQueue` is the only mutation path for tray, settings refresh, output
+compatibility adapters, and future keyboard/BLE providers. Each command or batch publishes one
+coherent immutable `RuntimeSnapshot` with input/navigation state, focused context, active binding
+identities, setting overrides, last binding event, and a monotonic revision. Dependency leaves such
+as Pan carry their prerequisites and precedence as one request; if a prerequisite loses a conflict,
+the dependent leaf is suppressed rather than leaving an unreachable mixed state. `OutputEngine`
+derives mode from this snapshot and does not own a second mutable mode value.
 
 See [`docs/default_profiles.md`](docs/default_profiles.md) for the composition and tuning workflow.
 
