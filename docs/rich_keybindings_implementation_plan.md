@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation in progress (Phases 0–10 complete)
+Status: implementation in progress (Phases 0–10 complete; Phase 11 in progress)
 
 Target branch: `rich-keybindings`
 
@@ -78,7 +78,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 8 — Motion/output integration | COMPLETE | Start `86d67e8`; start ledger `17cc139`; automated integration `5c3bcae`; completion `545a347`; items 8.1–8.6 and live gate complete | Wait for explicit `START PHASE 9`. |
 | 9 — Barebones settings UX | COMPLETE | Start `9a5b143`; generated UI `bf3d155`; acceptance refinements `89365c0`; items 9.1–9.5 complete | Wait for explicit `START PHASE 10`. |
 | 10 — Text HUD | COMPLETE | Start `714fc72`; implementation `2718601`; binding fix `adbf59e`; items 10.1–10.4 and live gate complete | Wait for explicit `START PHASE 11`. |
-| 11 — Full verification and release docs | NOT_STARTED | — | Start after Phases 0–10 are COMPLETE. |
+| 11 — Full verification and release docs | IN_PROGRESS | Start `97ccd54`; checklist recorded; automated/package hardening complete locally; manual packaged-build gates pending | Commit the automated/package checkpoint, then run the exact physical keyboard, firmware, host, HUD/UI, and clean-account matrices. |
 
 The dependencies above are stricter than numeric order where necessary. Phase 4 is an existing bug
 fix and may be implemented or merged earlier, but its code must still honor the Phase 0 contracts.
@@ -620,6 +620,83 @@ treating that review as an authority:
 - **Next exact action:** stop. Wait for explicit `START PHASE 11`; do not infer Phase 11
   authorization from Phase 10 completion. Do not push, merge, publish, or open a PR without a
   separate command.
+
+### 0.18 Phase 11 in-progress checkpoint and release checklist
+
+- **Status:** `IN_PROGRESS` from starting commit `97ccd54`. Phases 0–10 and every documented prior
+  stop gate are complete. The user explicitly issued `START PHASE 11`.
+- **Workspace boundary:** `.claude/` and `docs/rich_keybindings_plan_revisions.md` are untracked,
+  user-owned, and must remain untouched and uncommitted. Phase 11 is limited to verification,
+  release hardening/docs, schemas/examples, packaging/version metadata, and defects discovered by
+  verification; it must not grow new product features.
+- **Automated release checklist:** full pytest suite;
+  migration/rollback/recovery fixtures; config corruption preservation; package-data and installed-
+  resource checks; binding validator; Python compilation; AutoCAD NavMath; static diff/manifest and
+  security-posture checks; sdist/wheel build and isolated installed smoke; Nuitka onedir build and
+  packaged resource/config/validator smoke. The shell environment initially had neither `build` nor
+  `nuitka` installed, so their installation/build path was resolved rather than skipped.
+- **Contributor-contract checklist:** publish machine-readable JSON schemas and validated examples
+  for input profiles/bindings, declarative macros, and BLE device descriptors. Keep executable
+  adapter code outside the data-only descriptor contract and document version/compatibility rules.
+- **Documentation/security checklist:** reconcile README, HANDOFF, TODO, security, BLE protocol,
+  defaults, host, and packaging docs with actual System defaults → Global → app resolution; both
+  shipped input profiles; lazy/pass-through Raw Input and no raw-key logging; elevated/input-desktop
+  fail-safe; BLE trust boundary; bounded declarative DSL; third-party adapter trust; reversal,
+  rollback, and compatibility behavior. Reconcile package metadata and every changed firmware or
+  add-on version marker, and retain export/import plus visual binding priority as post-MVP work.
+- **Manual keyboard checklist:** layouts and AltGr; Sticky Keys; repeat rejection; rapid chord order;
+  sleep/resume; session lock/unlock; Remote Desktop; elevated foreground; live profile reload; and
+  shutdown while held. Record unavailable environments with reason and release impact. Continue to
+  call the backend Windows Raw Input, not a keyboard hook.
+- **Manual firmware checklist:** reconnect; missed, duplicate, stale/out-of-order, and wrapping
+  sequences; disconnect while held; debounce; simultaneous five-way contingency; legacy rotation;
+  and daemon-absent HID. Automated protocol vectors and the XIAO jumper bench may support this gate,
+  but the unavailable final Up/Down/Left/Right/Center hardware, production pin map, and production
+  debounce tuning remain an explicit release-qualification blocker and cannot be called passed.
+- **Manual host checklist:** Pointer/3D; cascading Shift Pan and explicit Ctrl+Shift in both orders;
+  Orbit/Fly/Walk; sensitivity holds; foreground switches while held; unknown-app/global behavior;
+  Onshape connected-but-unfocused behavior; and background target isolation. Exercise Blender,
+  SketchUp, Unreal, Unity, Godot, Onshape, and other installed supported hosts; unavailable hosts
+  must name the reason and release impact. Phase 10 already established current Blender, Fusion,
+  SOLIDWORKS, and Onshape setup/focus behavior, but Phase 11 will record which coverage is reused
+  versus newly exercised.
+- **Manual HUD/UI checklist:** multiple monitors, mixed DPI, work-area/taskbar changes, no activation
+  or focus steal, click-through, held/last text, and live config updates; exhaustive Global categories;
+  per-setting and page-level link/unlink/reset; edit commit behavior; and subwindow preservation.
+- **Distribution checklist:** exercise the exact onedir artifact; clean-user install/run/uninstall and
+  reversal; asInvoker/UAC, firewall, SmartScreen, AutoCAD/SketchUp trust, Onshape certificate, and AV
+  observations; signing/timestamp, SHA-256, source revision, dependency lock/SBOM, supported-host
+  matrix, and scan evidence. Items requiring a production signing identity, clean account, final
+  hardware, or unavailable commercial hosts are release gates, not reasons to falsify a pass.
+- **Automated/package checkpoint:** the untouched baseline passed `628 passed, 2 skipped`, Python
+  compilation, both System profile validations, AutoCAD NavMath `ALL PASS`, and `git diff --check`.
+  The hardened tree passes `637 passed, 2 skipped`; 88 focused migration/corruption, BLE trust, Raw
+  Input lifecycle, release-asset, and security tests pass. The synthetic elevated F24 probe produced
+  one press and one release, no retained pressed state, and no foreground change. Its injected input
+  is not physical-key acceptance.
+- **Contracts and distribution:** three JSON Schema 2020-12 contracts and three examples validate
+  both structurally and through authoritative runtime parsers. Clean sdist/wheel builds include
+  defaults, add-ons, descriptors, schemas, and examples. A separately installed wheel passes smoke
+  outside the checkout. The clean Nuitka onedir contains 1,061 files (119,202,050 bytes), passes its
+  embedded-resource/profile-compile smoke, and has local unsigned executable SHA-256
+  `AD71024461A1B12362A6AE5D737ADC7AA1218A425BDF5E86B27A29BFB7969BAD`.
+- **Verification-found defects fixed:** the build now uses a repository-bounded Nuitka cache,
+  explicitly permits required tool downloads, cleans only verified artifact directories, rejects
+  one-file mode, and refuses to hash a package until its smoke passes. This caught an interrupted
+  executable missing onedir DLLs. Python 3.9 compatibility is restored by postponing PEP 604 type
+  annotation evaluation, with a static regression guard. Stale user-facing `General` settings paths
+  were renamed to `Global`.
+- **Documentation/package state:** `docs/keybindings.md` documents actual profile, matching,
+  dependency, DSL, context, and trust behavior; `docs/release_verification.md` owns the exact release
+  matrices and evidence. README, HANDOFF, TODO, BLE, host, CI, optional dependencies, and package
+  data declarations are reconciled. No firmware or host add-on runtime changed, so their version
+  markers remain intentionally unchanged; daemon `0.1.73` is a local verification build, not a new
+  published version.
+- **First incomplete item:** 11.3 physical keyboard/lifecycle matrix, followed by 11.4 final hardware,
+  11.5 host coverage, 11.6 packaged HUD/UI, and clean-account/signing/reputation release gates.
+- **Next exact action:** commit the automated/package checkpoint without user-owned files, then ask
+  the user to run the first packaged-build manual batch from `docs/release_verification.md`. Record
+  unavailable environments and release impact exactly. Do not push, merge, publish, or open a PR.
 
 ## 1. Product goals
 

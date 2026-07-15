@@ -4,6 +4,8 @@ Persistent configuration answers what the base state should be.  This module own
 that commands temporarily or latchedly place above that base.  Providers and UI surfaces must use
 the serialized command path in :mod:`trackball_daemon.commands`; they do not mutate this store.
 """
+from __future__ import annotations
+
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 import copy

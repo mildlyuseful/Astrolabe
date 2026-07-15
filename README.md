@@ -127,7 +127,7 @@ host reloads it.
 
 ### Physical orientation and action routing
 
-**General → Physical trackball orientation** maps physical sensor X/Y/Z to logical axes once, before
+**Global → Physical trackball orientation** maps physical sensor X/Y/Z to logical axes once, before
 both pointer and 3D routing. Source changes remain a permutation, so an axis cannot be accidentally
 duplicated or lost.
 
@@ -138,7 +138,7 @@ corrections are supplied by immutable host baselines.
 ### Orbit targets and fallback order
 
 The app's selected **Orbit pivot** is tried first. If it is unsupported or a raycast misses, the
-daemon restarts at the beginning of **General → 3D control scheme → Failure fallback order**.
+daemon restarts at the beginning of **Global → 3D control scheme → Failure fallback order**.
 Unsupported methods are skipped, duplicates are removed, and an empty list means no orbit is
 performed after the primary target fails. **Selection overrides orbit center** has higher priority
 when enabled, except that a Camera primary remains a true turn-in-place operation.
@@ -146,7 +146,7 @@ when enabled, except that a Camera primary remains a true turn-in-place operatio
 ### Horizon entry and gesture holds
 
 **Level horizon when entering Turntable/Walk** removes existing camera roll once when entering a
-fixed-horizon mode. Each applicable app can inherit or override the General value. Godot does not
+fixed-horizon mode. Each applicable app can inherit or override the Global value. Godot does not
 show the setting because its editor camera cannot retain roll.
 
 **Pivot hold** controls when a ray-derived orbit target is recaptured. **Zoom hold** is independent
@@ -192,9 +192,13 @@ must be supplied from the real board rather than inferred from the bench sketch.
 - [`TODO.md`](TODO.md) — open verification, parity gaps, risks, and product work.
 - [`docs/apps/`](docs/apps/) — host-specific implementation and maintenance guides.
 - [`docs/default_profiles.md`](docs/default_profiles.md) — host alignment and shipped-default data.
+- [`docs/keybindings.md`](docs/keybindings.md) — profiles, chords, dependency cascading, declarative
+  actions, schemas, and contributor examples.
 - [`docs/feature_parity.md`](docs/feature_parity.md) — the currently enforced capability contract.
 - [`docs/security.md`](docs/security.md) — local listeners, permissions, reversal steps, and release
   hardening.
+- [`docs/release_verification.md`](docs/release_verification.md) — automated and manual release gates
+  with explicit skip/release-impact rules.
 
 Run the automated checks with:
 

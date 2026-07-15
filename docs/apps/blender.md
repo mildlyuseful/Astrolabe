@@ -53,7 +53,7 @@ socket-reader + main-thread-marshal shape — but much larger because Blender do
 | `trackball_daemon/plugins/blender/startup/trackball_nav_startup.py` | Auto-enable shim. Copied into Blender's `scripts/startup/`; enables the add-on on every launch (the analogue of Fusion's "Run on Startup"). |
 | `trackball_daemon/navbroker.py` | `NavBroker`: localhost TCP, newline-JSON frames. Carries the optional additive `"adv"` object (Blender's extra settings). |
 | `trackball_daemon/app.py` | `App._apply_schemes` pushes the control scheme + Blender's `advanced` block to the broker; `_nav_sink` routes the focused app's frames. |
-| `trackball_daemon/config.py` + `default_profiles.json` | Validation/migrations plus shipped General and neutral Blender user defaults. |
+| `trackball_daemon/config.py` + `default_profiles.json` | Validation/migrations plus frozen legacy Global and neutral Blender user defaults. |
 | `trackball_daemon/integrations.py` | `install_blender` (multi-version copy + startup shim), the `_ADDINS["blender"]` registry entry, version readers, `auto_update`. |
 | `trackball_daemon/app_registry.py` and `settings_schema.py` | App capabilities and the ordered stable setting contract. Blender enables its supported shared and rich-action fields here. |
 | `trackball_daemon/ui.py` | The Tkinter UI. One declarative renderer builds every host section under *Per-App Bindings*; the tab is scrollable. |

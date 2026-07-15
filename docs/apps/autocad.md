@@ -81,7 +81,7 @@ from the retired daemon-side COM navigation transport below.
   Pan or zoom invalidates the orbit pivot; pan preserves the cursor-zoom target, while orbit
   invalidates it. A scheme change clears both.
 - **Fixed-horizon entry:** a real free→turntable transition can remove existing roll once, controlled
-  by General/per-app `level_horizon_on_entry`. Startup establishes state without a false transition;
+  by Global/per-app `level_horizon_on_entry`. Startup establishes state without a false transition;
   ordinary turntable frames preserve the established horizon.
 - **Stationary cursor:** `Editor.PointMonitor` fires only on physical mouse movement. After every
   navigation frame, plugin 0.3.15 reprojects its cached plane sample through the new camera basis and
@@ -849,7 +849,7 @@ real COM behaviour — that's what this section's live testing is for.
   the foreground app by the **process name `acad`** (`_APP_PROC_HINTS`).
 - **`config.py`** — the `autocad` app uses the shared app profile: `rate_hz`,
   `orbit_pivot_hold_sec`, `zoom_cursor_hold_sec`, `selection_overrides_pivot`, nullable
-  `level_horizon_on_entry`, and `bindings.scheme` (`"default"` inherits General). Config v8 renames
+  `level_horizon_on_entry`, and `bindings.scheme` (`"default"` inherits Global). Config v8 renames
   `screen_center_pivot_hold_sec` to `orbit_pivot_hold_sec` and adds the independent Zoom hold from
   shipped defaults; the older `view_pivot_hold_sec` name was retired in v4.
 - **`integrations.py`** — `detect_autocad` (globs `Autodesk\AutoCAD*\acad.exe`) and

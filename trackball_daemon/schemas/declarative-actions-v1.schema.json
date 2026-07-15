@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astrolabe.dev/schemas/declarative-actions-v1.schema.json",
+  "title": "Astrolabe declarative macro action list v1",
+  "description": "A data-only action list embedded in a keybinding press or release phase. Runtime validation remains authoritative for target-specific values and paired hold actions.",
+  "type": "array",
+  "items": {"$ref": "#/$defs/action"},
+  "$defs": {
+    "action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {"command": {"enum": ["state.request", "state.release"]}, "target": {"type": "string", "minLength": 1, "pattern": "^\\S+$"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {"command": {"const": "input.mode.set"}, "target": {"enum": ["pointer", "3d"]}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command"],
+          "properties": {"command": {"enum": ["input.mode.toggle", "navigation.mode.cycle"]}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {"command": {"const": "navigation.mode.set"}, "target": {"enum": ["orbit", "fly", "walk"]}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {"command": {"const": "navigation.layer.set"}, "target": {"enum": ["primary", "secondary"]}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {"command": {"enum": ["pointer.button.press", "pointer.button.release"]}, "target": {"enum": ["left", "right", "middle", "x1", "x2"]}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target", "value"],
+          "properties": {"command": {"enum": ["setting.set_runtime", "setting.set_persistent"]}, "target": {"type": "string", "minLength": 1, "pattern": "^\\S+$"}, "value": true}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {"command": {"enum": ["setting.toggle_runtime", "setting.cycle_runtime"]}, "target": {"type": "string", "minLength": 1, "pattern": "^\\S+$"}, "value": {"type": "array", "minItems": 2, "uniqueItems": true}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target", "value"],
+          "properties": {"command": {"enum": ["setting.add_runtime", "setting.multiply_runtime"]}, "target": {"type": "string", "minLength": 1, "pattern": "^\\S+$"}, "value": {"type": "number"}}
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {"command": {"const": "setting.restore_previous"}, "target": {"type": "string", "minLength": 1, "pattern": "^\\S+$"}}
+        }
+      ]
+    }
+  }
+}

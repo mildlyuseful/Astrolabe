@@ -56,6 +56,16 @@ def test_release_packages_exclude_interpreter_cache_files():
     assert "global-exclude *.py[cod].*" in manifest
 
 
+def test_release_builder_is_onedir_repository_bounded_and_self_verifying():
+    builder = _source("tools/build_release.ps1")
+    assert "--mode=standalone" in builder
+    assert "--mode=onefile" not in builder and "--onefile" not in builder
+    assert "OutputDirectory must resolve inside the repository" in builder
+    assert "$env:NUITKA_CACHE_DIR = $NuitkaCache" in builder
+    assert "--release-smoke" in builder
+    assert "Get-FileHash -Algorithm SHA256" in builder
+
+
 def test_keyboard_observation_is_lazy_pass_through_and_has_no_raw_logging():
     provider = _source("trackball_daemon/input/windows_raw_input.py")
     app = _source("trackball_daemon/app.py")

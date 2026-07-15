@@ -1,4 +1,6 @@
 """Immutable normalized input records with no configuration-path knowledge."""
+from __future__ import annotations
+
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping

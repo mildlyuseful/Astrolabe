@@ -74,8 +74,9 @@ High-risk app-specific checks:
 
 ## Release readiness
 
-- Produce the first per-user Nuitka onedir build and test it on a clean Windows account without a
-  source checkout or Python installation.
+- Complete the exact manual matrix in `docs/release_verification.md`. The first sdist, wheel, and
+  per-user Nuitka onedir builds pass automated resource smoke; test the onedir GUI on a clean Windows
+  account without a source checkout or Python installation.
 - Authenticode-sign the daemon, installer/updater, and bundled AutoCAD DLL with one timestamped
   publisher identity. Publish SHA-256 checksums, source revision, dependency lock/SBOM, and exact
   Defender/third-party antivirus results.
@@ -98,6 +99,9 @@ High-risk app-specific checks:
 - Add PMW3610/third-sensor firmware support and, if required, a three-sensor fusion solver.
 
 ## Deferred by design
+
+- Keybinding profile export/import and a visual priority editor remain post-MVP. Advanced DSL is the
+  current lossless path for non-default priority and unusual context/action structures.
 
 - SketchUp for Web has no local Ruby hook and is not supported.
 - Onshape Camera pivot is not useful in its supported orthographic view; rotating about the eye

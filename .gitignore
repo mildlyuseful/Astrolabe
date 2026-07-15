@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 build/
 *.egg-info/
+nuitka-crash-report.xml
 
 # .NET build outputs (plugin_src is source; the shipping DLL is bundled under
 # trackball_daemon/plugins/ and IS committed)

@@ -57,6 +57,8 @@ trackball_daemon/
   control_hud.py             coalesced semantic text HUD and non-activating Windows placement
   system_defaults.json       concrete developer-owned setting defaults
   system_keybinding_profiles.json developer-owned hardware and keyboard binding bases
+  schemas/                    packaged JSON Schema contributor contracts
+  examples/                   validated data-only contributor examples
   default_profiles.json      frozen v8 migration compatibility data
   host_profiles.json         immutable developer-owned host alignment
   navbroker.py               loopback JSON transport for socket add-ons
@@ -141,7 +143,8 @@ area of the foreground-window monitor, falling back to cursor and then primary m
 visibility, topmost/click-through behavior, opacity, margin, and timeout are persistent Global
 settings; presentation-only changes bypass binding/output rebuilds.
 
-See [`docs/default_profiles.md`](docs/default_profiles.md) for the composition and tuning workflow.
+See [`docs/default_profiles.md`](docs/default_profiles.md) for the composition and tuning workflow
+and [`docs/keybindings.md`](docs/keybindings.md) for the public binding/DSL contract.
 
 ## 3. Firmware and BLE protocol
 
@@ -497,6 +500,19 @@ dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj --no-re
 git diff --check
 ```
 
+Release artifact checks use the optional extras and the repository-bounded build script:
+
+```powershell
+python -m pip install -e ".[dev,release]"
+python -m trackball_daemon --release-smoke
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_release.ps1
+```
+
+The smoke is deliberately side-effect-free and runs against source and the Nuitka onedir executable.
+It loads every packaged default/profile/descriptor/schema/example and compiles both System profiles
+without starting transport or UI ownership. Exact manual release matrices and artifact evidence live
+in [`docs/release_verification.md`](docs/release_verification.md).
+
 The AutoCAD project is a console test runner; `dotnet test` is not the meaningful invocation.
 Blender and host-specific probes live in `tools/`. Run the focused pure tests first, then the full
 suite, then a GUI smoke pass in every changed host. Do not describe source review, mocked APIs, or a
@@ -527,7 +543,11 @@ change in the repository source/default data, then exercise the normal setup/upd
 - [`README.md`](README.md): user capabilities, installation, operation, and troubleshooting.
 - [`TODO.md`](TODO.md): the only active backlog and live-verification ledger.
 - [`docs/default_profiles.md`](docs/default_profiles.md): host/default ownership and tuning.
+- [`docs/keybindings.md`](docs/keybindings.md): System profiles, matching, dependencies, DSL, schemas,
+  and contributor validation.
 - [`docs/feature_parity.md`](docs/feature_parity.md): current capability contract.
+- [`docs/release_verification.md`](docs/release_verification.md): release build, manual matrices, and
+  recorded evidence.
 - [`docs/security.md`](docs/security.md): permissions, warnings, reversal, and release hardening.
 - [`docs/apps/autocad.md`](docs/apps/autocad.md)
 - [`docs/apps/blender.md`](docs/apps/blender.md)

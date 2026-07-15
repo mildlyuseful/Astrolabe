@@ -62,6 +62,12 @@ Built-ins live in `trackball_daemon/devices/descriptor_data`. A descriptor conta
 }
 ```
 
+The packaged JSON Schema is
+`trackball_daemon/schemas/device-descriptor-v1.schema.json`; a parser-validated contributor example
+is `trackball_daemon/examples/device-descriptor.example.json`. JSON Schema checks portable shape,
+while `load_device_descriptor` remains authoritative for case-insensitive advertised-name
+uniqueness, UUID normalization, unique IDs/bits, and the control/input-characteristic relationship.
+
 Stable binding tokens are `source_id:control.id`, such as
 `ble.astrolabe:fiveway.center`. IDs, labels, bits, UUIDs, and advertised names are validated. Unknown
 root/control keys—including module or callback names—are rejected.

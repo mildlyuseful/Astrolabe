@@ -1,4 +1,6 @@
 """Immutable device and BLE-session values with no Bleak dependency."""
+from __future__ import annotations
+
 
 from dataclasses import dataclass, field
 import math

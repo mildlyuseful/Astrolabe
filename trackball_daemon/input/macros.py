@@ -1,4 +1,6 @@
 """Validation primitives for the allowlisted declarative binding action language."""
+from __future__ import annotations
+
 
 from dataclasses import dataclass
 import copy
