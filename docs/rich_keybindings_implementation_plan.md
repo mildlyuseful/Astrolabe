@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation in progress (Phases 0–10 complete; Phase 11 in progress)
+Status: implementation complete (Phases 0–11 complete; production release deferred)
 
 Target branch: `rich-keybindings`
 
@@ -78,7 +78,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 8 — Motion/output integration | COMPLETE | Start `86d67e8`; start ledger `17cc139`; automated integration `5c3bcae`; completion `545a347`; items 8.1–8.6 and live gate complete | Wait for explicit `START PHASE 9`. |
 | 9 — Barebones settings UX | COMPLETE | Start `9a5b143`; generated UI `bf3d155`; acceptance refinements `89365c0`; items 9.1–9.5 complete | Wait for explicit `START PHASE 10`. |
 | 10 — Text HUD | COMPLETE | Start `714fc72`; implementation `2718601`; binding fix `adbf59e`; items 10.1–10.4 and live gate complete | Wait for explicit `START PHASE 11`. |
-| 11 — Full verification and release docs | IN_PROGRESS | Start `97ccd54`; checklist recorded; automated/package hardening complete locally; manual packaged-build gates pending | Commit the automated/package checkpoint, then run the exact physical keyboard, firmware, host, HUD/UI, and clean-account matrices. |
+| 11 — Full verification and release docs | COMPLETE | Start `97ccd54`; automated/package checkpoint `3683901`; completion record below; items 11.1–11.7 complete at branch/merge scope | Branch is ready for the user's push/merge. Production release gates remain in `TODO.md`; do not publish from this checkpoint. |
 
 The dependencies above are stricter than numeric order where necessary. Phase 4 is an existing bug
 fix and may be implemented or merged earlier, but its code must still honor the Phase 0 contracts.
@@ -694,9 +694,60 @@ treating that review as an authority:
   published version.
 - **First incomplete item:** 11.3 physical keyboard/lifecycle matrix, followed by 11.4 final hardware,
   11.5 host coverage, 11.6 packaged HUD/UI, and clean-account/signing/reputation release gates.
-- **Next exact action:** commit the automated/package checkpoint without user-owned files, then ask
-  the user to run the first packaged-build manual batch from `docs/release_verification.md`. Record
-  unavailable environments and release impact exactly. Do not push, merge, publish, or open a PR.
+- **Packaged manual checkpoint:** the user reported the complete first onedir batch passing: tray,
+  Settings, HUD, BLE connection, Ctrl/Shift/Ctrl+Shift/F12 controls, live binding save, Global and
+  per-app link/reset flows, available monitor/DPI behavior, Blender/Fusion 360/SOLIDWORKS/Onshape,
+  and quit/restart while held. No stale state remained.
+- **Branch/release boundary:** the user explicitly scoped this phase to merging and closing the
+  feature branch without publishing a production release. Final five-way hardware, clean-account
+  install/uninstall, signing/timestamp, SmartScreen/AV reputation, SBOM, and final production host
+  qualification remain release work in `TODO.md`. They can be honest `BLOCKED_FOR_RELEASE` or
+  deferred results while this branch completes; they must never be described as production passes.
+- **Next exact action:** close the remaining physical keyboard/lifecycle matrix using available prior
+  evidence and one final live batch; record unavailable layout/RDP/environment cases and their
+  branch-versus-release impact. Then run the final suite, mark Phase 11 complete, commit, and stop.
+  Do not push, merge, publish, or open a PR.
+
+### 0.19 Phase 11 completion checkpoint
+
+- **Status:** `COMPLETE` at branch/merge scope from starting commit `97ccd54`; automated/package
+  checkpoint `3683901`. Work items 11.1–11.7 and the stop gate are complete under the user's explicit
+  decision that this branch will merge without becoming the first production release.
+- **Files and ownership:** release schemas/examples, side-effect-free smoke, repository-bounded
+  Nuitka onedir builder, CI/package metadata, Python 3.9 guard/fix, release/security tests, README,
+  HANDOFF, TODO, BLE/host/keybinding/release docs, and this ledger were updated. User-owned
+  `.claude/` and `docs/rich_keybindings_plan_revisions.md` remain untracked and untouched.
+- **Final automated result:** `python -m pytest -q` = `637 passed, 2 skipped in 9.85s`; both skips are
+  the documented Tk smokes unavailable in the shell Python runtime. `compileall`, both System profile
+  validations, source `--release-smoke`, AutoCAD NavMath `ALL PASS`, and `git diff --check` pass.
+  Focused migration/corruption, BLE trust, Raw Input lifecycle, release-asset, and security checks
+  pass 88 tests. The elevated synthetic F24 acceptance reports one press/release, no repeat edge,
+  no retained state, and unchanged foreground.
+- **Artifact result:** clean isolated sdist/wheel builds pass; a force-installed wheel passes smoke
+  from outside the checkout. The clean Nuitka onedir has 1,061 files (119,202,050 bytes), passes its
+  embedded-resource/profile-compile smoke, and has unsigned local executable SHA-256
+  `AD71024461A1B12362A6AE5D737ADC7AA1218A425BDF5E86B27A29BFB7969BAD`.
+- **Manual branch result:** the packaged onedir passes tray/Settings/HUD/BLE startup; Ctrl, Shift
+  cascade, both Ctrl+Shift orders, and F12; live binding save; Global/per-app commit/link/reset;
+  available monitor/DPI behavior; Blender, Fusion 360, SOLIDWORKS, and Onshape navigation;
+  quit/restart while held; Sticky Keys; session lock/unlock while held; and sleep/resume while held.
+  Each lifecycle boundary released cleanly and accepted later input.
+- **Unavailable/deferred with impact:** AltGr/non-US-layout and Remote Desktop were unavailable;
+  remaining supported hosts were unavailable for packaged live coverage. Automated paths pass, so
+  these do not block feature-branch merge, but they remain production qualification. Final five-way
+  pins/debounce/physical matrix await hardware. Clean-account install/uninstall, signing/timestamp,
+  SBOM/lock, checksums for the eventual artifact, SmartScreen/AV/firewall/UAC/certificate prompts,
+  and production host-version policy remain release work. None is represented as passed.
+- **Compatibility and versions:** legacy rotation-only firmware, XIAO test-bench input, v8→v9
+  migration/rollback, and existing add-on transports remain inside their documented compatibility
+  envelopes. No firmware or host add-on runtime changed, so their markers remain unchanged. Daemon
+  `0.1.73` identifies the local verification artifact; no production version was cut.
+- **Residual product work:** profile export/import, visual priority editing, later visual UI polish,
+  host parity gaps, production hardware, and release/distribution work remain only in `TODO.md` and
+  the release matrix; no stale TODO claims this completed implementation is still missing.
+- **Next exact action:** commit this Phase 11 completion record, record that commit in the ledger if
+  a separate bookkeeping commit is used, then stop. Do not push, merge, publish, open a PR, sign, or
+  distribute artifacts without a separate user command.
 
 ## 1. Product goals
 

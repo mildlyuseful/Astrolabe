@@ -4,6 +4,12 @@ This is the durable release gate for the first Astrolabe alpha. Automated, mocke
 test-bench, and live results remain distinct. A skipped check must include its reason and release
 impact; it is never converted into a pass by proximity to another test.
 
+Phase 11 closes the rich-keybindings feature branch at branch/merge quality; it does not publish the
+first production release. Final five-way hardware, clean-account installation, signing, reputation,
+and production-host qualification remain explicit release work after merge. They do not block the
+feature branch when the implemented boundary has automated coverage, available live tests pass, and
+the deferral plus release impact is recorded here and in `TODO.md`.
+
 ## Build and automated checks
 
 Install the development and release extras, then run:
@@ -131,3 +137,22 @@ Using the packaged Tk runtime, verify:
   evidence from new packaged-build coverage.
 - Final production five-way hardware is unavailable. Its physical matrix is `BLOCKED_FOR_RELEASE`,
   while development verification continues against automated protocol vectors and the XIAO bench.
+- Packaged-build manual batch passed: tray, Settings, HUD, BLE connection, Ctrl 3D, cascading Shift
+  Pan, Ctrl+Shift in both orders, keyboard-only F12 toggle, immediate binding recompilation, Global
+  blank-space commit/category preservation, per-app link/reset flows, available monitor/DPI HUD
+  behavior, Blender/Fusion 360/SOLIDWORKS/Onshape navigation, and quit/restart while a key was held.
+  No stale held state remained. This is branch-level live evidence for the unsigned local onedir,
+  not clean-account, signed-artifact, or final-hardware qualification.
+- Packaged lifecycle batch passed with Sticky Keys enabled/disabled, session lock/unlock while held,
+  and sleep/resume while held. Each boundary released the control, retained no stale HUD/runtime
+  state, and accepted new bindings afterward. Earlier physical/elevated acceptance covers ordinary
+  pass-through, integrity-boundary synthetic release, rapid chord order, profile reload, repeat, and
+  daemon shutdown.
+- AltGr/non-US-layout and Remote Desktop acceptance were unavailable in this environment. Branch
+  impact: none; the normalized/right-Alt and release-all paths retain automated coverage. Production
+  release impact: both remain named Windows-environment qualification items and cannot be advertised
+  as live-passed until exercised against the eventual release artifact.
+- Packaged live host evidence is Blender, Fusion 360, SOLIDWORKS, and Onshape. SketchUp, Unreal,
+  Unity, Godot, FreeCAD, AutoCAD, and Rhino were not part of the available Phase 11 live environment;
+  their automated integration/camera/transport suites pass, but their production host/version
+  matrices remain open in `TODO.md`.

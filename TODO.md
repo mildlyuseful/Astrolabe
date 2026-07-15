@@ -84,6 +84,8 @@ High-risk app-specific checks:
   handling against the exact signed artifact. Source inspection cannot establish these outcomes.
 - Test uninstall/reversal for every path in `docs/security.md`.
 - Decide and document the supported host-version policy for the first alpha.
+- Qualify the final packaged Raw Input path with a non-US AltGr layout and across a Remote Desktop
+  connect/disconnect boundary; neither environment was available during feature-branch closure.
 
 ## Product and integration backlog
 
