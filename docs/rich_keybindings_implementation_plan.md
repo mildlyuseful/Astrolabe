@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation in progress (Phases 0–9 complete; Phase 10 in progress)
+Status: implementation in progress (Phases 0–10 complete)
 
 Target branch: `rich-keybindings`
 
@@ -77,7 +77,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 7 — Binding compiler, DSL, and system profiles | COMPLETE | Start `7a0ae3d`; start ledger `6d1b7a4`; profiles/overrides `1283cb4`; compiler/runtime `86fd22c`; items 7.1–7.5 complete | Wait for explicit `START PHASE 8`. |
 | 8 — Motion/output integration | COMPLETE | Start `86d67e8`; start ledger `17cc139`; automated integration `5c3bcae`; completion `545a347`; items 8.1–8.6 and live gate complete | Wait for explicit `START PHASE 9`. |
 | 9 — Barebones settings UX | COMPLETE | Start `9a5b143`; generated UI `bf3d155`; acceptance refinements `89365c0`; items 9.1–9.5 complete | Wait for explicit `START PHASE 10`. |
-| 10 — Text HUD | IN_PROGRESS | Start `714fc72`; implementation `2718601`; HUD live matrix passed; binding-reload fix pending retest | Retest one saved/restarted custom binding and confirm the redundant tray mode item is gone, then complete the phase. |
+| 10 — Text HUD | COMPLETE | Start `714fc72`; implementation `2718601`; binding fix `adbf59e`; items 10.1–10.4 and live gate complete | Wait for explicit `START PHASE 11`. |
 | 11 — Full verification and release docs | NOT_STARTED | — | Start after Phases 0–10 are COMPLETE. |
 
 The dependencies above are stricter than numeric order where necessary. Phase 4 is an existing bug
@@ -572,11 +572,10 @@ treating that review as an authority:
 - **Next exact action:** stop. Wait for explicit `START PHASE 10`; do not infer Phase 10
   authorization from Phase 9 completion.
 
-### 0.17 Phase 10 in-progress checkpoint
+### 0.17 Phase 10 completion checkpoint
 
-- **Status:** `IN_PROGRESS` from starting commit `714fc72`; implementation checkpoint `2718601`.
-  Work items 10.1–10.4 and the HUD live matrix are implemented; one acceptance-found binding reload
-  regression remains pending live retest, so Phase 10 is not yet marked complete.
+- **Status:** `COMPLETE` from starting commit `714fc72`; implementation checkpoint `2718601`;
+  acceptance-fix checkpoint `adbf59e`. Work items 10.1–10.4 and the Phase 10 stop gate are complete.
 - **Bootstrap and baseline:** the complete plan/HANDOFF/TODO and Phase 10 scope were reread; Phase 8
   was confirmed complete; the untouched full suite passed 620 tests with the Tk smoke skipped.
   User-owned `.claude/` and `docs/rich_keybindings_plan_revisions.md` remain untracked and
@@ -612,11 +611,15 @@ treating that review as an authority:
 - **Manual stop gate:** the user reported the full HUD matrix passing: stationary keyboard/BLE
   updates, held/last timing, visibility/options, focus retention, work-area/monitor/DPI placement,
   and click-through all behaved as expected. That pass also exposed the independent live binding
-  recompilation defect above.
-- **Next exact action:** restart on the fix, save one keyboard binding, prove it applies immediately
-  and after restart, and confirm the tray no longer exposes a mode toggle. If those pass, mark Phase
-  10 `COMPLETE`, record the final commit/results, set the next action to wait for explicit
-  `START PHASE 11`, and stop without pushing.
+  recompilation defect above. After the fix, a saved keyboard-profile override applied normally,
+  the duplicate tray mode item was absent, and Pointer/3D activation worked in Blender and Fusion.
+  Fusion's initially missing delivery resolved when it became the foreground target. SolidWorks
+  and Onshape were correctly diagnosed as explicitly uninstalled/disabled rather than binding
+  failures; after their 3D Apps setup/enable gates were completed, the user reported every tested
+  host working.
+- **Next exact action:** stop. Wait for explicit `START PHASE 11`; do not infer Phase 11
+  authorization from Phase 10 completion. Do not push, merge, publish, or open a PR without a
+  separate command.
 
 ## 1. Product goals
 
