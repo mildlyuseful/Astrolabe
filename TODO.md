@@ -12,6 +12,68 @@ here.
   contingency; the passed XIAO jumper gate validates the software boundary but does not substitute
   for final-hardware qualification.
 
+## ZMK firmware foundation
+
+- Replace the final-hardware firmware with a build based on pinned upstream ZMK and a separately
+  maintained, out-of-tree Astrolabe ZMK module. Do not begin with a permanent ZMK fork: keep the
+  board/shield definition, PMW sensor drivers, custom service, and Astrolabe behavior in the module
+  so regular upstream ZMK/Zephyr updates remain possible. Carry a minimal, isolated upstream patch
+  only if a required hook cannot be implemented through the supported module APIs, and document an
+  exit condition for every such patch.
+- Expose two explicit, mutually exclusive device modes through a ZMK behavior that can be assigned
+  to an always-reachable physical control:
+  - **Astrolabe mode:** publish motion, atomic five-way pressed-state snapshots, sequence/epoch,
+    protocol version, and capability/battery information through a versioned custom GATT service
+    consumed by the daemon. Controls owned by this mode must not simultaneously emit HID reports.
+  - **Standalone trackball mode:** emit an ordinary HID pointer and HID buttons without requiring
+    the daemon. Define the five-way switch as physical ZMK key positions and make its standalone
+    assignments editable through ZMK Studio where current behavior metadata permits it. Predeclare
+    the supported mouse-button/key behaviors and a bounded number of editable layers in devicetree;
+    verify that Studio can assign the required mouse-button parameters before promising this UX. If
+    it cannot, retain safe stock mappings plus advanced keymap/devicetree configuration rather than
+    forking Studio solely to fill that gap.
+- Treat the user-facing mode as more than an ordinary keymap layer even if a layer behavior is used
+  to select it: it changes the output route and therefore needs explicit firmware state. A mode
+  transition must release all active HID and custom-service controls, advance the transport epoch,
+  publish a complete snapshot, and leave an always-available recovery binding. Specify whether the
+  selected mode persists across reboot; a disconnect or daemon crash must never leave a held button
+  or produce both a daemon action and an HID action.
+- Preserve the existing daemon architecture and ownership boundary:
+  - Firmware owns GPIO scanning/debounce, PMW sensor acquisition, safe device-local normalization,
+    BLE bonding/host profiles, battery and power behavior, standalone HID output, and the
+    device-local ZMK keymap.
+  - The daemon remains the authority for Windows keyboard chords, foreground-app context,
+    application capabilities, dependency closure, pointer/Orbit/Walk/Fly/Pan state, runtime setting
+    holds/toggles, global/per-app settings, host integrations, and the HUD.
+  - Implement the ZMK endpoint as another device transport/descriptor adapter that emits the
+    existing normalized input-provider events and stable `source_id:control.id` tokens. Do not add a
+    parallel ZMK-specific binding engine or move application-aware rules into firmware.
+- Keep ZMK Studio and Astrolabe Settings deliberately separate. Studio edits only device-local
+  standalone mappings, layers, and firmware behaviors; Astrolabe Settings edits daemon bindings and
+  app-dependent behavior. Do not extend or fork the Studio RPC protocol for the first
+  implementation. The Astrolabe data plane should remain its own small, bonded custom GATT service
+  so its protocol can evolve independently and so the existing daemon BLE adapter is changed rather
+  than replaced.
+- Reuse the current BLE snapshot guarantees in the ZMK transport: protocol/capability negotiation,
+  unsigned sequence handling, complete pressed-state snapshots, duplicate/out-of-order rejection,
+  reconnect reconciliation, and synthetic release on loss. Keep high-rate motion separate from
+  low-rate configuration and button state so ZMK Studio traffic cannot delay navigation input.
+- Pin and record the upstream ZMK, Zephyr, module, and toolchain revisions; produce reproducible
+  firmware artifacts in CI; and test module builds independently of the daemon. Publish the module
+  and stock keymap with the product so ZMK adoption provides a real repair/customization path rather
+  than serving only as an internal implementation detail.
+- Acceptance gates before replacing the existing firmware:
+  - With no daemon installed, pointer motion, remappable buttons, reboot persistence, BLE host
+    switching, sleep/wake, and USB/BLE output work as a normal trackball.
+  - With the daemon connected, the current motion, five-way, hold/toggle, dependency, foreground,
+    reconnect, and HUD matrices pass without changing binding/profile semantics.
+  - Repeated mode changes during held inputs, daemon termination, BLE loss, sleep/resume, firmware
+    reboot, and Studio connect/disconnect produce no stuck state, duplicate click, or unintended
+    fallback action.
+  - Measure XIAO nRF52840 flash/RAM, connection interval, notification throughput, motion latency,
+    and battery behavior with ZMK Studio and the custom GATT service enabled together before making
+    ZMK the production firmware foundation.
+
 ## Host feature parity
 
 These controls are intentionally not advertised until the host-specific behavior exists and has
