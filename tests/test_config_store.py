@@ -112,7 +112,7 @@ def test_link_unlink_and_system_reset_operations_have_distinct_semantics(tmp_pat
 
 
 def test_listener_failure_is_logged_and_does_not_hide_or_block_other_subscribers(
-        tmp_path, caplog):
+        tmp_path, daemon_caplog):
     store = ConfigStore(_store_path(tmp_path)).load()
     received = []
 
@@ -121,10 +121,10 @@ def test_listener_failure_is_logged_and_does_not_hide_or_block_other_subscribers
 
     store.add_listener(broken)
     store.add_listener(received.append)
-    with caplog.at_level("ERROR", logger="trackball_daemon.config_store"):
+    with daemon_caplog.at_level("ERROR", logger="trackball_daemon.config_store"):
         event = store.set_global("pointer.cursor.gain", 250.0)
     assert received == [event]
-    assert "subscriber exploded" in caplog.text
+    assert "subscriber exploded" in daemon_caplog.text
 
 
 def test_listener_can_commit_reentrantly_after_snapshot_publish(tmp_path):

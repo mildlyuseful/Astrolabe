@@ -145,7 +145,8 @@ def test_reconciliation_batch_publishes_only_the_final_chord_state():
         "keyboard:ctrl.left", "keyboard:shift.left")
 
 
-def test_listener_failure_does_not_block_other_listeners_or_reentrant_reads(caplog):
+def test_listener_failure_does_not_block_other_listeners_or_reentrant_reads(
+        daemon_caplog):
     aggregator = InputAggregator()
     aggregator.register_controls((_descriptor("keyboard", "f24"),))
     observed = []
@@ -159,7 +160,7 @@ def test_listener_failure_does_not_block_other_listeners_or_reentrant_reads(capl
     aggregator.accept(_event("keyboard", "f24", "pressed"))
 
     assert observed == [(1, 1)]
-    assert "Input listener failed" in caplog.text
+    assert "Input listener failed" in daemon_caplog.text
 
 
 def test_generic_modifier_alias_can_describe_both_physical_sides():

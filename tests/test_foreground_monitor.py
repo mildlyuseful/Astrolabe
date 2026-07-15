@@ -43,7 +43,7 @@ def test_monitor_thread_starts_refreshes_and_stops():
     assert not monitor.running
 
 
-def test_monitor_callback_failures_do_not_stop_later_publication(caplog):
+def test_monitor_callback_failures_do_not_stop_later_publication(daemon_caplog):
     current = ["first.exe"]
     calls = []
 
@@ -57,7 +57,7 @@ def test_monitor_callback_failures_do_not_stop_later_publication(caplog):
     current[0] = "second.exe"
     monitor.poll_once()
     assert calls == ["first.exe", "second.exe"]
-    assert "Foreground change callback failed" in caplog.text
+    assert "Foreground change callback failed" in daemon_caplog.text
 
 
 class _Config:
