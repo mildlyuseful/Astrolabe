@@ -10,9 +10,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from . import integrations
-from .app_registry import APP_SPECS, binding_profile
+from .app_registry import APP_SPECS, APP_SPECS_BY_ID, binding_profile
 from .binding_ui_model import BindingUIModel
-from .input.bindings import ACTIVATION_KINDS, MATCH_POLICIES
 from .settings_schema import BINDING_SECTIONS
 from .settings_schema import SettingScope, ValueKind
 from .settings_ui_model import CATEGORY_TITLES, SettingsUIModel
@@ -118,7 +117,12 @@ class SettingsWindow:
         self._keybinding_host = None
         self._settings_rebuilding = False
         self._refresh_pending = False
+        self._global_category = None
+        self._app_category = None
+        self._selected_binding_id = None
+        self._pending_setting_commit = None
         self.cfg.add_listener(self._on_config_event)
+        self.root.bind_all("<Button-1>", self._focus_blank_space, add="+")
 
     # --- show / hide --------------------------------------------------------------
     def show(self):
@@ -227,6 +231,46 @@ class SettingsWindow:
         if self._keybinding_host is not None:
             self._render_keybindings(self._keybinding_host)
 
+    def _focus_blank_space(self, event):
+        """Commit the current generated setting when otherwise inert space is clicked."""
+        if self.win is None:
+            return
+        try:
+            if event.widget.winfo_toplevel() != self.win:
+                return
+        except tk.TclError:
+            return
+        interactive = (ttk.Entry, ttk.Combobox, tk.Entry, tk.Text, ttk.Button,
+                       ttk.Checkbutton, tk.Button, tk.Listbox, ttk.Notebook, ttk.Scrollbar)
+        if not isinstance(event.widget, interactive) and self._pending_setting_commit is not None:
+            commit = self._pending_setting_commit
+            self._pending_setting_commit = None
+            commit()
+
+    @staticmethod
+    def _remember_category(notebook, attribute, owner):
+        try:
+            selected = notebook.select()
+            if selected:
+                setattr(owner, attribute, notebook.tab(selected, "text"))
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _restore_category(notebook, title):
+        if not title:
+            return
+        for tab_id in notebook.tabs():
+            if notebook.tab(tab_id, "text") == title:
+                notebook.select(tab_id)
+                return
+
+    @staticmethod
+    def _choice_text(spec, value):
+        if spec.id.startswith("input.axis_orientation.") and spec.id.endswith(".source"):
+            return {0: "Axis 0 (X)", 1: "Axis 1 (Y)", 2: "Axis 2 (Z)"}[value]
+        return SettingsWindow._setting_value_text(value)
+
     @staticmethod
     def _category_page(notebook, title):
         page = ttk.Frame(notebook)
@@ -307,7 +351,7 @@ class SettingsWindow:
             values = list(choices)
             if spec.nullable and None not in values:
                 values.append(None)
-            display = [self._setting_value_text(value) for value in values]
+            display = [self._choice_text(spec, value) for value in values]
             value_by_text = dict(zip(display, values))
             var = tk.StringVar(value=self._setting_value_text(view.value))
             control = ttk.Combobox(row, textvariable=var, values=display,
@@ -326,6 +370,8 @@ class SettingsWindow:
             control.pack(side="left")
 
             def commit(_event=None):
+                if self._pending_setting_commit is commit:
+                    self._pending_setting_commit = None
                 try:
                     value = self._parse_setting_value(spec, var.get().strip())
                 except (TypeError, ValueError):
@@ -334,6 +380,9 @@ class SettingsWindow:
                 self._run_setting_action(lambda: (
                     self.settings_model.set_app(app_id, spec.id, value) if app_id else
                     self.settings_model.set_global(spec.id, value)))
+            entry_pending = lambda _event=None: setattr(self, "_pending_setting_commit", commit)
+            control.bind("<FocusIn>", entry_pending)
+            control.bind("<KeyRelease>", entry_pending)
             control.bind("<Return>", commit)
             control.bind("<FocusOut>", commit)
         self._tooltip(control, spec.ui.help)
@@ -382,11 +431,21 @@ class SettingsWindow:
             categories = ttk.Notebook(host)
             categories.pack(fill="both", expand=True, padx=6, pady=6)
             views = self.settings_model.global_views()
-            for category in dict.fromkeys(view.spec.category for view in views):
+            present = {view.spec.category for view in views}
+            for category in (key for key in CATEGORY_TITLES if key in present):
                 inner = self._category_page(categories, CATEGORY_TITLES.get(
                     category, category.replace("_", " ").title()))
+                if category == "transform":
+                    ttk.Label(inner, text=(
+                        "Device-wide base orientation. Map the ball's physical sensor axes to "
+                        "logical X/Y/Z here; rotating the base should require only an axis swap "
+                        "and, when needed, one inversion."), wraplength=760,
+                        justify="left", foreground="#555").pack(fill="x", padx=10, pady=8)
                 for view in (item for item in views if item.spec.category == category):
                     self._generated_setting_row(inner, view)
+            self._restore_category(categories, self._global_category)
+            categories.bind("<<NotebookTabChanged>>", lambda _e: self._remember_category(
+                categories, "_global_category", self))
             actions = ttk.Frame(host)
             actions.pack(fill="x", padx=10, pady=(0, 10))
             button = ttk.Button(
@@ -432,11 +491,15 @@ class SettingsWindow:
             categories = ttk.Notebook(host)
             categories.pack(fill="both", expand=True, padx=6, pady=(0, 8))
             views = self.settings_model.app_views(app_id)
-            for category in dict.fromkeys(view.spec.category for view in views):
+            present = {view.spec.category for view in views}
+            for category in (key for key in CATEGORY_TITLES if key in present):
                 inner = self._category_page(categories, CATEGORY_TITLES.get(
                     category, category.replace("_", " ").title()))
                 for view in (item for item in views if item.spec.category == category):
                     self._generated_setting_row(inner, view, app_id=app_id)
+            self._restore_category(categories, self._app_category)
+            categories.bind("<<NotebookTabChanged>>", lambda _e: self._remember_category(
+                categories, "_app_category", self))
         finally:
             self._settings_rebuilding = False
 
@@ -483,17 +546,22 @@ class SettingsWindow:
             prefix = "" if binding.enabled else "[disabled] "
             listbox.insert("end", prefix + binding.label)
         ids = [binding.id for binding in bindings]
-        ttk.Button(listing, text="New binding", command=lambda: self._load_binding_editor(
-            editor, None)).pack(fill="x", pady=(5, 0))
+        ttk.Button(listing, text="New binding", command=lambda: (
+            setattr(self, "_selected_binding_id", None),
+            self._load_binding_editor(editor, None))).pack(fill="x", pady=(5, 0))
 
         def selected(_event=None):
             selection = listbox.curselection()
             if selection:
-                self._load_binding_editor(editor, ids[selection[0]])
+                self._selected_binding_id = ids[selection[0]]
+                self._load_binding_editor(editor, self._selected_binding_id)
         listbox.bind("<<ListboxSelect>>", selected)
         if ids:
-            listbox.selection_set(0)
-            self._load_binding_editor(editor, ids[0])
+            selected_index = (ids.index(self._selected_binding_id)
+                              if self._selected_binding_id in ids else 0)
+            self._selected_binding_id = ids[selected_index]
+            listbox.selection_set(selected_index)
+            self._load_binding_editor(editor, self._selected_binding_id)
 
     @staticmethod
     def _csv_values(text):
@@ -516,8 +584,6 @@ class SettingsWindow:
             }
         else:
             row = self.binding_model.row(binding_id)
-        fields = {}
-
         def entry(label, value, *, width=52):
             line = ttk.Frame(parent)
             line.pack(fill="x", padx=8, pady=3)
@@ -525,13 +591,8 @@ class SettingsWindow:
             widget_label.pack(side="left")
             var = tk.StringVar(value=value)
             ttk.Entry(line, textvariable=var, width=width).pack(side="left", fill="x", expand=True)
-            fields[label] = var
             return line, var
 
-        _line, id_var = entry("ID", row["id"])
-        if binding_id is not None:
-            next(widget for widget in _line.winfo_children()
-                 if isinstance(widget, ttk.Entry)).configure(state="disabled")
         _line, label_var = entry("Label", row["label"])
         enabled_var = tk.BooleanVar(value=row["enabled"])
         enabled_line = ttk.Frame(parent)
@@ -548,47 +609,144 @@ class SettingsWindow:
         chord_var.trace_add("write", lambda *_: warning_var.set(
             self.binding_model.pass_through_warning(self._csv_values(chord_var.get()))))
 
-        option_line = ttk.Frame(parent)
-        option_line.pack(fill="x", padx=8, pady=3)
-        ttk.Label(option_line, text="Activation", width=18, anchor="w").pack(side="left")
-        activation_var = tk.StringVar(value=row["activation"])
-        ttk.Combobox(option_line, textvariable=activation_var, values=ACTIVATION_KINDS,
-                     state="readonly", width=18).pack(side="left")
-        ttk.Label(option_line, text="Match", padding=(12, 0, 4, 0)).pack(side="left")
-        match_var = tk.StringVar(value=row["match"])
-        ttk.Combobox(option_line, textvariable=match_var, values=MATCH_POLICIES,
-                     state="readonly", width=23).pack(side="left")
+        match_line = ttk.Frame(parent)
+        match_line.pack(fill="x", padx=8, pady=3)
+        ttk.Label(match_line, text="Extra modifier keys", width=18, anchor="w").pack(side="left")
+        match_labels = {
+            "Must match exactly": "exact",
+            "May include extra modifiers": "allow_extra_modifiers",
+        }
+        match_var = tk.StringVar(value=next(
+            label for label, value in match_labels.items() if value == row["match"]))
+        ttk.Combobox(match_line, textvariable=match_var, values=tuple(match_labels),
+                     state="readonly", width=28).pack(side="left")
 
         when = row.get("when", {})
-        _line, apps_var = entry("Active apps", ", ".join(when.get("apps", [])))
-        _line, executables_var = entry(
-            "Executables", ", ".join(when.get("executables", [])))
-        _line, input_profiles_var = entry(
-            "Input profiles", ", ".join(when.get("input_profiles", [])))
-        _line, press_var = entry("On press (JSON)", json.dumps(row["press"]))
-        _line, release_var = entry("On release (JSON)", json.dumps(row["release"]))
+        selected_apps = when.get("apps", [])
+        app_labels = {"All applications": ""}
+        app_labels.update({app.display_name: app.app_id for app in APP_SPECS})
+        current_app_label = "All applications"
+        if len(selected_apps) == 1 and selected_apps[0] in APP_SPECS_BY_ID:
+            current_app_label = APP_SPECS_BY_ID[selected_apps[0]].display_name
+        app_line = ttk.Frame(parent)
+        app_line.pack(fill="x", padx=8, pady=3)
+        ttk.Label(app_line, text="Active application", width=18, anchor="w").pack(side="left")
+        app_var = tk.StringVar(value=current_app_label)
+        app_combo = ttk.Combobox(app_line, textvariable=app_var, values=tuple(app_labels),
+                                 state="readonly", width=28)
+        app_combo.pack(side="left")
+
+        simple = self.binding_model.simple_action(row)
+        editor_advanced_only = bool(
+            simple.advanced_only or len(selected_apps) > 1 or
+            when.get("executables") or when.get("input_profiles"))
+        target_options = dict(self.binding_model.simple_target_options())
+        target_by_label = {label: target_id for target_id, label in target_options.items()}
+        simple_frame = ttk.LabelFrame(parent, text="Action")
+        simple_frame.pack(fill="x", padx=8, pady=6)
+        advanced_notice = tk.StringVar(value=(
+            "This binding uses advanced DSL features. Use Advanced DSL to edit its action."
+            if editor_advanced_only else ""))
+        ttk.Label(simple_frame, textvariable=advanced_notice, foreground="#9a6700",
+                  wraplength=520).pack(fill="x", padx=8, pady=(5, 0))
+        target_line = ttk.Frame(simple_frame)
+        target_line.pack(fill="x", padx=8, pady=4)
+        ttk.Label(target_line, text="What it controls", width=18, anchor="w").pack(side="left")
+        target_var = tk.StringVar(value=target_options.get(simple.target_id, ""))
+        target_combo = ttk.Combobox(target_line, textvariable=target_var,
+                                    values=tuple(target_by_label), state="readonly", width=38)
+        target_combo.pack(side="left", fill="x", expand=True)
+
+        operation_line = ttk.Frame(simple_frame)
+        operation_line.pack(fill="x", padx=8, pady=4)
+        ttk.Label(operation_line, text="Behavior", width=18, anchor="w").pack(side="left")
+        operation_var = tk.StringVar()
+        operation_combo = ttk.Combobox(operation_line, textvariable=operation_var,
+                                       state="readonly", width=38)
+        operation_combo.pack(side="left", fill="x", expand=True)
+        value_line = ttk.Frame(simple_frame)
+        value_line.pack(fill="x", padx=8, pady=4)
+        value_label = ttk.Label(value_line, text="Value", width=18, anchor="w")
+        value_label.pack(side="left")
+        value_var = tk.StringVar(value=simple.value_text)
+        value_entry = ttk.Combobox(value_line, textvariable=value_var)
+        value_entry.pack(side="left", fill="x", expand=True)
+
+        operation_ids = {}
+
+        def refresh_value_field(*_):
+            target_id = target_by_label.get(target_var.get(), "")
+            if not target_id.startswith("setting:"):
+                return
+            setting_id = target_id.removeprefix("setting:")
+            operation_id = operation_ids.get(operation_var.get(), "")
+            choices = self.binding_model.setting_value_options(setting_id)
+            if operation_id == "cycle" or (operation_id == "toggle" and choices):
+                value_label.configure(text="Values")
+                value_entry.configure(values=(), state="disabled")
+                value_var.set("Automatic")
+            elif operation_id == "hold" and choices:
+                value_label.configure(text="Value while held")
+                value_entry.configure(values=choices, state="readonly")
+                if value_var.get() not in choices:
+                    value_var.set(choices[0])
+            else:
+                if operation_id == "toggle":
+                    label = "Two values (A, B)"
+                elif operation_id in {"add", "multiply"}:
+                    label = "Amount / factor"
+                else:
+                    label = "Value while held"
+                value_label.configure(text=label)
+                value_entry.configure(values=(), state="normal")
+                if value_var.get() == "Automatic":
+                    value_var.set("")
+
+        def refresh_action_fields(*_):
+            target_id = target_by_label.get(target_var.get(), "")
+            operation_ids.clear()
+            if target_id.startswith("setting:"):
+                setting_id = target_id.removeprefix("setting:")
+                options = self.binding_model.setting_operation_options(setting_id)
+                operation_ids.update({label: operation_id for operation_id, label in options})
+                operation_combo.configure(values=tuple(operation_ids), state="readonly")
+                selected = next((label for label, operation_id in operation_ids.items()
+                                 if operation_id == simple.operation_id), None)
+                operation_var.set(selected or (next(iter(operation_ids)) if operation_ids else ""))
+                refresh_value_field()
+            else:
+                operation_combo.configure(values=(), state="disabled")
+                operation_var.set("Built in")
+                value_var.set("")
+                value_entry.configure(state="disabled")
+                value_label.configure(text="Value")
+        target_combo.bind("<<ComboboxSelected>>", refresh_action_fields)
+        operation_combo.bind("<<ComboboxSelected>>", refresh_value_field)
+        refresh_action_fields()
+
         validation_var = tk.StringVar(value="")
         ttk.Label(parent, textvariable=validation_var, foreground="#b42318",
                   wraplength=540, justify="left").pack(fill="x", padx=26, pady=4)
 
         def current_row():
             when_value = {}
-            if self._csv_values(apps_var.get()):
-                when_value["apps"] = self._csv_values(apps_var.get())
-            if self._csv_values(executables_var.get()):
-                when_value["executables"] = self._csv_values(executables_var.get())
-            if self._csv_values(input_profiles_var.get()):
-                when_value["input_profiles"] = self._csv_values(input_profiles_var.get())
+            selected_app = app_labels[app_var.get()]
+            if selected_app:
+                when_value["apps"] = [selected_app]
+            target_id = target_by_label.get(target_var.get(), "")
+            operation_id = operation_ids.get(operation_var.get(), "")
+            activation, press, release = self.binding_model.build_simple_action(
+                target_id, operation_id, value_var.get())
             result = {
-                "id": id_var.get().strip(),
+                "id": row["id"],
                 "label": label_var.get().strip(),
                 "enabled": enabled_var.get(),
                 "chord": self._csv_values(chord_var.get()),
-                "match": match_var.get(),
-                "activation": activation_var.get(),
+                "match": match_labels[match_var.get()],
+                "activation": activation,
                 "priority": row.get("priority", 0),
-                "press": json.loads(press_var.get()),
-                "release": json.loads(release_var.get()),
+                "press": press,
+                "release": release,
             }
             if when_value:
                 result["when"] = when_value
@@ -596,16 +754,22 @@ class SettingsWindow:
 
         def save():
             try:
-                self.binding_model.save(current_row())
+                saved = current_row()
+                self._selected_binding_id = saved["id"]
+                self.binding_model.save(saved)
                 validation_var.set("Saved")
             except (TypeError, ValueError, json.JSONDecodeError) as exc:
                 validation_var.set(str(exc))
 
         actions = ttk.Frame(parent)
         actions.pack(fill="x", padx=8, pady=8)
-        ttk.Button(actions, text="Save", command=save).pack(side="left")
+        save_button = ttk.Button(actions, text="Save", command=save)
+        save_button.pack(side="left")
+        if editor_advanced_only:
+            save_button.configure(state="disabled")
         ttk.Button(actions, text="Advanced DSL…", command=lambda: self._advanced_binding_editor(
-            current_row, validation_var)).pack(side="left", padx=5)
+            (lambda: row) if editor_advanced_only else current_row,
+            validation_var)).pack(side="left", padx=5)
         if binding_id is not None:
             ttk.Button(actions, text="Delete", command=lambda: self._delete_binding(
                 binding_id)).pack(side="right")
@@ -643,6 +807,7 @@ class SettingsWindow:
                 parsed = json.loads(text.get("1.0", "end"))
                 if not isinstance(parsed, dict):
                     raise ValueError("binding DSL must be one JSON object")
+                self._selected_binding_id = parsed.get("id")
                 self.binding_model.save(parsed)
                 dialog.destroy()
             except (TypeError, ValueError, json.JSONDecodeError) as exc:

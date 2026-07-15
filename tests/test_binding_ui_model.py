@@ -92,3 +92,60 @@ def test_capability_status_and_pass_through_warning(tmp_path):
     assert views["ble.astrolabe"].status == "not present"
     assert not model.pass_through_warning(["keyboard:ctrl", "keyboard:shift"])
     assert "foreground application" in model.pass_through_warning(["keyboard:a"])
+
+
+def test_every_shipped_binding_has_a_plain_language_simple_action(tmp_path):
+    _store, model = _model(tmp_path)
+    for profile_id, _label in model.profiles():
+        for binding in model.bindings(profile_id):
+            view = model.simple_action(model.row(binding.id, profile_id))
+            assert not view.advanced_only, (profile_id, binding.id)
+            assert view.target_id
+
+
+def test_simple_setting_builder_owns_hold_release_and_toggle_semantics(tmp_path):
+    _store, model = _model(tmp_path)
+    activation, press, release = model.build_simple_action(
+        "setting:navigation.orbit.sensitivity", "hold", "2.5")
+    assert activation == "hold"
+    assert press == [{
+        "command": "setting.set_runtime",
+        "target": "navigation.orbit.sensitivity",
+        "value": 2.5,
+    }]
+    assert release == [{
+        "command": "setting.restore_previous",
+        "target": "navigation.orbit.sensitivity",
+    }]
+
+    activation, press, release = model.build_simple_action(
+        "setting:navigation.orbit.sensitivity", "toggle", "0.5, 2")
+    assert activation == "hold"  # physical press edges drive the logical toggle every time
+    assert press[0]["command"] == "setting.toggle_runtime"
+    assert press[0]["value"] == [0.5, 2.0]
+    assert release == []
+
+    activation, press, release = model.build_simple_action(
+        "setting:navigation.orbit.lock_horizon", "toggle", "Automatic")
+    assert activation == "hold"
+    assert press == [{
+        "command": "setting.toggle_runtime",
+        "target": "navigation.orbit.lock_horizon",
+    }]
+    assert release == []
+
+
+def test_low_level_latched_activation_remains_advanced_dsl_only(tmp_path):
+    _store, model = _model(tmp_path)
+    row = model.row("keyboard.ctrl.3d")
+    row["activation"] = "toggle"
+    assert model.simple_action(row).advanced_only
+
+    row = model.row("keyboard.ctrl.3d")
+    row["press"] = [{
+        "command": "setting.cycle_runtime",
+        "target": "navigation.orbit.style",
+        "value": ["turntable", "free"],
+    }]
+    row["release"] = []
+    assert model.simple_action(row).advanced_only

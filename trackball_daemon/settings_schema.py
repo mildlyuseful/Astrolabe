@@ -334,12 +334,12 @@ for index, axis in enumerate(("x", "y", "z")):
     _SPECS.append(_global(
         f"input.axis_orientation.{axis}.source",
         ("general", "axis_orientation", "source", index), ValueKind.INTEGER,
-        f"Physical {axis.upper()} source", category="input", choices=(0, 1, 2),
+        f"Logical {axis.upper()} uses physical axis", category="transform", choices=(0, 1, 2),
         control="choice", operations=frozenset({SettingOperation.UI_PERSIST})))
     _SPECS.append(_global(
         f"input.axis_orientation.{axis}.invert",
         ("general", "axis_orientation", "invert", index), ValueKind.BOOLEAN,
-        f"Invert physical {axis.upper()}", category="input",
+        f"Invert logical {axis.upper()}", category="transform",
         operations=frozenset({SettingOperation.UI_PERSIST})))
 
 

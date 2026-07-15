@@ -107,10 +107,17 @@ dictionaries. The test suite also enforces the ownership contract
 The settings window consumes `SettingsUIModel` and `BindingUIModel`, not mutable config maps.
 Global and per-app pages are generated from `SettingSpec`; linked app rows display their current
 Global-effective value, and every edit/reset/bulk link operation is a typed transaction. The
-keybinding page edits declarative rows against the selected immutable System input profile, stores
-only sparse profile-scoped patches, reports missing input providers as capability status, and
-validates the complete candidate before commit. The former `navigation.legacy_layer_toggle`
-setting is removed on v9 load because Phase 8 made layer activation binding-profile data.
+Global page gives the device-wide physical-axis permutation/inversion its own Physical transform
+category, independent from per-action routing. Category selection survives live refreshes, and a
+blank-space click explicitly commits the pending generated-setting editor. The keybinding page
+edits declarative rows against the selected immutable System input profile, stores only sparse
+profile-scoped patches, reports missing input providers as capability status, and validates the
+complete candidate before commit. Its ordinary editor exposes plain-language actions, settings,
+behaviors, values, and one app context; it always generates release/restoration behavior itself.
+Executable/profile/multi-app contexts, priority, low-level latched activation, custom release
+lists, and unusual action combinations remain losslessly editable through Advanced DSL. The former
+`navigation.legacy_layer_toggle` setting is removed on v9 load because Phase 8 made layer
+activation binding-profile data.
 
 Persistent configuration is not live control state. `RuntimeStore` resolves a context-aware base
 from one immutable config snapshot, then layers runtime latches and identity-owned hold requests

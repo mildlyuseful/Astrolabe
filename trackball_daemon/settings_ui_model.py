@@ -14,6 +14,7 @@ from .system_defaults import SYSTEM_DEFAULTS
 CATEGORY_TITLES = {
     "device": "Device",
     "input": "Input",
+    "transform": "Physical transform",
     "pointer": "Pointer",
     "orbit": "Orbit",
     "sensitivity": "Sensitivity & rate",
