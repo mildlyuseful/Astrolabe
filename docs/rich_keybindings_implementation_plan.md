@@ -78,7 +78,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 8 — Motion/output integration | COMPLETE | Start `86d67e8`; start ledger `17cc139`; automated integration `5c3bcae`; completion `545a347`; items 8.1–8.6 and live gate complete | Wait for explicit `START PHASE 9`. |
 | 9 — Barebones settings UX | COMPLETE | Start `9a5b143`; generated UI `bf3d155`; acceptance refinements `89365c0`; items 9.1–9.5 complete | Wait for explicit `START PHASE 10`. |
 | 10 — Text HUD | COMPLETE | Start `714fc72`; implementation `2718601`; binding fix `adbf59e`; items 10.1–10.4 and live gate complete | Wait for explicit `START PHASE 11`. |
-| 11 — Full verification and release docs | COMPLETE | Start `97ccd54`; automated/package checkpoint `3683901`; completion record below; items 11.1–11.7 complete at branch/merge scope | Branch is ready for the user's push/merge. Production release gates remain in `TODO.md`; do not publish from this checkpoint. |
+| 11 — Full verification and release docs | COMPLETE | Start `97ccd54`; automated/package checkpoint `3683901`; completion `6992d8b`; items 11.1–11.7 complete at branch/merge scope | Branch is ready for the user's push/merge. Production release gates remain in `TODO.md`; do not publish from this checkpoint. |
 
 The dependencies above are stricter than numeric order where necessary. Phase 4 is an existing bug
 fix and may be implemented or merged earlier, but its code must still honor the Phase 0 contracts.
@@ -711,8 +711,9 @@ treating that review as an authority:
 ### 0.19 Phase 11 completion checkpoint
 
 - **Status:** `COMPLETE` at branch/merge scope from starting commit `97ccd54`; automated/package
-  checkpoint `3683901`. Work items 11.1–11.7 and the stop gate are complete under the user's explicit
-  decision that this branch will merge without becoming the first production release.
+  checkpoint `3683901`; completion checkpoint `6992d8b`. Work items 11.1–11.7 and the stop gate are
+  complete under the user's explicit decision that this branch will merge without becoming the
+  first production release.
 - **Files and ownership:** release schemas/examples, side-effect-free smoke, repository-bounded
   Nuitka onedir builder, CI/package metadata, Python 3.9 guard/fix, release/security tests, README,
   HANDOFF, TODO, BLE/host/keybinding/release docs, and this ledger were updated. User-owned
@@ -745,9 +746,8 @@ treating that review as an authority:
 - **Residual product work:** profile export/import, visual priority editing, later visual UI polish,
   host parity gaps, production hardware, and release/distribution work remain only in `TODO.md` and
   the release matrix; no stale TODO claims this completed implementation is still missing.
-- **Next exact action:** commit this Phase 11 completion record, record that commit in the ledger if
-  a separate bookkeeping commit is used, then stop. Do not push, merge, publish, open a PR, sign, or
-  distribute artifacts without a separate user command.
+- **Next exact action:** stop. The user may push/merge/close the branch when ready. Do not push,
+  merge, publish, open a PR, sign, or distribute artifacts without a separate user command.
 
 ## 1. Product goals
 
