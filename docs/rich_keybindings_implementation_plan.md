@@ -1,6 +1,6 @@
 # Rich keybindings, input profiles, and layered settings implementation plan
 
-Status: implementation in progress (Phases 0–9 complete)
+Status: implementation in progress (Phases 0–9 complete; Phase 10 in progress)
 
 Target branch: `rich-keybindings`
 
@@ -77,7 +77,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 7 — Binding compiler, DSL, and system profiles | COMPLETE | Start `7a0ae3d`; start ledger `6d1b7a4`; profiles/overrides `1283cb4`; compiler/runtime `86fd22c`; items 7.1–7.5 complete | Wait for explicit `START PHASE 8`. |
 | 8 — Motion/output integration | COMPLETE | Start `86d67e8`; start ledger `17cc139`; automated integration `5c3bcae`; completion `545a347`; items 8.1–8.6 and live gate complete | Wait for explicit `START PHASE 9`. |
 | 9 — Barebones settings UX | COMPLETE | Start `9a5b143`; generated UI `bf3d155`; acceptance refinements `89365c0`; items 9.1–9.5 complete | Wait for explicit `START PHASE 10`. |
-| 10 — Text HUD | NOT_STARTED | — | Start after Phase 8 runtime snapshots are COMPLETE. |
+| 10 — Text HUD | IN_PROGRESS | Start `714fc72`; untouched baseline 620 passed/1 skipped; automated HUD checkpoint pending | Run the live Windows focus/monitor/DPI/click-through acceptance matrix, then complete and commit the phase. |
 | 11 — Full verification and release docs | NOT_STARTED | — | Start after Phases 0–10 are COMPLETE. |
 
 The dependencies above are stricter than numeric order where necessary. Phase 4 is an existing bug
@@ -571,6 +571,42 @@ treating that review as an authority:
   editor. Those findings were incorporated in `89365c0` rather than deferred into Phase 10.
 - **Next exact action:** stop. Wait for explicit `START PHASE 10`; do not infer Phase 10
   authorization from Phase 9 completion.
+
+### 0.17 Phase 10 in-progress checkpoint
+
+- **Status:** `IN_PROGRESS` from starting commit `714fc72`. Work items 10.1–10.4 are implemented;
+  the live Windows stop gate remains pending, so Phase 10 is not yet marked complete.
+- **Bootstrap and baseline:** the complete plan/HANDOFF/TODO and Phase 10 scope were reread; Phase 8
+  was confirmed complete; the untouched full suite passed 620 tests with the Tk smoke skipped.
+  User-owned `.claude/` and `docs/rich_keybindings_plan_revisions.md` remain untracked and
+  untouched.
+- **Semantic boundary:** immutable runtime snapshots now carry renderer-independent primary,
+  secondary, and current control help plus physical held-binding records. Binding activity covers
+  holds, toggles, pointer buttons, and persistent-only macros, so the HUD does not inspect input
+  providers, output packets, or binding-controller internals. Request-token holds remain a safe
+  fallback for direct command callers.
+- **Projection and queueing:** `control_hud.py` owns a pure snapshot-to-four-lines projection,
+  held-over-last precedence with a monotonic timeout, capacity-one latest-revision mailboxes for
+  runtime and config snapshots, and pure bottom-right work-area geometry. Burst and concurrent
+  publisher tests prove bounded coalescing to the newest revision.
+- **Window and settings:** the plain-label Tk `Toplevel` is created and drained only on the Tk
+  thread. Windows styles add tool-window/no-activate and optional click-through/topmost behavior;
+  absolute Win32 placement follows the foreground-window work area and polls foreground, monitor,
+  work-area, and DPI identity, with cursor then primary fallback. Global settings own visibility,
+  topmost, click-through, opacity, margin, and last-binding timeout; the tray has a checked
+  visibility action. HUD-only config changes do not release bindings or rebuild transports.
+- **Automated verification:** `python -m pytest -q` currently passes 626 tests with two Tk skips;
+  one is the pre-existing settings smoke and one is the new HUD smoke. The shell Python install has
+  no usable Tcl/Tk runtime, so native window behavior cannot be honestly closed from this sandbox.
+  Pure projection, held/last timing, semantic help, bounded/concurrent coalescing, geometry,
+  settings/default coverage, runtime/compiler regressions, `py_compile`, and `git diff --check`
+  pass.
+- **Manual stop gate:** pending on a real Windows desktop. Verify live stationary keyboard and BLE
+  updates, timed last-used clearing, tray and Global visibility/options, no focus steal, foreground
+  monitor following, taskbar/work-area changes, mixed-DPI movement, and click-through on/off.
+- **Next exact action:** run and report the Phase 10 manual acceptance matrix. If it passes, mark
+  Phase 10 `COMPLETE`, record the checkpoint commit and exact results, set the next action to wait
+  for explicit `START PHASE 11`, and stop without pushing.
 
 ## 1. Product goals
 

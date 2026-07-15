@@ -91,6 +91,9 @@ class TrayController:
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(self._mode_text, self._toggle_mode),
             pystray.MenuItem("Recenter 3D view", lambda icon, item: self.app.engine.reset_view()),
+            pystray.MenuItem("Show control panel", self._toggle_hud,
+                             checked=lambda item: self.app.config.snapshot().global_value(
+                                 "hud.visible")),
             pystray.MenuItem("Start at login", self._toggle_startup,
                              checked=lambda item: is_startup_enabled()),
             pystray.Menu.SEPARATOR,
@@ -102,6 +105,14 @@ class TrayController:
 
     def _toggle_mode(self, _icon, _item):
         self.app.commands.dispatch(ToggleInputMode(origin="tray"))
+
+    def _toggle_hud(self, icon, _item):
+        visible = self.app.config.snapshot().global_value("hud.visible")
+        self.app.set_control_hud_visible(not visible)
+        try:
+            icon.update_menu()
+        except Exception:
+            pass
 
     def start(self):
         self._thread = threading.Thread(target=self.icon.run, name="tray", daemon=True)

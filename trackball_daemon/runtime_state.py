@@ -97,6 +97,52 @@ class BindingEvent:
 
 
 @dataclass(frozen=True)
+class HeldBinding:
+    """One physically held binding exposed to passive runtime observers."""
+
+    binding_id: str
+    label: str
+
+
+@dataclass(frozen=True)
+class ControlHelp:
+    """Semantic control descriptions independent of any particular renderer."""
+
+    state_label: str
+    primary_help: str
+    secondary_help: str
+    current_help: str
+
+
+def _control_help(input_mode, navigation_mode, navigation_layer, settings):
+    if input_mode == "pointer":
+        help_text = "Ball: planar = pointer · twist = scroll"
+        return ControlHelp("Pointer", help_text, help_text, help_text)
+
+    if navigation_mode == "fly":
+        primary = "Ball: planar = look · twist = bank"
+        secondary = "Ball: planar = strafe / forward · twist = rise / fall"
+        secondary_label = "Move"
+    elif navigation_mode == "walk":
+        primary = "Ball: planar = look · twist = unused"
+        secondary = "Ball: planar = strafe / forward · twist = rise / fall"
+        secondary_label = "Move"
+    else:
+        twist = str(settings.get("navigation.orbit.twist_action", "roll"))
+        twist_label = {
+            "roll": "roll", "zoom": "zoom", "dolly": "dolly", "none": "unused",
+        }.get(twist, twist)
+        zoom = str(settings.get("navigation.zoom.behavior", "zoom"))
+        zoom_label = "dolly" if zoom == "dolly" else "zoom"
+        primary = f"Ball: planar = orbit · twist = {twist_label}"
+        secondary = f"Ball: planar = pan · twist = {zoom_label}"
+        secondary_label = "Pan / Zoom"
+    if navigation_layer == "secondary":
+        return ControlHelp(secondary_label, primary, secondary, secondary)
+    return ControlHelp(navigation_mode.title(), primary, secondary, primary)
+
+
+@dataclass(frozen=True)
 class StateNode:
     node_id: str
     assignments: object = field(default_factory=dict)
@@ -244,6 +290,8 @@ class RuntimeSnapshot:
     base_navigation_layer: str
     effective_navigation_layer: str
     held_binding_ids: tuple
+    held_bindings: tuple
+    control_help: ControlHelp
     latched_overrides: object
     base_settings: object
     effective_settings: object
@@ -266,6 +314,7 @@ class _RuntimeDraft:
     latched_settings: dict
     last_binding_event: BindingEvent | None
     request_tokens: dict
+    pressed_bindings: dict
     activation_serial: int
 
     def clone(self):
@@ -275,8 +324,20 @@ class _RuntimeDraft:
             latched_settings=copy.deepcopy(self.latched_settings),
             last_binding_event=self.last_binding_event,
             request_tokens=copy.deepcopy(self.request_tokens),
+            pressed_bindings=copy.deepcopy(self.pressed_bindings),
             activation_serial=self.activation_serial,
         )
+
+    def report_binding_activity(self, *, binding_id, activation_id, source, active, label=""):
+        if not binding_id or not activation_id or not source:
+            raise ValueError("binding activity identity fields must be non-empty")
+        event = BindingEvent(
+            binding_id, activation_id, "binding.activity", source, bool(active), label)
+        if active:
+            self.pressed_bindings[binding_id] = event
+        else:
+            self.pressed_bindings.pop(binding_id, None)
+        self.last_binding_event = event
 
     def set_context(self, context):
         if not isinstance(context, FocusedContext):
@@ -358,6 +419,15 @@ class _RuntimeDraft:
             self.last_binding_event = BindingEvent(
                 last.identity.binding_id, last.identity.activation_id, "state.release_all",
                 source or last.identity.source, False, last.label)
+        pressed = [event for event in self.pressed_bindings.values()
+                   if source is None or event.source == source]
+        for event in pressed:
+            self.pressed_bindings.pop(event.binding_id, None)
+        if pressed and not removed:
+            last = pressed[-1]
+            self.last_binding_event = BindingEvent(
+                last.binding_id, last.activation_id, "binding.activity",
+                source or last.source, False, last.label)
         return tuple(removed)
 
 
@@ -374,7 +444,7 @@ class RuntimeStore:
         self._lock = threading.RLock()
         self._listeners = []
         self._revision = 0
-        self._draft = _RuntimeDraft(FocusedContext(), {}, {}, None, {}, 0)
+        self._draft = _RuntimeDraft(FocusedContext(), {}, {}, None, {}, {}, 0)
         base = self._resolve_base(self._draft.focused_context)
         self._snapshot = self._build_snapshot(self._draft, base, self._revision)
 
@@ -429,6 +499,14 @@ class RuntimeStore:
         settings.update(draft.latched_settings)
         active_tokens = [token for token in draft.request_tokens.values()
                          if token.matches_context(draft.focused_context)]
+        held_bindings = list(draft.pressed_bindings.values())
+        held_ids = {event.binding_id for event in held_bindings}
+        held_bindings.extend(BindingEvent(
+            token.identity.binding_id, token.identity.activation_id, "state.request",
+            token.identity.source, True, token.label)
+            for token in sorted(active_tokens,
+                                key=lambda item: item.precedence.activation_serial)
+            if token.identity.binding_id not in held_ids)
         state_tokens = [
             token for token in active_tokens if not token.is_setting and
             self._dependency_graph.closure(token.identity.target).get(
@@ -455,9 +533,12 @@ class RuntimeStore:
             effective_navigation_mode=state["navigation.mode"],
             base_navigation_layer=base.navigation_layer,
             effective_navigation_layer=state["navigation.layer"],
-            held_binding_ids=tuple(dict.fromkeys(
-                token.identity.binding_id for token in sorted(
-                    active_tokens, key=lambda item: item.precedence.activation_serial))),
+            held_binding_ids=tuple(event.binding_id for event in held_bindings),
+            held_bindings=tuple(HeldBinding(
+                event.binding_id, event.label or event.binding_id) for event in held_bindings),
+            control_help=_control_help(
+                state["input.mode"], state["navigation.mode"],
+                state["navigation.layer"], settings),
             latched_overrides=_freeze(latched),
             base_settings=_freeze(dict(base.settings)),
             effective_settings=_freeze(settings),

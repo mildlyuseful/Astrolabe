@@ -47,6 +47,21 @@ class RefreshRuntimeBase(RuntimeCommand):
 
 
 @dataclass(frozen=True)
+class ReportBindingActivity(RuntimeCommand):
+    binding_id: str = ""
+    activation_id: str = ""
+    source: str = "binding"
+    active: bool = True
+    label: str = ""
+    command_id = "binding.activity"
+
+    def apply(self, draft, _previous):
+        draft.report_binding_activity(
+            binding_id=self.binding_id, activation_id=self.activation_id,
+            source=self.source, active=self.active, label=self.label)
+
+
+@dataclass(frozen=True)
 class SetInputMode(RuntimeCommand):
     mode: str = "3d"
     command_id = "input.mode.set"

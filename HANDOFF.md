@@ -54,6 +54,7 @@ trackball_daemon/
   settings_schema.py         stable setting/command IDs, validation, scope, UI metadata
   settings_ui_model.py       UI-independent Global/app projections and typed reset/link actions
   binding_ui_model.py        profile-scoped declarative binding editor and capability projection
+  control_hud.py             coalesced semantic text HUD and non-activating Windows placement
   system_defaults.json       concrete developer-owned setting defaults
   system_keybinding_profiles.json developer-owned hardware and keyboard binding bases
   default_profiles.json      frozen v8 migration compatibility data
@@ -131,6 +132,15 @@ derives mode from this snapshot and does not own a second mutable mode value. Su
 modes are also part of the resolved base: a held Fly/Walk request is inert while an Orbit-only app
 has focus and resumes safely if focus returns to a compatible app.
 
+The text-only control panel is a passive `RuntimeSnapshot` consumer. Snapshots carry semantic
+primary/secondary help plus physical held-binding activity, including pointer and persistent-only
+bindings that do not otherwise create state requests. Worker callbacks publish into capacity-one,
+latest-revision mailboxes; the Tk thread alone renders, times the last-used line, and performs
+window operations. On Windows the panel uses tool-window/no-activate styles and follows the work
+area of the foreground-window monitor, falling back to cursor and then primary monitor. Its
+visibility, topmost/click-through behavior, opacity, margin, and timeout are persistent Global
+settings; presentation-only changes bypass binding/output rebuilds.
+
 See [`docs/default_profiles.md`](docs/default_profiles.md) for the composition and tuning workflow.
 
 ## 3. Firmware and BLE protocol
@@ -178,7 +188,7 @@ apply on the next reconnect.
 
 Daemon-side ownership:
 
-- Main thread: hidden Tk root and all GUI work.
+- Main thread: hidden Tk root, settings UI, and the non-activating text HUD.
 - Tray thread: `pystray`; callbacks marshal to Tk.
 - BLE thread: asyncio/bleak subscription and packet delivery.
 - Raw Input window thread: message-only global keyboard receipt while keyboard bindings require it.

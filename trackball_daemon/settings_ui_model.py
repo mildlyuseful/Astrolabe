@@ -13,6 +13,7 @@ from .system_defaults import SYSTEM_DEFAULTS
 
 CATEGORY_TITLES = {
     "device": "Device",
+    "hud": "Control panel",
     "input": "Input",
     "transform": "Physical transform",
     "pointer": "Pointer",

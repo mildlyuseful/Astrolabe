@@ -16,6 +16,7 @@ from ..commands import (
     CommandBatch,
     CycleNavigationMode,
     ReleaseAll,
+    ReportBindingActivity,
     ReleaseState,
     RequestSettingOverride,
     RequestState,
@@ -724,7 +725,20 @@ class BindingController:
                     next_active.pop(binding_id)
                 else:
                     next_active[binding_id] = self._new_activation(binding)
-        return self._apply_active_set_unlocked(next_active)
+        activity_commands = []
+        for binding_id in sorted(satisfied - previous_satisfied):
+            binding = by_id[binding_id].definition
+            activity_commands.append(ReportBindingActivity(
+                origin=_BINDING_SOURCE, binding_id=binding.id,
+                activation_id=f"physical:{binding.id}", source=_BINDING_SOURCE,
+                active=True, label=binding.label))
+        for binding_id in sorted(previous_satisfied - satisfied):
+            binding = by_id[binding_id].definition
+            activity_commands.append(ReportBindingActivity(
+                origin=_BINDING_SOURCE, binding_id=binding.id,
+                activation_id=f"physical:{binding.id}", source=_BINDING_SOURCE,
+                active=False, label=binding.label))
+        return self._apply_active_set_unlocked(next_active, activity_commands)
 
     def _runtime_action(self, action, activation, snapshot, working_settings, phase):
         binding = activation.binding.definition
@@ -894,19 +908,19 @@ class BindingController:
         for action, activation in pointer_actions:
             self._pointer_action(action, activation)
 
-    def _apply_active_set_unlocked(self, next_active):
+    def _apply_active_set_unlocked(self, next_active, activity_commands=()):
         removed = [activation for binding_id, activation in self._active.items()
                    if binding_id not in next_active]
         added = [activation for binding_id, activation in next_active.items()
                  if binding_id not in self._active]
-        if not removed and not added:
+        if not removed and not added and not activity_commands:
             return self._runtime.snapshot()
         groups = [(activation, activation.binding.definition.release_actions, "release")
                   for activation in removed]
         groups += [(activation, activation.binding.definition.press_actions, "press")
                    for activation in added]
         self._active = next_active
-        self._apply_actions_unlocked(groups)
+        self._apply_actions_unlocked(groups, tuple(activity_commands))
         return self._runtime.snapshot()
 
     def _release_all_unlocked(self, reason):

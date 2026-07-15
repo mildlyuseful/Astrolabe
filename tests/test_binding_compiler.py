@@ -325,7 +325,9 @@ def test_persistent_macro_uses_one_config_transaction_without_runtime_latch(tmp_
     controller.update_pressed(("keyboard:a",))
     assert config.snapshot().global_value("navigation.orbit.sensitivity") == 2.5
     assert config.snapshot().revision == before_config_revision + 1
-    assert runtime.snapshot().revision == before_runtime_revision
+    assert runtime.snapshot().revision == before_runtime_revision + 1
+    assert runtime.snapshot().held_binding_ids == ("custom.persistent",)
+    assert runtime.snapshot().last_binding_event.label == "Custom binding"
 
 
 def test_static_invalid_entry_is_disabled_without_losing_valid_bindings():

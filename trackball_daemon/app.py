@@ -22,6 +22,7 @@ from .app_registry import APP_SPECS, APP_SPECS_BY_ID, resolve_foreground_context
 from .autocad_driver import AutoCADPluginLoader
 from .ble import start_ble_thread
 from .commands import SerializedCommandQueue, SetFocusedContext
+from .control_hud import ControlHUD
 from .config import (compose_advanced_with_host_baseline, host_baseline_payload,
                      normalize_orbit_pivot_fallbacks, orbit_pivot_candidates)
 from .config_store import ConfigStore
@@ -105,6 +106,7 @@ class App:
         self._last_pushed = None
         self.root = None
         self.ui = None
+        self.hud = None
         self.tray = None
         self.broker = None
         self.sw_driver = None
@@ -152,6 +154,7 @@ class App:
         # an unrelated "primary" install destination.
         self.observed_addin_versions = {}
         self._last_apps_pushed = None
+        self._last_hud_visible = None
         self._engine_app = None
         self._packet_app_key = _NO_PACKET_APP
         self._packet_state_revision = _NO_PACKET_REVISION
@@ -179,6 +182,13 @@ class App:
         return self._status.startswith(("connected", "subscribed"))
 
     def on_config_changed(self, _event):
+        if (_event.changes and all(
+                change.path[:1] == ("global_overrides",) and
+                len(change.path) > 1 and str(change.path[1]).startswith("hud.")
+                for change in _event.changes)):
+            # Presentation-only changes are consumed by ControlHUD's own immutable snapshot
+            # subscriber. They must not release active bindings or rebuild output transports.
+            return
         bindings = getattr(self, "binding_controller", None)
         if bindings is not None:
             # No activation survives a configuration generation. Compile only after the owned
@@ -509,6 +519,7 @@ class App:
         self.root = tk.Tk()
         self.root.withdraw()                       # headless: no window on startup
         self.ui = SettingsWindow(self.root, self)
+        self.hud = ControlHUD(self.root, self.runtime, self.config)
 
         self.tray = TrayController(self)
         self.tray.start()
@@ -557,6 +568,10 @@ class App:
         if self.root is not None:
             self.root.after(0, self.ui.show)
 
+    def set_control_hud_visible(self, visible):
+        """Typed persistent visibility action safe for the tray thread."""
+        self.config.set_global("hud.visible", bool(visible))
+
     def _poll(self):
         if self._status != self._last_pushed:
             self._last_pushed = self._status
@@ -571,6 +586,11 @@ class App:
                 self.tray.refresh()
             if self.ui is not None:
                 self.ui.update_app_connections(self.connected_apps)
+        hud_visible = self.config.snapshot().global_value("hud.visible")
+        if hud_visible != self._last_hud_visible:
+            self._last_hud_visible = hud_visible
+            if self.tray is not None:
+                self.tray.refresh()
         if not self.stop_event.is_set():
             self.root.after(300, self._poll)
 
@@ -600,6 +620,8 @@ class App:
             self.root.after(0, self._shutdown)
 
     def _shutdown(self):
+        if self.hud is not None:
+            self.hud.stop()
         try:
             self.root.quit()
         except Exception:

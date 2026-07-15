@@ -5,6 +5,12 @@
     "device.name": "Trackball BLE"
   },
   "global": {
+    "hud.always_on_top": true,
+    "hud.click_through": true,
+    "hud.last_binding_timeout": 3.0,
+    "hud.margin": 16,
+    "hud.opacity": 0.9,
+    "hud.visible": true,
     "input.axis_orientation.x.invert": false,
     "input.axis_orientation.x.source": 0,
     "input.axis_orientation.y.invert": false,

@@ -44,6 +44,9 @@ def test_initial_snapshot_is_immutable_and_contains_base_and_effective_state():
     assert snapshot.base_input_mode == snapshot.effective_input_mode == "3d"
     assert snapshot.base_navigation_mode == snapshot.effective_navigation_mode == "orbit"
     assert snapshot.held_binding_ids == ()
+    assert snapshot.held_bindings == ()
+    assert snapshot.control_help.state_label == "Orbit"
+    assert snapshot.control_help.current_help == "Ball: planar = orbit · twist = roll"
     with pytest.raises(TypeError):
         snapshot.effective_settings["pointer.cursor.gain"] = 999
 
