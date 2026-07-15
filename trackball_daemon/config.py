@@ -1,16 +1,18 @@
-"""The single source of truth: a JSON config in the per-user config dir.
+"""Host alignment, legacy v8 defaults, normalization, and historical migration helpers.
 
-Defaults are chosen so behavior is byte-identical to the original cube_test.py
-constants -- moving the numbers into config must not change the math. The UI and the
-output engine both read/write this one object.
+The transactional v9 source of truth is :mod:`trackball_daemon.config_store`. The materialized
+``LegacyConfig`` below exists only to reconstruct historical configs during migration and to keep
+durable regression tests for versions 1 through 8.
 """
 import copy
+from collections.abc import Mapping
 import json
 import threading
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
+from .app_registry import APP_IDS
 from .paths import config_path
 
 # Physical device orientation. ``source[i]`` says which raw sensor axis becomes logical X/Y/Z;
@@ -75,10 +77,7 @@ class HostBaseline:
 
 
 HOST_PROFILE_PATH = Path(__file__).with_name("host_profiles.json")
-HOST_PROFILE_APP_KEYS = (
-    "blender", "freecad", "sketchup", "unreal", "unity", "godot", "rhino", "fusion360",
-    "solidworks", "onshape", "autocad",
-)
+HOST_PROFILE_APP_KEYS = APP_IDS
 HOST_PROFILE_FIELDS = {
     "orbit_sign", "orbit_scale", "pan_sign", "pan_scale", "zoom_sign", "zoom_scale",
     "move_scale", "apply_in_daemon", "advanced_invert",
@@ -176,7 +175,14 @@ def host_baseline_payload(app_key):
 
 def compose_advanced_with_host_baseline(app_key, advanced):
     """Return wire-ready advanced settings: immutable host corrections XOR user preferences."""
-    out = copy.deepcopy(advanced or {})
+    def detached(value):
+        if isinstance(value, Mapping):
+            return {key: detached(child) for key, child in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [detached(child) for child in value]
+        return copy.deepcopy(value)
+
+    out = detached(advanced or {})
     for mode, action in host_baseline(app_key).advanced_invert:
         group = out.setdefault("invert", {}).setdefault(mode, {})
         group[action] = not bool(group.get(action, False))
@@ -379,7 +385,7 @@ def default_app_profile(app_key):
     return copy.deepcopy(_DEFAULT_APP_PROFILES[app_key])
 
 
-class Config:
+class LegacyConfig:
     def __init__(self):
         self._lock = threading.Lock()
         self.path = config_path()
@@ -598,3 +604,15 @@ class Config:
         for k in keys[:-1]:
             node = node[k]
         node[keys[-1]] = value
+
+
+class Config:
+    """Compatibility constructor returning the transactional v9 store.
+
+    New code should import :class:`ConfigStore` directly. Keeping this lazy constructor for one
+    cycle avoids an import loop while callers and third-party scripts move off the old module.
+    """
+
+    def __new__(cls, *args, **kwargs):
+        from .config_store import ConfigStore
+        return ConfigStore(*args, **kwargs)

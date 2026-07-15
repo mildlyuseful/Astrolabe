@@ -100,6 +100,12 @@ def vclose(u, v, eps=1e-9):
     return all(abs(u[i] - v[i]) <= eps for i in range(3))
 
 
+def test_discard_pending_clears_focus_stale_motion(bridge):
+    bridge.submit(1, 2, 3, 4, 5, 6)
+    bridge.discard_pending()
+    assert bridge._acc == [0.0] * 6
+
+
 def test_level_horizon_basis_preserves_view_direction_and_is_idempotent():
     back = ob._v_normalize((0.4, -0.2, 0.8))
     leveled = ob._level_horizon_basis(back)

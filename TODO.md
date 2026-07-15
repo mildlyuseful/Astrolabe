@@ -6,15 +6,11 @@ here.
 
 ## Highest priority
 
-No open items currently.
-
-## Normal priority
-
-- **Isolate broker frames by target application.** `NavBroker` currently sends each frame to every
-  connected socket client. Most add-ons do not independently verify Windows foreground ownership,
-  so opening more than one integrated host can move a background viewport. Make the target app part
-  of the broker submission/flush contract, retain per-target scheme data, and add a multi-client
-  regression test.
+- Before replacing the honest `firmware/Astrolabe` placeholder, supply the final
+  Up/Down/Left/Right/Center pins and debounce timing. Phase 11/release qualification must repeat the
+  physical matrix on the production five-way switch, including the simultaneous-input
+  contingency; the passed XIAO jumper gate validates the software boundary but does not substitute
+  for final-hardware qualification.
 
 ## Host feature parity
 
@@ -73,13 +69,14 @@ High-risk app-specific checks:
 - **SolidWorks:** COM throughput on large assemblies and cursor mapping at non-100% display scaling.
 - **FreeCAD:** perspective-camera path and world-space bounds for nested/placed objects.
 - **Rhino:** startup registration fallback and live under-cursor/object-center behavior.
-- **Daemon UI:** expanded 3D-app cards, scrolling, tooltips, confirmations, and reset behavior in the
-  normal packaged Tk runtime.
+- **Daemon UI:** finish the later visual layer for expanded 3D-app cards and the declarative
+  keybinding editor, including accessibility/usability polish in the normal packaged Tk runtime.
 
 ## Release readiness
 
-- Produce the first per-user Nuitka onedir build and test it on a clean Windows account without a
-  source checkout or Python installation.
+- Complete the exact manual matrix in `docs/release_verification.md`. The first sdist, wheel, and
+  per-user Nuitka onedir builds pass automated resource smoke; test the onedir GUI on a clean Windows
+  account without a source checkout or Python installation.
 - Authenticode-sign the daemon, installer/updater, and bundled AutoCAD DLL with one timestamped
   publisher identity. Publish SHA-256 checksums, source revision, dependency lock/SBOM, and exact
   Defender/third-party antivirus results.
@@ -87,12 +84,11 @@ High-risk app-specific checks:
   handling against the exact signed artifact. Source inspection cannot establish these outcomes.
 - Test uninstall/reversal for every path in `docs/security.md`.
 - Decide and document the supported host-version policy for the first alpha.
+- Qualify the final packaged Raw Input path with a non-US AltGr layout and across a Remote Desktop
+  connect/disconnect boundary; neither environment was available during feature-branch closure.
 
 ## Product and integration backlog
 
-- Add a controller-mode button-event message so integrations can implement Frame/View Selected,
-  orthographic view snaps, fixed-angle steps, and recenter-on-cursor. HID-only button handling cannot
-  trigger these operations today.
 - Improve Onshape pointer-userscript installation and updates without silently installing browser
   code or certificate trust.
 - Add automatic pointer/3D mode switching based on the foreground app, while retaining a predictable
@@ -105,6 +101,9 @@ High-risk app-specific checks:
 - Add PMW3610/third-sensor firmware support and, if required, a three-sensor fusion solver.
 
 ## Deferred by design
+
+- Keybinding profile export/import and a visual priority editor remain post-MVP. Advanced DSL is the
+  current lossless path for non-default priority and unusual context/action structures.
 
 - SketchUp for Web has no local Ruby hook and is not supported.
 - Onshape Camera pivot is not useful in its supported orthographic view; rotating about the eye

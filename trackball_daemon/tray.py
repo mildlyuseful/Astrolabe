@@ -9,8 +9,6 @@ import threading
 import pystray
 from PIL import Image, ImageDraw
 
-from .output import OutputEngine
-
 # --- "Start at login" (Windows HKCU Run key) -------------------------------------------
 _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 _RUN_NAME = "TrackballDaemon"
@@ -75,10 +73,6 @@ class TrayController:
     def _status_text(self, _item):
         return f"Status: {'Connected' if self.app.is_connected() else 'Disconnected'}"
 
-    def _mode_text(self, _item):
-        is_cube = self.app.engine.mode == OutputEngine.MODE_CUBE
-        return f"Mode: {'3D navigation' if is_cube else 'Pointer'}"
-
     def _apps_text(self, _item):
         return f"Apps: {self.app.app_connection_summary()}"
 
@@ -89,8 +83,10 @@ class TrayController:
             pystray.MenuItem(self._status_text, None, enabled=False),
             pystray.MenuItem(self._apps_text, None, enabled=False),
             pystray.Menu.SEPARATOR,
-            pystray.MenuItem(self._mode_text, lambda icon, item: self.app.engine.toggle_mode()),
             pystray.MenuItem("Recenter 3D view", lambda icon, item: self.app.engine.reset_view()),
+            pystray.MenuItem("Show control panel", self._toggle_hud,
+                             checked=lambda item: self.app.config.snapshot().global_value(
+                                 "hud.visible")),
             pystray.MenuItem("Start at login", self._toggle_startup,
                              checked=lambda item: is_startup_enabled()),
             pystray.Menu.SEPARATOR,
@@ -99,6 +95,14 @@ class TrayController:
 
     def _toggle_startup(self, icon, item):
         set_startup_enabled(not is_startup_enabled())
+
+    def _toggle_hud(self, icon, _item):
+        visible = self.app.config.snapshot().global_value("hud.visible")
+        self.app.set_control_hud_visible(not visible)
+        try:
+            icon.update_menu()
+        except Exception:
+            pass
 
     def start(self):
         self._thread = threading.Thread(target=self.icon.run, name="tray", daemon=True)

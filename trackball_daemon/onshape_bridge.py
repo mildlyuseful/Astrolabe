@@ -992,6 +992,10 @@ class OnshapeBridge:
             a[0] += ox; a[1] += oy; a[2] += oz
             a[3] += px; a[4] += py; a[5] += zoom
 
+    def discard_pending(self):
+        """Drop deltas captured before Onshape lost daemon-side foreground ownership."""
+        self._drain()
+
     def is_connected(self):
         return self._connected
 

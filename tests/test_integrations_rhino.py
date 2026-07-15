@@ -28,7 +28,7 @@ def test_install_copies_scripts_and_enables(isolated_config, tmp_path, monkeypat
     ok, msg, copies = integrations.normalize_install_result(
         integrations.install(integrations.APPS_BY_KEY["rhino"], cfg))
     assert ok is True
-    r = cfg.data["apps"]["rhino"]
+    r = cfg.snapshot().app_operational["rhino"]
     assert r["installed"] is True and r["enabled"] is True
     assert r["addin_version"] == "0.1.18"
     assert (scripts / "version.json").exists()
@@ -75,10 +75,10 @@ def test_reinstall_does_not_re_enable(isolated_config, tmp_path, monkeypatch):
     _patch_rhino(monkeypatch, tmp_path)
     cfg = Config().load()
     integrations.install(integrations.APPS_BY_KEY["rhino"], cfg)
-    cfg.data["apps"]["rhino"]["enabled"] = False
+    cfg.set_app_operational("rhino", enabled=False)
     ok, _msg = integrations.install(integrations.APPS_BY_KEY["rhino"], cfg)
     assert ok is True
-    assert cfg.data["apps"]["rhino"]["enabled"] is False
+    assert cfg.snapshot().app_operational["rhino"]["enabled"] is False
 
 
 def test_auto_update_recopies_on_version_bump(isolated_config, tmp_path, monkeypatch):

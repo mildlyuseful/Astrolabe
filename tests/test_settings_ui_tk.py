@@ -1,0 +1,111 @@
+"""Small Tk smoke tests; semantic behavior remains covered by UI-independent models."""
+
+from types import SimpleNamespace
+import tkinter as tk
+from tkinter import ttk
+
+import pytest
+
+from trackball_daemon.config_store import ConfigStore
+from trackball_daemon.input import InputAggregator, load_system_binding_profiles
+from trackball_daemon.ui import SettingsWindow
+
+
+def _walk(widget):
+    yield widget
+    for child in widget.winfo_children():
+        yield from _walk(child)
+
+
+def _tab(notebook, title):
+    for tab_id in notebook.tabs():
+        if notebook.tab(tab_id, "text") == title:
+            return notebook.nametowidget(tab_id)
+    raise AssertionError(f"missing tab {title}")
+
+
+def _row_with_label(parent, text):
+    for widget in _walk(parent):
+        if isinstance(widget, ttk.Label) and widget.cget("text") == text:
+            return widget.master, widget
+    raise AssertionError(f"missing setting row {text}")
+
+
+def test_generated_tabs_and_linked_value_refresh_after_global_edit(tmp_path):
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:  # pragma: no cover - headless non-Windows CI
+        pytest.skip(f"Tk display unavailable: {exc}")
+    root.withdraw()
+    store = ConfigStore(tmp_path / "config.json").load()
+    app = SimpleNamespace(
+        config=store,
+        binding_catalog=load_system_binding_profiles(),
+        input_aggregator=InputAggregator(),
+        status_text=lambda: "stopped",
+    )
+    ui = SettingsWindow(root, app)
+    try:
+        ui._build()
+        root.update()
+        notebook = next(widget for widget in ui.win.winfo_children()
+                        if isinstance(widget, ttk.Notebook))
+        assert [notebook.tab(tab_id, "text") for tab_id in notebook.tabs()] == [
+            "3D Apps", "Global", "Per-App", "Keybindings"]
+        global_tab = _tab(notebook, "Global")
+        global_categories = next(widget for widget in _walk(global_tab)
+                                 if isinstance(widget, ttk.Notebook))
+        category_titles = [global_categories.tab(tab_id, "text")
+                           for tab_id in global_categories.tabs()]
+        assert "Physical transform" in category_titles
+        orbit_tab = next(tab_id for tab_id in global_categories.tabs()
+                         if global_categories.tab(tab_id, "text") == "Orbit")
+        global_categories.select(orbit_tab)
+        root.update()
+
+        orbit_row, _label = _row_with_label(global_tab, "Orbit pivot hold")
+        orbit_entry = next(widget for widget in orbit_row.winfo_children()
+                           if isinstance(widget, ttk.Entry))
+        orbit_entry.event_generate("<FocusIn>")
+        orbit_entry.delete(0, "end")
+        orbit_entry.insert(0, "0.75")
+        blank_label = next(widget for widget in global_tab.winfo_children()
+                           if isinstance(widget, ttk.Label))
+        ui._focus_blank_space(SimpleNamespace(widget=blank_label))
+        root.update()
+        root.update_idletasks()
+        assert store.snapshot().global_value(
+            "navigation.orbit.pivot_hold_seconds") == 0.75
+        global_categories = next(widget for widget in _walk(global_tab)
+                                 if isinstance(widget, ttk.Notebook))
+        assert global_categories.tab(global_categories.select(), "text") == "Orbit"
+
+        per_app = _tab(notebook, "Per-App")
+        row, label = _row_with_label(per_app, "Orbit sensitivity")
+        entry = next(widget for widget in row.winfo_children()
+                     if isinstance(widget, ttk.Entry))
+        assert entry.get() == "1.0"
+        assert str(label.cget("foreground")) == "#777"
+
+        store.set_global("navigation.orbit.sensitivity", 4.25)
+        root.update()
+        root.update_idletasks()
+        row, label = _row_with_label(per_app, "Orbit sensitivity")
+        entry = next(widget for widget in row.winfo_children()
+                     if isinstance(widget, ttk.Entry))
+        assert entry.get() == "4.25"
+        assert str(label.cget("foreground")) == "#777"
+
+        keybindings = _tab(notebook, "Keybindings")
+        visible_labels = {str(widget.cget("text")) for widget in _walk(keybindings)
+                          if isinstance(widget, ttk.Label)}
+        assert "What it controls" in visible_labels
+        assert "Behavior" in visible_labels
+        assert "Executables" not in visible_labels
+        assert "Input profiles" not in visible_labels
+        assert "On press (JSON)" not in visible_labels
+        assert "On release (JSON)" not in visible_labels
+    finally:
+        if ui.win is not None:
+            ui.win.destroy()
+        root.destroy()

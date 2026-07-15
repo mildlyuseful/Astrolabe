@@ -7,9 +7,18 @@
  * when the bench hardware is retired; XIAO3389 moves to archive/ at that point.
  *
  * Until then there is nothing here: flash XIAO3389.ino for all current work. The BLE
- * rotation protocol (service 2cad0001-…, 12-byte float32 rx/ry/rz notify) is the contract
- * the daemon depends on — the production firmware must keep speaking it.
+ * rotation protocol (service 2cad0001-…, characteristic 2cad0002-…, fixed 12-byte
+ * float32 rx/ry/rz notify) is the contract the daemon depends on and must remain unchanged.
+ * Phase 6 additionally reserves characteristic 2cad0003-… for protocol-v1 full input-state
+ * snapshots. The production implementation must map bits 0..4 to Up/Down/Left/Right/Center,
+ * using active-low inputs with internal pull-ups and firmware debounce. This placeholder
+ * intentionally does not invent final pins or debounce timing before the hardware is complete.
+ * Although the switch is mechanically one-direction-at-a-time, firmware must publish the full
+ * observed bitset if simultaneous inputs occur rather than silently choosing a winner.
  */
+
+#define ASTROLABE_INPUT_PROTOCOL_VERSION 1
+#define ASTROLABE_FIRMWARE_PROTOCOL_REV   1
 
 void setup() {
 }

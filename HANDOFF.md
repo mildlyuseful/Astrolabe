@@ -38,16 +38,36 @@ trackball_daemon/
   app.py                     lifecycle, focus routing, service gates, scheme/rate delivery
   ble.py                     scan/connect/subscribe/reconnect loop
   output.py                  pointer/cube math and global/app mapping boundary
-  config.py                  config loading, validation, migrations, reset semantics
-  default_profiles.json      shipped General and neutral user-profile defaults
+  windows_pointer.py         bounded SendInput motion and pointer-button sink
+  instance_lock.py           process-lifetime single-controller ownership
+  commands.py                typed live-state commands and serialized dispatch queue
+  runtime_state.py           dependency-resolved live authority and immutable snapshots
+  input/model.py             immutable normalized controls, events, health, and transitions
+  input/aggregator.py        provider registry and atomic cross-provider pressed set
+  input/bindings.py          system-profile composition, chord compiler, activation ownership
+  input/macros.py            allowlisted declarative action parsing and setting validation
+  input/windows_raw_input.py lazy pass-through Windows keyboard receiver and reconciliation
+  config_store.py            transactional v9 loading, migration, snapshots, and events
+  config_resolver.py         pure System -> Global -> app setting resolution
+  config.py                  host/default helpers and historical migration machinery
+  app_registry.py            immutable app identity, focus, transport, modes, capabilities
+  settings_schema.py         stable setting/command IDs, validation, scope, UI metadata
+  settings_ui_model.py       UI-independent Global/app projections and typed reset/link actions
+  binding_ui_model.py        profile-scoped declarative binding editor and capability projection
+  control_hud.py             coalesced semantic text HUD and non-activating Windows placement
+  system_defaults.json       concrete developer-owned setting defaults
+  system_keybinding_profiles.json developer-owned hardware and keyboard binding bases
+  schemas/                    packaged JSON Schema contributor contracts
+  examples/                   validated data-only contributor examples
+  default_profiles.json      frozen v8 migration compatibility data
   host_profiles.json         immutable developer-owned host alignment
-  binding_schema.py          declarative Per-App Bindings capability/UI contract
   navbroker.py               loopback JSON transport for socket add-ons
   solidworks_driver.py       direct out-of-process SolidWorks COM transport
   onshape_bridge.py          Onshape TLS/WAMP NL-Proxy-compatible bridge
   autocad_driver.py          AutoCAD discovery, staging, trust, and NETLOAD delivery only
   integrations.py            host detection, setup metadata, copy/install/update operations
-  tray.py / ui.py            tray lifecycle and settings interface
+  tray.py / ui.py            tray lifecycle and generated barebones settings/binding interface
+  winfocus.py                foreground process query and motion-independent monitor
   plugins/                   bundled host add-ons and manifests
 
 plugin_src/autocad/          C# source and console math tests for the bundled AutoCAD plugin
@@ -60,20 +80,71 @@ archive/                     retired implementations kept only for earned techni
 ui_demo/                     design prototypes; not part of the daemon runtime
 ```
 
-Configuration ownership is deliberately split:
+Configuration and registry ownership is deliberately split:
 
-- `default_profiles.json` defines what a clean install and **Reset to defaults** receive.
+- `system_defaults.json` exhaustively defines the concrete base-installed System setting layer and
+  its sparse host-specific differences.
+- `default_profiles.json` is frozen compatibility data for reconstructing v8 inheritance during
+  migration; new defaults do not belong there.
 - `host_profiles.json` defines software-convention corrections that users must not need to discover
   or reapply.
+- `system_keybinding_profiles.json` defines immutable `astrolabe_5way` and `keyboard_only` bases.
+  User changes are sparse, stored under the base-profile ID, and never mutate this packaged file.
 - `%APPDATA%\TrackballDaemon\config.json` stores device and user choices.
-- `binding_schema.py` defines which controls are honest for each host. A field is exposed only when
-  every advertised option has a distinct runtime consumer.
+- `app_registry.py` is the only code-owned app identity/order table. Its immutable `AppSpec`
+  records own display names, process selectors, navigation transports/modes, and capability flags.
+  Packaged profile files are validated against that suite.
+- `settings_schema.py` owns stable setting and non-setting command IDs, v8 path mappings, types,
+  validation, scope, capability predicates, concrete System-default source metadata, allowed
+  operations, and the current presentation order. A setting is exposed only when the app satisfies its
+  predicate and every advertised option has a distinct runtime consumer.
+- `integrations.py` retains setup/detection/install metadata and functions, but every `AppDef`
+  references the canonical `AppSpec`; it does not repeat app IDs or display names.
 
-`config.py` constructs only per-app operational state in Python, then merges the complete resolved
-navigation profile from `default_profiles.json`. The test suite also enforces the ownership
-contract `rich_actions == not apply_in_daemon`, so each host baseline is applied exactly once.
+`ConfigStore` persists sparse v9 user overrides, validates the complete candidate before atomic
+replacement, and publishes deeply immutable snapshots. Feature consumers use typed transactions
+and snapshot/domain accessors; only the store's isolated legacy migration boundary materializes v8
+dictionaries. The test suite also enforces the ownership contract
+`rich_actions == not apply_in_daemon`, so each host baseline is applied exactly once.
 
-See [`docs/default_profiles.md`](docs/default_profiles.md) for the composition and tuning workflow.
+The settings window consumes `SettingsUIModel` and `BindingUIModel`, not mutable config maps.
+Global and per-app pages are generated from `SettingSpec`; linked app rows display their current
+Global-effective value, and every edit/reset/bulk link operation is a typed transaction. The
+Global page gives the device-wide physical-axis permutation/inversion its own Physical transform
+category, independent from per-action routing. Category selection survives live refreshes, and a
+blank-space click explicitly commits the pending generated-setting editor. The keybinding page
+edits declarative rows against the selected immutable System input profile, stores only sparse
+profile-scoped patches, reports missing input providers as capability status, and validates the
+complete candidate before commit. Its ordinary editor exposes plain-language actions, settings,
+behaviors, values, and one app context; it always generates release/restoration behavior itself.
+Executable/profile/multi-app contexts, priority, low-level latched activation, custom release
+lists, and unusual action combinations remain losslessly editable through Advanced DSL. The former
+`navigation.legacy_layer_toggle` setting is removed on v9 load because Phase 8 made layer
+activation binding-profile data.
+
+Persistent configuration is not live control state. `RuntimeStore` resolves a context-aware base
+from one immutable config snapshot, then layers runtime latches and identity-owned hold requests
+above it. `SerializedCommandQueue` is the only mutation path for tray, settings refresh, output
+compatibility adapters, and future keyboard/BLE providers. Each command or batch publishes one
+coherent immutable `RuntimeSnapshot` with input/navigation state, focused context, active binding
+identities, setting overrides, last binding event, and a monotonic revision. Dependency leaves such
+as Pan carry their prerequisites and precedence as one request; if a prerequisite loses a conflict,
+the dependent leaf is suppressed rather than leaving an unreachable mixed state. `OutputEngine`
+derives mode from this snapshot and does not own a second mutable mode value. Supported navigation
+modes are also part of the resolved base: a held Fly/Walk request is inert while an Orbit-only app
+has focus and resumes safely if focus returns to a compatible app.
+
+The text-only control panel is a passive `RuntimeSnapshot` consumer. Snapshots carry semantic
+primary/secondary help plus physical held-binding activity, including pointer and persistent-only
+bindings that do not otherwise create state requests. Worker callbacks publish into capacity-one,
+latest-revision mailboxes; the Tk thread alone renders, times the last-used line, and performs
+window operations. On Windows the panel uses tool-window/no-activate styles and follows the work
+area of the foreground-window monitor, falling back to cursor and then primary monitor. Its
+visibility, topmost/click-through behavior, opacity, margin, and timeout are persistent Global
+settings; presentation-only changes bypass binding/output rebuilds.
+
+See [`docs/default_profiles.md`](docs/default_profiles.md) for the composition and tuning workflow
+and [`docs/keybindings.md`](docs/keybindings.md) for the public binding/DSL contract.
 
 ## 3. Firmware and BLE protocol
 
@@ -97,6 +168,9 @@ Protocol contract:
 - Rotation characteristic: `2cad0002-6e64-0146-b139-9cf2a4cd57fc`.
 - Packet: 12 bytes, three little-endian `float32` values `(rx, ry, rz)` in radians since the prior
   notification.
+- Input-state characteristic: `2cad0003-6e64-0146-b139-9cf2a4cd57fc`. Protocol v1 kind 1 is a
+  full-state snapshot: version, kind, little-endian `uint16` sequence, payload byte count, then the
+  descriptor-mapped pressed bitset. The rotation characteristic remains unchanged.
 - Bluefruit stores the 128-bit UUID byte arrays in reverse order.
 - Firmware accumulates float deltas and clears them only after notification, so polling/notify
   cadence does not quantize away motion.
@@ -105,18 +179,24 @@ The raw-sensor IPS report is measured before `IPS_CAP`; the cap uses actual elap
 currently a test knob for emulating a lower-performance sensor, not the reported hardware limit.
 Set it high to disable the emulation during sensor characterization.
 
-The daemon's BLE reader is intentionally thin: it scans by configured name or connects by address,
-subscribes, and passes each byte packet to `App._handle_ble_packet`. That boundary captures the
-foreground app, activates its output mapping, and then calls `OutputEngine.handle_packet`. Device
-identity changes apply on the next reconnect.
+The daemon's generic BLE transport scans by configured name or connects by address, inventories
+GATT, selects a data-descriptor-backed adapter, and subscribes to every characteristic that adapter
+requests. Legacy firmware subscribes only to rotation. Input-capable firmware keeps the same motion
+path and additionally diffs accepted full-state snapshots into normalized `InputEvent` batches.
+Duplicate/stale/malformed snapshots cannot change pressed state; reconnect resets the sequence
+baseline, and disconnect releases every control owned by that provider. Device identity changes
+apply on the next reconnect.
 
 ## 4. Daemon threads and data flow
 
 Daemon-side ownership:
 
-- Main thread: hidden Tk root and all GUI work.
+- Main thread: hidden Tk root, settings UI, and the non-activating text HUD.
 - Tray thread: `pystray`; callbacks marshal to Tk.
 - BLE thread: asyncio/bleak subscription and packet delivery.
+- Raw Input window thread: message-only global keyboard receipt while keyboard bindings require it.
+- Input worker: normalization, reconciliation, and pressed-set publication outside native callbacks.
+- Foreground monitor: publishes process/app context independently of BLE motion.
 - Broker accept/sender threads: socket add-on connections and coalesced flushes.
 - SolidWorks worker: COM-initialized driver thread.
 - AutoCAD worker: COM-initialized loader/delivery thread; not the navigation transport.
@@ -128,10 +208,10 @@ The data path is:
 ```text
 BLE float packet
   -> App._handle_ble_packet
-       -> capture focused host and activate its mapping
+       -> capture one immutable runtime snapshot, focused host, and state revision
   -> OutputEngine.handle_packet
        -> global physical orientation
-       -> pointer mode: SendInput cursor/wheel
+       -> pointer mode: windows_pointer SendInput cursor/wheel
        -> 3D mode: app user mapping and host-alignment boundary
   -> App._nav_sink (enabled gate; routes with the same captured host key)
        -> SolidWorksDriver for SolidWorks
@@ -148,13 +228,44 @@ unflushed deltas loses physical rotation.
 The process remains alive on Tk's mainloop. Closing Settings hides it; tray → **Quit** performs the
 only normal shutdown.
 
+`InputAggregator` owns the complete pressed set across providers and publishes atomic batches, so
+disconnect or release-all cannot expose a half-released chord. The binding compiler expands generic
+selectors to physical controls, indexes candidates by source token, and recomputes the complete
+hold/toggle set after every batch or foreground-context change. Phase 3 resolves dependent states,
+priority, context specificity, exactness, chord size, and activation recency; the compiler does not
+duplicate that authority. Exact keyboard matching rejects unlisted modifiers, while exact device
+bindings also reject unexpected simultaneous controls from the same source. `WindowsRawInputProvider`
+starts only when the active compiled profile requests keyboard controls. Repeats preserve pressed
+state without emitting another activation edge. Profile swap, receiver failure/restart,
+lock/suspend, and shutdown release safely; resume/restart reconcile configured controls with
+`GetAsyncKeyState` only when the input desktop is accessible. `ForegroundMonitor` drives the same
+runtime context path as BLE packet routing, allowing stationary inputs to resolve the actual
+foreground app. Windows can hide Raw Input releases while a higher-integrity window is foreground,
+so the provider also polls only controls it already believes held and can synthesize releases only;
+it does not scan other configured keys or create activation edges from that fail-safe.
+
+The binding DSL is data only: stable command/setting IDs support set, explicit two-value toggle,
+cycle, numeric add/multiply, identity-based restore, and explicit persistent setting transactions.
+There is no eval, shell, raw JSON-pointer, arbitrary virtual-key, or scancode surface. Pointer
+buttons are restricted to paired momentary Left/Right/Middle/X1/X2 actions and are identity-owned;
+`SendInputPointerButtonSink` is the only OS delivery boundary. It retains
+release-on-disconnect/reload/shutdown/owner-replacement behavior and reports a rejected button edge
+instead of silently retaining ambiguous ownership. Motion injection preserves the historical
+non-throwing behavior so a transient desktop boundary cannot tear down the BLE stream.
+
+`SingleInstanceGuard` acquires `Local\TrackballDaemon.Controller.v1` before `App` is constructed.
+Therefore a second installed or source-tree instance cannot open BLE or output transports; it exits
+with an actionable diagnostic. Keep this acquisition ahead of every future transport startup.
+
 ## 5. Pointer, 3D, and mapping semantics
 
 `OutputEngine` has pointer and 3D modes. In pointer mode, yaw-dominant motion becomes wheel input;
 otherwise planar motion becomes cursor movement. Fractional pixel/notch remainders are carried.
 
-In 3D mode, the shipped toggle uses unmodified motion for orbit and Shift for mutually exclusive
-pan/zoom. The app's binding profile can change the toggle, action sources, inversions, and gains.
+In 3D mode, the shipped profile uses unmodified motion for orbit and Shift for mutually exclusive
+pan/zoom. Shift is an ordinary declarative hold binding whose `pan` dependency cascades through
+Orbit-secondary and 3D; `OutputEngine` never polls keyboard state. The app's binding profile can
+change the active mode/layer, action sources, inversions, and gains.
 `OutputEngine` publishes a complete immutable mapping snapshot and each packet retains one snapshot
 through transformation and emission. Config reloads and focus changes are serialized so fields from
 two app profiles cannot be mixed.
@@ -188,6 +299,8 @@ math, and never apply a baseline in both daemon and add-on. The `rich_actions` c
 | Rhino 8 | Broker → Python scripts | Per-user scripts plus startup command | Python constant + `version.json` |
 
 Socket add-ons send one hello line containing app key, loaded code version, host version, and PID.
+Rich add-ons consume the daemon runtime's `adv.nav_mode`; host-local mode overrides must not compete
+with that authority. Blender's former Alt+backtick operator was removed for this reason.
 Broker frames contain:
 
 ```json
@@ -202,14 +315,23 @@ Broker frames contain:
 }
 ```
 
-`adv` is the current broker app's complete additive contract, not a Blender-only extension. It can
+`adv` is the frame target's complete additive contract, not a Blender-only extension. It can
 include mode-specific settings, action routing, host baseline, selection override, candidate list,
 independent hold times, zoom style, and horizon-entry behavior. Add-ons must ignore unknown keys and
 use safe defaults for missing ones.
 
-The current broker broadcasts a submitted frame to every connected socket client; target-client
-isolation is tracked as normal-priority work in `TODO.md`. Do not claim foreground isolation is
-complete until the broker itself scopes delivery.
+`NavigationRouter` is the single daemon-side delivery boundary for broker clients, SolidWorks COM,
+and the Onshape bridge. Every immutable sample envelope carries its target app and runtime-state
+revision. The broker owns independent accumulators, rates, schemes/profile revisions, and delivery
+state per target, and sends a frame only to clients whose existing hello `app` matches that target.
+Focus changes atomically discard pending old-target motion; they never relabel or flush it into the
+new target. A disabled/unknown foreground app and connected-but-background Onshape select no target.
+Stale runtime revisions are rejected, while a newer revision discards motion accumulated under the
+prior state before accepting new deltas.
+
+This isolation is entirely server-side. The newline JSON hello/frame shapes and all bundled add-on
+version markers remain unchanged; `docs/rich_keybindings_phase4_protocol.md` records the frozen
+inventory and Phase 4 decision.
 
 Each socket add-on's hello reports the version of the copy actually loaded by that host document.
 The daemon remembers the most recently observed version per app and uses it for Setup/Update status,
@@ -250,8 +372,9 @@ and `TODO.md` for intentionally deferred parity.
 
 ## 8. Configuration and migrations
 
-The current config schema is version 8. Loading performs a deep merge with shipped defaults, then
-normalizes axis/pivot values and runs historical migrations. Important milestones:
+The current config schema is version 9. Its setting hierarchy is sparse System→Global→app:
+missing overrides inherit, and persisted v9 state never uses `0`, `"default"`, missing-field
+exceptions, or legacy mode names as inheritance sentinels. Important milestones:
 
 - v2 neutralized old per-app scaling that moved into host integrations.
 - v3 renamed pointer/cursor scheme values without losing Blender's separate 3D Cursor meaning.
@@ -260,14 +383,18 @@ normalizes axis/pivot values and runs historical migrations. Important milestone
 - v6/v7 transferred developer host alignment out of saved user preferences and established atomic
   user-profile reset semantics.
 - v8 separated orbit-pivot and cursor-zoom holds.
+- v9 introduced stable-ID System/Global/app layers, typed transactions, immutable snapshots,
+  structured observable change events, `cube`/`cursor` to `3d`/`pointer` aliases, selected-app UI
+  state, and removal of obsolete `general.buttons`.
 
 Old values must continue to land on their current meaning. Migration tests are durable user-data
 tests, not checkpoint tests. Corrupt or structurally invalid configuration must fall back safely
 without overwriting the bad source file unless a deliberate recovery policy is introduced.
 
-`APP_PROFILE_FIELDS` is the atomic reset boundary. Reset restores navigation fields from
-`default_profiles.json`, removes an app-specific horizon override so it inherits General, and
-preserves operational state such as enabled/installed/add-on version.
+Global reset removes the user override so System is visible again. Linking an app setting removes
+its app override; unlink-all pins the current effective values. Resetting an app setting to System
+pins the concrete System value and therefore breaks its Global link. All these operations preserve
+operational state such as enabled/installed/add-on version.
 
 The deprecated per-app `start_automatically` field had no consumer and is removed on load. The real
 daemon-level **Start at login** toggle lives in `tray.py` and writes only the current user's Windows
@@ -312,10 +439,12 @@ native HID remains the daemon-closed fallback.
 
 ### Host focus and process identity
 
-Desktop hosts route by foreground process name. Onshape cannot route by title because the browser
-tab title is the document name; it uses browser process + connected bridge, then Onshape's own focus
-signal as the fine gate. Keep routing tests at packet boundaries: discovering focus only after a
-packet has already been transformed applies the previous app's mapping to that packet.
+Desktop hosts route by foreground process name through `app_registry.resolve_foreground_context`.
+Onshape cannot route by title because the browser tab title is the document name. The resolver
+models its bridge as disconnected, connected-background, or connected-foreground; only foreground
+browser + connected bridge selects Onshape, then Onshape's own focus signal remains the fine gate.
+Keep routing tests at packet boundaries: discovering focus only after a packet has already been
+transformed applies the previous app's mapping to that packet.
 
 ### COM attachment
 
@@ -371,6 +500,19 @@ dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj --no-re
 git diff --check
 ```
 
+Release artifact checks use the optional extras and the repository-bounded build script:
+
+```powershell
+python -m pip install -e ".[dev,release]"
+python -m trackball_daemon --release-smoke
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tools\build_release.ps1
+```
+
+The smoke is deliberately side-effect-free and runs against source and the Nuitka onedir executable.
+It loads every packaged default/profile/descriptor/schema/example and compiles both System profiles
+without starting transport or UI ownership. Exact manual release matrices and artifact evidence live
+in [`docs/release_verification.md`](docs/release_verification.md).
+
 The AutoCAD project is a console test runner; `dotnet test` is not the meaningful invocation.
 Blender and host-specific probes live in `tools/`. Run the focused pure tests first, then the full
 suite, then a GUI smoke pass in every changed host. Do not describe source review, mocked APIs, or a
@@ -401,7 +543,11 @@ change in the repository source/default data, then exercise the normal setup/upd
 - [`README.md`](README.md): user capabilities, installation, operation, and troubleshooting.
 - [`TODO.md`](TODO.md): the only active backlog and live-verification ledger.
 - [`docs/default_profiles.md`](docs/default_profiles.md): host/default ownership and tuning.
+- [`docs/keybindings.md`](docs/keybindings.md): System profiles, matching, dependencies, DSL, schemas,
+  and contributor validation.
 - [`docs/feature_parity.md`](docs/feature_parity.md): current capability contract.
+- [`docs/release_verification.md`](docs/release_verification.md): release build, manual matrices, and
+  recorded evidence.
 - [`docs/security.md`](docs/security.md): permissions, warnings, reversal, and release hardening.
 - [`docs/apps/autocad.md`](docs/apps/autocad.md)
 - [`docs/apps/blender.md`](docs/apps/blender.md)

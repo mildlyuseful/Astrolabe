@@ -80,7 +80,7 @@ one home; the map below is the contract the eventual UI should follow.
 
 ## Parity notes
 
-Field visibility follows `trackball_daemon/binding_schema.py`: per-app Pivot hold and Zoom
+Field visibility follows `trackball_daemon/app_registry.py` and `settings_schema.py`: per-app Pivot hold and Zoom
 hold timers, Twist action on every app, Pan-mode zoom (Zoom / Dolly) only where the host
 implements both paths, SketchUp as a full rich app, Godot turntable-only with no
 roll/horizon controls, Fusion's Roll/Zoom/None twist set, and each integration's security

@@ -42,7 +42,7 @@ def test_install_copies_addon_and_enables(isolated_config, monkeypatch):
     appdef = integrations.APPS_BY_KEY["freecad"]
     ok, msg = integrations.install(appdef, cfg)
     assert ok is True
-    fc = cfg.data["apps"]["freecad"]
+    fc = cfg.snapshot().app_operational["freecad"]
     assert fc["installed"] is True and fc["enabled"] is True
     assert fc["addin_version"] == "0.1.13"
     dest = integrations.freecad_user_mod_dir()
@@ -60,7 +60,7 @@ def test_install_fails_when_freecad_absent(isolated_config, monkeypatch):
     ok, msg = integrations.install(appdef, cfg)
     assert ok is False
     assert "not found" in msg.lower()
-    assert cfg.data["apps"]["freecad"]["enabled"] is False
+    assert cfg.snapshot().app_operational["freecad"]["enabled"] is False
 
 
 def test_update_not_offered_before_install(isolated_config, monkeypatch):
@@ -74,10 +74,10 @@ def test_reinstall_does_not_re_enable(isolated_config, monkeypatch):
     cfg = Config().load()
     appdef = integrations.APPS_BY_KEY["freecad"]
     integrations.install(appdef, cfg)
-    cfg.data["apps"]["freecad"]["enabled"] = False        # user disabled it
+    cfg.set_app_operational("freecad", enabled=False)        # user disabled it
     ok, _msg = integrations.install(appdef, cfg)           # a reinstall/update
     assert ok is True
-    assert cfg.data["apps"]["freecad"]["enabled"] is False  # not silently re-enabled
+    assert cfg.snapshot().app_operational["freecad"]["enabled"] is False
 
 
 def test_auto_update_recopies_on_version_bump(isolated_config, monkeypatch):

@@ -1,0 +1,67 @@
+{
+  "version": 8,
+  "device": {
+    "name": "Fixture Trackball",
+    "address": "AA:BB:CC:DD:EE:FF",
+    "char_uuid": "2cad0002-6e64-0146-b139-9cf2a4cd57fc"
+  },
+  "general": {
+    "default_mode": "cube",
+    "axis_orientation": {"source": [1, 0, 2], "invert": [true, false, true]},
+    "cursor": {"x_src": 1, "x_sign": 1.0, "y_src": 0, "y_sign": 1.0, "gain": 240.0},
+    "scroll": {"src": 2, "sign": 1.0, "gain": 31.0, "deadzone": 0.005, "dominance": 1.8},
+    "buttons": {"left": "right", "right": "left", "middle": "none"},
+    "scheme": {"orbit_pivot": "screen_center", "orbit_style": "free", "zoom_mode": "to_cursor"},
+    "orbit_pivot_fallbacks": ["cursor_3d", "camera", "object", "origin"],
+    "level_horizon_on_entry": true
+  },
+  "apps": {
+    "blender": {
+      "enabled": true,
+      "installed": true,
+      "addin_version": "8.1.0-loaded",
+      "rate_hz": 0,
+      "orbit_pivot_hold_sec": 0.5,
+      "zoom_cursor_hold_sec": 0.5,
+      "selection_overrides_pivot": true,
+      "bindings": {
+        "orbit": {"sensitivity": 1.0},
+        "toggle": "shift",
+        "scheme": {"orbit_pivot": "default", "orbit_style": "default", "zoom_mode": "default"}
+      },
+      "advanced": {"twist_action": "roll", "nav_mode": "orbit"}
+    },
+    "fusion360": {
+      "enabled": false,
+      "installed": true,
+      "addin_version": "7.4.2",
+      "rate_hz": 75,
+      "orbit_pivot_hold_sec": 1.25,
+      "zoom_cursor_hold_sec": 0.8,
+      "selection_overrides_pivot": false,
+      "level_horizon_on_entry": false,
+      "bindings": {
+        "orbit": {"sensitivity": 1.75},
+        "pan": {"gain": 0.65},
+        "zoom": {"gain": 1.4},
+        "toggle": "none",
+        "scheme": {"orbit_pivot": "object", "orbit_style": "turntable", "zoom_mode": "to_object"}
+      },
+      "advanced": {"twist_action": "zoom", "zoom_style": "dolly"}
+    },
+    "onshape": {
+      "enabled": true,
+      "installed": true,
+      "addin_version": "web-fixture"
+    }
+  },
+  "active_app": "fusion360",
+  "bridge": {"port": 47991, "rate_hz": 48},
+  "onshape": {
+    "address": "127.51.68.120",
+    "port": 8181,
+    "cert_path": "C:/fixture/onshape_cert.pem",
+    "key_path": "C:/fixture/onshape_key.pem",
+    "cursor_userscript_warn_dismissed": true
+  }
+}

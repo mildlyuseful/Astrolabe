@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "device_id": "astrolabe_5way",
+  "source_id": "ble.astrolabe",
+  "label": "Astrolabe five-way switch",
+  "match": {
+    "advertised_names": ["Astrolabe"]
+  },
+  "service_uuid": "2cad0001-6e64-0146-b139-9cf2a4cd57fc",
+  "motion_characteristic": "2cad0002-6e64-0146-b139-9cf2a4cd57fc",
+  "input_characteristic": "2cad0003-6e64-0146-b139-9cf2a4cd57fc",
+  "controls": [
+    {"id": "fiveway.up", "label": "Astrolabe Up", "bit": 0},
+    {"id": "fiveway.down", "label": "Astrolabe Down", "bit": 1},
+    {"id": "fiveway.left", "label": "Astrolabe Left", "bit": 2},
+    {"id": "fiveway.right", "label": "Astrolabe Right", "bit": 3},
+    {"id": "fiveway.center", "label": "Astrolabe Center", "bit": 4}
+  ],
+  "metadata": {
+    "electrical": "active_low_internal_pullup",
+    "debounce": "firmware_defined",
+    "simultaneous_controls": "mechanically_exclusive_not_enforced",
+    "protocol_version": 1
+  }
+}

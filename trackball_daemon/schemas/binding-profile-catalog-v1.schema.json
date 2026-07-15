@@ -1,0 +1,208 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://astrolabe.dev/schemas/binding-profile-catalog-v1.schema.json",
+  "title": "Astrolabe system keybinding profile catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "profiles"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "profiles": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {"$ref": "#/$defs/astrolabeProfile"},
+        {"$ref": "#/$defs/keyboardProfile"}
+      ],
+      "items": false
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^\\S+$"
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apps": {"$ref": "#/$defs/uniqueTextArray"},
+        "executables": {"$ref": "#/$defs/uniqueTextArray"},
+        "input_profiles": {"$ref": "#/$defs/uniqueTextArray"}
+      }
+    },
+    "uniqueTextArray": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1, "pattern": "\\S"}
+    },
+    "action": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {
+            "command": {"enum": ["state.request", "state.release"]},
+            "target": {"type": "string", "minLength": 1, "pattern": "^\\S+$"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {
+            "command": {"const": "input.mode.set"},
+            "target": {"enum": ["pointer", "3d"]}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command"],
+          "properties": {
+            "command": {"enum": ["input.mode.toggle", "navigation.mode.cycle"]}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {
+            "command": {"const": "navigation.mode.set"},
+            "target": {"enum": ["orbit", "fly", "walk"]}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {
+            "command": {"const": "navigation.layer.set"},
+            "target": {"enum": ["primary", "secondary"]}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {
+            "command": {"enum": ["pointer.button.press", "pointer.button.release"]},
+            "target": {"enum": ["left", "right", "middle", "x1", "x2"]}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target", "value"],
+          "properties": {
+            "command": {"enum": ["setting.set_runtime", "setting.set_persistent"]},
+            "target": {"type": "string", "minLength": 1, "pattern": "^\\S+$"},
+            "value": true
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {
+            "command": {"enum": ["setting.toggle_runtime", "setting.cycle_runtime"]},
+            "target": {"type": "string", "minLength": 1, "pattern": "^\\S+$"},
+            "value": {"type": "array", "minItems": 2, "uniqueItems": true}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target", "value"],
+          "properties": {
+            "command": {"enum": ["setting.add_runtime", "setting.multiply_runtime"]},
+            "target": {"type": "string", "minLength": 1, "pattern": "^\\S+$"},
+            "value": {"type": "number"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "target"],
+          "properties": {
+            "command": {"const": "setting.restore_previous"},
+            "target": {"type": "string", "minLength": 1, "pattern": "^\\S+$"}
+          }
+        }
+      ]
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "label", "enabled", "chord", "match", "activation", "priority", "press",
+        "release"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/identifier"},
+        "label": {"type": "string", "minLength": 1, "pattern": "\\S"},
+        "enabled": {"type": "boolean"},
+        "when": {"$ref": "#/$defs/context"},
+        "chord": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[a-z0-9_.-]+:[a-z0-9_.-]+$"}
+        },
+        "match": {"enum": ["exact", "allow_extra_modifiers"]},
+        "activation": {"enum": ["hold", "toggle"]},
+        "priority": {"type": "integer", "minimum": 0},
+        "press": {"type": "array", "items": {"$ref": "#/$defs/action"}},
+        "release": {"type": "array", "items": {"$ref": "#/$defs/action"}}
+      },
+      "anyOf": [
+        {"properties": {"press": {"minItems": 1}}},
+        {"properties": {"release": {"minItems": 1}}}
+      ]
+    },
+    "profileBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "bindings"],
+      "properties": {
+        "id": {"type": "string"},
+        "label": {"type": "string", "minLength": 1, "pattern": "\\S"},
+        "bindings": {"type": "array", "items": {"$ref": "#/$defs/binding"}}
+      }
+    },
+    "astrolabeProfile": {
+      "allOf": [
+        {"$ref": "#/$defs/profileBase"},
+        {"properties": {"id": {"const": "astrolabe_5way"}}}
+      ]
+    },
+    "keyboardProfile": {
+      "allOf": [
+        {"$ref": "#/$defs/profileBase"},
+        {
+          "properties": {
+            "id": {"const": "keyboard_only"},
+            "bindings": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  {"$ref": "#/$defs/binding"},
+                  {
+                    "properties": {
+                      "chord": {
+                        "items": {"type": "string", "pattern": "^keyboard:[a-z0-9_.-]+$"}
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

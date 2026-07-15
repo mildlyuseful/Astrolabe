@@ -1,6 +1,6 @@
 # Per-app setting and feature parity
 
-`trackball_daemon/binding_schema.py` is the UI contract. A control is enabled only when the
+`trackball_daemon/app_registry.py` and `trackball_daemon/settings_schema.py` are the UI contract. A control is enabled only when the
 integration has a distinct runtime behavior for every option it presents. Stored config fields may
 exist in the shared shape without being visible; that does not make them an implemented feature.
 

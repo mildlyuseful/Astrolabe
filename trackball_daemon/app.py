@@ -12,42 +12,101 @@ Threading model (Windows):
   * debug thread      -> optional pygame cube (--debug)
 The process stays alive on the Tk mainloop and exits only when tray -> Quit tears it down.
 """
+import copy
 import json
 import threading
 import tkinter as tk
 
 from . import integrations
+from .app_registry import APP_SPECS, APP_SPECS_BY_ID, resolve_foreground_context
 from .autocad_driver import AutoCADPluginLoader
 from .ble import start_ble_thread
-from .config import (Config, compose_advanced_with_host_baseline, effective_level_horizon,
-                     effective_scheme, host_baseline_payload,
+from .commands import SerializedCommandQueue, SetFocusedContext
+from .control_hud import ControlHUD
+from .config import (compose_advanced_with_host_baseline, host_baseline_payload,
                      normalize_orbit_pivot_fallbacks, orbit_pivot_candidates)
+from .config_store import ConfigStore
+from .devices import (
+    DeviceAdapterRegistry,
+    MotionSample,
+    SnapshotInputProvider,
+    builtin_device_descriptors,
+)
+from .input import (
+    BindingController,
+    InputAggregator,
+    compile_binding_profile,
+    compose_binding_profile,
+    load_system_binding_profiles,
+)
+from .input.windows_raw_input import WindowsRawInputProvider
 from .navbroker import NavBroker
+from .navigation_router import NavigationEnvelope, NavigationRouter
 from .onshape_bridge import OnshapeBridge
 from .output import OutputEngine
 from .paths import user_config_dir
 from .solidworks_driver import SolidWorksDriver
+from .runtime_state import ConfigRuntimeBaseResolver, FocusedContext, RuntimeStore
+from .settings_schema import SETTING_SPECS
 from .tray import TrayController
 from .ui import SettingsWindow
 from .util import get_logger
-from .winfocus import foreground_process_name
+from .winfocus import ForegroundMonitor, foreground_process_name
+from .windows_pointer import SendInputPointerButtonSink
 
 
 _NO_PACKET_APP = object()
+_NO_PACKET_REVISION = object()
+
+
+def _set_nested(container, path, value):
+    """Set one already-shaped dict/list path in a detached materialized profile."""
+    current = container
+    for key in path[:-1]:
+        current = current[key]
+    current[path[-1]] = copy.deepcopy(value)
 
 
 class App:
     def __init__(self, debug=False):
         self.debug = debug
         self.log = get_logger()
-        self.config = Config().load()
+        self.config = ConfigStore().load()
         self.first_run = self.config.first_run
-        self.engine = OutputEngine(self.config)
+        self.runtime = RuntimeStore(ConfigRuntimeBaseResolver(self.config))
+        self.commands = SerializedCommandQueue(self.runtime)
+        self.engine = OutputEngine(self.config, self.runtime, self.commands)
+        self.input_aggregator = InputAggregator()
+        self.keyboard_provider = WindowsRawInputProvider(
+            self.input_aggregator.accept_many, self.input_aggregator.update_health)
+        self.input_aggregator.register_provider(self.keyboard_provider)
+        device_descriptors = builtin_device_descriptors()
+        self.ble_input_providers = {}
+        for descriptor in device_descriptors:
+            provider = SnapshotInputProvider(
+                descriptor,
+                self.input_aggregator.accept_many,
+                self.input_aggregator.update_health,
+            )
+            self.input_aggregator.register_provider(provider)
+            self.ble_input_providers[descriptor.source_id] = provider
+        self.device_adapters = DeviceAdapterRegistry(
+            device_descriptors, self.ble_input_providers)
+        self.binding_catalog = load_system_binding_profiles()
+        self.pointer_button_output = SendInputPointerButtonSink()
+        self.binding_controller = BindingController(
+            self._compiled_binding_profile(), self.commands, self.runtime,
+            config_store=self.config, pointer_sink=self.pointer_button_output)
+        self._binding_context = self.runtime.snapshot().focused_context
+        self.input_aggregator.add_listener(self.binding_controller.handle_transition)
+        self.runtime.add_listener(self._on_runtime_state_changed)
+        self._configure_binding_controls()
         self.stop_event = threading.Event()
         self._status = "starting"
         self._last_pushed = None
         self.root = None
         self.ui = None
+        self.hud = None
         self.tray = None
         self.broker = None
         self.sw_driver = None
@@ -57,22 +116,25 @@ class App:
 
         # 3D-app nav bridge (127.0.0.1). The engine forwards orbit/pan/zoom deltas here,
         # gated on the focused CAD app; socket add-ons connect and drive their app's camera.
-        self.broker = NavBroker(self.config.data["bridge"]["port"], self._on_clients_changed,
-                                rate_hz=self.config.data["bridge"].get("rate_hz", 30))
+        snapshot = self.config.snapshot()
+        self.broker = NavBroker(snapshot.bridge_port, self._on_clients_changed,
+                                rate_hz=snapshot.global_value("navigation.refresh_rate"))
         # SolidWorks is driven by external COM automation, not a socket add-in: this in-process
         # driver attaches to a running SolidWorks and moves its camera directly. It lives parallel
         # to the broker; _nav_sink routes solidworks frames here instead of to the broker.
         self.sw_driver = SolidWorksDriver(self._on_sw_connection_changed,
-                                          rate_hz=self.config.data["bridge"].get("rate_hz", 30))
+                                          rate_hz=snapshot.global_value("navigation.refresh_rate"))
         # Onshape (browser) is driven by an in-process bridge that impersonates the 3Dconnexion
         # local NL-Proxy service Onshape's page connects to (TLS WebSocket on 127.51.68.120:8181).
         # Like the SW driver it lives parallel to the broker; _nav_sink routes onshape frames here.
-        ocfg = self.config.data.get("onshape", {})
+        ocfg = snapshot.onshape
         self.onshape_bridge = OnshapeBridge(
             self._on_onshape_connection_changed,
-            rate_hz=self.config.data["bridge"].get("rate_hz", 30),
+            rate_hz=snapshot.global_value("navigation.refresh_rate"),
             host=ocfg.get("address") or None, port=ocfg.get("port") or None,
             cert_path=ocfg.get("cert_path") or None, key_path=ocfg.get("key_path") or None)
+        self.navigation = NavigationRouter(
+            self.broker, self.sw_driver, self.onshape_bridge)
         # AutoCAD is a BROKER app: its compiled NETLOAD plugin (plugin_src/autocad) drives the
         # live GraphicsSystem view in-process and connects to the nav broker like the other
         # socket add-ons. COM's only remaining job is DELIVERY -- this loader NETLOADs the
@@ -92,14 +154,21 @@ class App:
         # an unrelated "primary" install destination.
         self.observed_addin_versions = {}
         self._last_apps_pushed = None
+        self._last_hud_visible = None
         self._engine_app = None
         self._packet_app_key = _NO_PACKET_APP
-        self._last_scheme_pushed = None
+        self._packet_state_revision = _NO_PACKET_REVISION
+        self._last_scheme_pushed = {}
+        self._last_runtime_rate = {}
+        self.foreground_monitor = ForegroundMonitor(self._on_foreground_process_changed)
+        self._apply_rates()
+        self._apply_schemes()
 
     # --- BLE wiring and packet-boundary routing -----------------------------------
     def get_ble_params(self):
-        d = self.config.data["device"]
-        return d["name"], d.get("address", ""), d["char_uuid"]
+        snapshot = self.config.snapshot()
+        return (snapshot.device_value("device.name"),
+                snapshot.device_value("device.address"), snapshot.device_char_uuid)
 
     def set_status(self, text):
         # Called from the BLE thread; just store + log. The Tk poll pushes it to the GUI.
@@ -112,15 +181,62 @@ class App:
     def is_connected(self):
         return self._status.startswith(("connected", "subscribed"))
 
-    def on_config_changed(self):
+    def on_config_changed(self, _event):
+        if (_event.changes and all(
+                change.path[:1] == ("global_overrides",) and
+                len(change.path) > 1 and str(change.path[1]).startswith("hud.")
+                for change in _event.changes)):
+            # Presentation-only changes are consumed by ControlHUD's own immutable snapshot
+            # subscriber. They must not release active bindings or rebuild output transports.
+            return
+        bindings = getattr(self, "binding_controller", None)
+        if bindings is not None:
+            # No activation survives a configuration generation. Compile only after the owned
+            # runtime/external resources have been released.
+            bindings.release_all("binding_config_reload")
+            bindings.reload(self._compiled_binding_profile())
+            self._configure_binding_controls()
         self.engine.apply_config()
         self._apply_service_gates()
         self._apply_rates()
         self._apply_schemes()
+        monitor = getattr(self, "foreground_monitor", None)
+        if monitor is not None:
+            monitor.refresh()
+
+    def configure_keyboard_controls(self, control_ids):
+        """Phase 7 compiler seam; an empty set keeps global keyboard reception unregistered."""
+        return self.input_aggregator.configure_provider("keyboard", control_ids)
+
+    def configure_ble_controls(self, source_id, control_ids):
+        """Phase 7 compiler seam for one stable data-descriptor control namespace."""
+        if source_id not in self.ble_input_providers:
+            raise ValueError(f"unknown BLE input provider: {source_id}")
+        return self.input_aggregator.configure_provider(source_id, control_ids)
+
+    def _compiled_binding_profile(self):
+        snapshot = self.config.snapshot()
+        profile = compose_binding_profile(
+            self.binding_catalog, snapshot.input_profile,
+            snapshot.keybinding_overrides[snapshot.input_profile])
+        return compile_binding_profile(profile, self.binding_catalog)
+
+    def _configure_binding_controls(self):
+        required = self.binding_controller.compiled_profile.required_controls
+        self.configure_keyboard_controls(required.get("keyboard", ()))
+        for source_id in self.ble_input_providers:
+            self.configure_ble_controls(source_id, required.get(source_id, ()))
+
+    def _on_runtime_state_changed(self, event):
+        context = event.snapshot.focused_context
+        if context != self._binding_context:
+            self._binding_context = context
+            self.binding_controller.context_changed()
+        self._apply_runtime_navigation_profile(event.snapshot)
 
     def _service_allowed(self, key):
         """Sensitive in-process services require both successful setup and Enabled=true."""
-        cfg = self.config.data.get("apps", {}).get(key) or {}
+        cfg = self.config.snapshot().app_operational[key]
         return bool(cfg.get("installed") and cfg.get("enabled"))
 
     def _apply_service_gates(self):
@@ -133,160 +249,210 @@ class App:
             self.acad_loader.set_enabled(self._service_allowed("autocad"))
 
     def _effective_scheme(self, key):
-        g = self.config.data["general"].get("scheme", {})
-        a = (self.config.data["apps"].get(key) or {}).get("bindings", {}).get("scheme", {})
-        return effective_scheme(g, a)
-
-    def _broker_excluded_keys(self):
-        """Apps whose frames do NOT go to the socket broker (in-process transports). AutoCAD is a
-        broker app -- its NETLOADed plugin is the sole transport (the COM one is archived)."""
-        return ("solidworks", "onshape")
+        snapshot = self.config.snapshot()
+        return {
+            "orbit_pivot": snapshot.app_value(key, "navigation.orbit.pivot"),
+            "orbit_style": snapshot.app_value(key, "navigation.orbit.style"),
+            "zoom_mode": snapshot.app_value(key, "navigation.zoom.target"),
+        }
 
     def _apply_schemes(self):
-        """Push each CAD app's effective control scheme to its driver. Mirrors _apply_rates:
-        the broker gets the focused socket app's scheme; the SW driver gets SolidWorks'."""
+        """Publish every app profile through the shared target-aware navigation boundary."""
+        navigation = getattr(self, "navigation", None)
+        if navigation is None:
+            return
+        snapshot = self.config.snapshot()
         fallbacks = normalize_orbit_pivot_fallbacks(
-            self.config.data.get("general", {}).get("orbit_pivot_fallbacks"))
-        if self.broker is not None:
-            key = self._engine_app
-            if not key or key in self._broker_excluded_keys():
-                key = self.config.data.get("active_app", "fusion360")
+            list(snapshot.global_value("navigation.orbit.pivot_fallbacks")))
+        if not isinstance(getattr(self, "_last_scheme_pushed", None), dict):
+            self._last_scheme_pushed = {}
+        for spec in APP_SPECS:
+            key = spec.app_id
             scheme = self._effective_scheme(key)
-            # Apps with a richer nav set (Blender, Unreal) carry their own "advanced" options. Attach
-            # the FOCUSED broker app's advanced block as the additive "adv" object on every frame; the
-            # add-on reads its own settings and apps without an advanced block (Fusion/FreeCAD) ignore
-            # the extra key. `key` is the focused broker app (it persists across a focus loss, so a
-            # mode change made while the settings window is up still targets the right app), so
-            # nav_mode delivery is robust -- switching to fly/walk reaches the add-on on focus.
-            # selection_overrides_pivot lives on the app root (all apps) and is folded into adv so
-            # every socket add-on can read one place — Fusion/etc. still ignore unknown keys.
-            appcfg = self.config.data["apps"].get(key) or {}
+            # Socket integrations consume this additive profile from their matching frames. Direct
+            # transports receive the shared fields below through the same router configuration API.
+            appcfg = snapshot.app_profile(key)
             adv = compose_advanced_with_host_baseline(key, appcfg.get("advanced"))
             adv["host_baseline"] = host_baseline_payload(key)
             adv["selection_overrides_pivot"] = bool(
                 appcfg.get("selection_overrides_pivot", True))
             adv["orbit_hold_sec"] = appcfg.get("orbit_pivot_hold_sec", 0.5)
             adv["zoom_hold_sec"] = appcfg.get("zoom_cursor_hold_sec", 0.5)
-            adv["level_horizon_on_entry"] = effective_level_horizon(
-                self.config.data["general"], appcfg)
+            adv["level_horizon_on_entry"] = snapshot.app_value(
+                key, "navigation.level_horizon_on_entry")
             adv["orbit_pivot_fallbacks"] = fallbacks
             adv["orbit_pivot_candidates"] = orbit_pivot_candidates(
                 scheme["orbit_pivot"], fallbacks)
-            self.broker.set_scheme(**scheme, advanced=adv)
+            navigation.set_scheme(
+                key, **scheme, advanced=adv,
+                selection_overrides_pivot=bool(
+                    appcfg.get("selection_overrides_pivot", True)),
+                orbit_pivot_fallbacks=fallbacks,
+                level_horizon_on_entry=snapshot.app_value(
+                    key, "navigation.level_horizon_on_entry"),
+                pivot_hold_sec=appcfg.get("orbit_pivot_hold_sec", 0.5),
+                zoom_hold_sec=appcfg.get("zoom_cursor_hold_sec", 0.5))
             nav = (adv or {}).get("nav_mode")
             sig = (key, scheme["orbit_pivot"], scheme["orbit_style"], scheme["zoom_mode"], nav,
                    tuple(fallbacks))
-            if sig != self._last_scheme_pushed:
-                self._last_scheme_pushed = sig
+            if sig != self._last_scheme_pushed.get(key):
+                self._last_scheme_pushed[key] = sig
                 self.log.info("scheme -> %s: pivot=%s style=%s zoom=%s nav=%s"
                               % (key, scheme["orbit_pivot"], scheme["orbit_style"],
                                  scheme["zoom_mode"], nav))
-        if self.sw_driver is not None:
-            swcfg = self.config.data["apps"].get("solidworks") or {}
-            self.sw_driver.set_scheme(
-                **self._effective_scheme("solidworks"),
-                selection_overrides_pivot=bool(swcfg.get("selection_overrides_pivot", True)),
-                orbit_pivot_fallbacks=fallbacks,
-                level_horizon_on_entry=effective_level_horizon(
-                    self.config.data["general"], swcfg))
-            self.sw_driver.set_pivot_hold(swcfg.get("orbit_pivot_hold_sec", 0.5))
-            self.sw_driver.set_zoom_hold(swcfg.get("zoom_cursor_hold_sec", 0.5))
-        if self.onshape_bridge is not None:
-            oncfg = self.config.data["apps"].get("onshape") or {}
-            self.onshape_bridge.set_scheme(
-                **self._effective_scheme("onshape"),
-                selection_overrides_pivot=bool(oncfg.get("selection_overrides_pivot", True)),
-                orbit_pivot_fallbacks=fallbacks,
-                level_horizon_on_entry=effective_level_horizon(
-                    self.config.data["general"], oncfg))
-            self.onshape_bridge.set_pivot_hold(oncfg.get("orbit_pivot_hold_sec", 0.5))
-            self.onshape_bridge.set_zoom_hold(oncfg.get("zoom_cursor_hold_sec", 0.5))
+        runtime = getattr(self, "runtime", None)
+        if runtime is not None:
+            self._apply_runtime_navigation_profile(runtime.snapshot())
+
+    def _apply_runtime_navigation_profile(self, runtime_snapshot):
+        """Publish the focused app's runtime settings and daemon-authoritative nav mode."""
+        navigation = getattr(self, "navigation", None)
+        app_id = runtime_snapshot.focused_context.app_id
+        if navigation is None or app_id not in APP_SPECS_BY_ID:
+            return
+        app_spec = APP_SPECS_BY_ID[app_id]
+        settings = runtime_snapshot.effective_settings
+        config_snapshot = self.config.snapshot()
+        app_profile = config_snapshot.app_profile(app_id)
+        advanced = compose_advanced_with_host_baseline(app_id, app_profile.get("advanced"))
+        for setting in SETTING_SPECS:
+            if (setting.applies_to(app_spec) and setting.app_path[:1] == ("advanced",) and
+                    setting.setting_id in settings):
+                _set_nested(advanced, setting.app_path[1:], settings[setting.setting_id])
+        # Runtime state, not any host-local override or persisted navigation.mode value, is the
+        # authority delivered to rich add-ons.
+        advanced["nav_mode"] = runtime_snapshot.effective_navigation_mode
+        selection_override = settings.get(
+            "navigation.orbit.selection_override", True)
+        pivot_hold = settings.get("navigation.orbit.pivot_hold_seconds", 0.5)
+        zoom_hold = settings.get("navigation.zoom.cursor_hold_seconds", 0.5)
+        level_horizon = settings.get("navigation.level_horizon_on_entry", True)
+        fallbacks = normalize_orbit_pivot_fallbacks(
+            list(settings.get(
+                "navigation.orbit.pivot_fallbacks",
+                config_snapshot.global_value("navigation.orbit.pivot_fallbacks"))))
+        orbit_pivot = settings.get(
+            "navigation.orbit.pivot", config_snapshot.app_value(
+                app_id, "navigation.orbit.pivot"))
+        orbit_style = settings.get(
+            "navigation.orbit.style", config_snapshot.app_value(
+                app_id, "navigation.orbit.style"))
+        zoom_mode = settings.get(
+            "navigation.zoom.target", config_snapshot.app_value(
+                app_id, "navigation.zoom.target"))
+        advanced["host_baseline"] = host_baseline_payload(app_id)
+        advanced["selection_overrides_pivot"] = bool(selection_override)
+        advanced["orbit_hold_sec"] = pivot_hold
+        advanced["zoom_hold_sec"] = zoom_hold
+        advanced["level_horizon_on_entry"] = level_horizon
+        advanced["orbit_pivot_fallbacks"] = fallbacks
+        advanced["orbit_pivot_candidates"] = orbit_pivot_candidates(
+            orbit_pivot, fallbacks)
+        navigation.set_scheme(
+            app_id, orbit_pivot=orbit_pivot, orbit_style=orbit_style,
+            zoom_mode=zoom_mode, advanced=advanced,
+            selection_overrides_pivot=bool(selection_override),
+            orbit_pivot_fallbacks=fallbacks,
+            level_horizon_on_entry=level_horizon,
+            pivot_hold_sec=pivot_hold, zoom_hold_sec=zoom_hold)
+        rate = settings.get(
+            "navigation.refresh_rate", config_snapshot.app_value(
+                app_id, "navigation.refresh_rate"))
+        rates = getattr(self, "_last_runtime_rate", None)
+        if rates is None:
+            self._last_runtime_rate = rates = {}
+        if rates.get(app_id) != rate:
+            rates[app_id] = rate
+            navigation.set_rate(app_id, rate)
 
     def _app_rate(self, key):
         """Effective viewport/flush rate (Hz) for app `key`: its per-app override, or the global
         bridge default when the per-app value is 0/unset."""
-        appcfg = self.config.data["apps"].get(key) or {}
-        rate = appcfg.get("rate_hz") or 0
-        if rate and rate > 0:
-            return rate
-        return self.config.data["bridge"].get("rate_hz", 30)
+        return self.config.snapshot().app_value(key, "navigation.refresh_rate")
 
     def _apply_rates(self):
-        """Run each CAD component at its app's configured rate. The SolidWorks driver always uses
-        SolidWorks' rate; the socket broker uses the focused socket app's rate (falling back to the
-        configured active_app). Called on focus change and on any config edit, so per-app sliders
-        apply live."""
-        if self.sw_driver is not None:
-            self.sw_driver.set_rate(self._app_rate("solidworks"))
-        if self.onshape_bridge is not None:
-            self.onshape_bridge.set_rate(self._app_rate("onshape"))
-        if self.broker is not None:
-            key = self._engine_app
-            if not key or key in self._broker_excluded_keys():
-                key = self.config.data.get("active_app", "fusion360")
-            self.broker.set_rate(self._app_rate(key))
+        """Publish every target's independent effective refresh rate."""
+        navigation = getattr(self, "navigation", None)
+        if navigation is not None:
+            for spec in APP_SPECS:
+                navigation.set_rate(spec.app_id, self._app_rate(spec.app_id))
 
     # --- 3D-app nav routing -------------------------------------------------------
-    _APP_PROC_HINTS = {
-        "fusion360": ("fusion",),
-        "blender": ("blender",),
-        "freecad": ("freecad",),
-        "sketchup": ("sketchup",),
-        "unreal": ("unrealeditor", "ue4editor"),
-        "unity": ("unity",),
-        "godot": ("godot",),
-        "rhino": ("rhino",),
-        "solidworks": ("sldworks",),
-        "autocad": ("acad",),
-    }
-    _BROWSER_PROCS = ("chrome", "msedge", "firefox", "brave", "opera", "vivaldi")
+    def _foreground_app_context(self):
+        return self._foreground_context_for_process(foreground_process_name())
+
+    def _foreground_context_for_process(self, proc):
+        connected = bool(self.onshape_bridge is not None and self.onshape_bridge.is_connected())
+        return resolve_foreground_context(proc, onshape_connected=connected)
 
     def _foreground_app_key(self):
-        proc = foreground_process_name()
-        if not proc:
-            return None
-        for key, hints in self._APP_PROC_HINTS.items():
-            if any(h in proc for h in hints):
-                return key
-        # Onshape runs in a browser, so the foreground PROCESS is the browser (chrome/msedge/...),
-        # not "onshape". We can't match by window title either -- Onshape titles the tab with the
-        # document name (e.g. "monstera leaf | Part Studio 1"), not "Onshape". Instead: a browser is
-        # foreground AND an Onshape tab has completed the 3Dconnexion handshake (bridge connected).
-        # The bridge's own focus signal (Onshape reports when its 3D view is active) is the finer
-        # gate, applied in the driver before any camera move -- so we never move a backgrounded tab.
-        if any(b in proc for b in self._BROWSER_PROCS):
-            if self.onshape_bridge is not None and self.onshape_bridge.is_connected():
-                return "onshape"
-        return None
+        return self._foreground_app_context().app_id
 
     def _active_app_key(self):
-        key = self._foreground_app_key()
+        return self._active_app_key_from_context(self._foreground_app_context())
+
+    def _active_app_key_from_context(self, context):
+        key = context.app_id
         if key is None:
             return None
-        appcfg = self.config.data["apps"].get(key)
-        if not appcfg or not appcfg.get("enabled"):
+        appcfg = self.config.snapshot().app_operational.get(key)
+        if not appcfg or not appcfg["enabled"]:
             return None
         return key
 
+    def _publish_runtime_context(self, app_id, executable=None):
+        commands = getattr(self, "commands", None)
+        if commands is None:
+            return
+        context = FocusedContext(app_id=app_id, executable=executable)
+        if self.runtime.snapshot().focused_context != context:
+            commands.dispatch(SetFocusedContext(origin="foreground", context=context))
+
+    def _apply_foreground_context(self, context):
+        key = self._active_app_key_from_context(context)
+        self._publish_runtime_context(context.app_id, context.process_name)
+        if key is not None:
+            self._activate_nav_app(key)
+        self.navigation.activate(key)
+        return key
+
+    def _on_foreground_process_changed(self, process_name):
+        self._apply_foreground_context(self._foreground_context_for_process(process_name))
+        keyboard = getattr(self, "keyboard_provider", None)
+        if keyboard is not None:
+            keyboard.reconcile("foreground_change")
+
     def _activate_nav_app(self, key):
-        """Switch mappings/rate/scheme before transforming the focused app's next packet."""
-        if key != self._engine_app:               # drive each app with its own bindings + rate
+        """Switch mappings before transforming the focused app's next complete packet."""
+        if key != self._engine_app:
+            runtime = getattr(self, "runtime", None)
+            if runtime is not None and runtime.snapshot().focused_context.app_id != key:
+                self._publish_runtime_context(key)
             self._engine_app = key
             self.engine.set_active_bindings(key)
-            self._apply_rates()
-            self._apply_schemes()
 
     def _handle_ble_packet(self, data):
         """Choose one focused app for both mapping and routing of this complete BLE packet."""
-        key = self._active_app_key()
-        if key is not None:
-            self._activate_nav_app(key)
+        context = self._foreground_app_context()
+        key = self._apply_foreground_context(context)
         previous = getattr(self, "_packet_app_key", _NO_PACKET_APP)
+        previous_revision = getattr(self, "_packet_state_revision", _NO_PACKET_REVISION)
         self._packet_app_key = key
+        runtime = getattr(self, "runtime", None)
+        runtime_snapshot = runtime.snapshot() if runtime is not None else None
+        self._packet_state_revision = runtime_snapshot.revision if runtime_snapshot is not None else 0
         try:
-            self.engine.handle_packet(bytes(data))
+            if runtime_snapshot is not None:
+                self._apply_runtime_navigation_profile(runtime_snapshot)
+            self.engine.handle_packet(bytes(data), runtime_snapshot=runtime_snapshot)
         finally:
             self._packet_app_key = previous
+            self._packet_state_revision = previous_revision
+
+    def _handle_ble_motion(self, sample):
+        if not isinstance(sample, MotionSample):
+            raise TypeError("BLE device adapters must emit MotionSample values")
+        self._handle_ble_packet(sample.payload)
 
     def _nav_sink(self, ox, oy, oz, px, py, zoom):
         # Called synchronously by _handle_ble_packet after that method selected the app whose
@@ -298,12 +464,17 @@ class App:
         if key is None:
             return
         self._activate_nav_app(key)
-        if key == "onshape":                      # browser bridge (NL-Proxy emulation), not the broker
-            self.onshape_bridge.submit(ox, oy, oz, px, py, zoom)
-        elif key == "solidworks":                 # external COM automation, not the socket broker
-            self.sw_driver.submit(ox, oy, oz, px, py, zoom)
-        else:                                     # socket add-ons (Fusion, AutoCAD, ...) via the broker
-            self.broker.submit(ox, oy, oz, px, py, zoom)
+        self.navigation.activate(key)
+        revision = getattr(self, "_packet_state_revision", _NO_PACKET_REVISION)
+        if revision is _NO_PACKET_REVISION:
+            runtime = getattr(self, "runtime", None)
+            revision = runtime.snapshot().revision if runtime is not None else 0
+        self.navigation.submit(NavigationEnvelope(
+            target_app=key,
+            orbit=(ox, oy, oz),
+            pan=(px, py),
+            zoom=zoom,
+            state_revision=revision))
 
     def _on_clients_changed(self, infos):
         # Broker add-on handshakes changed (any broker thread). Merge with the SW driver state.
@@ -322,6 +493,9 @@ class App:
         with self._apps_lock:
             self._onshape_apps = [("onshape", version or "web", 0)] if connected else []
             self._refresh_connected_apps()
+        monitor = getattr(self, "foreground_monitor", None)
+        if monitor is not None:
+            monitor.refresh()
 
     def _refresh_connected_apps(self):
         # Caller holds _apps_lock. Rebuild the combined list (a new object => lockless readers ok).
@@ -345,6 +519,7 @@ class App:
         self.root = tk.Tk()
         self.root.withdraw()                       # headless: no window on startup
         self.ui = SettingsWindow(self.root, self)
+        self.hud = ControlHUD(self.root, self.runtime, self.config)
 
         self.tray = TrayController(self)
         self.tray.start()
@@ -352,7 +527,7 @@ class App:
         # Publish the bridge port for the add-ons, then start the broker.
         try:
             with open(user_config_dir() / "bridge.json", "w", encoding="utf-8") as f:
-                json.dump({"port": self.config.data["bridge"]["port"]}, f)
+                json.dump({"port": self.config.snapshot().bridge_port}, f)
         except OSError:
             pass
         self.broker.start()
@@ -363,6 +538,7 @@ class App:
         self.sw_driver.start()
         self.onshape_bridge.start()
         self.acad_loader.start()
+        self.foreground_monitor.start()
 
         # One-click-free add-in refresh: re-copy any installed add-in the daemon now ships a
         # newer version of (e.g. this release's viewport-refresh fix). Takes effect on the
@@ -370,10 +546,13 @@ class App:
         for key, old, new in integrations.auto_update(self.config):
             self.log.info(f"updated {key} add-in {old} -> {new} (restart {key} to apply)")
 
-        def notify_cb(sender, data):
-            self._handle_ble_packet(data)
-
-        start_ble_thread(self.get_ble_params, notify_cb, self.set_status, self.stop_event)
+        start_ble_thread(
+            self.get_ble_params,
+            self.device_adapters,
+            self._handle_ble_motion,
+            self.set_status,
+            self.stop_event,
+        )
 
         if self.debug:
             from .debugview import start_debug_view
@@ -389,6 +568,10 @@ class App:
         if self.root is not None:
             self.root.after(0, self.ui.show)
 
+    def set_control_hud_visible(self, visible):
+        """Typed persistent visibility action safe for the tray thread."""
+        self.config.set_global("hud.visible", bool(visible))
+
     def _poll(self):
         if self._status != self._last_pushed:
             self._last_pushed = self._status
@@ -403,12 +586,26 @@ class App:
                 self.tray.refresh()
             if self.ui is not None:
                 self.ui.update_app_connections(self.connected_apps)
+        hud_visible = self.config.snapshot().global_value("hud.visible")
+        if hud_visible != self._last_hud_visible:
+            self._last_hud_visible = hud_visible
+            if self.tray is not None:
+                self.tray.refresh()
         if not self.stop_event.is_set():
             self.root.after(300, self._poll)
 
     def quit(self):
         # Called from the tray thread.
         self.stop_event.set()
+        if getattr(self, "binding_controller", None) is not None:
+            try:
+                self.binding_controller.release_all("daemon_shutdown")
+            finally:
+                self.pointer_button_output.release_all()
+        if getattr(self, "input_aggregator", None) is not None:
+            self.input_aggregator.shutdown("daemon_shutdown")
+        if getattr(self, "foreground_monitor", None) is not None:
+            self.foreground_monitor.stop()
         if self.broker is not None:
             self.broker.stop()
         if self.sw_driver is not None:
@@ -423,6 +620,8 @@ class App:
             self.root.after(0, self._shutdown)
 
     def _shutdown(self):
+        if self.hud is not None:
+            self.hud.stop()
         try:
             self.root.quit()
         except Exception:

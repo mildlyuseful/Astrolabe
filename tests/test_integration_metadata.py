@@ -4,11 +4,13 @@ from dataclasses import replace
 import pytest
 
 from trackball_daemon import integrations
+from trackball_daemon.app_registry import APP_SPECS_BY_ID
 
 
 def test_every_app_has_complete_copyable_setup_metadata():
     assert set(integrations.APPS_BY_KEY) == {app.key for app in integrations.APPS}
     for app in integrations.APPS:
+        assert app.spec is APP_SPECS_BY_ID[app.key]
         assert app.install_model, app.key
         assert app.supported_versions, app.key
         assert app.setup_instructions, app.key

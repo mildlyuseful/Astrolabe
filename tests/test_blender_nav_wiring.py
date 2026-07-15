@@ -5,6 +5,7 @@ The invariant under test: extending the broker must NOT change what existing add
 they read only o/p/z/op/os/zm, so "adv" is present only when the focused app sets it.
 """
 import ast
+from collections.abc import Mapping
 import json
 import warnings
 from pathlib import Path
@@ -15,6 +16,14 @@ from trackball_daemon.config import (Config, compose_advanced_with_host_baseline
                                      default_app_profile, host_baseline_payload)
 from trackball_daemon.navbroker import NavBroker
 from trackball_daemon.ui import _PIVOT_LABELS
+
+
+def _plain(value):
+    if isinstance(value, Mapping):
+        return {key: _plain(child) for key, child in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(child) for child in value]
+    return value
 
 
 # --- broker frame construction --------------------------------------------------------
@@ -38,26 +47,26 @@ def test_frame_includes_adv_when_set():
 
 def test_set_scheme_stores_advanced():
     b = NavBroker(47999)
-    b.set_scheme("screen_center", "free", "to_center")  # default: no advanced
-    assert b._scheme["adv"] is None
+    b.set_scheme("blender", "screen_center", "free", "to_center")
+    assert b.delivery_state("blender")["scheme"]["adv"] is None
     adv = {"nav_mode": "walk"}
-    b.set_scheme("camera", "turntable", "to_object", advanced=adv)
-    assert b._scheme["adv"] == adv
-    # legacy 3-arg call site still works unchanged
-    b.set_scheme("object", "free", "to_cursor")
-    assert b._scheme == {"op": "object", "os": "free", "zm": "to_cursor", "adv": None}
+    b.set_scheme("blender", "camera", "turntable", "to_object", advanced=adv)
+    assert b.delivery_state("blender")["scheme"]["adv"] == adv
+    b.set_scheme("blender", "object", "free", "to_cursor")
+    assert b.delivery_state("blender")["scheme"] == {
+        "op": "object", "os": "free", "zm": "to_cursor", "adv": None}
 
 
 # --- config: the additive Blender advanced block --------------------------------------
 def test_blender_app_has_advanced_block(isolated_config):
     cfg = Config().load()
-    blender = cfg.data["apps"]["blender"]
+    blender = cfg.snapshot().app_profile("blender")
     assert "advanced" in blender
-    assert blender["advanced"] == default_app_profile("blender")["advanced"]
+    assert _plain(blender["advanced"]) == default_app_profile("blender")["advanced"]
     # Blender's native default pivot is "camera" (orbit about view_location)
     assert blender["bindings"]["scheme"]["orbit_pivot"] == "camera"
     # Every app now has the shared Twist action; Fusion additionally supports zoom vs dolly.
-    assert cfg.data["apps"]["fusion360"]["advanced"] == {
+    assert _plain(cfg.snapshot().app_profile("fusion360")["advanced"]) == {
         "twist_action": "roll", "zoom_style": "zoom"}
 
 
@@ -81,6 +90,16 @@ def test_blender_bundled_version_markers_stay_in_sync():
     assert ".".join(map(str, assignments["bl_info"]["version"])) == manifest_version
 
 
+def test_blender_navigation_mode_has_no_host_local_override():
+    source = (Path(__file__).parents[1] /
+              "trackball_daemon/plugins/blender/trackball_nav/__init__.py").read_text(
+                  encoding="utf-8")
+    assert 'nav_mode = adv.get("nav_mode", "orbit")' in source
+    assert "_mode_override" not in source
+    assert "TRACKBALL_NAV_OT_cycle_mode" not in source
+    assert "trackball_nav.cycle_mode" not in source
+
+
 def test_blender_addon_consumes_shared_zoom_target_and_behavior():
     source = (Path(__file__).parents[1] /
               "trackball_daemon/plugins/blender/trackball_nav/__init__.py").read_text(
@@ -100,13 +119,13 @@ def test_advanced_appears_on_old_config_via_deep_merge(isolated_config):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(disk, f)
     cfg = Config().load()
-    assert cfg.data["apps"]["blender"]["advanced"] == default_app_profile("blender")["advanced"]
+    assert _plain(cfg.snapshot().app_profile("blender")["advanced"]) == default_app_profile("blender")["advanced"]
 
 
 def test_sketchup_app_has_blender_parity_advanced_block(isolated_config):
     cfg = Config().load()
-    sketchup = cfg.data["apps"]["sketchup"]
-    assert sketchup["advanced"] == default_app_profile("sketchup")["advanced"]
+    sketchup = cfg.snapshot().app_profile("sketchup")
+    assert _plain(sketchup["advanced"]) == default_app_profile("sketchup")["advanced"]
     assert sketchup["advanced"]["nav_mode"] == "orbit"
     assert set(sketchup["advanced"]["invert"]) == {"orbit", "camera", "fly", "walk"}
     assert set(sketchup["advanced"]["invert"]["fly"]) == {
@@ -126,7 +145,7 @@ def test_sketchup_advanced_appears_on_old_config_via_deep_merge(isolated_config)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(disk, f)
     cfg = Config().load()
-    assert cfg.data["apps"]["sketchup"]["advanced"] == default_app_profile("sketchup")["advanced"]
+    assert _plain(cfg.snapshot().app_profile("sketchup")["advanced"]) == default_app_profile("sketchup")["advanced"]
 
 
 # --- App._apply_schemes: advanced only for a focused Blender ---------------------------
@@ -134,27 +153,30 @@ def _app_with_real_config(cfg, engine_app):
     app = App.__new__(App)
     app.config = cfg
     app._engine_app = engine_app
-    app._last_scheme_pushed = None
+    app._last_scheme_pushed = {}
     app.log = SimpleNamespace(info=lambda *a, **k: None)
-    app.sw_driver = None
-    app.onshape_bridge = None
-    app.broker = SimpleNamespace(schemes=[])
-    app.broker.set_scheme = lambda **kw: app.broker.schemes.append(kw)
+    app.navigation = SimpleNamespace(schemes=[])
+    app.navigation.set_scheme = lambda target, **kw: app.navigation.schemes.append(
+        {"target": target, **kw})
     return app
+
+
+def _sent(app, target):
+    return next(item for item in app.navigation.schemes if item["target"] == target)
 
 
 def test_blender_focus_sends_advanced(isolated_config):
     cfg = Config().load()
     app = _app_with_real_config(cfg, "blender")
     app._apply_schemes()
-    sent = app.broker.schemes[-1]
+    sent = _sent(app, "blender")
     adv = sent["advanced"]
     # Core Blender advanced plus immutable host corrections and app-root settings.
-    for k, v in cfg.data["apps"]["blender"]["advanced"].items():
+    for k, v in cfg.snapshot().app_profile("blender")["advanced"].items():
         if k != "invert":
             assert adv[k] == v
     expected = compose_advanced_with_host_baseline(
-        "blender", cfg.data["apps"]["blender"]["advanced"])
+        "blender", cfg.snapshot().app_profile("blender")["advanced"])
     assert adv["invert"] == expected["invert"]
     assert adv["host_baseline"] == host_baseline_payload("blender")
     assert adv["selection_overrides_pivot"] is True
@@ -168,7 +190,7 @@ def test_fusion_focus_sends_selection_override_only(isolated_config):
     cfg = Config().load()
     app = _app_with_real_config(cfg, "fusion360")
     app._apply_schemes()
-    sent = app.broker.schemes[-1]
+    sent = _sent(app, "fusion360")
     assert sent["advanced"]["selection_overrides_pivot"] is True
     assert sent["advanced"]["level_horizon_on_entry"] is True
     assert sent["advanced"]["host_baseline"] == host_baseline_payload("fusion360")
@@ -185,31 +207,31 @@ def test_unreal_focus_sends_its_advanced(isolated_config):
     cfg = Config().load()
     app = _app_with_real_config(cfg, "unreal")
     app._apply_schemes()
-    sent = app.broker.schemes[-1]
+    sent = _sent(app, "unreal")
     adv = sent["advanced"]
     assert adv["nav_mode"] == "orbit"
     assert adv["selection_overrides_pivot"] is True
-    assert adv["nav_mode"] == cfg.data["apps"]["unreal"]["advanced"]["nav_mode"]
-    assert adv is not cfg.data["apps"]["blender"]["advanced"]
+    assert adv["nav_mode"] == cfg.snapshot().app_profile("unreal")["advanced"]["nav_mode"]
+    assert adv is not cfg.snapshot().app_profile("blender")["advanced"]
 
 
 def test_per_app_level_horizon_override_is_sent(isolated_config):
     cfg = Config().load()
-    cfg.data["apps"]["blender"]["level_horizon_on_entry"] = False
+    cfg.set_app("blender", "navigation.level_horizon_on_entry", False)
     app = _app_with_real_config(cfg, "blender")
     app._apply_schemes()
-    assert app.broker.schemes[-1]["advanced"]["level_horizon_on_entry"] is False
+    assert _sent(app, "blender")["advanced"]["level_horizon_on_entry"] is False
 
 
 def test_sketchup_focus_sends_its_advanced(isolated_config):
     cfg = Config().load()
     app = _app_with_real_config(cfg, "sketchup")
     app._apply_schemes()
-    sent = app.broker.schemes[-1]
+    sent = _sent(app, "sketchup")
     adv = sent["advanced"]
     assert adv["nav_mode"] == "orbit"
     assert adv["selection_overrides_pivot"] is True
-    assert sent["advanced"] is not cfg.data["apps"]["blender"]["advanced"]
+    assert sent["advanced"] is not cfg.snapshot().app_profile("blender")["advanced"]
 
 
 def test_blender_addon_consumes_selection_override():
@@ -254,7 +276,7 @@ def test_every_rich_integration_consumes_per_action_axis_sources():
 
 def test_ui_exposes_global_and_per_action_axis_routing():
     source = (Path(__file__).parents[1] / "trackball_daemon/ui.py").read_text(encoding="utf-8")
-    schema = (Path(__file__).parents[1] / "trackball_daemon/binding_schema.py").read_text(
+    schema = (Path(__file__).parents[1] / "trackball_daemon/settings_schema.py").read_text(
         encoding="utf-8")
     assert "Physical trackball orientation" in source
     assert "Changing a source swaps axes instead of duplicating one" in source

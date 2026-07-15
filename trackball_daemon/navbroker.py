@@ -1,20 +1,20 @@
-"""Local nav broker: a 127.0.0.1-only socket server that streams navigation deltas to CAD
-add-ons (the thin per-app drivers).
+"""Target-isolated loopback navigation broker for socket-host add-ons.
 
-Protocol (newline-delimited JSON, both directions):
-  add-on -> broker (once):   {"type":"hello","app":"fusion360","version":"...","pid":1234}
-  broker -> add-on (stream): {"o":[ox,oy,oz],"p":[px,py],"z":zoom}   # per-flush accumulated delta
+The on-wire protocol remains newline-delimited JSON:
 
-Design notes:
-  * submit() (called on the BLE thread) only accumulates -- never blocks on a socket.
-  * a sender thread flushes the accumulated delta at a fixed rate and zeroes it, so a slow
-    add-on coalesces motion instead of losing it (same idea as the firmware's float carry).
-  * bound to 127.0.0.1 only -- never exposed off-box.
+* add-on -> broker once: ``{"type":"hello","app":"fusion360",...}``
+* broker -> matching add-on: the legacy ``o/p/z/op/os/zm`` frame plus optional ``adv``.
+
+Target identity is deliberately internal and comes from the existing hello ``app`` field. Motion,
+rate, scheme/profile revision, and delivery state are owned per target; no frame is broadcast.
 """
+from dataclasses import dataclass, field
+import copy
 import json
 import socket
 import threading
 import time
+
 
 DEFAULT_FLUSH_HZ = 30.0
 
@@ -29,19 +29,38 @@ class _Client:
         self.pid = 0
 
 
+@dataclass
+class _TargetState:
+    period: float
+    next_flush: float
+    accumulator: list = field(default_factory=lambda: [0.0] * 6)
+    scheme: dict = field(default_factory=lambda: {
+        "op": "screen_center", "os": "free", "zm": "to_center", "adv": None,
+    })
+    profile_revision: int = 0
+    accepted_state_revision: int = -1
+    pending_state_revision: int = -1
+    delivery_serial: int = 0
+    discarded_samples: int = 0
+
+    def discard(self):
+        if any(self.accumulator):
+            self.discarded_samples += 1
+        self.accumulator = [0.0] * 6
+        self.pending_state_revision = -1
+
+
 class NavBroker:
     def __init__(self, port, on_clients_changed=None, rate_hz=DEFAULT_FLUSH_HZ):
         self.port = int(port)
-        self.on_clients_changed = on_clients_changed       # callback(list_of_client_info)
+        self.on_clients_changed = on_clients_changed
         self._lock = threading.Lock()
-        self._acc = [0.0] * 6
         self._clients = []
+        self._targets = {}
+        self._active_target = None
+        self._default_period = 1.0 / self._clamp_rate(rate_hz)
         self._stop = threading.Event()
         self._srv = None
-        self._period = 1.0 / self._clamp_rate(rate_hz)     # flush/refresh interval
-        # Control scheme sent each frame. "adv" is an optional app-specific extras dict (e.g.
-        # Blender's richer nav options) that rides along additively; None => omitted from the frame.
-        self._scheme = {"op": "screen_center", "os": "free", "zm": "to_center", "adv": None}
 
     @staticmethod
     def _clamp_rate(hz):
@@ -51,37 +70,106 @@ class NavBroker:
             hz = DEFAULT_FLUSH_HZ
         return min(240.0, max(1.0, hz))
 
-    def set_rate(self, hz):
-        """Live-update the 3D update/refresh rate (Hz). Applied to the next flush."""
-        self._period = 1.0 / self._clamp_rate(hz)
+    def _target_unlocked(self, target):
+        if not isinstance(target, str) or not target:
+            raise ValueError("navigation target must be a non-empty app ID")
+        state = self._targets.get(target)
+        if state is None:
+            state = _TargetState(self._default_period, time.monotonic() + self._default_period)
+            self._targets[target] = state
+        return state
 
-    def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, advanced=None):
-        """Set the control scheme forwarded to the add-on in each frame.
-
-        `advanced` is an optional app-specific extras dict (Blender's nav_mode / twist_action /
-        zoom_style / lock_horizon / speeds / ...). When non-None it rides along as an additive
-        "adv" object on every frame; existing add-ons (Fusion) read only o/p/z/op/os/zm and ignore
-        it, so passing it never changes what they see."""
+    def set_rate(self, target, hz):
+        """Set one target's live flush rate without affecting any other host."""
+        period = 1.0 / self._clamp_rate(hz)
         with self._lock:
-            self._scheme = {"op": orbit_pivot, "os": orbit_style, "zm": zoom_mode, "adv": advanced}
+            state = self._target_unlocked(target)
+            state.period = period
+            state.next_flush = time.monotonic() + period
 
-    # --- producer side (BLE thread) ------------------------------------------------
-    def submit(self, ox, oy, oz, px, py, zoom):
+    def set_scheme(self, target, orbit_pivot, orbit_style, zoom_mode, advanced=None,
+                   profile_revision=None):
+        """Publish one target's scheme, discarding deltas accumulated under an older profile."""
+        scheme = {
+            "op": orbit_pivot,
+            "os": orbit_style,
+            "zm": zoom_mode,
+            "adv": copy.deepcopy(advanced),
+        }
         with self._lock:
-            a = self._acc
+            state = self._target_unlocked(target)
+            revision = (state.profile_revision + 1 if profile_revision is None
+                        else int(profile_revision))
+            if scheme != state.scheme or revision != state.profile_revision:
+                state.discard()
+                state.scheme = scheme
+                state.profile_revision = revision
+
+    def activate_target(self, target):
+        """Atomically select one socket target and discard the prior target's pending motion."""
+        with self._lock:
+            if target == self._active_target:
+                return
+            if self._active_target is not None:
+                self._target_unlocked(self._active_target).discard()
+            self._active_target = target
+            if target is not None:
+                self._target_unlocked(target).discard()
+
+    def discard_pending(self, target):
+        with self._lock:
+            state = self._targets.get(target)
+            if state is not None:
+                state.discard()
+
+    # --- producer side -------------------------------------------------------------
+    def submit(self, target, ox, oy, oz, px, py, zoom, *, state_revision=0):
+        """Associate one sample with its captured target and monotonic runtime revision."""
+        revision = int(state_revision)
+        with self._lock:
+            if target != self._active_target:
+                return False
+            state = self._target_unlocked(target)
+            if revision < state.accepted_state_revision:
+                return False
+            if revision > state.accepted_state_revision:
+                state.discard()
+                state.accepted_state_revision = revision
+            state.pending_state_revision = revision
+            a = state.accumulator
             a[0] += ox; a[1] += oy; a[2] += oz
             a[3] += px; a[4] += py; a[5] += zoom
+        return True
 
     @staticmethod
     def _build_frame(acc, scheme):
-        """Build one wire frame from the accumulated delta + the current scheme. The optional "adv"
-        extras object is included ONLY when set (Blender), so other add-ons' frames are byte-for-byte
-        unchanged (they read only o/p/z/op/os/zm)."""
+        """Build the unchanged legacy wire frame plus optional additive advanced data."""
         obj = {"o": [acc[0], acc[1], acc[2]], "p": [acc[3], acc[4]], "z": acc[5],
                "op": scheme["op"], "os": scheme["os"], "zm": scheme["zm"]}
         if scheme.get("adv") is not None:
             obj["adv"] = scheme["adv"]
         return obj
+
+    def delivery_state(self, target):
+        """Detached diagnostics used by tests/HUD plumbing; never exposes mutable internals."""
+        with self._lock:
+            state = self._target_unlocked(target)
+            return {
+                "active": target == self._active_target,
+                "period": state.period,
+                "profile_revision": state.profile_revision,
+                "accepted_state_revision": state.accepted_state_revision,
+                "pending_state_revision": state.pending_state_revision,
+                "delivery_serial": state.delivery_serial,
+                "discarded_samples": state.discarded_samples,
+                "pending": tuple(state.accumulator),
+                "scheme": {
+                    "op": state.scheme["op"],
+                    "os": state.scheme["os"],
+                    "zm": state.scheme["zm"],
+                    "adv": copy.deepcopy(state.scheme["adv"]),
+                },
+            }
 
     def client_infos(self):
         with self._lock:
@@ -136,7 +224,6 @@ class NavBroker:
             with self._lock:
                 self._clients.append(client)
             self._changed()
-            # Hold the connection open; reads only detect disconnect.
             conn.settimeout(1.0)
             while not self._stop.is_set():
                 try:
@@ -170,32 +257,53 @@ class NavBroker:
             buf += chunk
         return buf.split(b"\n", 1)[0].decode("utf-8", "replace")
 
-    def _sender(self):
-        while not self._stop.is_set():
-            time.sleep(self._period)             # re-read each loop so set_rate() applies live
-            with self._lock:
-                if not self._clients:
-                    self._acc = [0.0] * 6        # drop motion while nobody is listening
+    def _next_wait(self):
+        with self._lock:
+            if not self._targets:
+                return self._default_period
+            now = time.monotonic()
+            return max(0.001, min(state.next_flush - now for state in self._targets.values()))
+
+    def _collect_due(self, now, force=False):
+        deliveries = []
+        with self._lock:
+            for target, state in self._targets.items():
+                if not force and now < state.next_flush:
                     continue
-                a = self._acc
-                if a[0] == 0.0 and a[1] == 0.0 and a[2] == 0.0 and a[3] == 0.0 and a[4] == 0.0 and a[5] == 0.0:
+                state.next_flush = now + state.period
+                if not any(state.accumulator):
                     continue
-                frame = json.dumps(self._build_frame(a, self._scheme))
-                self._acc = [0.0] * 6
-                clients = list(self._clients)
-            payload = (frame + "\n").encode("utf-8")
-            dead = []
-            for c in clients:
+                clients = [client for client in self._clients if client.app == target]
+                if not clients:
+                    state.discard()
+                    continue
+                frame = json.dumps(self._build_frame(state.accumulator, state.scheme))
+                revision = state.pending_state_revision
+                state.accumulator = [0.0] * 6
+                state.pending_state_revision = -1
+                state.delivery_serial += 1
+                deliveries.append((target, (frame + "\n").encode("utf-8"), clients, revision))
+        return deliveries
+
+    def _flush_once(self, *, now=None, force=False):
+        dead = []
+        for _target, payload, clients, _revision in self._collect_due(
+                time.monotonic() if now is None else now, force=force):
+            for client in clients:
                 try:
-                    c.conn.sendall(payload)
+                    client.conn.sendall(payload)
                 except OSError:
-                    dead.append(c)
-            if dead:
-                with self._lock:
-                    for c in dead:
-                        if c in self._clients:
-                            self._clients.remove(c)
-                self._changed()
+                    dead.append(client)
+        if dead:
+            with self._lock:
+                for client in dead:
+                    if client in self._clients:
+                        self._clients.remove(client)
+            self._changed()
+
+    def _sender(self):
+        while not self._stop.wait(self._next_wait()):
+            self._flush_once()
 
     def _changed(self):
         if self.on_clients_changed:

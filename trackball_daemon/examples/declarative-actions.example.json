@@ -1,0 +1,7 @@
+[
+  {
+    "command": "setting.set_runtime",
+    "target": "navigation.orbit.sensitivity",
+    "value": 0.35
+  }
+]

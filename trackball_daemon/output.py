@@ -4,73 +4,16 @@ The SendInput primitive and quaternion helpers originate in cube_test.py. A vali
 raw-to-logical axis orientation is applied once at packet ingress; cursor and per-app mappings then
 consume the same logical XYZ vector. Identity defaults preserve the original behavior exactly.
 """
-import ctypes
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import struct
-import sys
 import threading
 
 from .config import host_baseline
-from .binding_schema import binding_profile
-
-# ===========================================================================
-# Windows SendInput (relative pointer move + wheel), pure ctypes -- no dependency
-# ===========================================================================
-_WIN = (sys.platform == "win32")
-if _WIN:
-    from ctypes import wintypes
-
-    MOUSEEVENTF_MOVE  = 0x0001
-    MOUSEEVENTF_WHEEL = 0x0800
-    WHEEL_DELTA       = 120
-    INPUT_MOUSE       = 0
-
-    class _MOUSEINPUT(ctypes.Structure):
-        _fields_ = [("dx", wintypes.LONG), ("dy", wintypes.LONG),
-                    ("mouseData", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
-                    ("time", wintypes.DWORD),
-                    ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong))]
-
-    class _INPUT(ctypes.Structure):
-        class _U(ctypes.Union):
-            _fields_ = [("mi", _MOUSEINPUT)]
-        _anonymous_ = ("u",)
-        _fields_ = [("type", wintypes.DWORD), ("u", _U)]
-
-    _SendInput = ctypes.windll.user32.SendInput
-
-    def send_mouse(dx=0, dy=0, wheel=0):
-        flags = 0
-        if dx or dy:
-            flags |= MOUSEEVENTF_MOVE
-        if wheel:
-            flags |= MOUSEEVENTF_WHEEL
-        if not flags:
-            return
-        mi = _MOUSEINPUT(int(dx), int(dy),
-                         (int(wheel) * WHEEL_DELTA) & 0xFFFFFFFF,
-                         flags, 0, None)
-        inp = _INPUT(INPUT_MOUSE)
-        inp.mi = mi
-        _SendInput(1, ctypes.byref(inp), ctypes.sizeof(_INPUT))
-
-    _GetAsyncKeyState = ctypes.windll.user32.GetAsyncKeyState
-
-    def shift_held():
-        # VK_SHIFT = 0x10. System-wide (no window focus needed) -- this is how the headless
-        # app reproduces the pygame window's "hold SHIFT to pan/zoom" behavior.
-        return (_GetAsyncKeyState(0x10) & 0x8000) != 0
-else:
-    _warned = [False]
-
-    def send_mouse(dx=0, dy=0, wheel=0):
-        if not _warned[0]:
-            print("[WARN] cursor mode needs Windows SendInput; pointer injection disabled")
-            _warned[0] = True
-
-    def shift_held():
-        return False
+from .app_registry import binding_profile
+from .commands import SerializedCommandQueue, SetInputMode, ToggleInputMode
+from .runtime_state import ConfigRuntimeBaseResolver, RuntimeStore
+from .windows_pointer import send_mouse
 
 # ===========================================================================
 # Quaternion helpers  (q = (w, x, y, z), unit quaternions) -- verbatim
@@ -141,14 +84,18 @@ class _OutputMapping:
     twist_action: str
     host_baseline: object
     o_src: tuple
+    o_base_sign: tuple
     o_sign: tuple
     o_sens: float
     p_xsrc: int
+    p_xbase_sign: float
     p_xsign: float
     p_ysrc: int
+    p_ybase_sign: float
     p_ysign: float
     p_gain: float
     z_src: int
+    z_base_sign: float
     z_sign: float
     z_gain: float
     z_dead: float
@@ -166,8 +113,12 @@ class OutputEngine:
     MODE_CUBE = MODE_CUBE
     MODE_CURSOR = MODE_CURSOR
 
-    def __init__(self, config):
+    def __init__(self, config, runtime_store=None, command_queue=None):
         self.cfg = config
+        self.runtime = runtime_store or RuntimeStore(ConfigRuntimeBaseResolver(config))
+        self.commands = command_queue or SerializedCommandQueue(self.runtime)
+        if self.commands.runtime_store is not self.runtime:
+            raise ValueError("OutputEngine command queue must own the supplied runtime store")
         self.lock = threading.Lock()            # protects view state (orientation/pan/distance)
         self._mapping_lock = threading.RLock()  # serialize config reloads with foreground switches
         self._mapping = None
@@ -188,30 +139,32 @@ class OutputEngine:
         # Which app's 3D bindings to use (None => config "active_app"). The app sets this to
         # the focused CAD app so each app is driven with its own sensitivities.
         self._bindings_app = None
-        self.apply_config()
-        # default mode chosen only at startup (apply_config must NOT reset a live toggle)
-        self.mode = MODE_CUBE if self.cfg.data["general"]["default_mode"] == "cube" else MODE_CURSOR
+        self.apply_config(refresh_runtime=False)
         self._last_mode = self.mode
 
-    def apply_config(self):
+    def apply_config(self, *, refresh_runtime=True):
         """Build and atomically publish a complete mapping after a config change."""
         with self._mapping_lock:
-            app_key = self._bindings_app or self.cfg.data["active_app"]
+            snapshot = self.cfg.snapshot()
+            app_key = self._bindings_app or snapshot.selected_app
             self._mapping = self._build_mapping(app_key)
+        if refresh_runtime:
+            from .commands import RefreshRuntimeBase
+            self.commands.dispatch(RefreshRuntimeBase(origin="config"))
 
     def _build_mapping(self, app_key):
         """Build a mapping without exposing a partially refreshed set of fields."""
-        g = self.cfg.data["general"]
+        snapshot = self.cfg.snapshot()
+        g = snapshot.general_profile
         orientation = g.get("axis_orientation") or {}
         global_src = tuple(int(v) for v in orientation.get("source", [0, 1, 2]))
         global_sign = tuple(-1.0 if v else 1.0
                             for v in orientation.get("invert", [False, False, False]))
         c, s = g["cursor"], g["scroll"]
 
-        apps = self.cfg.data["apps"]
-        if app_key not in apps:
-            app_key = self.cfg.data["active_app"]
-        app = apps[app_key]
+        if app_key not in snapshot.app_profiles:
+            app_key = snapshot.selected_app
+        app = snapshot.app_profile(app_key)
         b = app["bindings"]
         o, p, z = b["orbit"], b["pan"], b["zoom"]
         # Fold the user's per-axis invert flags into the snapshot signs (default off => no-op,
@@ -238,15 +191,19 @@ class OutputEngine:
             twist_action=str((app.get("advanced") or {}).get("twist_action", "roll")),
             host_baseline=host_baseline(app_key),
             o_src=tuple(int(v) for v in o["axis_source"]),
+            o_base_sign=tuple(float(value) for value in o["axis_sign"]),
             o_sign=tuple(float(o["axis_sign"][k]) * (-1.0 if oi[k] else 1.0)
                          for k in range(3)),
             o_sens=float(o["sensitivity"]),
             p_xsrc=int(p["x_src"]),
+            p_xbase_sign=float(p["x_sign"]),
             p_xsign=float(p["x_sign"]) * (-1.0 if pi[0] else 1.0),
             p_ysrc=int(p["y_src"]),
+            p_ybase_sign=float(p["y_sign"]),
             p_ysign=float(p["y_sign"]) * (-1.0 if pi[1] else 1.0),
             p_gain=float(p["gain"]),
             z_src=int(z["src"]),
+            z_base_sign=float(z["sign"]),
             z_sign=float(z["sign"]) * (-1.0 if zi else 1.0),
             z_gain=float(z["gain"]),
             z_dead=float(z["deadzone"]),
@@ -257,20 +214,77 @@ class OutputEngine:
             toggle=b.get("toggle", "shift"),
         )
 
+    @staticmethod
+    def _mapping_for_runtime(mapping, runtime_snapshot):
+        """Overlay registry-approved live values onto one immutable config mapping."""
+        settings = runtime_snapshot.effective_settings
+        values = {
+            "c_gain": settings.get("pointer.cursor.gain", mapping.c_gain),
+            "s_gain": settings.get("pointer.scroll.gain", mapping.s_gain),
+            "s_dead": settings.get("pointer.scroll.deadzone", mapping.s_dead),
+            "s_dom": settings.get("pointer.scroll.dominance", mapping.s_dom),
+        }
+        if runtime_snapshot.focused_context.app_id != mapping.app_key:
+            return replace(mapping, **values)
+        values.update({
+            "o_sens": settings.get("navigation.orbit.sensitivity", mapping.o_sens),
+            "p_gain": settings.get("navigation.pan.gain", mapping.p_gain),
+            "z_gain": settings.get("navigation.zoom.gain", mapping.z_gain),
+            "z_dom": settings.get("navigation.zoom.dominance", mapping.z_dom),
+            "twist_action": settings.get(
+                "navigation.orbit.twist_action", mapping.twist_action),
+        })
+        if not mapping.binding_profile.rich_actions:
+            o_src = tuple(settings.get(
+                f"navigation.routing.orbit.{axis}.source", mapping.o_src[index])
+                for index, axis in enumerate("xyz"))
+            o_sign = tuple(
+                mapping.o_base_sign[index] * (-1.0 if settings.get(
+                    f"navigation.routing.orbit.{axis}.invert",
+                    mapping.o_sign[index] != mapping.o_base_sign[index]) else 1.0)
+                for index, axis in enumerate("xyz"))
+            values.update({
+                "o_src": o_src,
+                "o_sign": o_sign,
+                "p_xsrc": settings.get("navigation.routing.pan.x.source", mapping.p_xsrc),
+                "p_xsign": mapping.p_xbase_sign * (-1.0 if settings.get(
+                    "navigation.routing.pan.x.invert",
+                    mapping.p_xsign != mapping.p_xbase_sign) else 1.0),
+                "p_ysrc": settings.get("navigation.routing.pan.y.source", mapping.p_ysrc),
+                "p_ysign": mapping.p_ybase_sign * (-1.0 if settings.get(
+                    "navigation.routing.pan.y.invert",
+                    mapping.p_ysign != mapping.p_ybase_sign) else 1.0),
+                "z_src": settings.get("navigation.routing.zoom.source", mapping.z_src),
+                "z_sign": mapping.z_base_sign * (-1.0 if settings.get(
+                    "navigation.routing.zoom.invert",
+                    mapping.z_sign != mapping.z_base_sign) else 1.0),
+            })
+        return replace(mapping, **values)
+
     # --- runtime controls (thread-safe) -------------------------------------------
+    @property
+    def mode(self):
+        return (MODE_CUBE if self.runtime.snapshot().effective_input_mode == "3d"
+                else MODE_CURSOR)
+
     def set_mode(self, mode):
-        self.mode = mode
+        canonical = {MODE_CUBE: "3d", MODE_CURSOR: "pointer", "3d": "3d",
+                     "pointer": "pointer"}.get(mode)
+        if canonical is None:
+            raise ValueError(f"invalid output mode: {mode!r}")
+        self.commands.dispatch(SetInputMode(origin="output-compat", mode=canonical))
+        return self.mode
 
     def set_active_bindings(self, key):
         """Atomically switch to app ``key`` and publish its complete mapping snapshot."""
         with self._mapping_lock:
-            app_key = key or self.cfg.data["active_app"]
+            app_key = key or self.cfg.snapshot().selected_app
             mapping = self._build_mapping(app_key)
             self._bindings_app = key
             self._mapping = mapping
 
     def toggle_mode(self):
-        self.mode = MODE_CURSOR if self.mode == MODE_CUBE else MODE_CUBE
+        self.commands.dispatch(ToggleInputMode(origin="output-compat"))
         return self.mode
 
     def reset_view(self):
@@ -314,24 +328,26 @@ class OutputEngine:
                  aligned_p[0], aligned_p[1], aligned_z)
 
     # --- the data path -------------------------------------------------------------
-    def handle_packet(self, data):
+    def handle_packet(self, data, runtime_snapshot=None):
         if len(data) < 12:
             return
-        mapping = self._mapping             # one immutable mapping for this entire packet
+        runtime_snapshot = runtime_snapshot or self.runtime.snapshot()
+        mapping = self._mapping_for_runtime(
+            self._mapping, runtime_snapshot)  # one immutable mapping for this entire packet
         raw = struct.unpack_from("<fff", data, 0)
         # The one physical-orientation transform. Everything downstream (pointer, cube, broker,
         # per-app action routing) speaks this same body-relative logical XYZ frame.
         recv = tuple(mapping.global_sign[i] * raw[mapping.global_src[i]] for i in range(3))
 
-        mode = self.mode
+        mode = (MODE_CUBE if runtime_snapshot.effective_input_mode == "3d" else MODE_CURSOR)
         if mode != self._last_mode:                 # reset cursor accumulators on any switch
             self._last_mode = mode
             self._mx = self._my = self._sc = 0.0
 
         if mode == MODE_CUBE:
-            if mapping.toggle == "shift" and shift_held():
-                # SHIFT held: pan (move part) + zoom (twist part), mutually exclusive via the
-                # same dominance test cursor mode uses for move-vs-scroll. Orbit is paused.
+            if runtime_snapshot.effective_navigation_layer == "secondary":
+                # Secondary layer: pan/move + zoom/thrust, mutually exclusive via the same
+                # dominance test cursor mode uses for move-vs-scroll. Primary orbit/look is paused.
                 twist = mapping.z_sign * recv[mapping.z_src]
                 plane = math.hypot(recv[mapping.p_xsrc], recv[mapping.p_ysrc])
                 if abs(twist) > mapping.z_dead and abs(twist) > mapping.z_dom * plane:

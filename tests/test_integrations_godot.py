@@ -32,7 +32,7 @@ def test_install_copies_addon_enables_and_marks(isolated_config, tmp_path, monke
     cfg = Config().load()
     ok, msg = integrations.install(integrations.APPS_BY_KEY["godot"], cfg)
     assert ok is True
-    g = cfg.data["apps"]["godot"]
+    g = cfg.snapshot().app_operational["godot"]
     assert g["installed"] is True and g["enabled"] is True
     assert g["addin_version"] == "0.1.12"
     dest = proj / "addons" / "trackball_nav"

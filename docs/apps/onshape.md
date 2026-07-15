@@ -194,7 +194,7 @@ Algorithm:
    fabricated at-depth point tracks it. (A fabrication computed from Onshape's own camera would
    survive the re-cast — the strict bbox test in step 3 is the backstop for that case.)
 5. No valid, confirmed hit at any aperture → the method is **unavailable**; resolution continues
-   through the **configured fallback chain** (General → Failure fallback order).
+   through the **configured fallback chain** (Global → Failure fallback order).
 6. **Hold the pivot for the whole gesture** (`_held_pivot`): captured once on the first orbit frame,
    reused every frame, re-picked only after a pan/zoom or the configured Pivot hold expires. The hit-test therefore runs
    **once per gesture (a handful of round-trips), not per frame.**
@@ -209,7 +209,7 @@ convention as Fusion/SolidWorks/FreeCAD, whose resolvers also skip camera. Daemo
 0.1.58 wires `selection_overrides_pivot` into
 the in-process bridge, so a non-empty selection replaces the designated orbit pivot. Onshape builds
 that omit the optional selection properties safely continue through the designated-pivot path. The
-scheme comes from `set_scheme` (General → 3D control scheme, or per-app Onshape override).
+scheme comes from `set_scheme` (Global → 3D control scheme, or per-app Onshape override).
 
 Config v8 separates **Pivot hold** (`orbit_pivot_hold_sec`) from **Zoom hold**
 (`zoom_cursor_hold_sec`). Pan and zoom invalidate the orbit pivot; pan preserves a held To Cursor
@@ -494,7 +494,7 @@ block; blank cert paths → the generated defaults). Under-cursor orbit needs th
   `_apply_rates`/`_apply_schemes`.
 - `config.py` — top-level `"onshape"` endpoint/certificate block plus the shared
   `apps.onshape` profile. Config v8 owns the split hold migration; the per-app nullable horizon
-  value inherits the General default until explicitly changed.
+  value inherits the Global value until explicitly changed.
 - `integrations.py` — `setup_onshape` (generate cert + trust instructions; wired as the AppDef
   `setup`). Onshape is **not** in `_ADDINS` (no add-in to copy/auto-update).
 - `ui.py` — the 3D-Apps row + Per-App Bindings render via the generic no-add-in path

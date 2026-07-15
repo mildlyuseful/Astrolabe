@@ -1,7 +1,7 @@
 /* ============================================================================
    Astrolabe control daemon — UI demo, Fable v2 (front-end only, drives nothing)
    Mirrors the real daemon's settings contract (trackball_daemon/ui.py,
-   config.py, binding_schema.py) reorganized into three pages:
+   config.py, app_registry.py, settings_schema.py) reorganized into three pages:
      Overview · 3D Apps (setup + bindings merged, master–detail) · General
 
    Rendering model: full page renders happen ONLY on rail navigation. Every
@@ -52,7 +52,7 @@ const ROUTES_BY_MODE = {
 };
 
 /* --------------------------------------------- binding profiles (schema)
-   Mirrors trackball_daemon/binding_schema.py APP_BINDING_PROFILES: which
+   Mirrors trackball_daemon/app_registry.py APP_BINDING_PROFILES: which
    fields, pivots, styles, twist actions and zoom behaviors each host
    actually implements. */
 const PIVOTS_DEFAULT = ['screen_center', 'cursor', 'selection', 'object', 'origin'];

@@ -48,7 +48,7 @@ def test_install_copies_plugin_and_enables(isolated_config, tmp_path, monkeypatc
     appdef = integrations.APPS_BY_KEY["unreal"]
     ok, _msg = integrations.install(appdef, cfg)
     assert ok is True
-    u = cfg.data["apps"]["unreal"]
+    u = cfg.snapshot().app_operational["unreal"]
     assert u["installed"] is True and u["enabled"] is True
     assert u["addin_version"] == "0.2.13"
     dest = integrations.unreal_plugin_dir()
@@ -71,7 +71,7 @@ def test_install_fails_when_unreal_absent(isolated_config, monkeypatch):
     ok, msg = integrations.install(appdef, cfg)
     assert ok is False
     assert "not found" in msg.lower()
-    assert cfg.data["apps"]["unreal"]["enabled"] is False
+    assert cfg.snapshot().app_operational["unreal"]["enabled"] is False
 
 
 def test_install_reports_manual_steps_when_unwritable(isolated_config, tmp_path, monkeypatch):
@@ -89,7 +89,7 @@ def test_install_reports_manual_steps_when_unwritable(isolated_config, tmp_path,
         integrations.install(integrations.APPS_BY_KEY["unreal"], cfg))
     assert ok is False
     assert "admin" in msg.lower()
-    assert cfg.data["apps"]["unreal"]["installed"] is False
+    assert cfg.snapshot().app_operational["unreal"]["installed"] is False
     assert copies and "bundled" in copies[0][0].lower()
 
 
@@ -106,10 +106,10 @@ def test_reinstall_does_not_re_enable(isolated_config, tmp_path, monkeypatch):
     cfg = Config().load()
     appdef = integrations.APPS_BY_KEY["unreal"]
     integrations.install(appdef, cfg)
-    cfg.data["apps"]["unreal"]["enabled"] = False        # user disabled it
+    cfg.set_app_operational("unreal", enabled=False)        # user disabled it
     ok, _msg = integrations.install(appdef, cfg)          # a reinstall/update
     assert ok is True
-    assert cfg.data["apps"]["unreal"]["enabled"] is False  # not silently re-enabled
+    assert cfg.snapshot().app_operational["unreal"]["enabled"] is False
 
 
 def test_auto_update_recopies_on_version_bump(isolated_config, tmp_path, monkeypatch):

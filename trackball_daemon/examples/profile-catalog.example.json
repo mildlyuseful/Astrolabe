@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "astrolabe_5way",
+      "label": "Astrolabe hardware",
+      "bindings": [
+        {
+          "id": "example.center.toggle_mode",
+          "label": "Center: Toggle Pointer / 3D",
+          "enabled": true,
+          "chord": ["ble.astrolabe:fiveway.center"],
+          "match": "exact",
+          "activation": "toggle",
+          "priority": 0,
+          "press": [{"command": "input.mode.toggle"}],
+          "release": []
+        }
+      ]
+    },
+    {
+      "id": "keyboard_only",
+      "label": "Keyboard only",
+      "bindings": [
+        {
+          "id": "example.ctrl.sensitivity",
+          "label": "Ctrl: Fine orbit",
+          "enabled": true,
+          "when": {"apps": ["blender"]},
+          "chord": ["keyboard:ctrl"],
+          "match": "allow_extra_modifiers",
+          "activation": "hold",
+          "priority": 10,
+          "press": [{"command": "setting.set_runtime", "target": "navigation.orbit.sensitivity", "value": 0.35}],
+          "release": [{"command": "setting.restore_previous", "target": "navigation.orbit.sensitivity"}]
+        }
+      ]
+    }
+  ]
+}

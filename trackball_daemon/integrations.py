@@ -20,7 +20,19 @@ import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from types import MappingProxyType
 from typing import Callable, Optional
+
+from .app_registry import APP_SPECS_BY_ID, AppSpec
+
+
+def _operational_state(cfg, app_id):
+    """Detached setup-workflow state; publish it only after external setup succeeds."""
+    return dict(cfg.snapshot().app_operational[app_id])
+
+
+def _save_operational(cfg, app_id, values):
+    cfg.set_app_operational(app_id, **values)
 
 
 def _hidden_check_output(args, *, timeout=8) -> str:
@@ -38,8 +50,7 @@ def _hidden_check_output(args, *, timeout=8) -> str:
 
 @dataclass
 class AppDef:
-    key: str
-    name: str
+    spec: AppSpec
     needs_plugin: bool                 # True: needs an add-on; False: gesture/profile only
     detect: Callable[[], Optional[str]]
     setup: Optional[Callable] = None   # per-app installer; None => generic mark-installed
@@ -52,6 +63,14 @@ class AppDef:
     health_check: str = ""
     security_notes: str = ""
     security_confirmation: str = ""       # non-empty => UI confirms before setup mutates state
+
+    @property
+    def key(self):
+        return self.spec.app_id
+
+    @property
+    def name(self):
+        return self.spec.display_name
 
 
 @dataclass(frozen=True)
@@ -314,7 +333,7 @@ def install_fusion(appdef: AppDef, cfg) -> tuple[bool, str]:
     if not src.exists():
         return False, "Bundled Fusion add-in is missing from this build."
     dest = fusion_addins_dir() / "TrackballNav"
-    a = cfg.data["apps"][appdef.key]
+    a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -325,7 +344,7 @@ def install_fusion(appdef: AppDef, cfg) -> tuple[bool, str]:
     if not was_installed:                                # don't re-enable on an update
         a["enabled"] = True
     a["addin_version"] = bundled_addin_version(appdef.key) or ""
-    cfg.save()
+    _save_operational(cfg, appdef.key, a)
     verb = "updated" if was_installed else "copied"
     return True, (f"Add-in {verb} in Fusion's AddIns folder (v{a['addin_version']}).\n\n"
                   "In Fusion: Utilities → Add-Ins (Shift+S) → select \"TrackballNav\" → Run, and "
@@ -345,11 +364,11 @@ def setup_solidworks(appdef: "AppDef", cfg) -> tuple[bool, str]:
     except Exception:
         return False, ("pywin32 is required to drive SolidWorks over COM, but it isn't "
                        "installed.\nInstall it with:  pip install pywin32")
-    a = cfg.data["apps"][appdef.key]
+    a = _operational_state(cfg, appdef.key)
     a["installed"] = True
     a["enabled"] = True
     a["addin_version"] = ""                       # no add-in for SolidWorks (driven via COM)
-    cfg.save()
+    _save_operational(cfg, appdef.key, a)
     return True, ("SolidWorks integration enabled — it's driven directly via COM, so there's "
                   "nothing to install.\n\nOpen SolidWorks with a part or assembly, switch the "
                   "daemon to 3D mode, and focus SolidWorks. The row flips to \"connected\" once "
@@ -419,12 +438,12 @@ def install_autocad(appdef: "AppDef", cfg) -> tuple[bool, str]:
     copy_status, copy_detail = _copy_acad_plugin()
     if copy_status == "error":
         return False, copy_detail
-    a = cfg.data["apps"][appdef.key]
+    a = _operational_state(cfg, appdef.key)
     a["installed"] = True
     a["enabled"] = True
     a["addin_version"] = (ver if copy_status == "copied"
                             else (installed_addin_version("autocad") or ""))
-    cfg.save()
+    _save_operational(cfg, appdef.key, a)
     if copy_status == "copied":
         warning = f"\n\nNote: {copy_detail}" if copy_detail else ""
         return True, (f"AutoCAD plugin v{ver} installed.{warning}\n\nNothing to do inside AutoCAD: the "
@@ -441,7 +460,7 @@ def _onshape_cert_paths(cfg):
     """Cert/key paths for the Onshape bridge: the config override if set, else the driver default
     (onshape_cert.pem / onshape_key.pem in the per-user config dir)."""
     from . import onshape_bridge
-    o = cfg.data.get("onshape", {}) or {}
+    o = cfg.snapshot().onshape
     d_cert, d_key = onshape_bridge.default_cert_paths()
     return (o.get("cert_path") or d_cert, o.get("key_path") or d_key)
 
@@ -459,11 +478,11 @@ def setup_onshape(appdef: "AppDef", cfg) -> tuple[bool, str]:
         return False, ("Could not generate the TLS certificate the Onshape bridge needs.\n"
                        "Install the Python 'cryptography' package (pip install cryptography) or "
                        "make sure 'openssl' is on PATH, then try again.")
-    a = cfg.data["apps"][appdef.key]
+    a = _operational_state(cfg, appdef.key)
     a["installed"] = True
     a["enabled"] = True
     a["addin_version"] = ""                       # no add-in for Onshape (browser bridge)
-    cfg.save()
+    _save_operational(cfg, appdef.key, a)
     return True, (
         "Onshape integration enabled — it's driven through the browser's built-in 3Dconnexion "
         "support, so there's no add-in to install.\n\n"
@@ -550,7 +569,7 @@ def install_blender(appdef: "AppDef", cfg, install_startup=None) -> tuple[bool, 
     scripts_dirs = _blender_version_dirs()
     if not scripts_dirs:
         return False, "Could not determine Blender's user scripts folder."
-    a = cfg.data["apps"][appdef.key]
+    a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     installed_to, started_to = [], []
     for scripts in scripts_dirs:
@@ -572,7 +591,7 @@ def install_blender(appdef: "AppDef", cfg, install_startup=None) -> tuple[bool, 
     if not was_installed:                                # don't re-enable on an update
         a["enabled"] = True
     a["addin_version"] = bundled_addin_version(appdef.key) or ""
-    cfg.save()
+    _save_operational(cfg, appdef.key, a)
     verb = "updated" if was_installed else "installed"
     vers = ", ".join(installed_to) or "—"
     if started_to:
@@ -626,7 +645,7 @@ def install_freecad(appdef: "AppDef", cfg) -> tuple[bool, str]:
     if not src.exists():
         return False, "Bundled FreeCAD add-on is missing from this build."
     dest = freecad_user_mod_dir()
-    a = cfg.data["apps"][appdef.key]
+    a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -637,7 +656,7 @@ def install_freecad(appdef: "AppDef", cfg) -> tuple[bool, str]:
     if not was_installed:                                # don't re-enable on an update
         a["enabled"] = True
     a["addin_version"] = bundled_addin_version(appdef.key) or ""
-    cfg.save()
+    _save_operational(cfg, appdef.key, a)
     verb = "updated" if was_installed else "installed"
     return True, (f"FreeCAD add-on {verb} (v{a['addin_version']}) in FreeCAD's user Mod folder:\n"
                   f"{dest}\n\n"
@@ -705,7 +724,7 @@ def install_sketchup(appdef: "AppDef", cfg) -> tuple[bool, str]:
     if not plugin_dirs:
         return False, "Could not determine SketchUp's per-version Plugins folders."
 
-    a = cfg.data["apps"][appdef.key]
+    a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     installed_to = []
     for plugins in plugin_dirs:
@@ -722,7 +741,7 @@ def install_sketchup(appdef: "AppDef", cfg) -> tuple[bool, str]:
     if not was_installed:
         a["enabled"] = True
     a["addin_version"] = bundled_addin_version(appdef.key) or ""
-    cfg.save()
+    _save_operational(cfg, appdef.key, a)
     verb = "updated" if was_installed else "installed"
     years = ", ".join(installed_to) or "--"
     return True, (
@@ -776,7 +795,7 @@ def install_unreal(appdef: "AppDef", cfg) -> tuple[bool, str]:
     src = _bundled_addin("unreal", "TrackballNav")
     if not src.exists():
         return False, "Bundled Unreal add-on is missing from this build."
-    a = cfg.data["apps"][appdef.key]
+    a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     copied, failed = [], []
     for exe in engines:
@@ -805,7 +824,7 @@ def install_unreal(appdef: "AppDef", cfg) -> tuple[bool, str]:
     if not was_installed:                                # don't re-enable on an update
         a["enabled"] = True
     a["addin_version"] = bundled_addin_version(appdef.key) or ""
-    cfg.save()
+    _save_operational(cfg, appdef.key, a)
     verb = "updated" if was_installed else "installed"
     tail = ("\n\nNote: some engines need admin to write and were skipped: "
             + ", ".join(lbl for lbl, _ in failed)) if failed else ""
@@ -953,7 +972,7 @@ def install_unity(appdef: "AppDef", cfg) -> tuple[bool, str]:
     if not src.exists():
         return False, "Bundled Unity package is missing from this build."
     projects = _unity_project_candidates()
-    a = cfg.data["apps"][appdef.key]
+    a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     if not projects:
         # Fallback: stage under APPDATA and ask the user to open a project + Set up again.
@@ -964,7 +983,7 @@ def install_unity(appdef: "AppDef", cfg) -> tuple[bool, str]:
         except OSError as e:
             return False, f"Couldn't stage the Unity package: {e}"
         a["installed"] = False
-        cfg.save()
+        _save_operational(cfg, appdef.key, a)
         return False, (
             "Unity Editor was detected (or not), but no open/recent project path was found.\n\n"
             "Open a Unity project, then click Set up again — the package will be copied into\n"
@@ -986,7 +1005,7 @@ def install_unity(appdef: "AppDef", cfg) -> tuple[bool, str]:
     if not was_installed:
         a["enabled"] = True
     a["addin_version"] = bundled_addin_version(appdef.key) or ""
-    cfg.save()
+    _save_operational(cfg, appdef.key, a)
     verb = "updated" if was_installed else "installed"
     return True, (
         f"Trackball Nav package {verb} (v{a['addin_version']}) into {len(copied)} project(s).\n\n"
@@ -1150,7 +1169,7 @@ def install_godot(appdef: "AppDef", cfg) -> tuple[bool, str]:
     if not src.exists():
         return False, "Bundled Godot add-on is missing from this build."
     projects = _godot_project_candidates()
-    a = cfg.data["apps"][appdef.key]
+    a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     if not projects:
         dest = Path(os.environ.get("APPDATA", "")) / "TrackballDaemon" / "godot" / "trackball_nav"
@@ -1160,7 +1179,7 @@ def install_godot(appdef: "AppDef", cfg) -> tuple[bool, str]:
         except OSError as e:
             return False, f"Couldn't stage the Godot add-on: {e}"
         a["installed"] = False
-        cfg.save()
+        _save_operational(cfg, appdef.key, a)
         return False, (
             "No Godot project was found automatically.\n\n"
             "Set up looks for projects in:\n"
@@ -1200,7 +1219,7 @@ def install_godot(appdef: "AppDef", cfg) -> tuple[bool, str]:
     if not was_installed:
         a["enabled"] = True
     a["addin_version"] = bundled_addin_version(appdef.key) or ""
-    cfg.save()
+    _save_operational(cfg, appdef.key, a)
     verb = "updated" if was_installed else "installed"
     return True, (
         f"Trackball Nav {verb} (v{a['addin_version']}) into {len(copied)} Godot project(s).\n\n"
@@ -1266,7 +1285,7 @@ def install_rhino(appdef: "AppDef", cfg) -> tuple[bool, str]:
     if not src.exists():
         return False, "Bundled Rhino add-on is missing from this build."
     dest = rhino_scripts_dir()
-    a = cfg.data["apps"][appdef.key]
+    a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -1280,7 +1299,7 @@ def install_rhino(appdef: "AppDef", cfg) -> tuple[bool, str]:
     if not was_installed:
         a["enabled"] = True
     a["addin_version"] = bundled_addin_version(appdef.key) or ""
-    cfg.save()
+    _save_operational(cfg, appdef.key, a)
     verb = "updated" if was_installed else "installed"
     if auto:
         return True, (
@@ -1550,31 +1569,32 @@ _APP_UX = {
 }
 
 
-APPS = [
-    AppDef("blender", "Blender", True, detect_blender, setup=install_blender,
+APPS = (
+    AppDef(APP_SPECS_BY_ID["blender"], True, detect_blender, setup=install_blender,
            **_APP_UX["blender"]),
-    AppDef("freecad", "FreeCAD", True, detect_freecad, setup=install_freecad,
+    AppDef(APP_SPECS_BY_ID["freecad"], True, detect_freecad, setup=install_freecad,
            **_APP_UX["freecad"]),
-    AppDef("sketchup", "SketchUp", True, detect_sketchup, setup=install_sketchup,
+    AppDef(APP_SPECS_BY_ID["sketchup"], True, detect_sketchup, setup=install_sketchup,
            **_APP_UX["sketchup"]),
-    AppDef("unreal", "Unreal Engine", True, detect_unreal, setup=install_unreal,
+    AppDef(APP_SPECS_BY_ID["unreal"], True, detect_unreal, setup=install_unreal,
            **_APP_UX["unreal"]),
-    AppDef("unity", "Unity", True, detect_unity, setup=install_unity,
+    AppDef(APP_SPECS_BY_ID["unity"], True, detect_unity, setup=install_unity,
            **_APP_UX["unity"]),
-    AppDef("godot", "Godot", True, detect_godot, setup=install_godot,
+    AppDef(APP_SPECS_BY_ID["godot"], True, detect_godot, setup=install_godot,
            **_APP_UX["godot"]),
-    AppDef("rhino", "Rhino", True, detect_rhino, setup=install_rhino,
+    AppDef(APP_SPECS_BY_ID["rhino"], True, detect_rhino, setup=install_rhino,
            **_APP_UX["rhino"]),
-    AppDef("fusion360", "Fusion 360", True, detect_fusion, setup=install_fusion,
+    AppDef(APP_SPECS_BY_ID["fusion360"], True, detect_fusion, setup=install_fusion,
            **_APP_UX["fusion360"]),
-    AppDef("solidworks", "SolidWorks", False, detect_solidworks, setup=setup_solidworks,
+    AppDef(APP_SPECS_BY_ID["solidworks"], False, detect_solidworks, setup=setup_solidworks,
            **_APP_UX["solidworks"]),
-    AppDef("onshape", "Onshape", False, detect_onshape, setup=setup_onshape,
+    AppDef(APP_SPECS_BY_ID["onshape"], False, detect_onshape, setup=setup_onshape,
            **_APP_UX["onshape"]),
-    AppDef("autocad", "AutoCAD", True, detect_autocad, setup=install_autocad,
+    AppDef(APP_SPECS_BY_ID["autocad"], True, detect_autocad, setup=install_autocad,
            **_APP_UX["autocad"]),
-]
-APPS_BY_KEY = {a.key: a for a in APPS}
+)
+APPS_BY_KEY = MappingProxyType({app_id: next(app for app in APPS if app.key == app_id)
+                                for app_id in APP_SPECS_BY_ID})
 
 
 def setup_action_label(appdef: AppDef, app_cfg, installed_version=_VERSION_UNSET) -> Optional[str]:
@@ -1621,9 +1641,7 @@ def install(appdef: AppDef, cfg):
     found = appdef.detect()
     if appdef.needs_plugin and not found:
         return False, f"{appdef.name} was not found on this machine — install it first."
-    cfg.data["apps"][appdef.key]["installed"] = True
-    cfg.data["apps"][appdef.key]["enabled"] = True
-    cfg.save()
+    cfg.set_app_operational(appdef.key, installed=True, enabled=True)
     if appdef.needs_plugin:
         # Generic path for a future AppDef registered without its own setup; every
         # current app has one, so this is unreachable today.

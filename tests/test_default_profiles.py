@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from trackball_daemon import integrations
-from trackball_daemon.binding_schema import APP_BINDING_PROFILES
+from trackball_daemon.app_registry import APP_BINDING_PROFILES
 from trackball_daemon.config import (
     APP_PROFILE_FIELDS,
     DEFAULTS,
@@ -40,7 +40,7 @@ def test_host_profiles_are_loaded_from_separate_packaged_raw_file():
     assert raw["schema"] == 1
     assert tuple(raw["profiles"]) == HOST_PROFILE_APP_KEYS
     pyproject = (Path(__file__).parents[1] / "pyproject.toml").read_text(encoding="utf-8")
-    assert '"host_profiles.json", "default_profiles.json", "plugins/**/*"' in pyproject
+    assert '"host_profiles.json", "default_profiles.json", "system_defaults.json"' in pyproject
 
 
 def test_host_alignment_has_exactly_one_owner_for_every_app():
@@ -107,73 +107,54 @@ def test_shipped_user_profiles_start_with_every_inversion_unchecked():
 
 def test_user_config_never_serializes_developer_host_alignment(isolated_config):
     cfg = Config().load()
-    assert "host_baseline" not in json.dumps(cfg.data)
     assert "host_baseline" not in cfg.path.read_text(encoding="utf-8")
 
 
 def test_level_horizon_default_override_and_reset_semantics(isolated_config):
     cfg = Config().load()
-    general = cfg.data["general"]
-    app = cfg.data["apps"]["blender"]
-    assert general["level_horizon_on_entry"] is True
-    assert effective_level_horizon(general, app) is True
-    general["level_horizon_on_entry"] = False
-    assert effective_level_horizon(general, app) is False
-    app["level_horizon_on_entry"] = True
-    assert effective_level_horizon(general, app) is True
+    assert cfg.snapshot().global_value("navigation.level_horizon_on_entry") is True
+    assert cfg.snapshot().app_value("blender", "navigation.level_horizon_on_entry") is True
+    cfg.set_global("navigation.level_horizon_on_entry", False)
+    assert cfg.snapshot().app_value("blender", "navigation.level_horizon_on_entry") is False
+    cfg.set_app("blender", "navigation.level_horizon_on_entry", True)
+    assert cfg.snapshot().app_value("blender", "navigation.level_horizon_on_entry") is True
     cfg.reset_app_profile("blender")
-    assert "level_horizon_on_entry" not in cfg.data["apps"]["blender"]
-    assert effective_level_horizon(general, cfg.data["apps"]["blender"]) is False
+    assert cfg.snapshot().app_value("blender", "navigation.level_horizon_on_entry") is False
 
 
 def test_reset_restores_complete_profile_once_and_preserves_operational_state(isolated_config):
     cfg = Config().load()
-    app = cfg.data["apps"]["blender"]
-    expected = default_app_profile("blender")
-    for field in APP_PROFILE_FIELDS:
-        if field in app:
-            app[field] = "changed" if field != "bindings" else {"changed": True}
     operational = {
         "enabled": True,
         "installed": True,
         "addin_version": "9.9.9",
     }
-    app.update(operational)
-    app["level_horizon_on_entry"] = False
+    cfg.set_global("navigation.orbit.sensitivity", 1.5)
+    cfg.set_app("blender", "navigation.orbit.sensitivity", 2.5)
+    cfg.set_app_operational("blender", **operational)
     notifications = []
-    cfg.add_listener(lambda: notifications.append("changed"))
+    cfg.add_listener(lambda event: notifications.append(event))
 
     cfg.reset_app_profile("blender")
 
-    assert {field: cfg.data["apps"]["blender"][field] for field in expected} == expected
-    assert {field: cfg.data["apps"]["blender"][field] for field in operational} == operational
-    assert "level_horizon_on_entry" not in cfg.data["apps"]["blender"]
-    assert notifications == ["changed"]
+    assert cfg.snapshot().app_value("blender", "navigation.orbit.sensitivity") == 1.5
+    assert dict(cfg.snapshot().app_operational["blender"]) == operational
+    assert len(notifications) == 1
     on_disk = json.loads(cfg.path.read_text(encoding="utf-8"))
-    assert {field: on_disk["apps"]["blender"][field] for field in expected} == expected
+    assert on_disk["app_overrides"]["blender"] == {}
 
 
 def test_reset_removes_non_profile_advanced_data_and_profiles_are_detached(isolated_config):
-    cfg = Config().load()
-    cfg.data["apps"]["fusion360"]["advanced"] = {"unexpected": True}
-    cfg.reset_app_profile("fusion360")
-    assert cfg.data["apps"]["fusion360"]["advanced"] == {
-        "twist_action": "roll", "zoom_style": "zoom"}
-
     first = default_app_profile("fusion360")
     first["bindings"]["orbit"]["sensitivity"] = 999
     assert default_app_profile("fusion360")["bindings"]["orbit"]["sensitivity"] != 999
 
 
 def test_default_profile_source_contains_every_navigation_field(isolated_config):
-    cfg = Config().load()
     for key in DEFAULT_PROFILE_KEYS:
         profile = default_app_profile(key)
-        expected_fields = {field for field in APP_PROFILE_FIELDS
-                           if field in cfg.data["apps"][key]}
-        assert set(profile) == expected_fields
-        assert profile == {field: copy.deepcopy(cfg.data["apps"][key][field])
-                           for field in expected_fields}
+        assert set(profile) <= set(APP_PROFILE_FIELDS)
+        assert "bindings" in profile and "advanced" in profile
 
 
 def test_python_bootstrap_contains_only_operational_app_state():

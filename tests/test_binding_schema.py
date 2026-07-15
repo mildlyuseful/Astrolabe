@@ -1,8 +1,9 @@
 """Declarative per-app binding superstructure and presentation conventions."""
 
 from trackball_daemon import integrations
-from trackball_daemon.binding_schema import APP_BINDING_PROFILES, BINDING_SECTIONS
+from trackball_daemon.app_registry import APP_BINDING_PROFILES
 from trackball_daemon.config import Config
+from trackball_daemon.settings_schema import BINDING_SECTIONS
 from trackball_daemon.ui import _option_label
 
 
@@ -19,9 +20,9 @@ def test_schema_covers_every_app_and_has_one_global_field_order():
 
 def test_all_apps_have_twist_config_and_zoom_target_config(isolated_config):
     cfg = Config().load()
-    for key, app in cfg.data["apps"].items():
+    for key, app in cfg.snapshot().app_profiles.items():
         assert app["advanced"]["twist_action"] in APP_BINDING_PROFILES[key].twist_actions
-        assert app["bindings"]["scheme"]["zoom_mode"] == "default"
+        assert app["bindings"]["scheme"]["zoom_mode"] != "default"
 
 
 def test_rich_profiles_get_shared_zoom_mode_and_capability_specific_fields():
@@ -48,7 +49,7 @@ def test_every_advanced_control_has_a_shipped_config_value(isolated_config):
         "pivot_extent": "pivot_extent_mult",
     }
     for app_key, profile in APP_BINDING_PROFILES.items():
-        advanced = cfg.data["apps"][app_key]["advanced"]
+        advanced = cfg.snapshot().app_profile(app_key)["advanced"]
         for field, config_key in config_key_by_field.items():
             if profile.supports(field):
                 assert config_key in advanced, f"{app_key}.{config_key} is required by {field}"

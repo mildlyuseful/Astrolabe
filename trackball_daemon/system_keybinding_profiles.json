@@ -1,0 +1,182 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "astrolabe_5way",
+      "label": "Astrolabe hardware",
+      "bindings": [
+        {
+          "id": "keyboard.ctrl.3d",
+          "label": "Ctrl: 3D",
+          "enabled": true,
+          "chord": ["keyboard:ctrl"],
+          "match": "allow_extra_modifiers",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "state.request", "target": "input.3d"}],
+          "release": [{"command": "state.release", "target": "input.3d"}]
+        },
+        {
+          "id": "keyboard.shift.pan",
+          "label": "Shift: Pan / Zoom",
+          "enabled": true,
+          "chord": ["keyboard:shift"],
+          "match": "allow_extra_modifiers",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "state.request", "target": "pan"}],
+          "release": [{"command": "state.release", "target": "pan"}]
+        },
+        {
+          "id": "keyboard.ctrl_shift.pan",
+          "label": "Ctrl + Shift: Pan / Zoom",
+          "enabled": true,
+          "chord": ["keyboard:ctrl", "keyboard:shift"],
+          "match": "exact",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "state.request", "target": "pan"}],
+          "release": [{"command": "state.release", "target": "pan"}]
+        },
+        {
+          "id": "astrolabe.center.toggle_mode",
+          "label": "Center: Toggle Pointer / 3D",
+          "enabled": true,
+          "chord": ["ble.astrolabe:fiveway.center"],
+          "match": "exact",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "input.mode.toggle"}],
+          "release": []
+        },
+        {
+          "id": "astrolabe.up.orbit",
+          "label": "Up: Orbit",
+          "enabled": true,
+          "chord": ["ble.astrolabe:fiveway.up"],
+          "match": "exact",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "navigation.mode.set", "target": "orbit"}],
+          "release": []
+        },
+        {
+          "id": "astrolabe.right.fly",
+          "label": "Right: Fly",
+          "enabled": true,
+          "chord": ["ble.astrolabe:fiveway.right"],
+          "match": "exact",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "navigation.mode.set", "target": "fly"}],
+          "release": []
+        },
+        {
+          "id": "astrolabe.down.walk",
+          "label": "Down: Walk",
+          "enabled": true,
+          "chord": ["ble.astrolabe:fiveway.down"],
+          "match": "exact",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "navigation.mode.set", "target": "walk"}],
+          "release": []
+        },
+        {
+          "id": "astrolabe.left.secondary",
+          "label": "Left: Secondary controls",
+          "enabled": true,
+          "chord": ["ble.astrolabe:fiveway.left"],
+          "match": "exact",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "state.request", "target": "orbit.secondary"}],
+          "release": [{"command": "state.release", "target": "orbit.secondary"}]
+        },
+        {
+          "id": "xiao.left.pointer_button",
+          "label": "XIAO Left click",
+          "enabled": true,
+          "chord": ["ble.xiao3389:button.left"],
+          "match": "exact",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "pointer.button.press", "target": "left"}],
+          "release": [{"command": "pointer.button.release", "target": "left"}]
+        },
+        {
+          "id": "xiao.right.pointer_button",
+          "label": "XIAO Right click",
+          "enabled": true,
+          "chord": ["ble.xiao3389:button.right"],
+          "match": "exact",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "pointer.button.press", "target": "right"}],
+          "release": [{"command": "pointer.button.release", "target": "right"}]
+        },
+        {
+          "id": "xiao.middle.pointer_button",
+          "label": "XIAO Middle click",
+          "enabled": true,
+          "chord": ["ble.xiao3389:button.middle"],
+          "match": "exact",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "pointer.button.press", "target": "middle"}],
+          "release": [{"command": "pointer.button.release", "target": "middle"}]
+        }
+      ]
+    },
+    {
+      "id": "keyboard_only",
+      "label": "Keyboard only",
+      "bindings": [
+        {
+          "id": "keyboard.ctrl.3d",
+          "label": "Ctrl: 3D",
+          "enabled": true,
+          "chord": ["keyboard:ctrl"],
+          "match": "allow_extra_modifiers",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "state.request", "target": "input.3d"}],
+          "release": [{"command": "state.release", "target": "input.3d"}]
+        },
+        {
+          "id": "keyboard.shift.pan",
+          "label": "Shift: Pan / Zoom",
+          "enabled": true,
+          "chord": ["keyboard:shift"],
+          "match": "allow_extra_modifiers",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "state.request", "target": "pan"}],
+          "release": [{"command": "state.release", "target": "pan"}]
+        },
+        {
+          "id": "keyboard.ctrl_shift.pan",
+          "label": "Ctrl + Shift: Pan / Zoom",
+          "enabled": true,
+          "chord": ["keyboard:ctrl", "keyboard:shift"],
+          "match": "exact",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "state.request", "target": "pan"}],
+          "release": [{"command": "state.release", "target": "pan"}]
+        },
+        {
+          "id": "keyboard.f12.toggle_mode",
+          "label": "F12: Toggle Pointer / 3D",
+          "enabled": true,
+          "chord": ["keyboard:f12"],
+          "match": "exact",
+          "activation": "hold",
+          "priority": 0,
+          "press": [{"command": "input.mode.toggle"}],
+          "release": []
+        }
+      ]
+    }
+  ]
+}

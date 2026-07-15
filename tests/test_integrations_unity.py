@@ -33,7 +33,7 @@ def test_install_copies_package_and_enables(isolated_config, tmp_path, monkeypat
     cfg = Config().load()
     ok, msg = integrations.install(integrations.APPS_BY_KEY["unity"], cfg)
     assert ok is True
-    u = cfg.data["apps"]["unity"]
+    u = cfg.snapshot().app_operational["unity"]
     assert u["installed"] is True and u["enabled"] is True
     assert u["addin_version"] == "0.1.15"
     dest = proj / "Packages" / "com.astrolabe.trackball-nav"
@@ -52,7 +52,7 @@ def test_install_fails_without_project(isolated_config, monkeypatch):
         integrations.install(integrations.APPS_BY_KEY["unity"], cfg))
     assert ok is False
     assert "project" in msg.lower()
-    assert cfg.data["apps"]["unity"]["installed"] is False
+    assert cfg.snapshot().app_operational["unity"]["installed"] is False
     assert copies and "staged" in copies[0][0].lower()
 
 
@@ -62,10 +62,10 @@ def test_reinstall_does_not_re_enable(isolated_config, tmp_path, monkeypatch):
     monkeypatch.setattr(integrations, "detect_unity", lambda: str(proj / "Unity.exe"))
     cfg = Config().load()
     integrations.install(integrations.APPS_BY_KEY["unity"], cfg)
-    cfg.data["apps"]["unity"]["enabled"] = False
+    cfg.set_app_operational("unity", enabled=False)
     ok, _msg = integrations.install(integrations.APPS_BY_KEY["unity"], cfg)
     assert ok is True
-    assert cfg.data["apps"]["unity"]["enabled"] is False
+    assert cfg.snapshot().app_operational["unity"]["enabled"] is False
 
 
 def test_auto_update_recopies_on_version_bump(isolated_config, tmp_path, monkeypatch):

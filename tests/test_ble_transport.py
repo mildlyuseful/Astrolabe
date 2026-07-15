@@ -1,0 +1,196 @@
+"""Generic BLE transport and legacy/five-way adapter selection."""
+
+import asyncio
+from types import SimpleNamespace
+import struct
+import threading
+
+from trackball_daemon.devices import (
+    BleConnectionConfig,
+    BleTransport,
+    DeviceAdapterRegistry,
+    DeviceSession,
+    GattInventory,
+    SnapshotInputProvider,
+    builtin_device_descriptors,
+    encode_input_state_snapshot,
+)
+from trackball_daemon.input import InputAggregator, ProviderStatus
+
+
+SERVICE = "2cad0001-6e64-0146-b139-9cf2a4cd57fc"
+ROTATION = "2cad0002-6e64-0146-b139-9cf2a4cd57fc"
+INPUT = "2cad0003-6e64-0146-b139-9cf2a4cd57fc"
+
+
+def _registry():
+    aggregator = InputAggregator()
+    descriptors = builtin_device_descriptors()
+    providers = {}
+    for descriptor in descriptors:
+        provider = SnapshotInputProvider(
+            descriptor, aggregator.accept_many, aggregator.update_health)
+        aggregator.register_provider(provider)
+        provider.configure(control.control_id for control in descriptor.controls)
+        providers[descriptor.source_id] = provider
+    return DeviceAdapterRegistry(descriptors, providers), providers, aggregator
+
+
+def _session(name, characteristics=(ROTATION, INPUT)):
+    return DeviceSession(
+        "AA:BB#1", name, "AA:BB",
+        GattInventory(frozenset((SERVICE,)), frozenset(characteristics)))
+
+
+def test_registry_selects_fiveway_by_data_descriptor_and_legacy_without_input_char():
+    registry, providers, _aggregator = _registry()
+    samples = []
+    config = BleConnectionConfig("Trackball BLE", "", ROTATION)
+
+    modern = registry.select(config, _session("Trackball BLE"), samples.append)
+    modern.connected(_session("Trackball BLE"))
+    assert modern.label == "XIAO3389 three-button test bench"
+    assert [item.characteristic_uuid for item in modern.subscriptions] == [ROTATION, INPUT]
+    assert providers["ble.xiao3389"].health.status is ProviderStatus.STARTING
+    modern.disconnected()
+
+    legacy_session = _session("Trackball BLE", (ROTATION,))
+    legacy = registry.select(config, legacy_session, samples.append)
+    legacy.connected(legacy_session)
+    assert legacy.label == "legacy Astrolabe rotation"
+    assert [item.characteristic_uuid for item in legacy.subscriptions] == [ROTATION]
+    assert providers["ble.xiao3389"].health.status is ProviderStatus.SUSPENDED
+
+
+def test_unknown_device_name_does_not_guess_an_input_bit_mapping():
+    registry, providers, _aggregator = _registry()
+    adapter = registry.select(
+        BleConnectionConfig("Community Device", "AA:BB", ROTATION),
+        _session("Community Device"), lambda _sample: None)
+    adapter.connected(_session("Community Device"))
+    assert len(adapter.subscriptions) == 1
+    assert all(provider.session is None for provider in providers.values())
+
+
+def test_fiveway_adapter_emits_exact_motion_and_normalized_input_events():
+    registry, _providers, aggregator = _registry()
+    samples = []
+    adapter = registry.select(
+        BleConnectionConfig("Astrolabe", "", ROTATION),
+        _session("Astrolabe"), samples.append)
+    adapter.connected(_session("Astrolabe"))
+    transitions = []
+    aggregator.add_listener(transitions.append)
+
+    callbacks = {item.characteristic_uuid: item.callback for item in adapter.subscriptions}
+    payload = struct.pack("<fff", 1.0, -2.0, 0.5)
+    callbacks[ROTATION](None, payload)
+    callbacks[INPUT](None, encode_input_state_snapshot(7, b"\x11"))
+
+    assert samples[0].payload == payload
+    assert samples[0].rotation == (1.0, -2.0, 0.5)
+    assert aggregator.snapshot().pressed_tokens == (
+        "ble.astrolabe:fiveway.center", "ble.astrolabe:fiveway.up")
+    assert transitions[-1].reason == "ble_input_snapshot"
+
+
+class _FakeService:
+    def __init__(self, uuid, characteristics):
+        self.uuid = uuid
+        self.characteristics = [SimpleNamespace(uuid=value) for value in characteristics]
+
+
+class _FakeServices:
+    def __init__(self):
+        self.services = {SERVICE: _FakeService(SERVICE, (ROTATION, INPUT))}
+
+
+class _FakeDevice:
+    name = "Trackball BLE"
+    address = "AA:BB"
+
+
+class _FakeScanner:
+    @staticmethod
+    async def find_device_by_name(name, timeout):
+        assert name == "Trackball BLE"
+        assert timeout == 10.0
+        return _FakeDevice()
+
+
+class _FakeClient:
+    instance = None
+
+    def __init__(self, target):
+        assert isinstance(target, _FakeDevice)
+        self.address = target.address
+        self.services = _FakeServices()
+        self.is_connected = True
+        self.started = []
+        self.stopped = []
+        self.__class__.instance = self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        self.is_connected = False
+
+    async def start_notify(self, uuid, callback):
+        self.started.append(uuid)
+        if uuid == ROTATION:
+            callback(None, struct.pack("<fff", 0.1, 0.2, 0.3))
+        elif uuid == INPUT:
+            callback(None, encode_input_state_snapshot(1, b"\x01"))
+
+    async def stop_notify(self, uuid):
+        self.stopped.append(uuid)
+
+
+def test_transport_discovers_and_subscribes_all_adapter_characteristics_then_disconnects():
+    registry, _providers, aggregator = _registry()
+    stop = threading.Event()
+    statuses = []
+    samples = []
+
+    async def sleep(_delay):
+        stop.set()
+
+    transport = BleTransport(
+        lambda: ("Trackball BLE", "", ROTATION),
+        registry,
+        samples.append,
+        statuses.append,
+        stop,
+        scanner=_FakeScanner,
+        client_factory=_FakeClient,
+        sleep=sleep,
+    )
+    asyncio.run(transport.run())
+
+    assert _FakeClient.instance.started == [ROTATION, INPUT]
+    assert _FakeClient.instance.stopped == [INPUT, ROTATION]
+    assert samples and samples[0].source_id == "ble.xiao3389.motion"
+    assert aggregator.snapshot().pressed_tokens == ()
+    assert any("XIAO3389 three-button test bench is live" in text for text in statuses)
+
+
+def test_transport_reports_scan_failure_without_constructing_a_client():
+    class BrokenScanner:
+        @staticmethod
+        async def find_device_by_name(_name, timeout):
+            raise OSError(f"adapter unavailable after {timeout}")
+
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    statuses = []
+
+    async def sleep(_delay):
+        stop.set()
+
+    transport = BleTransport(
+        lambda: ("Trackball BLE", "", ROTATION), registry,
+        lambda _sample: None, statuses.append, stop,
+        scanner=BrokenScanner, client_factory=lambda _target: None, sleep=sleep)
+    asyncio.run(transport.run())
+    assert any(text.startswith("scan error:") for text in statuses)

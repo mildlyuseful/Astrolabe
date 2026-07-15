@@ -4,7 +4,8 @@
  * Shared SPI: SCK=D8 MISO=D9 MOSI=D10.  CS_A=D7  CS_B=D6.  Buttons L/R/M = D0/D1/D2 to GND.
  *
  * EXTENSION: in addition to the HID mouse, this also broadcasts fused 3-axis ball
- * rotation over a custom 128-bit GATT service (one notify characteristic). The HID
+ * rotation over a custom 128-bit GATT service. A second additive notify characteristic
+ * publishes versioned full button-state snapshots for daemon/controller mode. The HID
  * mouse is unchanged and fully functional whether or not anything subscribes to the
  * rotation stream. See the blocks tagged "[GATT]" below.
  */
@@ -56,14 +57,23 @@
 // [GATT] Custom 3-axis rotation service (purely additive; HID mouse untouched)
 // ---------------------------------------------------------------------------
 // Random 128-bit base UUID; the service uses field 0x0001 and the characteristic
-// field 0x0002. These MUST match the daemon (cube_test.py) exactly:
+// fields 0x0002/0x0003. These MUST match the daemon exactly:
 //   service        2cad0001-6e64-0146-b139-9cf2a4cd57fc
-//   characteristic 2cad0002-6e64-0146-b139-9cf2a4cd57fc
+//   rotation       2cad0002-6e64-0146-b139-9cf2a4cd57fc (fixed 12-byte float32 x 3)
+//   input state    2cad0003-6e64-0146-b139-9cf2a4cd57fc (protocol v1 snapshot)
 // Adafruit Bluefruit takes 128-bit UUIDs little-endian (reverse of the strings above).
 const uint8_t ROT_SERVICE_UUID[16] = {
   0xFC,0x57,0xCD,0xA4,0xF2,0x9C,0x39,0xB1,0x46,0x01,0x64,0x6E,0x01,0x00,0xAD,0x2C };
 const uint8_t ROT_CHAR_UUID[16]    = {
   0xFC,0x57,0xCD,0xA4,0xF2,0x9C,0x39,0xB1,0x46,0x01,0x64,0x6E,0x02,0x00,0xAD,0x2C };
+const uint8_t INPUT_CHAR_UUID[16]  = {
+  0xFC,0x57,0xCD,0xA4,0xF2,0x9C,0x39,0xB1,0x46,0x01,0x64,0x6E,0x03,0x00,0xAD,0x2C };
+
+#define ASTROLABE_INPUT_PROTOCOL_VERSION  1
+#define ASTROLABE_FIRMWARE_PROTOCOL_REV    1
+#define ASTROLABE_INPUT_KIND_STATE        1
+#define ASTROLABE_INPUT_STATE_BYTES       1
+#define ASTROLABE_INPUT_PACKET_BYTES      6
 
 // 1:1 conversion. The solver outputs wx/wy/wz = R_counts * (true radians per poll),
 // where R_counts is the ball radius expressed in sensor counts. Divide by R_counts
@@ -219,15 +229,18 @@ static bool buildSolver() {
 
 BLEDis bledis;
 BLEHidAdafruit blehid;
-// [GATT] custom rotation service + one notify characteristic
+// [GATT] compatibility-frozen rotation plus additive input-state notification
 BLEService        rotationService(ROT_SERVICE_UUID);
 BLECharacteristic rotationChar(ROT_CHAR_UUID);
+BLECharacteristic inputStateChar(INPUT_CHAR_UUID);
 PMW3389 sensorA, sensorB;
 
 float    accX=0, accY=0, accScroll=0;
 // [GATT] integrated ball rotation since the last notify, in radians (float -> no remainder carry)
 float    gx=0, gy=0, gz=0;
 uint8_t  lastButtons=0, g_buttons=0;
+uint8_t  g_protocolButtons=0;
+uint16_t g_inputSequence=0;
 uint32_t lastPollUs=0, lastScrollMs=0, lastSendMs=0, lastBlinkMs=0;
 bool     ledState=false;
 
@@ -289,6 +302,28 @@ static void rotCccdCallback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t 
   else if(conn_hdl == g_ctrlConn) { g_controller = false; g_ctrlConn = BLE_CONN_HANDLE_INVALID; }
 }
 
+// [INPUT v1] Full-state snapshots repair missed notifications. This test-bench descriptor maps
+// bit 0/1/2 to Left/Right/Middle. The production five-way descriptor uses the same packet format
+// with bits 0..4, but its physical pin mapping does not belong in this test-bench sketch.
+static bool notifyInputState(uint16_t conn_hdl = BLE_CONN_HANDLE_INVALID){
+  uint8_t packet[ASTROLABE_INPUT_PACKET_BYTES] = {
+    ASTROLABE_INPUT_PROTOCOL_VERSION,
+    ASTROLABE_INPUT_KIND_STATE,
+    (uint8_t)(g_inputSequence & 0xFF),
+    (uint8_t)(g_inputSequence >> 8),
+    ASTROLABE_INPUT_STATE_BYTES,
+    g_protocolButtons
+  };
+  if(conn_hdl == BLE_CONN_HANDLE_INVALID) return inputStateChar.notify(packet, sizeof(packet));
+  return inputStateChar.notify(conn_hdl, packet, sizeof(packet));
+}
+
+// A new subscription/session receives an unconditional baseline before later state changes.
+static void inputCccdCallback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t value){
+  (void)value;
+  if(chr->notifyEnabled(conn_hdl)) notifyInputState(conn_hdl);
+}
+
 static void haltBlink(uint8_t blinks, const char *msg){
   pinMode(LED_BUILTIN, OUTPUT);
   for(;;){
@@ -322,6 +357,11 @@ static void setupRotationService(){
   rotationChar.setFixedLen(12);                         // 3 x float32 (rx,ry,rz) = one BLE packet
   rotationChar.setCccdWriteCallback(rotCccdCallback);   // [MODE] subscribe/unsubscribe == mode switch
   rotationChar.begin();
+  inputStateChar.setProperties(CHR_PROPS_NOTIFY);       // additive, never changes controller ownership
+  inputStateChar.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  inputStateChar.setFixedLen(ASTROLABE_INPUT_PACKET_BYTES);
+  inputStateChar.setCccdWriteCallback(inputCccdCallback);
+  inputStateChar.begin();
 }
 
 static void startAdv(){
@@ -462,6 +502,11 @@ void loop(){
   }
 
   g_buttons = readButtons();
+  if(g_buttons != g_protocolButtons){
+    g_protocolButtons = g_buttons;
+    g_inputSequence++;                                  // uint16_t wrap is the wire contract
+    notifyInputState();                                 // no-op unless at least one client subscribed
+  }
 
   if(Bluefruit.connected() && (nowMs-lastSendMs) >= BLE_SEND_MS){
     lastSendMs = nowMs;

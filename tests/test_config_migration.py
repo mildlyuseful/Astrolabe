@@ -8,7 +8,7 @@ import json
 
 import pytest
 
-from trackball_daemon.config import (Config, CONFIG_VERSION, DEFAULTS, DEFAULT_ACTION_AXIS_SOURCE,
+from trackball_daemon.config import (LegacyConfig as Config, CONFIG_VERSION, DEFAULTS, DEFAULT_ACTION_AXIS_SOURCE,
                                      DEFAULT_ORBIT_PIVOT_FALLBACKS,
                                      normalize_action_axis_sources,
                                      normalize_axis_permutation,
