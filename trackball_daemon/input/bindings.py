@@ -364,6 +364,20 @@ def load_system_binding_profiles(source=None):
     return _load_catalog(data)
 
 
+def _detached(value):
+    """Copy frozen config values into ordinary DSL containers.
+
+    Config snapshots deliberately expose nested ``MappingProxyType``/tuple values. Binding
+    composition is a read boundary and must accept those snapshots without asking ``deepcopy`` to
+    pickle their immutable wrappers.
+    """
+    if isinstance(value, Mapping):
+        return {key: _detached(child) for key, child in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_detached(child) for child in value]
+    return copy.deepcopy(value)
+
+
 def compose_binding_profile(catalog, profile_id, overrides):
     """Apply one sparse binding-ID-to-field-patch map without mutating the system profile."""
     if not isinstance(catalog, BindingProfileCatalog):
@@ -386,7 +400,7 @@ def compose_binding_profile(catalog, profile_id, overrides):
         consumed.add(binding.binding_id)
         if not isinstance(patch, Mapping) or set(patch) - patch_fields:
             raise ValueError(f"invalid override patch for {binding.binding_id}")
-        patch = dict(patch)
+        patch = _detached(patch)
         if patch.get("deleted") is True:
             if set(patch) != {"deleted"}:
                 raise ValueError(f"deleted override cannot contain fields: {binding.binding_id}")
@@ -394,7 +408,7 @@ def compose_binding_profile(catalog, profile_id, overrides):
         if "deleted" in patch:
             raise ValueError(f"deleted must be true when present: {binding.binding_id}")
         row = _binding_to_row(binding)
-        row.update(copy.deepcopy(patch))
+        row.update(patch)
         composed.append(_parse_binding(row, profile_id, catalog.control_selectors))
 
     for binding_id, patch in overrides.items():
@@ -403,7 +417,7 @@ def compose_binding_profile(catalog, profile_id, overrides):
             continue
         if not isinstance(patch, Mapping) or "deleted" in patch:
             raise ValueError(f"custom binding must be a complete binding object: {binding_id}")
-        row = copy.deepcopy(dict(patch))
+        row = _detached(patch)
         row["id"] = binding_id
         composed.append(_parse_binding(row, profile_id, catalog.control_selectors))
 

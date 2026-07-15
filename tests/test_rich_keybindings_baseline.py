@@ -55,15 +55,8 @@ def test_runtime_mode_survives_config_refresh_but_new_engine_uses_startup_defaul
     assert replacement.mode == OutputEngine.MODE_CURSOR
 
 
-def test_tray_mode_item_reads_and_mutates_the_shared_runtime_authority(monkeypatch):
-    """The Phase 3 command boundary replaces direct OutputEngine ownership."""
-    from trackball_daemon.commands import RequestState, SerializedCommandQueue
-    from trackball_daemon.runtime_state import RuntimeBaseState, RuntimeStore
-
-    runtime = RuntimeStore(lambda _context: RuntimeBaseState(input_mode="pointer"))
-    commands = SerializedCommandQueue(runtime)
-    origins = []
-    runtime.add_listener(lambda event: origins.append(event.origin))
+def test_tray_does_not_duplicate_declarative_mode_controls(monkeypatch):
+    """The HUD reports mode while configured bindings remain its only control surface."""
     engine = SimpleNamespace(
         mode=OutputEngine.MODE_CURSOR,
         reset_view=lambda: None,
@@ -71,11 +64,12 @@ def test_tray_mode_item_reads_and_mutates_the_shared_runtime_authority(monkeypat
     controller = TrayController.__new__(TrayController)
     controller.app = SimpleNamespace(
         engine=engine,
-        runtime=runtime,
-        commands=commands,
+        config=SimpleNamespace(snapshot=lambda: SimpleNamespace(
+            global_value=lambda _setting_id: True)),
         is_connected=lambda: False,
         app_connection_summary=lambda: "none",
         open_settings=lambda: None,
+        set_control_hud_visible=lambda _visible: None,
         quit=lambda: None,
     )
 
@@ -92,16 +86,9 @@ def test_tray_mode_item_reads_and_mutates_the_shared_runtime_authority(monkeypat
     )
 
     menu = controller._build_menu()
-    mode_item = menu[4]
-    assert mode_item.text(None) == "Mode: Pointer"
-    mode_item.action(None, None)
-    assert runtime.snapshot().effective_input_mode == "3d"
-    assert mode_item.text(None) == "Mode: 3D navigation"
-    commands.dispatch(RequestState(
-        origin="fake-provider", source="keyboard", binding_id="hold-pointer",
-        activation_id="hold-1", target="input.pointer"))
-    assert runtime.snapshot().effective_input_mode == "pointer"
-    assert origins == ["tray", "fake-provider"]
+    labels = [item.text for item in menu if item is not _Menu.SEPARATOR]
+    assert "Show control panel" in labels
+    assert not any(isinstance(label, str) and label.startswith("Mode:") for label in labels)
 
 
 def test_scheme_inheritance_uses_only_the_explicit_default_sentinel():

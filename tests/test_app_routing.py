@@ -22,6 +22,7 @@ from trackball_daemon.config import Config, host_baseline_payload
 from trackball_daemon.config_store import ConfigStore
 from trackball_daemon.commands import (
     RequestSettingOverride, RequestState, SerializedCommandQueue, SetFocusedContext)
+from trackball_daemon.input import BindingController, load_system_binding_profiles
 from trackball_daemon.output import OutputEngine
 from trackball_daemon.navigation_router import NavigationRouter
 from trackball_daemon.runtime_state import ConfigRuntimeBaseResolver, FocusedContext, RuntimeStore
@@ -29,6 +30,45 @@ from trackball_daemon.runtime_state import ConfigRuntimeBaseResolver, FocusedCon
 
 def _scheme(pivot="default", style="default", zoom="default"):
     return {"scheme": {"orbit_pivot": pivot, "orbit_style": style, "zoom_mode": zoom}}
+
+
+def test_saved_binding_override_recompiles_live_from_immutable_config_snapshot(tmp_path):
+    app = App.__new__(App)
+    app.config = ConfigStore(tmp_path / "config.json").load()
+    app.config.set_global("input.mode.default", "pointer")
+    app.binding_catalog = load_system_binding_profiles()
+    app.runtime = RuntimeStore(ConfigRuntimeBaseResolver(app.config))
+    app.commands = SerializedCommandQueue(app.runtime)
+    app.binding_controller = BindingController(
+        app._compiled_binding_profile(), app.commands, app.runtime)
+    app.controls = []
+    app.configure_keyboard_controls = lambda controls: app.controls.append(tuple(controls))
+    app.configure_ble_controls = lambda _source, _controls: None
+    app.ble_input_providers = {}
+    app.engine = SimpleNamespace(apply_config=lambda: None)
+    app.navigation = None
+    app.sw_driver = app.onshape_bridge = app.acad_loader = None
+    app.foreground_monitor = None
+    app._last_scheme_pushed = {}
+    app._last_runtime_rate = {}
+    app.config.add_listener(app.on_config_changed)
+
+    app.config.set_keybinding_override("astrolabe_5way", "user.binding.1", {
+        "label": "A toggles Pointer / 3D",
+        "enabled": True,
+        "chord": ["keyboard:a"],
+        "match": "exact",
+        "activation": "hold",
+        "priority": 0,
+        "press": [{"command": "input.mode.toggle"}],
+        "release": [],
+    })
+
+    assert "a" in app.binding_controller.compiled_profile.required_controls["keyboard"]
+    app.binding_controller.update_pressed(("keyboard:a",))
+    assert app.runtime.snapshot().effective_input_mode == "3d"
+    app.binding_controller.update_pressed(())
+    assert app.runtime.snapshot().effective_input_mode == "3d"
 
 
 def _bare_app():

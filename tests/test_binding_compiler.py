@@ -1,5 +1,6 @@
 from dataclasses import replace
 from itertools import permutations
+from types import MappingProxyType
 
 from trackball_daemon.commands import SerializedCommandQueue
 from trackball_daemon.config_store import ConfigStore
@@ -57,6 +58,23 @@ def _binding_row(chord, press, release=(), *, activation="hold", match="exact",
     if when is not None:
         row["when"] = when
     return row
+
+
+def test_profile_composition_accepts_deeply_immutable_config_snapshot_overrides():
+    catalog = load_system_binding_profiles()
+    overrides = MappingProxyType({
+        "keyboard.f12.toggle_mode": MappingProxyType({
+            "label": "A toggles mode",
+            "chord": ("keyboard:a",),
+            "press": (MappingProxyType({"command": "input.mode.toggle"}),),
+            "release": (),
+        }),
+    })
+    profile = compose_binding_profile(catalog, "keyboard_only", overrides)
+    binding = next(item for item in profile.bindings
+                   if item.id == "keyboard.f12.toggle_mode")
+    assert binding.label == "A toggles mode"
+    assert binding.chord == ("keyboard:a",)
 
 
 def test_cascading_dependencies_work_in_every_ctrl_shift_order():

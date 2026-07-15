@@ -77,7 +77,7 @@ commit only the intended files, record the commit in this table, and wait.
 | 7 — Binding compiler, DSL, and system profiles | COMPLETE | Start `7a0ae3d`; start ledger `6d1b7a4`; profiles/overrides `1283cb4`; compiler/runtime `86fd22c`; items 7.1–7.5 complete | Wait for explicit `START PHASE 8`. |
 | 8 — Motion/output integration | COMPLETE | Start `86d67e8`; start ledger `17cc139`; automated integration `5c3bcae`; completion `545a347`; items 8.1–8.6 and live gate complete | Wait for explicit `START PHASE 9`. |
 | 9 — Barebones settings UX | COMPLETE | Start `9a5b143`; generated UI `bf3d155`; acceptance refinements `89365c0`; items 9.1–9.5 complete | Wait for explicit `START PHASE 10`. |
-| 10 — Text HUD | IN_PROGRESS | Start `714fc72`; untouched baseline 620 passed/1 skipped; automated HUD checkpoint pending | Run the live Windows focus/monitor/DPI/click-through acceptance matrix, then complete and commit the phase. |
+| 10 — Text HUD | IN_PROGRESS | Start `714fc72`; implementation `2718601`; HUD live matrix passed; binding-reload fix pending retest | Retest one saved/restarted custom binding and confirm the redundant tray mode item is gone, then complete the phase. |
 | 11 — Full verification and release docs | NOT_STARTED | — | Start after Phases 0–10 are COMPLETE. |
 
 The dependencies above are stricter than numeric order where necessary. Phase 4 is an existing bug
@@ -574,8 +574,9 @@ treating that review as an authority:
 
 ### 0.17 Phase 10 in-progress checkpoint
 
-- **Status:** `IN_PROGRESS` from starting commit `714fc72`. Work items 10.1–10.4 are implemented;
-  the live Windows stop gate remains pending, so Phase 10 is not yet marked complete.
+- **Status:** `IN_PROGRESS` from starting commit `714fc72`; implementation checkpoint `2718601`.
+  Work items 10.1–10.4 and the HUD live matrix are implemented; one acceptance-found binding reload
+  regression remains pending live retest, so Phase 10 is not yet marked complete.
 - **Bootstrap and baseline:** the complete plan/HANDOFF/TODO and Phase 10 scope were reread; Phase 8
   was confirmed complete; the untouched full suite passed 620 tests with the Tk smoke skipped.
   User-owned `.claude/` and `docs/rich_keybindings_plan_revisions.md` remain untracked and
@@ -595,18 +596,27 @@ treating that review as an authority:
   work-area, and DPI identity, with cursor then primary fallback. Global settings own visibility,
   topmost, click-through, opacity, margin, and last-binding timeout; the tray has a checked
   visibility action. HUD-only config changes do not release bindings or rebuild transports.
-- **Automated verification:** `python -m pytest -q` currently passes 626 tests with two Tk skips;
+- **Acceptance-found defect:** a saved keybinding patch was persisted, but `App` passed its deeply
+  immutable config snapshot directly to a composer that used `copy.deepcopy` on nested
+  `mappingproxy` values. The subscriber exception was visible in `daemon.log` but did not roll back
+  the valid save, leaving the running compiler stale. Composition now explicitly detaches frozen
+  containers, and an App-level regression test proves save → immutable snapshot → live compiler →
+  provider registration → stationary activation. The tray's duplicate Pointer/3D action is
+  removed; mode status belongs to the HUD and mode control belongs to declarative bindings.
+- **Automated verification:** the post-fix suite passes 628 tests with two Tk skips;
   one is the pre-existing settings smoke and one is the new HUD smoke. The shell Python install has
   no usable Tcl/Tk runtime, so native window behavior cannot be honestly closed from this sandbox.
   Pure projection, held/last timing, semantic help, bounded/concurrent coalescing, geometry,
   settings/default coverage, runtime/compiler regressions, `py_compile`, and `git diff --check`
   pass.
-- **Manual stop gate:** pending on a real Windows desktop. Verify live stationary keyboard and BLE
-  updates, timed last-used clearing, tray and Global visibility/options, no focus steal, foreground
-  monitor following, taskbar/work-area changes, mixed-DPI movement, and click-through on/off.
-- **Next exact action:** run and report the Phase 10 manual acceptance matrix. If it passes, mark
-  Phase 10 `COMPLETE`, record the checkpoint commit and exact results, set the next action to wait
-  for explicit `START PHASE 11`, and stop without pushing.
+- **Manual stop gate:** the user reported the full HUD matrix passing: stationary keyboard/BLE
+  updates, held/last timing, visibility/options, focus retention, work-area/monitor/DPI placement,
+  and click-through all behaved as expected. That pass also exposed the independent live binding
+  recompilation defect above.
+- **Next exact action:** restart on the fix, save one keyboard binding, prove it applies immediately
+  and after restart, and confirm the tray no longer exposes a mode toggle. If those pass, mark Phase
+  10 `COMPLETE`, record the final commit/results, set the next action to wait for explicit
+  `START PHASE 11`, and stop without pushing.
 
 ## 1. Product goals
 

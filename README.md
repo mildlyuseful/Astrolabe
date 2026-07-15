@@ -59,9 +59,10 @@ For the optional cube verification window:
 python -m trackball_daemon --debug
 ```
 
-The daemon starts with no main window. Use its tray icon to open Settings, change mode, inspect
-connection status, enable **Start at login**, or quit. Closing Settings hides it; it does not stop
-the daemon.
+The daemon starts with its passive control panel and no settings window. Use the tray icon to open
+Settings, show/hide the control panel, inspect connection status, enable **Start at login**, or
+quit. Input and navigation modes are changed by the declarative bindings shown under
+**Keybindings**. Closing Settings hides it; it does not stop the daemon.
 
 Do not pair the trackball as a Windows Bluetooth mouse while the daemon is consuming its BLE
 rotation service. With the daemon closed, the firmware's ordinary HID mouse path works normally.
@@ -74,9 +75,10 @@ rotation service. With the daemon closed, the firmware's ordinary HID mouse path
    The panel shows detected versions, supported/unverified status, every file or trust change, a
    manual path, and a health check before it acts.
 3. Complete the host-side step shown by the panel, if any, then restart or reload that host.
-4. Switch the daemon to **3D mode**, focus the host's 3D viewport, and move the ball. Hold **Shift**
-   for pan/zoom with the shipped bindings.
-5. Tune the app under **Per-App Bindings**. Use **Reset to defaults** to remove app-specific user
+4. Select the hardware or keyboard-only input profile under **Keybindings**. Switch to **3D mode**,
+   focus the host's 3D viewport, and move the ball. Hold **Shift** for pan/zoom with the shipped
+   bindings; the keyboard-only profile uses **F12** to toggle Pointer/3D.
+5. Tune the app under **Per-App**. Use **Reset app** to remove app-specific user
    overrides without disabling the integration or forgetting its installed add-on version.
 
 The status row and tray list the versions of add-ons that are actually connected. Bundled add-ons
@@ -157,7 +159,7 @@ restore three-axis orbit without overwriting the user's choice.
 
 ## Troubleshooting
 
-- Confirm the tray says the BLE device is connected and the daemon is in **3D mode**.
+- Confirm the tray says the BLE device is connected and the control panel reports **3D** mode.
 - Confirm the intended host is foreground, its integration is enabled, and the 3D viewport has
   focus where the host requires it.
 - Open **3D Apps** and run the listed health check. A connected row shows the loaded integration
