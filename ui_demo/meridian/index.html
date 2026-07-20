@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Astrolabe — Meridian</title>
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css?v=3">
+</head>
+<body data-mode="cube">
+<div class="desktop">
+  <div class="window" id="app">
+
+    <header class="titlebar">
+      <div class="brand">
+        <img class="brand-logo" src="assets/logo.svg" width="18" height="18" alt="">
+        <span class="brand-name">ASTROLABE</span>
+        <span class="brand-sub">meridian</span>
+      </div>
+      <div class="titlebar-right">
+        <div class="conn-pill" title="BLE link — pulses while the rotation stream is live">
+          <span class="conn-dot"></span>Connected
+        </div>
+        <button class="win-btn" id="btn-hide" title="Close hides to the tray" aria-label="Hide to tray">
+          <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="body">
+      <aside class="rail">
+        <div class="mode-seg" id="mode-toggle" role="group" aria-label="Input mode">
+          <span class="mode-thumb" id="mode-thumb"></span>
+          <button type="button" data-mode="cursor" title="Pointer mode">Ptr</button>
+          <button type="button" data-mode="cube" title="3D navigation">3D</button>
+        </div>
+
+        <nav class="rail-nav" id="rail-nav" aria-label="Pages">
+          <span class="rail-tick" id="rail-tick"></span>
+          <button type="button" data-page="hosts" class="is-active">
+            <span class="rail-label">Hosts</span>
+            <span class="rail-hint">feel &amp; setup</span>
+          </button>
+          <button type="button" data-page="bindings">
+            <span class="rail-label">Bindings</span>
+            <span class="rail-hint">chords</span>
+          </button>
+          <button type="button" data-page="system">
+            <span class="rail-label">System</span>
+            <span class="rail-hint">device &amp; HUD</span>
+          </button>
+        </nav>
+
+        <div class="rail-foot">
+          <div class="handshake" id="handshake" title="Add-on handshake">
+            <span class="hs-dot"></span>
+            <span class="hs-text">Blender · linked</span>
+          </div>
+          <div class="rail-meta">
+            <span class="mono">v0.1.55</span>
+            <button type="button" class="quit-btn" id="btn-quit">Quit</button>
+          </div>
+        </div>
+      </aside>
+
+      <main class="view" id="view" tabindex="-1"></main>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+  </div>
+</div>
+
+<dialog class="modal" id="modal"></dialog>
+<script src="app.js?v=3"></script>
+</body>
+</html>

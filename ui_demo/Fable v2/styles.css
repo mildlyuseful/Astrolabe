@@ -438,7 +438,7 @@ body[data-mode="cursor"] .legend-3d  { opacity: 0; transform: translateY(-4px); 
 
 .row {
   display: grid;
-  grid-template-columns: 148px 190px 18px 1fr;
+  grid-template-columns: 148px 190px 22px 1fr;
   align-items: center;
   gap: 4px 10px;
   min-height: 29px;
@@ -449,8 +449,11 @@ body[data-mode="cursor"] .legend-3d  { opacity: 0; transform: translateY(-4px); 
 .row .rc { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .row .hint { font-size: 10.5px; color: var(--text3); line-height: 1.35; }
 
-/* narrower, denser rows inside the app-detail pane */
-.detail .row { grid-template-columns: 116px 168px 18px 1fr; min-height: 27px; padding: 0; }
+/* narrower, denser rows inside the app-detail pane.
+   Two button slots (link + reset) sit full-size; the CONTROL column is the one
+   that shrinks when the window is tight (down to 96px), while the descriptor
+   keeps a 150px floor so it is never crushed. */
+.detail .row { grid-template-columns: 116px minmax(96px, 148px) 20px 20px minmax(150px, 1fr); gap: 4px 8px; min-height: 27px; padding: 0; }
 .detail .sect { margin: 9px 0 4px; }
 
 /* per-control divergence reset */
@@ -1077,6 +1080,181 @@ select.sel option { background: var(--surface); color: var(--text); }
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: none; }
 }
+
+/* ------------------------------------------------- link button (per-app layer)
+   Expresses inheritance instead of a "Default (General)" dropdown item:
+   linked = following the Global default (whole chain); broken = this app has
+   its own value. Paired with the reset button, which resets to System. */
+
+.link-chip {
+  width: 20px; height: 18px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  background: var(--inset);
+  cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+.link-chip .lk { width: 13px; height: 13px; display: block; }
+
+.link-chip.linked   { color: var(--text3); }
+.link-chip.linked:hover { color: var(--text2); border-color: var(--line3); }
+.link-chip.broken   { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
+.link-chip.broken:hover { background: rgba(138, 180, 255, 0.22); }
+
+/* a linked control reads as inherited, not editable-here */
+.rc.linked select.sel,
+.rc.linked input.text { opacity: 0.5; }
+.rc.linked .switch { opacity: 0.5; }
+
+/* pinned "Global defaults" row atop the app list */
+.app-item.global-row { color: var(--text); }
+.app-item.global-row .gicon {
+  width: 14px; height: 14px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  color: var(--accent);
+}
+.app-list .list-div {
+  height: 1px;
+  background: var(--line);
+  margin: 4px 2px 5px;
+}
+.app-list .list-cap {
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text3);
+  padding: 2px 7px 3px;
+}
+
+.detail-head .global-tag {
+  font: 500 10px var(--font);
+  color: var(--text3);
+  padding: 2px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+/* --------------------------------------------------------- keybindings page */
+
+.keys {
+  display: grid;
+  grid-template-columns: 210px 1fr;
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+}
+
+.keys-list { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); padding-right: 10px; }
+
+.kb-scroll { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; min-height: 0; flex: 1; }
+
+.kb-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+
+.kb-item:hover { background: rgba(255, 255, 255, 0.03); }
+.kb-item.on { background: var(--surface2); }
+.kb-item.disabled .kb-label { color: var(--text3); }
+
+.kb-label { font: 500 11.5px var(--font); color: var(--text); display: flex; align-items: center; gap: 6px; }
+.kb-item.disabled .kb-label { color: var(--text3); }
+.kb-off { font-size: 9px; color: var(--text3); border: 1px solid var(--line2); border-radius: 3px; padding: 0 3px; }
+
+.kb-chord { display: flex; flex-wrap: wrap; gap: 3px; }
+
+.chord-chip {
+  font: 600 9.5px var(--mono);
+  color: var(--text2);
+  background: var(--inset);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
+.chord-chip.plus { border: 0; background: transparent; color: var(--text3); padding: 1px 0; }
+.chord-chip.ble { color: var(--accent); border-color: rgba(138, 180, 255, 0.3); }
+
+.kb-new { margin-top: 6px; }
+
+.kb-editor { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding-right: 2px; }
+
+/* editor column is narrow: label | control, with the hint on its own line
+   under the control (the reset cell is unused here and collapses) */
+.kb-editor .row { grid-template-columns: 104px 1fr; row-gap: 0; min-height: 28px; }
+.kb-editor .row .rc { flex-wrap: wrap; }
+.kb-editor .row .rs { display: none; }
+.kb-editor .row .hint { grid-column: 2; margin: 0 0 5px; }
+.kb-editor .sect { margin: 10px 0 5px; }
+.kb-editor .app-actions { padding-top: 10px; }
+
+.kb-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 6px;
+}
+
+.kb-editor-head .app-name { font-size: 13px; }
+.kb-editor-head .spacer { flex: 1; }
+
+.chord-edit { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.chord-edit .chord-chip { cursor: default; }
+
+.kb-warn { font-size: 10.5px; color: var(--warn); margin: 2px 0 0; }
+
+/* device / capability health strip */
+.cap-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+
+.cap-item { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--text2); }
+.cap-item .mono { color: var(--text2); }
+.cap-item.absent { color: var(--text3); }
+
+.kb-empty { padding: 20px 8px; color: var(--text3); font-size: 11.5px; font-style: italic; text-align: center; }
+
+/* token picker inside the chord modal */
+.token-groups { display: flex; flex-direction: column; gap: 10px; }
+.token-group h5 {
+  margin: 0 0 4px;
+  font: 600 9.5px var(--font);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text3);
+}
+.token-wrap { display: flex; flex-wrap: wrap; gap: 5px; }
+.token-btn {
+  font: 600 10px var(--mono);
+  color: var(--text2);
+  background: var(--inset);
+  border: 1px solid var(--line2);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: color var(--t-fast), border-color var(--t-fast), background var(--t-fast);
+}
+.token-btn:hover { color: var(--text); border-color: var(--line3); }
+.token-btn.on { color: var(--accent); border-color: var(--accent); background: var(--accent-dim); }
 
 /* --------------------------------------------------------- reduced motion */
 

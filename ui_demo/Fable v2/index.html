@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Astrolabe — Control Daemon</title>
 <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body data-mode="cube">
 <div class="desktop">
@@ -108,17 +108,18 @@
         </div>
 
         <div class="mode-toggle" id="mode-toggle" role="radiogroup" aria-label="Input mode"
-             title="Global input mode — also toggleable from the tray">
+             title="Live input mode — normally driven by a keybinding; the tray toggles it too">
           <div class="mode-thumb" id="mode-thumb"></div>
-          <button data-mode="cursor" role="radio">Cursor</button>
-          <button data-mode="cube" role="radio">3D&nbsp;Nav</button>
+          <button data-mode="cursor" role="radio">Pointer</button>
+          <button data-mode="cube" role="radio">3D</button>
         </div>
 
         <nav class="rnav" id="rnav">
           <span class="rnav-tick" id="rnav-tick"></span>
           <button data-page="overview">Overview<span class="rnav-sub">link, runtime &amp; status</span></button>
-          <button data-page="apps">3D Apps<span class="rnav-sub">setup &amp; per-app bindings</span></button>
-          <button data-page="general">General<span class="rnav-sub">device, pointer &amp; defaults</span></button>
+          <button data-page="apps">3D Apps<span class="rnav-sub">setup &amp; per-app settings</span></button>
+          <button data-page="keys">Keybindings<span class="rnav-sub">controls &amp; input profiles</span></button>
+          <button data-page="general">General<span class="rnav-sub">device, pointer &amp; panel</span></button>
         </nav>
 
         <div class="rail-foot">
@@ -146,6 +147,6 @@
 <div id="modal-root"></div>
 <div id="toast-root"></div>
 
-<script src="app.js"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

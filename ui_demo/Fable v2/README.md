@@ -4,7 +4,7 @@ A front-end-only mock of a possible final design for the Astrolabe control daemo
 **It drives nothing** — every control is interactive but edits only in-memory demo state.
 
 Open `index.html` directly in a browser, or serve the folder with any static server.
-Pages deep-link via hash: `#overview`, `#apps:unreal`, `#apps:blender.routing`, `#general:pointer`, …
+Pages deep-link via hash: `#overview`, `#apps:global.nav`, `#apps:unreal.routing`, `#keys`, `#general:panel`, …
 
 ## Design style: **Precision Instrument Minimalism** (dark)
 
@@ -13,79 +13,106 @@ accent, CAD-standard X/Y/Z = red/green/blue, monospaced numerals, and the produc
 base-cut angle only in quiet places (logo, heading ticks, the rail's sliding nav tick).
 No frameworks, no webfonts, no images (all SVG inline); every animation is a short
 transform/opacity transition, the only continuous one is the 3 s connection pulse, and
-`prefers-reduced-motion` disables everything. The window is a fixed 880 × 560; nothing
-scrolls except the setup-instructions box inside 3D Apps.
+`prefers-reduced-motion` disables everything. The window is a fixed 880 × 560; the only
+scroll regions are the setup-instructions box and the keybinding list/editor.
+
+## What the daemon added, and how this demo absorbs it
+
+The `rich-keybindings` work reshaped the daemon's real settings surface into four Tkinter
+tabs — **3D Apps**, **Global**, **Per-App**, **Keybindings** — plus a passive text **control
+panel** and a three-layer **System → Global → per-app** settings model
+(`app_registry.py`, `settings_schema.py`, `settings_ui_model.py`, `binding_ui_model.py`,
+`system_keybinding_profiles.json`). Two moves keep that compact:
+
+- **Global + Per-App collapse into one master-detail.** The daemon gives every navigation
+  setting a Global default that each app either *links* to or *overrides*. Instead of two
+  parallel tabs, this demo pins a **“Global defaults”** row at the top of the 3D Apps list;
+  the eleven apps sit below it and visibly inherit from it. Selecting Global edits the
+  baseline; selecting an app edits its overrides against that baseline.
+- **Two per-control buttons replace the “Default (General)” sentinels.** In v1 every
+  per-app dropdown carried a fake “Default (General)” option to express inheritance. Here
+  each per-app row carries two small buttons:
+  - a **link button** — a **chain icon** when the control is *linked* (subdued, showing the
+    Global value) and a **broken-chain icon** when it is *unlinked* (live, app-specific).
+    Clicking it links ↔ unlinks; relinking discards the app’s own value.
+  - a **reset button** (↺) that resets the control to its shipped **System** default. It
+    appears whenever the current value differs from that System default — even while the row
+    is still *linked* (i.e. the Global default itself has moved off System) — and clicking it
+    **always breaks the link**, because holding the System value means no longer following
+    Global. The settings column is sized so both buttons sit at full size.
+
+  The Global-defaults row has no link (it is the baseline), so it shows only the reset
+  button, which resets that Global control to System.
 
 ## Information architecture
 
-Three pages behind a persistent left rail. The daemon's real config keys all have exactly
-one home; the map below is the contract the eventual UI should follow.
+Four pages behind a persistent left rail. Every real config key has exactly one home; this
+map is the contract the eventual UI should follow.
 
-| Region | Contents (real config keys) |
+| Region | Contents (config keys / source) |
 |---|---|
-| **Rail** (persistent) | Interactive ball diagram + mode-aware axis legend · global Cursor ↔ 3D Nav toggle (`general.default_mode` live value) · page nav · live add-on handshakes · daemon version / Quit. |
-| **Overview** | Link facts (device, status, mode), runtime endpoints (`bridge`, `onshape`), config/log paths, Start at login, Recenter 3D view, clickable per-app status tiles, first-run steps. |
-| **3D Apps → Setup** | Per app: detection, supported versions, install model, security notes, Set up / Update action, auto/manual/health instructions (`integrations.py` data). |
-| **3D Apps → Tuning** | `apps.<k>.rate_hz`, `bindings.orbit.sensitivity`, `bindings.pan.gain`, `bindings.zoom.gain/.dominance`, `bindings.toggle`, `advanced.fly_speed/.walk_speed` (rich), `orbit_pivot_hold_sec`, `zoom_cursor_hold_sec`. |
-| **3D Apps → Navigation** | Orbit behavior: `bindings.scheme.orbit_style/.orbit_pivot`, `advanced.twist_action/.lock_horizon`, `level_horizon_on_entry`, `selection_overrides_pivot`, Onshape userscript. Pan/Zoom behavior: `bindings.scheme.zoom_mode`, `advanced.zoom_style/.pan_scales_with_distance/.override_dynamic_clip/.pivot_extent_mult/.lock_camera_to_view`. |
-| **3D Apps → Routing** | Per-action X/Y/Z sources + inversion (`advanced.axis_source/.invert` per mode on rich hosts; `bindings.orbit/pan/zoom` sources on standard hosts). |
-| **General → Device & Orientation** | `device.name/.address`, `bridge.rate_hz`, permutation-safe `general.axis_orientation`. |
-| **General → 3D Defaults** | `general.scheme.*`, `general.level_horizon_on_entry`, `general.orbit_pivot_fallbacks` chain editor. |
-| **General → Pointer & Buttons** | `general.cursor.gain`, `general.scroll.*`, `general.default_mode`, reserved `general.buttons.*`. |
+| **Rail** (persistent) | Interactive ball diagram + mode-aware axis legend · live Pointer ↔ 3D toggle (`input.mode.default`, normally driven by a keybinding) · 4-item page nav · add-on handshake · daemon version / Quit. |
+| **Overview** | Link facts, active input profile, runtime endpoints (`bridge`, `onshape`), control-panel state, Start at login, Recenter, clickable per-app status tiles, first-run steps. |
+| **3D Apps → Global defaults** | The Global layer: **Tuning · Navigation · Routing** for the baseline every app inherits (`system_defaults.json` `global`). |
+| **3D Apps → \<app\> → Setup** | Detection, supported versions, install model, security notes, Set up / Update, honest auto/manual/health instructions (`integrations.py`). |
+| **3D Apps → \<app\> → Tuning** | `navigation.refresh_rate`, `orbit.sensitivity`, `pan.gain`, `zoom.gain/.dominance`, `fly.speed/.walk_speed` (rich), `orbit.pivot_hold_seconds`, `zoom.cursor_hold_seconds` — each with a link + reset button. |
+| **3D Apps → \<app\> → Navigation** | Orbit: `orbit.style/.pivot`, `twist_action`, `lock_horizon`, `level_horizon_on_entry`, `selection_override`, Onshape userscript. Pan/Zoom: `zoom.target`, `zoom.behavior`, `pan.scales_with_distance`, Unity `override_dynamic_clip` / `pivot_extent_multiplier`, Blender `lock_camera_to_view`. |
+| **3D Apps → \<app\> → Routing** | Per-action X/Y/Z source + inversion, per mode on rich hosts (`navigation.routing.*`). |
+| **Keybindings** | Input-profile selector (`astrolabe_5way`, `keyboard_only`) · device/capability health strip · binding list · editor: chord (Record…), extra-modifier match, active app, action (built-in command **or** a setting hold/toggle/cycle/add/multiply), value, Advanced DSL, delete / restore-System. |
+| **General → Device & Orientation** | `device.name/.address`, `bridge.rate_hz`, permutation-safe `input.axis_orientation`. |
+| **General → 3D Defaults** | The two device-wide scheme controls with no per-app form: startup `input.mode.default` and the `orbit.pivot_fallbacks` chain editor. |
+| **General → Pointer** | `pointer.cursor.gain`, `pointer.scroll.*`. Notes that physical buttons are mapped under Keybindings, not a reserved-button table. |
+| **General → Control Panel** | The passive HUD: `hud.visible/.always_on_top/.click_through/.opacity/.margin/.last_binding_timeout`. |
 
 ### Why it is organized this way
 
-- **Setup and bindings live together.** v1 (like the current Tkinter window) split an
-  app's integration from its navigation settings into different pages; here selecting a
-  host in the master list gives everything about it under four sub-tabs. One place to
-  look, fewer clicks.
-- **The header mode slider *is* the enable switch.** Each app's active control mode is a
-  color-coded Off · Orbit · Fly · Walk slider (standard hosts: Off · Orbit) in the detail
-  header. "Enabled" wasn't really a separate concept — an app is either off or being
-  driven in some mode — so merging them removes a control and makes mode a first-class,
-  always-visible fact. The app list mirrors it: an enabled app's status dot expands into
-  a circled mode letter (O/F/W) whose ring keeps the integration-status color; a disabled
-  app shows a dimmed plain dot.
-- **Tuning = numbers, Navigation = behavior.** Every scalar the user nudges while dialing
-  in feel (rates, gains, dominance, hold timers, fly/walk speeds) sits in Tuning; every
-  discrete behavioral choice (pivots, styles, twist action, horizon rules, zoom targets)
-  sits in Navigation. Fly/walk speeds are gains, so they belong in Tuning — that also
-  turns Navigation into a single stable panel instead of v1's per-mode sub-panels.
-- **Routing reads column-major.** Rotation actions (Pitch/Yaw/Twist or Orbit X/Y/Z) fill
-  the left column, translation actions (Pan/Zoom, Fwd/Strafe/Up-Dn) the right, instead of
-  zig-zagging. On rich hosts the routing-mode tabs default to the app's active mode.
-- **One trackball, everywhere.** The rail diagram is the only axis reference in the app;
-  hovering any X/Y/Z control (routing pickers, orientation editor, the legend itself)
-  highlights that axis, and the legend swaps meaning with the global mode toggle
-  (`X pitch · Y yaw · Z twist` vs `X cursor ↕ · Y cursor ↔ · Z scroll`).
-- **Every setting explains itself.** Rows are `label · control · reset · descriptor`; the
-  right-hand space carries a one-line explanation, ⓘ tooltips only for genuinely long
-  text.
-- **Divergence is visible and reversible per control.** Any control that differs from its
-  shipped default grows a small ↺ next to it; clicking resets just that setting (per-app
-  scheme fields go back to "Default (General)", the per-app level-horizon override is
-  removed so the app follows General again). The header ↺ resets the whole app profile;
-  operational state (mode/enable, install, add-in version) is outside that boundary,
-  exactly like `APP_PROFILE_FIELDS` in the daemon.
+- **Setup, tuning, and bindings live together.** Selecting a host gives everything about it
+  under four sub-tabs — no jumping between a “Global” tab and a “Per-App” tab to compare a
+  value against its default; the Global row is right there in the same list.
+- **The header mode slider is the enable switch.** Each app's active control mode is a
+  colour-coded **Off · Orbit · Fly · Walk** slider (standard hosts: Off · Orbit). Off is
+  “disabled,” so one control expresses both facts. The app list mirrors it: an enabled app's
+  status dot becomes a circled mode letter (O/F/W) keeping the integration-status colour; a
+  disabled app is a dimmed dot. (The Global row has no slider — it is a baseline, not a
+  running integration.)
+- **Tuning = numbers, Navigation = behaviour.** Scalars you nudge for feel (rates, gains,
+  dominance, hold timers, fly/walk speeds) sit in Tuning; discrete behavioural choices
+  (pivots, styles, twist, horizon rules, zoom targets) sit in Navigation, one stable panel.
+- **Keybindings is its own page.** Chords, input profiles, and the built-in/setting action
+  vocabulary are a distinct concern from how navigation *feels*, and the binding editor is a
+  full master-detail in its own right. Device presence shows as a health strip so a missing
+  provider (here the XIAO test-bench) is visible at a glance.
+- **The control panel gets a General sub-tab.** It is a handful of global HUD settings with
+  no per-app or per-app-capable analog, so it sits with the other device-wide settings.
+- **Every setting explains itself.** Rows are `label · control · link · reset · descriptor`;
+  each descriptor is a single line, with any option- or mode-specific detail (what a given
+  dropdown value does) moved into the ⓘ tooltip rather than the line itself.
+- **Divergence is visible and reversible.** Any control whose value differs from its shipped
+  System default grows a small ↺ that resets just that control to System — on the Global row
+  and on each app alike. On an app the link button additionally links/unlinks it from the
+  Global default. The header ↺ relinks a whole app; “Reset Global” resets the whole baseline.
+  Operational state (mode/enable, install, add-in version) is outside those boundaries,
+  matching `APP_PROFILE_FIELDS` / the daemon's reset scope.
 
 ### Interaction & animation rules
 
-- Segmented controls never repaint on click — they slide a thumb, exactly like the rail's
-  Cursor/3D toggle (equal-width buttons make the thumb a pure translate).
+- Segmented controls (sub-tabs, mode slider, match/profile toggles) never repaint on click —
+  they slide a thumb, exactly like the rail's Pointer/3D toggle.
 - A full page render happens only on rail navigation. Sub-tab clicks swap just their pane;
-  routing-mode tabs swap just the route rows; the fallback editor re-renders only itself;
-  value edits, axis picks, orientation swaps, and the mode slider mutate the DOM in place.
-  Nothing outside the thing you clicked ever flashes.
-- The pane that does swap enters with the same short fade/6 px rise used everywhere.
+  routing-mode tabs swap just the route rows; the fallback and keybinding editors re-render
+  only themselves; link / reset buttons, value edits, axis picks and the mode slider mutate the DOM in
+  place. Nothing outside the thing you clicked ever flashes.
 
 ## Parity notes
 
-Field visibility follows `trackball_daemon/app_registry.py` and `settings_schema.py`: per-app Pivot hold and Zoom
-hold timers, Twist action on every app, Pan-mode zoom (Zoom / Dolly) only where the host
+Field visibility follows `app_registry.py` / `settings_schema.py`: per-app Pivot hold and
+Zoom hold timers, Twist action on every app, Pan-mode zoom (Zoom / Dolly) only where the host
 implements both paths, SketchUp as a full rich app, Godot turntable-only with no
-roll/horizon controls, Fusion's Roll/Zoom/None twist set, and each integration's security
-notes from `integrations.py`. Free-orbit selection nudges twist to Roll once, mirroring
-`ui.py`.
+roll/horizon controls, Fusion's Roll/Zoom/None twist set, Unity's dynamic-clip and
+pivot-extent, Blender's camera-lock, and each integration's security notes from
+`integrations.py`. Keybinding chords, actions, match modes, and the two System profiles are
+ported from `system_keybinding_profiles.json` and `devices/descriptor_data`. Free-orbit
+selection still nudges twist to Roll once, mirroring `ui.py`.
 
 Orientation reference (unchanged): top view, front of the device toward you — X right
 (pitch), Y up (yaw), Z toward you (twist).
