@@ -194,6 +194,8 @@ def test_local_bridge_rejects_non_onshape_web_origins():
     assert ob._allowed_web_origin("https://cad.onshape.com") is True
     assert ob._allowed_web_origin("https://acme.onshape.com") is True
     assert ob._allowed_web_origin("https://127.51.68.120:8181") is True
+    assert ob._allowed_web_origin("https://127.51.68.120:8182") is False
+    assert ob._allowed_web_origin("https://127.51.68.120") is False
     assert ob._allowed_web_origin("") is True                 # direct local status-page visit
     assert ob._allowed_web_origin("https://evil.example") is False
     assert ob._allowed_web_origin("http://cad.onshape.com") is False

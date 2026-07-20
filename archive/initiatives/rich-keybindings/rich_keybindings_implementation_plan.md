@@ -2,7 +2,8 @@
 
 > **Archived completed execution plan.** Merged to `main` in `76104c2` on 2026-07-14.
 > Phase commands, ledgers, next actions, test counts, and version inventories below are historical
-> and have no current authority. See [`../../../AGENTS.md`](../../../AGENTS.md),
+> and have no current authority. References to the retired `HANDOFF.md` below are preserved historical
+> provenance, not current bootstrap instructions. See [`../../../AGENTS.md`](../../../AGENTS.md),
 > [`../../../docs/architecture.md`](../../../docs/architecture.md), and
 > [`../../../TODO.md`](../../../TODO.md) for current guidance.
 

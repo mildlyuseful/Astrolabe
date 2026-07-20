@@ -131,7 +131,6 @@ class App:
         self.onshape_bridge = OnshapeBridge(
             self._on_onshape_connection_changed,
             rate_hz=snapshot.global_value("navigation.refresh_rate"),
-            host=ocfg.get("address") or None, port=ocfg.get("port") or None,
             cert_path=ocfg.get("cert_path") or None, key_path=ocfg.get("key_path") or None)
         self.navigation = NavigationRouter(
             self.broker, self.sw_driver, self.onshape_bridge)

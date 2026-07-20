@@ -53,7 +53,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from .config import orbit_pivot_candidates
+from .config import ONSHAPE_BRIDGE_HOST, ONSHAPE_BRIDGE_PORT, orbit_pivot_candidates
 from .paths import user_config_dir
 from .util import get_logger
 
@@ -73,8 +73,9 @@ except Exception:                       # pragma: no cover - exercised only with
 
 
 # --- the loopback endpoint Onshape's 3Dconnexion client probes (see notes doc) ----------------
-BRIDGE_HOST = "127.51.68.120"
-BRIDGE_PORT = 8181
+BRIDGE_HOST = ONSHAPE_BRIDGE_HOST
+BRIDGE_PORT = ONSHAPE_BRIDGE_PORT
+_BRIDGE_ORIGIN = f"https://{BRIDGE_HOST}:{BRIDGE_PORT}"
 # Reported by GET /3dconnexion/nlproxy so Onshape thinks a recent 3DxWare service is present.
 NLPROXY_VERSION = "1.4.8.21486"
 # WAMP WELCOME server-ident. Free-form (the real proxy sends a 3Dconnexion copyright string; the
@@ -99,7 +100,7 @@ def _allowed_web_origin(origin):
         if parsed.scheme != "https":
             return False
         return (host == "onshape.com" or host.endswith(".onshape.com") or
-                host == BRIDGE_HOST)
+                (host == BRIDGE_HOST and parsed.port == BRIDGE_PORT))
     except Exception:
         return False
 
@@ -869,7 +870,7 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
 // ==/UserScript==
 (function () {
   "use strict";
-  var ENDPOINT = "https://127.51.68.120:8181/trackball/pointer";
+  var ENDPOINT = "__ASTROLABE_ONSHAPE_ORIGIN__/trackball/pointer";
   var last = { t: 0, x: 0, y: 0, on: false };
   function canvasEl() {
     return document.getElementById("canvas") || document.querySelector("canvas");
@@ -913,10 +914,10 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
     } catch (e) {}
   }, 200);
 })();
-"""
+""".replace("__ASTROLABE_ONSHAPE_ORIGIN__", _BRIDGE_ORIGIN)
 
-POINTER_SCRIPT_URL = "https://127.51.68.120:8181/trackball/pointer.js"
-POINTER_STATUS_URL = "https://127.51.68.120:8181/trackball/pointer"
+POINTER_SCRIPT_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer.js"
+POINTER_STATUS_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer"
 
 
 def pointer_userscript_source():
@@ -1000,10 +1001,11 @@ class OnshapeBridge:
         requested_host = BRIDGE_HOST if host is None else host
         if requested_host != BRIDGE_HOST:
             raise ValueError("Onshape bridge must bind the fixed loopback endpoint")
+        requested_port = BRIDGE_PORT if port is None else port
+        if requested_port != BRIDGE_PORT:
+            raise ValueError(f"Onshape bridge port must remain fixed at {BRIDGE_PORT}")
         self._host = BRIDGE_HOST
-        self._port = int(BRIDGE_PORT if port is None else port)
-        if not 1 <= self._port <= 65535:
-            raise ValueError("Onshape bridge port must be in 1..65535")
+        self._port = BRIDGE_PORT
         d_cert, d_key = default_cert_paths()
         self._cert_path = cert_path or d_cert
         self._key_path = key_path or d_key

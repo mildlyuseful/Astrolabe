@@ -1,1 +1,36 @@
-{"version": "0.3.16"}
+{
+    "schema":  1,
+    "version":  "0.3.16",
+    "assembly_version":  "0.3.16.0",
+    "informational_version":  "0.3.16+76c750f56cb14122ee111446eb505bb8b6430a43",
+    "source_revision":  "76c750f56cb14122ee111446eb505bb8b6430a43",
+    "source_tree":  "fd96e15e5a73f51bbcbe806833091c8dfca0d228",
+    "dll_sha256":  "6e1355934db3e8764dd8a9ea24a84290a22496cea924584adb43396c6ee02ca8",
+    "dll_size":  40448,
+    "target_framework":  "net8.0-windows",
+    "platform":  "x64",
+    "dotnet_sdk":  "8.0.422",
+    "autocad_reference_family":  "AutoCAD 2026 managed .NET 8",
+    "autocad_references":  [
+                               {
+                                   "name":  "accoremgd.dll",
+                                   "file_version":  "25.1.164.0.0",
+                                   "sha256":  "4e8c983cf14e9da588e259f1216c7a66fa315f39fc373886f2166e38ba5fccd6"
+                               },
+                               {
+                                   "name":  "acdbmgd.dll",
+                                   "file_version":  "25.1.164.0.0",
+                                   "sha256":  "23673c9058987890d06c868a159ea8af74a0c6347f46068dc30c46149bf50437"
+                               },
+                               {
+                                   "name":  "acmgd.dll",
+                                   "file_version":  "25.1.164.0.0",
+                                   "sha256":  "cf120f26a851a1cf6936d684c715d4b1c2c052552f8697f888473dab4bb0cdc6"
+                               }
+                           ],
+    "build_properties":  {
+                             "configuration":  "Release",
+                             "continuous_integration_build":  true,
+                             "deterministic":  true
+                         }
+}

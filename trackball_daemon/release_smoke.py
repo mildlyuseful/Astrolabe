@@ -3,6 +3,7 @@
 import importlib.resources
 import json
 
+from .autocad_artifact import validate_bundled_autocad_artifact
 from .devices import builtin_device_descriptors
 from .input.bindings import (
     compile_binding_profile,
@@ -44,6 +45,7 @@ def run_release_smoke():
     for name in _EXAMPLES:
         _read_json(root.joinpath("examples", name))
 
+    autocad = validate_bundled_autocad_artifact(root)
     catalog = load_system_binding_profiles()
     compiled = {
         profile_id: len(compile_binding_profile(profile, catalog).bindings)
@@ -56,4 +58,8 @@ def run_release_smoke():
         "devices": devices,
         "schemas": list(_SCHEMAS),
         "examples": list(_EXAMPLES),
+        "autocad_plugin": {
+            "version": autocad["version"],
+            "sha256": autocad["dll_sha256"],
+        },
     }

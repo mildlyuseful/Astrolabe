@@ -24,6 +24,12 @@ New-Item -ItemType Directory -Force -Path $PythonArtifacts, $NuitkaArtifacts, $N
 Push-Location $RepoRoot
 try {
     $env:NUITKA_CACHE_DIR = $NuitkaCache
+    python tools/verify_autocad_artifact.py
+    if ($LASTEXITCODE -ne 0) { throw "AutoCAD artifact verification failed with exit code $LASTEXITCODE" }
+
+    python -m trackball_daemon --release-smoke
+    if ($LASTEXITCODE -ne 0) { throw "Source release smoke failed with exit code $LASTEXITCODE" }
+
     python -m build --outdir $PythonArtifacts
     if ($LASTEXITCODE -ne 0) { throw "python -m build failed with exit code $LASTEXITCODE" }
 
@@ -34,19 +40,25 @@ try {
         --windows-console-mode=attach `
         --include-package=trackball_daemon `
         --include-package-data=trackball_daemon `
+        --include-data-files=trackball_daemon/plugins/autocad/TrackballNavAcad.dll=trackball_daemon/plugins/autocad/TrackballNavAcad.dll `
         --output-dir=$NuitkaArtifacts `
         --output-filename=Astrolabe.exe `
         tools/release_entry.py
     if ($LASTEXITCODE -ne 0) { throw "Nuitka failed with exit code $LASTEXITCODE" }
 
     $Executable = Join-Path $NuitkaArtifacts "release_entry.dist/Astrolabe.exe"
+    $PackagedAutoCAD = Join-Path $NuitkaArtifacts (
+        "release_entry.dist/trackball_daemon/plugins/autocad/TrackballNavAcad.dll")
     if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
         throw "Nuitka executable not found at expected path: $Executable"
+    }
+    if (-not (Test-Path -LiteralPath $PackagedAutoCAD -PathType Leaf)) {
+        throw "Nuitka AutoCAD plugin not found at expected path: $PackagedAutoCAD"
     }
     & $Executable --release-smoke
     if ($LASTEXITCODE -ne 0) { throw "Packaged release smoke failed with exit code $LASTEXITCODE" }
 
-    Get-FileHash -Algorithm SHA256 -LiteralPath $Executable |
+    Get-FileHash -Algorithm SHA256 -LiteralPath $Executable, $PackagedAutoCAD |
         Select-Object Algorithm, Hash, Path |
         Format-List
 }

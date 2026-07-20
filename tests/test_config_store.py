@@ -39,35 +39,54 @@ def test_fresh_install_persists_empty_override_maps_and_resolves_system_values(t
     assert "buttons" not in store.snapshot().general_profile
 
 
-def test_non_loopback_onshape_address_is_rejected_without_rewriting_source(tmp_path):
+@pytest.mark.parametrize(
+    ("field", "invalid", "expected"),
+    (("address", "0.0.0.0", "127.51.68.120"), ("port", 8182, 8181)),
+)
+def test_non_fixed_onshape_endpoint_is_rejected_without_rewriting_source(
+        tmp_path, field, invalid, expected):
     path = _store_path(tmp_path)
     ConfigStore(path).load()
     disk = json.loads(path.read_text(encoding="utf-8"))
-    disk["onshape"]["address"] = "0.0.0.0"
+    disk["onshape"][field] = invalid
     disk["global_overrides"]["pointer.cursor.gain"] = 300.0
-    path.write_text(json.dumps(disk), encoding="utf-8")
+    source = json.dumps(disk)
+    path.write_text(source, encoding="utf-8")
 
     store = ConfigStore(path).load()
 
-    assert store.snapshot().onshape["address"] == "127.51.68.120"
+    assert store.snapshot().onshape[field] == expected
     assert store.snapshot().global_value("pointer.cursor.gain") == 300.0
-    assert json.loads(path.read_text(encoding="utf-8"))["onshape"]["address"] == "0.0.0.0"
+    assert path.read_text(encoding="utf-8") == source
 
 
-def test_legacy_non_loopback_onshape_address_preserves_migrated_state_and_source(tmp_path):
+@pytest.mark.parametrize(
+    ("field", "invalid", "expected"),
+    (("address", "0.0.0.0", "127.51.68.120"), ("port", 8182, 8181)),
+)
+def test_legacy_non_fixed_onshape_endpoint_preserves_migrated_state_and_source(
+        tmp_path, field, invalid, expected):
     path = _store_path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     disk = json.loads((FIXTURES / "config_v8_migration.json").read_text(encoding="utf-8"))
-    disk["onshape"]["address"] = "0.0.0.0"
+    disk["onshape"][field] = invalid
     source = json.dumps(disk, indent=2)
     path.write_text(source, encoding="utf-8")
 
     store = ConfigStore(path).load()
 
-    assert store.snapshot().onshape["address"] == "127.51.68.120"
+    assert store.snapshot().onshape[field] == expected
     assert store.snapshot().global_value("pointer.cursor.gain") == 240.0
     assert store.snapshot().selected_app == "fusion360"
     assert path.read_text(encoding="utf-8") == source
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"), (("address", "0.0.0.0"), ("port", 8182)))
+def test_onshape_endpoint_cannot_be_changed_transactionally(tmp_path, field, invalid):
+    store = ConfigStore(_store_path(tmp_path)).load()
+    with pytest.raises(ValueError, match=rf"{field} must remain fixed"):
+        store.transaction().set_onshape(field, invalid).commit()
 
 
 def test_snapshot_is_copy_on_publish_and_deeply_immutable(tmp_path):

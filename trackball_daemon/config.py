@@ -287,6 +287,9 @@ GENERAL_PROFILE_FIELDS = {
     "orbit_pivot_fallbacks", "level_horizon_on_entry",
 }
 
+ONSHAPE_BRIDGE_HOST = "127.51.68.120"
+ONSHAPE_BRIDGE_PORT = 8181
+
 DEFAULTS = {
     "version": CONFIG_VERSION,
     "device": {
@@ -307,7 +310,8 @@ DEFAULTS = {
     # Under-cursor orbit uses a page userscript that POSTs exact #canvas NDC to /trackball/pointer
     # (see docs/apps/onshape.md §8.14). cursor_userscript_warn_dismissed suppresses the one-time
     # UI warning when the user picks Orbit pivot = cursor.
-    "onshape": {"address": "127.51.68.120", "port": 8181, "cert_path": "", "key_path": "",
+    "onshape": {"address": ONSHAPE_BRIDGE_HOST, "port": ONSHAPE_BRIDGE_PORT,
+                "cert_path": "", "key_path": "",
                 "cursor_userscript_warn_dismissed": False},
 }
 

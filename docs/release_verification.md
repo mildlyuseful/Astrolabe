@@ -17,18 +17,21 @@ python -m pip install -e ".[dev,release,onshape]"
 python -m pytest -q
 python -m compileall -q trackball_daemon tests tools
 python -m trackball_daemon.validate_bindings
+python tools/verify_autocad_artifact.py
 python -m trackball_daemon --release-smoke
 dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj --configuration Release
 & ".\tools\build_release.ps1"
 git diff --check
 ```
 
-`build_release.ps1` refuses output paths outside the repository, builds the sdist and wheel in an
-isolated PEP 517 environment, keeps Nuitka downloads/cache under `build/release`, creates a Windows
-standalone onedir executable, runs its side-effect-free packaged-resource smoke, and prints the
-executable's SHA-256. The smoke loads defaults, profiles, descriptors, schemas, and examples and
-compiles both System profiles without acquiring the controller mutex, opening BLE or Raw Input,
-starting the tray, loading host integrations, or writing user config.
+`build_release.ps1` refuses output paths outside the repository, verifies the bundled AutoCAD DLL
+against its source-tree and hash manifest, builds the sdist and wheel in an isolated PEP 517
+environment, keeps Nuitka downloads/cache under `build/release`, explicitly includes the AutoCAD DLL,
+creates a Windows standalone onedir executable, and runs its side-effect-free packaged-resource smoke.
+The smoke validates the AutoCAD DLL and loads defaults, profiles, descriptors, schemas, and examples,
+then compiles both System profiles without acquiring the controller mutex, opening BLE or Raw Input,
+starting the tray, loading host integrations, or writing user config. The script prints SHA-256 values
+for both the executable and packaged AutoCAD DLL.
 
 Before release, also install the wheel into a clean Windows account without Python or a source
 checkout, exercise the onedir GUI there, uninstall/reverse every path in `security.md`, and retain

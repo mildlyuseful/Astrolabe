@@ -49,6 +49,9 @@ DEPRECATED_V9_SETTING_IDS = frozenset({"navigation.legacy_layer_toggle"})
 DEFAULT_INPUT_PROFILE = "astrolabe_5way"
 INPUT_PROFILES = SYSTEM_INPUT_PROFILE_IDS
 logger = logging.getLogger("trackball_daemon.config_store")
+_FIXED_ONSHAPE_ENDPOINT = {
+    key: DEFAULTS["onshape"][key] for key in ("address", "port")
+}
 
 APP_OPERATIONAL_FIELDS = ("enabled", "installed", "addin_version")
 GLOBAL_INTERNAL_PATHS = {
@@ -84,6 +87,20 @@ def _valid_internal_value(internal_id, value):
     if internal_id.endswith("deadzone"):
         return value >= 0
     return value > 0
+
+
+def _repair_fixed_onshape_endpoint(state):
+    onshape = state.get("onshape") if isinstance(state, dict) else None
+    if not isinstance(onshape, dict):
+        return frozenset()
+    rejected = set()
+    for key, expected in _FIXED_ONSHAPE_ENDPOINT.items():
+        if key in onshape and onshape[key] != expected:
+            onshape[key] = expected
+            rejected.add(key)
+            logger.error(
+                "Rejected non-fixed Onshape %s; preserving source file", key)
+    return frozenset(rejected)
 
 
 def _get_path(root, path, default=None):
@@ -325,10 +342,9 @@ def validate_v9_state(state):
     for key, default in DEFAULTS["onshape"].items():
         if type(state["onshape"][key]) is not type(default):
             raise ValueError(f"invalid Onshape setting: {key}")
-    if state["onshape"]["address"] != DEFAULTS["onshape"]["address"]:
-        raise ValueError("Onshape address must remain the fixed loopback endpoint")
-    if not 1 <= state["onshape"]["port"] <= 65535:
-        raise ValueError("invalid Onshape port")
+    for key, expected in _FIXED_ONSHAPE_ENDPOINT.items():
+        if state["onshape"][key] != expected:
+            raise ValueError(f"Onshape {key} must remain fixed at {expected}")
     if (not isinstance(state["ui_state"], dict) or set(state["ui_state"]) != {"selected_app"} or
             state["ui_state"].get("selected_app") not in APP_IDS):
         raise ValueError("invalid selected app")
@@ -587,34 +603,16 @@ class ConfigStore:
                     if isinstance(disk, dict) and disk.get("version") == CONFIG_VERSION:
                         candidate = copy.deepcopy(disk)
                         cleaned = _remove_deprecated_v9_settings(candidate)
-                        onshape = candidate.get("onshape")
-                        rejected_address = (
-                            isinstance(onshape, dict) and
-                            set(onshape) == set(DEFAULTS["onshape"]) and
-                            onshape.get("address") != DEFAULTS["onshape"]["address"]
-                        )
-                        if rejected_address:
-                            onshape["address"] = DEFAULTS["onshape"]["address"]
-                            logger.error(
-                                "Rejected non-loopback Onshape address; preserving source file")
+                        rejected_endpoint = _repair_fixed_onshape_endpoint(candidate)
                         validate_v9_state(candidate)
-                        if cleaned and not rejected_address:
+                        if cleaned and not rejected_endpoint:
                             self._save_unlocked(candidate)
                         self._state = candidate
                     else:
                         legacy = copy.deepcopy(disk)
-                        onshape = legacy.get("onshape") if isinstance(legacy, dict) else None
-                        rejected_address = (
-                            isinstance(onshape, dict) and
-                            "address" in onshape and
-                            onshape.get("address") != DEFAULTS["onshape"]["address"]
-                        )
-                        if rejected_address:
-                            onshape["address"] = DEFAULTS["onshape"]["address"]
-                            logger.error(
-                                "Rejected non-loopback Onshape address; preserving source file")
+                        rejected_endpoint = _repair_fixed_onshape_endpoint(legacy)
                         migrated = migrate_v8_to_v9(legacy)
-                        if not rejected_address:
+                        if not rejected_endpoint:
                             self._save_unlocked(migrated)
                         self._state = migrated
                 except (OSError, json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
@@ -778,9 +776,10 @@ class ConfigStore:
         elif kind == "set_bridge_port":
             state["bridge"]["port"] = operation[1]
         elif kind == "set_onshape":
-            if operation[1] not in state["onshape"]:
-                raise ValueError(f"unknown Onshape setting: {operation[1]}")
-            state["onshape"][operation[1]] = operation[2]
+            key, value = operation[1:]
+            if key not in state["onshape"]:
+                raise ValueError(f"unknown Onshape setting: {key}")
+            state["onshape"][key] = value
         else:
             raise ValueError(f"unknown config operation: {kind}")
 

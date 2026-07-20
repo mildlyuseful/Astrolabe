@@ -37,9 +37,9 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 
 - Compile `firmware/XIAO3389/XIAO3389.ino` in CI with pinned board-core and library versions; report
   artifact size. Add a pinned `west` build when the ZMK module begins.
-- Make the AutoCAD release artifact traceable to current source. Build it in the release workflow when
-  possible; otherwise verify source hashes, assembly version, DLL hash, target framework, and Autodesk
-  reference family, and fail when the bundled DLL is stale.
+- Make `tools/build_autocad_plugin.ps1` the sole publisher of the bundled AutoCAD DLL and provenance
+  manifest. A bare Release build currently overwrites them with an intentionally fail-closed minimal
+  manifest; gate or remove that project target in the next attributed plugin-source commit.
 - Build the sdist and wheel in CI, install the wheel outside the checkout, and run binding validation
   and release smoke against the installed package.
 - Produce a deterministic archive of the complete Nuitka onedir output and publish its checksum. The

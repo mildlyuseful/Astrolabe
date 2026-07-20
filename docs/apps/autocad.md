@@ -64,8 +64,18 @@ A locked installed DLL is staged and applied on a later AutoCAD start. Plugin so
 new build and an AutoCAD restart; daemon loader changes require a daemon restart. Keep the project
 version, `Plugin.PluginVersion`, bundled DLL, and manifest synchronized.
 
+Build a shippable DLL with `tools/build_autocad_plugin.ps1`, not a bare Release build. The controlled
+build refuses modified or untracked plugin sources, injects an existing full source revision into the
+assembly informational version, and records the plugin source-tree ID, DLL hash, target framework,
+.NET SDK, and exact AutoCAD managed-reference versions and hashes in `version.json`. The artifact
+commit can follow the recorded source revision; requiring a binary to name the commit that contains
+that same binary would be circular. `tools/verify_autocad_artifact.py`, the Python suite, and release
+smoke fail when the committed plugin source tree or bundled DLL no longer matches the manifest.
+
 The production build targets the managed API references for the supported AutoCAD generation. A
-successful compile alone does not establish runtime compatibility with another binary era.
+successful compile alone does not establish runtime compatibility with another binary era. The known
+`WindowsBase` 4.0/8.0 resolution warning remains a release-integrity warning even when the build has
+zero errors.
 
 ## Camera contract
 
@@ -148,9 +158,10 @@ Automated checks cover:
 Run the focused suites before the full Python suite:
 
 ```powershell
-python -m pytest tests/test_autocad_loader.py tests/test_integrations_autocad.py tests/test_app_routing.py -q
+python -m pytest tests/test_autocad_loader.py tests/test_integrations_autocad.py tests/test_autocad_artifact_provenance.py tests/test_app_routing.py -q
 dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj -c Release
-dotnet build plugin_src/autocad/TrackballNavAcad/TrackballNavAcad.csproj -c Release
+& ".\tools\build_autocad_plugin.ps1"       # only when producing a new bundled DLL
+python tools/verify_autocad_artifact.py
 ```
 
 A current live claim requires the built DLL loaded into a disposable AutoCAD session. Record completed

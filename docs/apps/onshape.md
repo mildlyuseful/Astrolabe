@@ -49,9 +49,9 @@ NL-Proxy session**, but not its camera math (we reuse the Fusion add-in's vector
 
 ## 3. Endpoint & discovery
 
-- Host/port: **`127.51.68.120:8181`, HTTPS/WSS only**. The host is a fixed loopback security
-  boundary: config validation and `OnshapeBridge` reject any other bind address. Onshape is HTTPS, so
-  mixed-content rules forbid `ws://`.
+- Host/port: **`127.51.68.120:8181`, HTTPS/WSS only**. The complete endpoint is a fixed loopback
+  security boundary: config validation and `OnshapeBridge` reject any other bind address or port.
+  Onshape is HTTPS, so mixed-content rules forbid `ws://`.
 - HTTP discovery: Onshape first does `GET https://127.51.68.120:8181/3dconnexion/nlproxy`; we reply
   `{"port":8181,"version":"1.4.8.21486"}`. This is **cross-origin** (page is `https://cad.onshape.com`)
   so an allowed response carries CORS headers (`Access-Control-Allow-Origin`, echoing the request

@@ -1,5 +1,6 @@
 """Protocol and resource-boundary tests for the local Onshape WebSocket server."""
 import base64
+import json
 import struct
 
 import pytest
@@ -217,6 +218,18 @@ def handshake_for(request):
     sock = FakeSocket(request)
     bridge = type("Bridge", (), {"_log": None})()
     return ob._OnshapeConn(bridge, sock), sock
+
+
+def test_discovery_advertises_the_fixed_listener_port():
+    connection, sock = handshake_for(websocket_request(path="/3dconnexion/nlproxy"))
+
+    assert connection.handshake_http() is False
+    response = sock.sent[-1]
+    assert response.startswith(b"HTTP/1.1 200")
+    assert json.loads(response.split(b"\r\n\r\n", 1)[1]) == {
+        "port": ob.BRIDGE_PORT,
+        "version": ob.NLPROXY_VERSION,
+    }
 
 
 @pytest.mark.parametrize(

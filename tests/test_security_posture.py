@@ -17,13 +17,14 @@ def test_network_listeners_are_loopback_only():
     broker = _source("trackball_daemon/navbroker.py")
     assert 'srv.bind(("127.0.0.1", self.port))' in broker
     assert onshape_bridge.BRIDGE_HOST.startswith("127.")
-    assert onshape_bridge.OnshapeBridge()._host == onshape_bridge.BRIDGE_HOST
+    bridge = onshape_bridge.OnshapeBridge()
+    assert (bridge._host, bridge._port) == (
+        onshape_bridge.BRIDGE_HOST, onshape_bridge.BRIDGE_PORT)
     with pytest.raises(ValueError, match="fixed loopback"):
         onshape_bridge.OnshapeBridge(host="0.0.0.0")
-    with pytest.raises(ValueError, match="port must be"):
-        onshape_bridge.OnshapeBridge(port=0)
-    with pytest.raises(ValueError, match="port must be"):
-        onshape_bridge.OnshapeBridge(port=65536)
+    for port in (0, 8182, 65536, "8181"):
+        with pytest.raises(ValueError, match="port must remain fixed"):
+            onshape_bridge.OnshapeBridge(port=port)
 
 
 def test_onshape_trust_is_manual_and_origin_scoped():

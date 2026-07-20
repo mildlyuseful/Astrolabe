@@ -81,3 +81,7 @@ def test_release_contracts_are_declared_and_readable_as_package_data():
         resource = package_root.joinpath(*relative.split("/"))
         assert resource.is_file(), relative
         assert resource.read_text(encoding="utf-8").strip().startswith(("{", "["))
+
+    autocad = package_root.joinpath("plugins", "autocad")
+    assert autocad.joinpath("TrackballNavAcad.dll").read_bytes().startswith(b"MZ")
+    assert json.loads(autocad.joinpath("version.json").read_text(encoding="utf-8"))["schema"] == 1
