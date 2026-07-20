@@ -1,9 +1,13 @@
 # SpaceMouse / navlib **desktop** bridge — Milestone 0 spike report
 
-Status: **SPIKE COMPLETE — feasibility decision pending.** This documents the reverse-engineering of
+> **Archived completed feasibility spike.** The desktop socket hypothesis was rejected; a clean-room
+> `TDxNavLib.dll` remains an unapproved deferred proposal. Current disposition is in
+> [`../../TODO.md`](../../TODO.md).
+
+Status: **SPIKE COMPLETE — desktop socket hypothesis rejected.** This documents the reverse-engineering of
 how native desktop CAD apps consume 3Dconnexion SpaceMouse input, the go/no-go per the Milestone 0
 plan, and the one viable driver-free path. **No bridge code has been written** — per the task, the
-build is gated behind this spike's decision. Companion: [`apps/onshape.md`](../apps/onshape.md)
+build is gated behind this spike's decision. Companion: [`docs/apps/onshape.md`](../../docs/apps/onshape.md)
 (the *web* navlib bridge, which this was supposed to generalize).
 
 > TL;DR: The task's leading hypothesis — "desktop navlib apps connect to a loopback WebSocket on

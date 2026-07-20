@@ -39,6 +39,37 @@ def test_fresh_install_persists_empty_override_maps_and_resolves_system_values(t
     assert "buttons" not in store.snapshot().general_profile
 
 
+def test_non_loopback_onshape_address_is_rejected_without_rewriting_source(tmp_path):
+    path = _store_path(tmp_path)
+    ConfigStore(path).load()
+    disk = json.loads(path.read_text(encoding="utf-8"))
+    disk["onshape"]["address"] = "0.0.0.0"
+    disk["global_overrides"]["pointer.cursor.gain"] = 300.0
+    path.write_text(json.dumps(disk), encoding="utf-8")
+
+    store = ConfigStore(path).load()
+
+    assert store.snapshot().onshape["address"] == "127.51.68.120"
+    assert store.snapshot().global_value("pointer.cursor.gain") == 300.0
+    assert json.loads(path.read_text(encoding="utf-8"))["onshape"]["address"] == "0.0.0.0"
+
+
+def test_legacy_non_loopback_onshape_address_preserves_migrated_state_and_source(tmp_path):
+    path = _store_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    disk = json.loads((FIXTURES / "config_v8_migration.json").read_text(encoding="utf-8"))
+    disk["onshape"]["address"] = "0.0.0.0"
+    source = json.dumps(disk, indent=2)
+    path.write_text(source, encoding="utf-8")
+
+    store = ConfigStore(path).load()
+
+    assert store.snapshot().onshape["address"] == "127.51.68.120"
+    assert store.snapshot().global_value("pointer.cursor.gain") == 240.0
+    assert store.snapshot().selected_app == "fusion360"
+    assert path.read_text(encoding="utf-8") == source
+
+
 def test_snapshot_is_copy_on_publish_and_deeply_immutable(tmp_path):
     store = ConfigStore(_store_path(tmp_path)).load()
     before = store.snapshot()

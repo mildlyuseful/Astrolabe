@@ -1,5 +1,8 @@
 # Rich keybindings plan — review notes and proposed revisions
 
+> **Archived pre-implementation review.** Accepted items were incorporated into the completed
+> implementation; rejected or corrected suggestions below are not current decisions.
+
 Status: review of `rich_keybindings_implementation_plan.md` (branch `rich-keybindings`)
 
 This is a review of the implementation plan, not of any implementation. The plan is sound overall:

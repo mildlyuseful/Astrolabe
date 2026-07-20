@@ -1,6 +1,8 @@
 """Regression checks for the integration security and permission contract."""
 from pathlib import Path
 
+import pytest
+
 from trackball_daemon import onshape_bridge
 
 
@@ -13,10 +15,15 @@ def _source(path):
 
 def test_network_listeners_are_loopback_only():
     broker = _source("trackball_daemon/navbroker.py")
-    onshape = _source("trackball_daemon/onshape_bridge.py")
     assert 'srv.bind(("127.0.0.1", self.port))' in broker
     assert onshape_bridge.BRIDGE_HOST.startswith("127.")
-    assert "srv.bind((self._host, self._port))" in onshape
+    assert onshape_bridge.OnshapeBridge()._host == onshape_bridge.BRIDGE_HOST
+    with pytest.raises(ValueError, match="fixed loopback"):
+        onshape_bridge.OnshapeBridge(host="0.0.0.0")
+    with pytest.raises(ValueError, match="port must be"):
+        onshape_bridge.OnshapeBridge(port=0)
+    with pytest.raises(ValueError, match="port must be"):
+        onshape_bridge.OnshapeBridge(port=65536)
 
 
 def test_onshape_trust_is_manual_and_origin_scoped():

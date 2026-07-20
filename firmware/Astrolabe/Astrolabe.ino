@@ -1,20 +1,14 @@
 /*
  * Astrolabe — production trackball firmware (PLACEHOLDER, not started).
  *
- * This sketch is the planned successor to firmware/XIAO3389/XIAO3389.ino, which is the
- * dual-PMW3389 TEST-BENCH firmware. The production build targets different sensors
- * (PMW3610-class — see HANDOFF.md "PMW3610 third sensor") and will take over this name
- * when the bench hardware is retired; XIAO3389 moves to archive/ at that point.
+ * Final sensor count, sensor model, geometry, buses, pins, and switch debounce remain open
+ * hardware gates in ../../TODO.md. This placeholder does not invent final pins or debounce timing.
+ * Current bench work uses ../XIAO3389/XIAO3389.ino.
  *
- * Until then there is nothing here: flash XIAO3389.ino for all current work. The BLE
- * rotation protocol (service 2cad0001-…, characteristic 2cad0002-…, fixed 12-byte
- * float32 rx/ry/rz notify) is the contract the daemon depends on and must remain unchanged.
- * Phase 6 additionally reserves characteristic 2cad0003-… for protocol-v1 full input-state
- * snapshots. The production implementation must map bits 0..4 to Up/Down/Left/Right/Center,
- * using active-low inputs with internal pull-ups and firmware debounce. This placeholder
- * intentionally does not invent final pins or debounce timing before the hardware is complete.
- * Although the switch is mechanically one-direction-at-a-time, firmware must publish the full
- * observed bitset if simultaneous inputs occur rather than silently choosing a winner.
+ * The compatibility-frozen BLE rotation and full input-state contracts are documented in
+ * ../../docs/ble_device_adapters.md. Production firmware must preserve those wire formats,
+ * publish bits 0..4 as Up/Down/Left/Right/Center, use active-low inputs with internal pull-ups and firmware debounce,
+ * and publish the full observed bitset if simultaneous inputs occur.
  */
 
 #define ASTROLABE_INPUT_PROTOCOL_VERSION 1

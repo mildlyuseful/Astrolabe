@@ -2,13 +2,13 @@
 
 The **"what you can't see by reading the code"** document for the Unreal side of the Trackball
 Daemon: the architecture, the **verified** editor viewport-camera model + coordinate conventions,
-and the Unreal-specific gotchas that would otherwise cost real debugging. Unreal is a **socket
-add-on** integration (like Fusion/Blender/FreeCAD), not an in-process driver. Read this before
-touching the add-on.
+and the Unreal-specific gotchas that would otherwise cost real debugging. Unreal is a
+**broker-connected host add-on** integration (like Fusion, Blender, and FreeCAD), distinct from the
+daemon-side direct transports. Shared focus, state, mapping, routing, and lifecycle contracts are
+defined in [`../architecture.md`](../architecture.md). Read both before touching the add-on.
 
-The camera/API model was originally verified against Unreal Engine 5.8 and the built-in Python
-Editor Script Plugin. Current versions come from `ADDIN_VERSION`, `version.json`, the `.uplugin`, and
-`trackball_daemon.__version__`; do not maintain a snapshot here.
+Current versions come from `ADDIN_VERSION`, `version.json`, the `.uplugin`, and
+`trackball_daemon.__version__`; do not maintain a host or add-on version snapshot here.
 
 ---
 
@@ -29,9 +29,10 @@ python -m pytest tests -q
 no clicking). A throwaway `.uproject` (JSON: `EngineAssociation` + `Plugins:[{PythonScriptPlugin,
 true}]`) is enough; no content needed:
 
-```sh
-UE="/c/Program Files/Epic Games/UE_5.8/Engine/Binaries/Win64/UnrealEditor-Cmd.exe"
-"$UE" /path/Probe.uproject -run=pythonscript -script="/path/probe.py" -unattended -nopause -nosplash -nullrhi -stdout
+```powershell
+$UnrealEditorCmd = '<Unreal-install>\Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
+& $UnrealEditorCmd '<absolute-path>\Probe.uproject' -run=pythonscript `
+  '-script=<absolute-path>\probe.py' -unattended -nopause -nosplash -nullrhi -stdout
 ```
 
 `unreal.MathLibrary` basis math + API introspection work headless; the viewport get/set does **not**
@@ -42,8 +43,8 @@ the `.uproject`, and the UE log shows `Running start-up script .../TrackballNav/
 To get the add-on into a running editor: edit
 `trackball_daemon/plugins/unreal/TrackballNav/`, **bump the version in three places**
 (`ADDIN_VERSION` in `Content/Python/trackball_nav.py` + `version.json` + `VersionName` in
-`TrackballNav.uplugin` — see §7), then let the daemon's `auto_update` re-copy it, or call
-`integrations.install_unreal(appdef, cfg)`. **Restart the editor** to reload it (Unreal has no
+`TrackballNav.uplugin` — see §7), then restart the daemon for `auto_update` or use
+**Settings → 3D Apps → Unreal → Update**. **Restart the editor** to reload it (Unreal has no
 "reload Python add-on" — it's a restart). See §8/§10.
 
 ---
@@ -68,7 +69,8 @@ free-fly editor camera and its plugin/`init_unreal.py` startup model.
 | `…/Content/Python/trackball_nav.py` | **The add-on.** Reader thread, Slate-post-tick main-thread pump, live camera read/write, pivot resolution, scheme, logging. Runs *inside the editor's Python*. |
 | `…/Content/Python/tbnav_unreal_camera.py` | **Pure camera math** (vector + Rodrigues rotation, the duck-typed `Camera`, rotator↔basis, orbit/pan/zoom). **No `unreal` import** → unit-testable headless under plain `python`. |
 | `trackball_daemon/integrations.py` | `detect_unreal`, `install_unreal` (copy the plugin into each engine's `Engine/Plugins`), `unreal_plugin_dir`, the `_ADDINS["unreal"]` entry, `auto_update`. |
-| `navbroker.py` / `app.py` / `config.py` / `ui.py` | Generic broker-app plumbing — **no Unreal-specific code** beyond a one-line `_APP_PROC_HINTS` entry and `config.apps.unreal` default. |
+| `app_registry.py` / `navigation_router.py` / `navbroker.py` | Unreal identity, capabilities, and target-isolated broker delivery. |
+| `config_store.py` / `runtime_state.py` / `settings_schema.py` / `system_defaults.json` | Sparse settings, live mode/layer state, validation, and current defaults. |
 | `tests/test_unreal_nav_math.py` / `tests/test_unreal_cursor_pivot.py` / `tests/test_integrations_unreal.py` | Pure-math + cursor-pivot (stubbed `unreal`) + wiring tests. |
 
 The daemon process and the add-on are **two different Python interpreters** (daemon Python vs
@@ -79,8 +81,9 @@ Unreal's bundled Python). They only talk over the broker socket.
 ## 3. End-to-end data flow
 
 ```
-BLE trackball → output.py (per-app sensitivity/sign + Shift gating) → App._nav_sink
-  → (focused app == unreal, enabled) → NavBroker.submit  (accumulate; flush one coalesced frame/Hz)
+BLE trackball + immutable RuntimeSnapshot → output.py per-app mapping
+  → App._nav_sink creates an Unreal-targeted envelope → NavigationRouter / NavBroker
+  → per-target accumulation and configured-rate flush
         frame = {"o":[ox,oy,oz], "p":[px,py], "z":zoom, "op":…, "os":…, "zm":…, "adv":{…}}
   ──────────────────── localhost TCP ────────────────────
   → add-on reader thread (background; newline-JSON → queue.Queue)
@@ -88,10 +91,10 @@ BLE trackball → output.py (per-app sensitivity/sign + Shift gating) → App._n
   → _apply(): read the live viewport camera → tbnav_unreal_camera.{orbit,pan,dolly} → write loc+rotator back
 ```
 
-Routing is **generic**: `app.py::_APP_PROC_HINTS["unreal"] = ("unrealeditor","ue4editor")` (the one
-needed change), and `_nav_sink`'s else-branch sends every non-SolidWorks/non-Onshape app to the
-broker. Unreal is selected when the foreground process is `UnrealEditor.exe`/`UE4Editor.exe` and the
-app is enabled. (Verified by `tests/test_app_routing.py::test_unreal_routes_to_broker`.)
+Routing is generic and target-isolated. `app_registry.AppSpec` owns the `UnrealEditor`/`UE4Editor`
+process selectors, supported modes, and broker transport. The shipped Shift binding requests the
+RuntimeStore secondary layer; `OutputEngine` consumes that immutable state, and `NavigationRouter`
+sends the envelope only to clients whose hello identity is `unreal`.
 
 **Contract:** the daemon sends Unreal's immutable correction in `adv.host_baseline`; the add-on
 applies it after mode-specific user action routing. `tbnav_unreal_camera.py` is deliberately neutral
@@ -102,8 +105,8 @@ and `adv` is part of Unreal's supported wire contract. See
 
 ## 4. The verified editor camera model (the crux)
 
-All of this was confirmed live (headless pythonscript probe) on UE 5.8 — **do not re-derive it from
-matrix algebra, observe it** (the project's recurring lesson). The editor viewport camera is a
+These contracts come from direct API probes: **do not re-derive them from matrix algebra; observe
+host behavior when requalifying them.** The editor viewport camera is a
 **free-fly eye + FRotator**, NOT a view-distance/look-at model, so orbit-about-a-pivot and zoom are
 **synthesised** here and written back as location + rotation every frame.
 
@@ -139,16 +142,18 @@ sub.set_level_viewport_camera_info(unreal.Vector(*loc), new_rot)
 
 **Orbit magnitude is 1.0** (full ball angle = true 1:1), like the other **eye+target** apps
 (Fusion/SolidWorks/Onshape/FreeCAD). Do **not** copy Blender's `0.5` — that is specific to its
-`RegionView3D` (HANDOFF §12.12). Locked by
+`RegionView3D` (see [`blender.md`](blender.md) and
+[`../default_profiles.md`](../default_profiles.md)). Locked by
 `tests/test_unreal_nav_math.py::test_orbit_scale_is_unity_full_angle`.
 
 ---
 
-## 5. The control model (Blender-parity, as of add-on 0.2.0)
+## 5. The control model
 
-The Unreal add-on carries the **same rich scheme as Blender** (an additive `"adv"` object on each
-broker frame — see §5.1), interpreted for the editor's free-fly camera. `config.apps.unreal` uses
-the shared shipped profile plus Unreal's rich `advanced` action block.
+The Unreal add-on carries the **same rich scheme as Blender** (an additive `adv` object on each
+targeted broker frame — see §5.1), interpreted for the editor's free-fly camera. Sparse v9 stable-ID
+settings resolve from immutable Global/System state plus Unreal overrides; the runtime contributes
+the daemon-authoritative effective navigation mode.
 
 - **Nav mode** (`advanced.nav_mode`): `orbit` | `fly` | `walk` — the daemon dropdown (or the toggle).
   - **orbit**: un-shifted ball orbits about the pivot; Shift → pan/zoom. Twist is routed by
@@ -166,8 +171,8 @@ the shared shipped profile plus Unreal's rich `advanced` action block.
   `selection` → aggregate bounds center of selected actors — **Unreal has NO 3D cursor**
   (verified: no such Python
   API; all Blender-style `*cursor*` names are mouse/UI/gizmo, and no 3D-cursor option is shown for Unreal);
-  the under-mouse `cursor` pivot (add-on **0.2.3**) raycasts the surface under the **level-viewport
-  mouse** — Half A from stock `GeoReferencingEditorBPLibrary.get_viewport_cursor_information()`
+  the under-mouse `cursor` pivot raycasts the surface under the **level-viewport mouse** — Half A
+  from stock `GeoReferencingEditorBPLibrary.get_viewport_cursor_information()`
   (gotcha #13), Half B `line_trace_single` along that world ray, bbox-validated and **held for the
   gesture** like `screen_center`; on miss / unfocused viewport it continues the configured chain;
   `screen_center` → the surface under the **screen centre** via `SystemLibrary.line_trace_single` down the
@@ -199,11 +204,11 @@ shortcut (no equivalent editor input hook wired — use the daemon dropdown). Zo
 the shared `bindings.scheme.zoom_mode` field.
 
 ### 5.1 How the advanced block reaches the add-on
-`App._apply_schemes` attaches the **focused broker app's** `advanced` block as the frame's additive
-`"adv"` object (Blender's when Blender is focused, Unreal's when Unreal is focused; apps without one —
-Fusion/FreeCAD — get `None` and ignore the key). This generalised the old "always attach Blender's
-adv" special-case (which couldn't coexist with a second advanced-carrying app). The add-on reads
-`o/p/z/op/os/zm` **and** `adv`; the pure-math split keeps every camera op unit-testable headless.
+`App._apply_schemes` publishes Unreal's detached profile through `NavigationRouter`, and
+`_apply_runtime_navigation_profile` overlays the focused `RuntimeSnapshot`, including effective
+navigation mode. `NavBroker` sends the additive `adv` object only to clients registered for the
+active Unreal target. The add-on reads `o/p/z/op/os/zm` and `adv`; the pure-math split keeps every
+camera operation unit-testable headless.
 
 ---
 
@@ -260,8 +265,8 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
   `version.json`, and `VersionName` in `TrackballNav.uplugin`. `_ADDINS["unreal"]` reads `version.json`
   like Fusion's `.manifest`. On a bump, `auto_update` re-copies on the daemon's next launch (needs
   write access — i.e. admin for an engine dir). The hello handshake reports `ADDIN_VERSION` so the
-  tray shows the **loaded** build (`Apps: unreal v0.1.0`) — your first check the editor picked up new
-  code.
+  tray shows the loaded build as `Apps: unreal v<loaded-version>` — your first check that the editor
+  picked up new code.
 
 ---
 
@@ -283,10 +288,9 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
 5. **Left-handed + degrees need a host correction.** The basis/round-trip math uses Unreal's own
    helpers and remains convention-safe; user-feel signs belong in the immutable Unreal profile and
    should be settled by eye on the device, not inferred from self-referential algebra.
-5b. **The immutable Unreal orbit baseline is `2.0`, not `1.0`.** On real hardware the default orbit
-   felt half of what it should be, so the developer profile doubles it (verified on the device — see
-   the 0.1.0→0.2.0 note). `tbnav_unreal_camera.py` is neutral; the mode-aware add-on consumes the
-   factor from `adv.host_baseline`. Set orbit **Sensitivity 0.5** for the debug cube's literal 1:1.
+5b. **Suite alignment belongs only in the immutable Unreal host profile.**
+   `tbnav_unreal_camera.py` remains neutral; the mode-aware add-on consumes the factor from
+   `adv.host_baseline`. Inspect `host_profiles.json` for the current value instead of copying it here.
 5c. **Unreal has NO 3D cursor.** Probed the whole `unreal` namespace + `LevelEditorSubsystem`/
    `EditorActorSubsystem` — there is no queryable Blender-style 3D-cursor / editor-pivot point (every
    `*cursor*` name is the mouse cursor / a UI gizmo). The daemon therefore does not offer the
@@ -314,8 +318,8 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
 12. **Two interpreters → two reload rules.** A change to the add-on (`Content/Python/*.py`) needs the
     **editor restarted** (no Python-add-on reload); a change to the daemon needs the **daemon
     restarted**. A change to both needs both.
-13. **Under-cursor (`cursor`) orbit / `to_cursor` zoom — DONE in code (add-on 0.2.3) via stock
-    GeoReferencing.** Earlier probes correctly found that PIE-only mouse APIs and
+13. **Under-cursor orbit and To Cursor zoom require stock GeoReferencing.** Earlier probes correctly
+    found that PIE-only mouse APIs and
     `get_mouse_position_on_platform` can't localise into the level viewport, and that
     `EditorViewportClient` is absent from Python. The missing Half A was **already shipped by Epic**
     inside the **GeoReferencing** plugin (not under an obvious "Editor Scripting" name):
@@ -335,9 +339,9 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
       `get_mouse_position_on_platform` + a calibrated viewport rect (no reliable screen origin).
     - Headless stubs cover the pipeline; the real-editor hover/focus pass is tracked in
       [`TODO.md`](../../TODO.md).
-14. **`selection_overrides_pivot`.** Config key `apps.unreal.selection_overrides_pivot`
-    (default **True**; deep-merged, no config-version bump). The daemon folds it into the frame's
-    `adv` object. When **True** and level actors are selected, orbit (`screen_center` / `cursor` / `origin`)
+14. **Selection override.** The registered `navigation.selection_overrides_pivot` setting resolves
+    through sparse v9 Global/System/app state and is delivered in Unreal's `adv` profile. When
+    **True** and level actors are selected, orbit (`screen_center` / `cursor` / `origin`)
     and `to_cursor` zoom use the **selection centre** instead of the designated pivot. When
     **False**, the designated pivot is used even with a selection (raycast bbox gate disabled).
     Model Center and Selection remain distinct. The same selection-override contract is implemented
@@ -345,25 +349,15 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
 
 ---
 
-## 9. How it was verified (so you can re-verify)
+## 9. Verification boundary
 
-Everything in §4/§8 came from **headless** pythonscript probes driven against UE 5.8 (a hand-written
-throwaway `.uproject` enabling `PythonScriptPlugin`; `UnrealEditor-Cmd.exe … -run=pythonscript
--script=…`):
-- **API surface + conventions** (no viewport needed): `UnrealEditorSubsystem` vs `EditorLevelLibrary`
-  presence + the camera methods; `MathLibrary.get_forward/right/up_vector` returning +X/+Y/+Z at
-  identity; the yaw+90 → +Y and pitch+90 → +Z observations; `make_rot_from_xz` round-tripping exactly;
-  the `Rotator(roll,pitch,yaw)` positional order; `compose_rotators` misbehaving;
-  `register_slate_post_tick_callback`/`register_python_shutdown_callback`; `line_trace_single`/
-  `get_actor_bounds`/`get_selected_level_actors` signatures; HitResult `to_dict` keys.
-- **Plugin auto-load** (the riskiest install fact): the plugin enabled in the project's `Plugins/`,
-  the UE log showing `Running start-up script .../TrackballNav/.../init_unreal.py` **before** the
-  engine's own plugins, and a follow-up `-script` confirming `trackball_nav._started == True` and a
-  registered Slate tick handle inside the editor.
+A throwaway project with `PythonScriptPlugin` enabled is sufficient for unattended API-surface,
+basis, rotator, trace, bounds, callback, and plugin-startup probes. Use the version-neutral command in
+§0 and record completed run evidence under `archive/release-evidence/`.
 
-The **one thing not verifiable headless:** whether `set_level_viewport_camera_info` *visibly* moves
-the GUI viewport, and the user-feel sign/scale. That's the live-tune pass on a real editor (the same
-deferral FreeCAD made for its sign calibration).
+Headless commandlets have no level-editor perspective viewport, so they cannot prove visible camera
+movement, viewport focus behavior, or physical sign/feel. Those claims require a disposable GUI
+editor session and remain tracked in [`TODO.md`](../../TODO.md).
 
 ---
 
@@ -376,15 +370,16 @@ deferral FreeCAD made for its sign calibration).
   ray → hold / fallback cursor and `to_cursor` pipeline with a stub `unreal`. `tests/test_integrations_unreal.py`
   covers the daemon wiring (Unreal is an `_ADDINS` app; install copies the plugin + marks enabled; the
   admin-needed copy failure returns manual steps without marking installed; `auto_update` re-copies on
-  a bump; plugin-dir resolution; detection; `.uplugin` lists GeoReferencing). `python -m pytest tests -q`
-  is green.
-- **Live (the only thing tests can't cover):** install via the daemon's **Set up** (or drop the
+  a bump; plugin-dir resolution; detection; `.uplugin` lists GeoReferencing). Run these focused tests
+  before the full suite; do not copy a passing count into this guide.
+- **Live boundary:** install via the daemon's **Set up** (or drop the
   plugin into a project's `Plugins/`), enable it in *Edit → Plugins* + restart, run the daemon, open a
   level, switch to 3D mode, focus the editor, **click the level viewport**, set Orbit pivot =
   Under Cursor, and use the trackball. Lean on `%APPDATA%\TrackballDaemon\unreal_addin.log`
   (`start:` / `scheme:` / `rx orbit|pan|zoom` / `screen-center-pivot` / `cursor-pivot:` / `applied`).
-  **Sign/scale calibration** (`ORBIT_SIGN`/`PAN_*`/`ZOOM_*` in `tbnav_unreal_camera.py`) still wants
-  a real trackball — flip with the per-app Invert checkboxes or the constants.
+  **Sign/scale calibration requires a real trackball.** Tune intrinsic suite alignment in
+  `host_profiles.json`; use per-app inversion/gain only for user preferences. Keep add-on camera math
+  and local multipliers neutral; current qualification status lives in [`TODO.md`](../../TODO.md).
 
 ---
 
@@ -397,8 +392,8 @@ deferral FreeCAD made for its sign calibration).
   `Play-In-Editor active` (PIE guard), `no perspective viewport` (no level/viewport open),
   `GeoReferencingEditorBPLibrary missing` (dependency not enabled). The tray's `Apps: unreal v…`
   confirms the hello handshake.
-- The current live-GUI matrix (cursor focus, independent holds, horizon entry, signs/feel, PIE) and
-  discrete button-event work are tracked in [`TODO.md`](../../TODO.md).
+- Current live-GUI qualification and discrete button-event work are tracked only in
+  [`TODO.md`](../../TODO.md).
 - **Install caveat:** writing the plugin into an engine `Plugins` dir needs **admin**; without it the
   daemon prints manual steps (engine dir as admin, or the project `Plugins` dir no-admin). The plugin
   must be **enabled once** per project before it loads.

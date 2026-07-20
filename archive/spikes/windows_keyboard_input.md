@@ -1,6 +1,10 @@
 # Windows keyboard input backend decision
 
-Status: accepted Phase 0 architecture decision; production implementation deferred to Phase 5
+> **Archived backend-decision evidence.** Raw Input is now implemented. Current lifecycle and
+> security behavior is documented in [`../../docs/security.md`](../../docs/security.md) and
+> [`../../docs/architecture.md`](../../docs/architecture.md).
+
+Status: accepted Phase 0 architecture decision; implementation completed in the rich-keybindings work
 
 Decision date: 2026-07-13
 

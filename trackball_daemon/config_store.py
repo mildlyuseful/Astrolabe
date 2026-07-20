@@ -149,7 +149,7 @@ def _fresh_state():
 
 
 def _remove_deprecated_v9_settings(state):
-    """Drop settings whose runtime authority moved to declarative profile data in Phase 8."""
+    """Drop settings whose runtime authority moved to declarative profile data."""
     changed = False
     for setting_id in DEPRECATED_V9_SETTING_IDS:
         if setting_id in state.get("global_overrides", {}):
@@ -325,6 +325,10 @@ def validate_v9_state(state):
     for key, default in DEFAULTS["onshape"].items():
         if type(state["onshape"][key]) is not type(default):
             raise ValueError(f"invalid Onshape setting: {key}")
+    if state["onshape"]["address"] != DEFAULTS["onshape"]["address"]:
+        raise ValueError("Onshape address must remain the fixed loopback endpoint")
+    if not 1 <= state["onshape"]["port"] <= 65535:
+        raise ValueError("invalid Onshape port")
     if (not isinstance(state["ui_state"], dict) or set(state["ui_state"]) != {"selected_app"} or
             state["ui_state"].get("selected_app") not in APP_IDS):
         raise ValueError("invalid selected app")
@@ -581,14 +585,37 @@ class ConfigStore:
                 try:
                     disk = json.loads(self.path.read_text(encoding="utf-8"))
                     if isinstance(disk, dict) and disk.get("version") == CONFIG_VERSION:
-                        cleaned = _remove_deprecated_v9_settings(disk)
-                        validate_v9_state(disk)
-                        if cleaned:
-                            self._save_unlocked(disk)
-                        self._state = copy.deepcopy(disk)
+                        candidate = copy.deepcopy(disk)
+                        cleaned = _remove_deprecated_v9_settings(candidate)
+                        onshape = candidate.get("onshape")
+                        rejected_address = (
+                            isinstance(onshape, dict) and
+                            set(onshape) == set(DEFAULTS["onshape"]) and
+                            onshape.get("address") != DEFAULTS["onshape"]["address"]
+                        )
+                        if rejected_address:
+                            onshape["address"] = DEFAULTS["onshape"]["address"]
+                            logger.error(
+                                "Rejected non-loopback Onshape address; preserving source file")
+                        validate_v9_state(candidate)
+                        if cleaned and not rejected_address:
+                            self._save_unlocked(candidate)
+                        self._state = candidate
                     else:
-                        migrated = migrate_v8_to_v9(disk)
-                        self._save_unlocked(migrated)
+                        legacy = copy.deepcopy(disk)
+                        onshape = legacy.get("onshape") if isinstance(legacy, dict) else None
+                        rejected_address = (
+                            isinstance(onshape, dict) and
+                            "address" in onshape and
+                            onshape.get("address") != DEFAULTS["onshape"]["address"]
+                        )
+                        if rejected_address:
+                            onshape["address"] = DEFAULTS["onshape"]["address"]
+                            logger.error(
+                                "Rejected non-loopback Onshape address; preserving source file")
+                        migrated = migrate_v8_to_v9(legacy)
+                        if not rejected_address:
+                            self._save_unlocked(migrated)
                         self._state = migrated
                 except (OSError, json.JSONDecodeError, TypeError, ValueError, KeyError) as exc:
                     logger.error("Config load/migration failed; preserving source file: %s", exc)
@@ -605,7 +632,7 @@ class ConfigStore:
         return ConfigTransaction(self)
 
     def ui_value(self, keys):
-        """Temporary path adapter owned by the store until Phase 9 generates the settings UI."""
+        """Compatibility path adapter for the existing settings UI."""
         keys = tuple(keys)
         snapshot = self.snapshot()
         if keys == ("active_app",):

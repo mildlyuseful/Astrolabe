@@ -1,15 +1,17 @@
 # Fusion 360 navigation — maintainer's guide
 
 The **"what you can't see by reading the code"** document for the Fusion 360 side of the Trackball
-Daemon. Fusion is a **socket add-on** integration (the FIRST one built — Blender/FreeCAD/SketchUp/
-Unreal were modelled on it), not an in-process driver (SolidWorks/Onshape). The add-in runs inside
-Fusion's embedded CPython, connects to the daemon's nav broker, and drives
-`app.activeViewport.camera`.
+Daemon. Fusion is a **broker-connected host add-in** integration (Blender, FreeCAD, SketchUp, and
+Unreal follow the same boundary), distinct from the daemon-side direct transports used for
+SolidWorks COM and Onshape. The add-in runs inside Fusion's embedded CPython, connects to the daemon's
+nav broker, and drives
+`app.activeViewport.camera`. Shared focus, mapping, routing, and lifecycle contracts are defined in
+[`../architecture.md`](../architecture.md).
 
 Primary code: [`trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py`](../../trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py)
 (+ `TrackballNav.manifest`). Tests: [`tests/test_fusion_cursor_pivot.py`](../../tests/test_fusion_cursor_pivot.py)
-(pixel→ray→pivot math against a stubbed `adsk`). Wiring: `app.py`, `config.py`, `integrations.py`
-(`install_fusion` / auto-update), `ui.py`. User-facing setup: the Fusion section of
+(pixel→ray→pivot math against a stubbed `adsk`). Wiring: `app_registry.py`,
+`navigation_router.py`, `navbroker.py`, and `integrations.py` (`install_fusion` / auto-update). User-facing setup: the Fusion section of
 [`README.md`](../../README.md). Current versions come from `ADDIN_VERSION`, the manifest, and
 `trackball_daemon.__version__`; do not maintain a snapshot here.
 
@@ -17,8 +19,8 @@ Primary code: [`trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py`
 
 ## 1. What it is, in one paragraph
 
-A background socket thread reads broker frames (newline-JSON from `127.0.0.1:47900`) and fires a
-Fusion **CustomEvent**; the event handler applies the camera change on Fusion's **main thread**
+A background socket thread reads broker frames from `127.0.0.1` using the port in
+`%APPDATA%\TrackballDaemon\bridge.json` (`47900` fallback) and fires a Fusion **CustomEvent**; the event handler applies the camera change on Fusion's **main thread**
 (the Fusion API is main-thread-only — same marshalling problem every socket add-on solves, each
 with its host's mechanism: Blender uses a timer, FreeCAD a `QTimer`, Unreal a Slate post-tick,
 SketchUp `UI.start_timer`). The camera model is the classic **eye + target + up**: orbit rotates
@@ -32,8 +34,8 @@ applied by the daemon before the frame reaches this lean add-in; the add-in came
   `%APPDATA%\Autodesk\Autodesk Fusion 360\API\AddIns\`. One-time in Fusion: *Utilities → Add-Ins
   (Shift+S) → TrackballNav → Run* + tick **Run on Startup** (Fusion won't let an installer set
   that flag).
-- **Reload after an edit:** stop/run the add-in in the Add-Ins dialog, or restart Fusion
-  (HANDOFF §12.10 — the #1 "I changed it and nothing happened" cause).
+- **Reload after an edit:** stop/run the add-in in the Add-Ins dialog, or restart Fusion. Daemon-side
+  changes require a separate daemon restart.
 - **Version bump = TWO places:** `ADDIN_VERSION` in `TrackballNav.py` **and** `version` in
   `TrackballNav.manifest` (must match — the manifest drives the daemon's version-gated
   auto-update, the constant drives the handshake shown in the tray). Forgetting the bump means
@@ -56,15 +58,14 @@ applied by the daemon before the frame reaches this lean add-in; the add-in came
    activation (or Esc) terminates it. An always-on tracker command fights normal modeling. The
    cursor pivot instead reads the cursor **on-demand at gesture start** via ctypes
    `GetCursorPos` (the add-in runs in-process, so Win32 is available).
-5. **Fusion's MIXED coordinate/DPI model** (pinned by two live passes at 125% scaling; the fit
-   `view = 1.25·logical_in − physical_origin` was exact on every logged sample):
+5. **Fusion's coordinate/DPI model mixes logical and physical pixels:**
    - `Viewport.screenToView` takes **LOGICAL** screen px in but returns **PHYSICAL** viewport px;
    - `Viewport.viewToModelSpace` consumes **PHYSICAL** px;
    - `vp.width/height` are **LOGICAL**.
    So the `GetCursorPos` pixel (physical) is **÷ the monitor's effective DPI scale** before
-   `screenToView` (0.1.12 — unfixed, hits landed down-right of the cursor), and the output
-   bounds check validates against **`vp.size × scale`** (0.1.13 — the logical-size check wrongly
-   rejected the right/bottom ~20% band). A `cursor map:` log line prints screen px → scale →
+   `screenToView`, and the output bounds check validates against **`vp.size × scale`**. Unscaled input
+   displaces hits down-right; checking against logical size rejects part of the physical viewport. A
+   `cursor map:` log line prints screen px → scale →
    view px for diagnosis. Mixed-DPI multi-monitor is bounded by the range check + fallback but
    not fully verified.
 6. **`findBRepUsingRay` on the root component may miss bodies inside assembly occurrences**
@@ -72,14 +73,14 @@ applied by the daemon before the frame reaches this lean add-in; the add-in came
 
 ## 4. The screen-center-pivot / cursor-pivot raycast
 
-Shared concept (HANDOFF §7): pivot on the real surface depth, validate against the model bbox,
+Shared contract ([`architecture.md`](../architecture.md)): pivot on real surface depth, validate
+against the model bounds,
 continue through the configured fallback chain on a miss, hold the pivot for the whole gesture
 (re-cast on pan/zoom or after the idle hold time). Fusion specifics:
 
 - `screen_center` pivot: ray down the **screen centre** via `findBRepUsingRay` (aperture grows ×3 until a
   hit, smallest wins).
-- `cursor` pivot / `to_cursor` zoom (born 0.1.11–0.1.13 as `pointer`/`to_pointer`; renamed in
-  0.1.14 with the daemon's config v3): `GetCursorPos` → DPI divide →
+- `cursor` pivot / `to_cursor` zoom: `GetCursorPos` → DPI divide →
   `screenToView` → `viewToModelSpace` to aim the ray (perspective: eye→point; ortho: parallel,
   pushed back), then the same pick/validate/hold machinery. If `screenToView` output fails the
   physical-bounds check, a window-under-cursor client-rect mapping is the coordinate fallback. A
@@ -87,8 +88,8 @@ continue through the configured fallback chain on a miss, hold the pivot for the
   a point on the cursor ray at the current target/model depth.
 - The cursor is read fresh at each gesture start — there is deliberately **no cache to go
   stale**.
-- Add-in 0.1.15 resolves `origin` explicitly; 0.1.16 computes `selection` from the aggregate
-  world-space bounds of `app.userInterface.activeSelections`. `selection_overrides_pivot` makes
+- `origin` resolves explicitly; `selection` uses the aggregate world-space bounds of
+  `app.userInterface.activeSelections`. `selection_overrides_pivot` makes
   that centre replace the designated orbit/to-cursor pivot; disabling it restores the requested
   pivot.
 - **`camera` (turn-in-place) is currently unsupported** — the resolver skips it like `cursor_3d`
@@ -110,7 +111,7 @@ python -m pytest tests/test_fusion_cursor_pivot.py -q   # pixel->ray->pivot + ho
 python -m pytest tests -q                                # daemon wiring + regressions
 ```
 
-There is no headless Fusion, so live verification = install the add-in, watch
-`fusion_addin.log`, and use the `cursor map:` line to confirm the coordinate mapping on the
-actual monitor scale. The current live matrix—including occurrence geometry, horizon entry,
-independent holds, and edge/DPI checks—is tracked in [`TODO.md`](../../TODO.md).
+Fusion has no headless viewport, so visible camera and monitor-DPI claims require an installed add-in
+and a disposable GUI session. Use `fusion_addin.log` and its `cursor map:` line to distinguish
+coordinate mapping from camera application. Current qualification work is tracked only in
+[`TODO.md`](../../TODO.md).

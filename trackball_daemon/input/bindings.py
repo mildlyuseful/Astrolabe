@@ -585,7 +585,7 @@ def replace_compiled_diagnostics(profile, diagnostics):
 
 
 class PointerButtonSink:
-    """Phase 7 ownership seam. Phase 8 supplies the actual bounded SendInput delivery."""
+    """Inert default sink; the application injects bounded pointer-button delivery."""
 
     def press(self, _button, _owner):
         pass
@@ -630,7 +630,7 @@ class BindingController:
     """Recompute the complete binding set from atomic pressed snapshots.
 
     The controller owns activation identities and externally held pointer resources. It never
-    performs OS output itself; the sink remains inert until Phase 8 supplies a delivery adapter.
+    performs OS output itself; an injected sink owns bounded pointer-button delivery.
     """
 
     def __init__(self, compiled_profile, command_queue, runtime_store, *, config_store=None,
@@ -708,8 +708,8 @@ class BindingController:
         matches = [binding for binding in self._candidate_bindings()
                    if _is_satisfied(binding, self._pressed, context, self._profile)]
         # A more-specific definition for the same logical chord suppresses its fallback. Chords
-        # with different controls remain concurrent so Phase 3 can resolve contradictory holds by
-        # explicit priority and activation recency.
+        # with different controls remain concurrent and resolve contradictory holds by explicit
+        # priority and activation recency.
         ranks = {}
         for binding in matches:
             definition = binding.definition

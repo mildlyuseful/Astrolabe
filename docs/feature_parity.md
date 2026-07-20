@@ -3,6 +3,7 @@
 `trackball_daemon/app_registry.py` and `trackball_daemon/settings_schema.py` are the UI contract. A control is enabled only when the
 integration has a distinct runtime behavior for every option it presents. Stored config fields may
 exist in the shared shape without being visible; that does not make them an implemented feature.
+Shared capability and routing ownership is defined in [`architecture.md`](architecture.md).
 
 ## Audited behavior
 
@@ -24,5 +25,6 @@ exist in the shared shape without being visible; that does not make them an impl
   behavior; a separate Dolly twist option would be a duplicate, not a distinct action.
 
 Open parity work and host-accounted limitations live in [`TODO.md`](../TODO.md). When adding one of
-those features, implement and verify the host behavior first, then enable its field/options in
-`APP_BINDING_PROFILES` in the same change.
+those features, implement and verify the host behavior first, then update the canonical `APP_SPECS`
+declaration through `_spec` / `_profile` and the matching `settings_schema.py` capability predicate in
+the same change. `APP_BINDING_PROFILES` is a generated read-only compatibility view, not an authority.

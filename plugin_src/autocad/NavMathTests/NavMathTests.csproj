@@ -20,5 +20,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\TrackballNavAcad\NavMath.cs" Link="NavMath.cs" />
+    <Compile Include="..\TrackballNavAcad\BrokerConfig.cs" Link="BrokerConfig.cs" />
   </ItemGroup>
 </Project>

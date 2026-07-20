@@ -170,3 +170,14 @@ def test_autocad_plugin_consumes_advanced_settings_and_all_generic_pivots():
     frame_parser = source[source.index("void HandleFrame"):source.index("// --- UI-thread timer")]
     assert "_horizonFixed = fixedHorizon" in frame_parser
     assert "_levelPending = true" in frame_parser
+
+
+def test_autocad_plugin_discovers_the_daemon_broker_port():
+    root = Path(__file__).parents[1] / "plugin_src" / "autocad" / "TrackballNavAcad"
+    plugin = (root / "Plugin.cs").read_text(encoding="utf-8")
+    resolver = (root / "BrokerConfig.cs").read_text(encoding="utf-8")
+    assert "BrokerConfig.ResolvePort()" in plugin
+    assert "const int BrokerPort" not in plugin
+    assert '"TrackballDaemon", "bridge.json"' in resolver
+    assert "port >= 1 && port <= 65535" in resolver
+    assert "return DefaultPort" in resolver

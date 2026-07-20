@@ -4,10 +4,10 @@ and auto-update the bundled add-ons.
 Detection is best-effort via common Windows install paths. Every registered app has a real
 `setup`: the socket-add-on apps (Fusion, Blender, FreeCAD, SketchUp, Unreal, Unity, Godot,
 Rhino) copy their bundled add-on into the host app's add-on directory, AutoCAD stages its
-bundled NETLOAD plugin, and the in-process apps (SolidWorks, Onshape) verify prerequisites
-and enable the driver (no file copy). `auto_update` re-copies a bundled add-on only when its
-bundled version is newer than the installed one (version-gated -- see HANDOFF 12.11),
-preserving the user's enabled state.
+bundled NETLOAD plugin, and the daemon-side direct integrations (SolidWorks, Onshape) verify
+prerequisites and enable the driver (no file copy). `auto_update` re-copies a bundled add-on only when its
+bundled version is newer than the installed one (see `docs/architecture.md`), preserving the user's
+enabled state.
 """
 import glob
 import json
@@ -354,7 +354,7 @@ def install_fusion(appdef: AppDef, cfg) -> tuple[bool, str]:
 # --- SolidWorks: no-file COM integration ----------------------------------------------
 def setup_solidworks(appdef: "AppDef", cfg) -> tuple[bool, str]:
     """Enable the SolidWorks integration. Unlike Fusion there is NOTHING to copy or register:
-    SolidWorks is driven live over its COM automation API (pywin32) by the in-process driver,
+    SolidWorks is driven live over its COM automation API (pywin32) by the daemon-side driver,
     not by a registered add-in. So we only verify SolidWorks is installed and pywin32 is
     importable, then mark the app enabled/installed in config."""
     if not detect_solidworks():
@@ -423,10 +423,10 @@ def install_autocad(appdef: "AppDef", cfg) -> tuple[bool, str]:
     AutoCAD's navigation comes from a compiled NETLOAD plugin (`TrackballNavAcad.dll`,
     plugin_src/autocad) -- the SOLE AutoCAD transport (the COM nav transport is archived at
     archive/autocad_com_transport/). The daemon's plugin loader auto-NETLOADs it into a running
-    AutoCAD -- a PROVEN zero-user-friction pattern (docs 8.14). Install/Update here just copies
-    the bundled DLL + version.json into the runtime dir. AutoCAD locks the loaded DLL for its
-    whole session, so with AutoCAD running an update is only STAGED: it is copied + NETLOADed
-    automatically the next time AutoCAD starts. COM's only remaining job is that NETLOAD."""
+    AutoCAD. Install/Update here copies the bundled DLL + version.json into the runtime dir.
+    AutoCAD locks the loaded DLL for its whole session, so with AutoCAD running an update is only
+    STAGED: the daemon retries the copy and NETLOADs it automatically the next time AutoCAD starts.
+    COM is used only to attach to AutoCAD and issue that NETLOAD."""
     if not detect_autocad():
         return False, "AutoCAD was not found on this machine — install it first."
     try:
@@ -467,7 +467,7 @@ def _onshape_cert_paths(cfg):
 
 def setup_onshape(appdef: "AppDef", cfg) -> tuple[bool, str]:
     """Enable the Onshape integration. Like SolidWorks there is no add-in to install: Onshape is
-    driven over the browser's native 3Dconnexion support by an in-process bridge that impersonates
+    driven over the browser's native 3Dconnexion support by a daemon-side bridge that impersonates
     the local NL-Proxy service. Setup (a) generates a self-signed TLS cert for 127.51.68.120 (safe
     — only writes files in our own config dir; it does NOT touch any trust store), then (b) returns
     the exact, user-run steps to trust the cert + enable Onshape's SpaceMouse option. We never

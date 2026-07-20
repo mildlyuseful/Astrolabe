@@ -1,14 +1,16 @@
 # SketchUp navigation — maintainer's guide
 
 The SketchUp side of Trackball Daemon is a **Ruby socket extension**. It runs inside SketchUp
-Desktop (Pro/Studio), connects to the daemon's localhost nav broker, and drives the active view's
+Desktop (Pro/Studio), connects to the daemon's loopback nav broker, and drives the active view's
 explicit eye/target/up camera. SketchUp for Web is not supported because it has no local Ruby hook.
+Shared focus, mapping, target isolation, and lifecycle contracts live in
+[`../architecture.md`](../architecture.md).
 
-The camera model was originally verified live against SketchUp 2026.2.243 with its bundled Ruby.
+The camera model was originally verified live against a desktop SketchUp host with its bundled Ruby.
 The API probe and production self-test run from *Extensions → Developer → Ruby Console*. Current
-code versions come from the two `ADDIN_VERSION` constants, `version.json`, and
-`trackball_daemon.__version__`; do not maintain a snapshot here. Live Win32 cursor-to-viewport
-verification remains tracked in [`TODO.md`](../../TODO.md).
+code versions come from the two `ADDIN_VERSION` constants and `version.json`; do not maintain a
+snapshot here. Live Win32 cursor-to-viewport verification remains tracked in
+[`TODO.md`](../../TODO.md).
 
 ## 1. File map
 
@@ -25,8 +27,10 @@ verification remains tracked in [`TODO.md`](../../TODO.md).
 ## 2. Data flow and threading
 
 ```text
-BLE → output.py (unchanged, already scaled/inverted) → App._nav_sink
-    → focused app == sketchup → NavBroker.submit
+MotionSample + immutable RuntimeSnapshot
+    → target-tagged NavigationEnvelope
+    → NavigationRouter active-target/revision gate
+    → NavBroker SketchUp channel
     → newline JSON over 127.0.0.1 TCP
     → main.rb UI.start_timer(0.02, repeat=true)
     → non-blocking socket read + partial-line buffer
@@ -42,11 +46,12 @@ saying “readable” does not guarantee that a blocking `gets("\n")` already ha
 The hello is:
 
 ```json
-{"type":"hello","app":"sketchup","version":"0.2.0","host":"26.2.243","pid":1234}
+{"type":"hello","app":"sketchup","version":"<add-in>","host":"<SketchUp>","pid":1234}
 ```
 
-Port discovery reads `%APPDATA%\TrackballDaemon\bridge.json`, falling back to `47900`. Socket
-errors close the client and retry after 1.5 seconds. Diagnostics go to
+Every reconnect attempt reads `%APPDATA%\TrackballDaemon\bridge.json`, falling back to `47900` if
+it is missing or unreadable. The host remains fixed to `127.0.0.1`. Socket errors close the client
+and retry after 1.5 seconds. Diagnostics go to
 `%APPDATA%\TrackballDaemon\sketchup_addin.log`.
 
 ## 3. Verified camera model
@@ -68,8 +73,8 @@ cam.height     # inches (parallel projection)
 view.invalidate
 ```
 
-`cam.set` changed the live viewport camera directly on 2026.2; assigning `view.camera = cam` was not
-needed. `view.invalidate` is still called after each applied frame and is the API's preferred redraw
+`cam.set` changes the live viewport camera directly; assigning `view.camera = cam` is not needed.
+`view.invalidate` is still called after each applied frame and is the API's preferred redraw
 request. Internal model coordinates and camera height are **inches**. SketchUp is right-handed and
 Z-up, so turntable yaw uses `(0,0,1)`.
 
@@ -123,7 +128,7 @@ The shipped factors are documented in [`../default_profiles.md`](../default_prof
   object centre stays fixed. Factors and eye-target distance are clamped so the eye never crosses
   the target.
 
-### Camera, fly, and walk (`0.2.0`)
+### Camera, fly, and walk
 
 SketchUp now consumes the same additive broker `adv` shape used by Blender/Unreal:
 
@@ -174,8 +179,8 @@ channel means screen pan in Orbit, thrust in Fly, and ground-forward in Walk.
 - `object` → `model.bounds.center`
 - `selection` → aggregate bounds centre of the current `model.selection`
 - `screen_center` → surface under the viewport **centre**; a miss continues the global chain
-- `cursor` → surface under the **mouse cursor** (add-on 0.2.2) — the same `pickray`/`raytest` as
-  `screen_center`, aimed through the live cursor pixel instead of the centre. See §5.5.
+- `cursor` → surface under the **mouse cursor** — the same `pickray`/`raytest` as `screen_center`,
+  aimed through the live cursor pixel instead of the centre. See §5.5.
 
 Both `screen_center` and `cursor` share the orbit gesture target: a real hit is held for
 `orbit_hold_sec`, reacquired after invalidation/idle, and validated against model bounds. A rejected
@@ -190,10 +195,10 @@ ray = view.pickray(view.vpwidth * 0.5, view.vpheight * 0.5)
 hit = model.raytest(ray) # [Geom::Point3d, instance_path] or nil
 ```
 
-SketchUp 2025+ returns logical-pixel `Float` viewport dimensions and accepts Float coordinates in
-`pickray`; the 2026 probe observed `1176.8 × 767.2`.
+Supported desktop hosts may return logical-pixel `Float` viewport dimensions, and `pickray` accepts
+those Float coordinates. Do not truncate them.
 
-### 5.5 The `cursor` pivot — under-mouse orbit (`cursor.rb`, add-on 0.2.2)
+### 5.5 The `cursor` pivot — under-mouse orbit (`cursor.rb`)
 
 Half B (pixel → surface) is trivial here: `pickray` already takes any viewport pixel, so
 `cursor_pivot` is `screen_center_pivot` fed the cursor pixel. **Half A — the live cursor — was the
@@ -214,17 +219,10 @@ DPI handling. A stray window is rejected: it must sit under SketchUp's foregroun
 mapped pixel must land in-range; the raytest's bbox validation catches anything left. Orbit misses
 continue the configured chain.
 
-> **⚠ NEEDS LIVE-GUI VERIFY.** SketchUp computer-control access was declined this session, so the
-> tracker is implemented to the API and unit-tested only for the offline pixel→pivot math
-> (`sketchup_nav_selftest.rb` feeds a synthetic pixel). A GUI pass must confirm (1) `WindowFromPoint`
-> over the drawing area returns the GL window whose client rect **is** the viewport (origin at its
-> top-left, no inset), and (2) the pivot lands under the cursor while orbiting. If (1) is off, the
-> aspect gate + bbox validation continue through the configured chain rather than mispivoting. Run
-> `TrackballNav::CursorTracker.selftest` in the Ruby Console, hover a face, and read the add-on log to
-> check the reported viewport pixel. (This is the one app in the series verified only offline — the
-> two halves each rest on a proven primitive: `pickray`/`raytest` is live-verified, and the
-> `GetCursorPos`+`WindowFromPoint`+client-rect mapping is the same one proven in the SolidWorks
-> driver this cycle.)
+> **Warning: the Win32 cursor → viewport mapping is offline-tested but not live-qualified in
+> SketchUp.** If `WindowFromPoint` or the client rect does not align with the drawing viewport, the
+> aspect and bounds gates continue through the configured pivot chain rather than applying a
+> known-bad pivot. The current qualification task lives only in [`TODO.md`](../../TODO.md).
 
 ## 6. Install, loading, and versioning
 
@@ -266,33 +264,17 @@ Interactive camera coverage:
 load '<repo>/tools/sketchup_nav_selftest.rb'  # use your checkout's absolute path
 ```
 
-The self-test creates a temporary box inside an abortable operation and currently performs 28 live
-assertions: the original orbit/pan/zoom/raycast checks plus camera eye/focal hold, independent
-camera pitch reversal, fly look/move/vector preservation, fly-forward inversion, walk horizon
-lock, ground-plane walk movement, and — new in 0.2.2 — the **`cursor` pivot** (a synthetic
-off-centre pixel raycasts a *different* surface point than the centre, nil pixel yields no pivot,
-and a held cursor pivot stays rigid vs the eye through an orbit). It writes
+The self-test creates a temporary box inside an abortable operation and exercises
+orbit/pan/zoom/raycast behavior, camera eye/focal hold, independent camera pitch reversal, fly and
+walk movement, horizon lock, and the `cursor` pivot with a synthetic off-centre pixel. It writes
 `%TEMP%\sketchup_nav_selftest.log`, restores the original camera, and restarts the socket timer in
 `ensure`.
 
-**The `cursor` pivot's Half A (the live Win32 cursor → viewport mapping in `cursor.rb`) is NOT yet
-GUI-verified** — computer-control access to SketchUp was declined this cycle. Run
-`TrackballNav::CursorTracker.selftest` in the Ruby Console, hover a face, and read the add-on log to
-confirm the reported viewport pixel matches the cursor before trusting live tracking (§5.5).
-
-Verified on this machine:
-
-- live camera/accessor/rotation/redraw/timer/socket probe: pass;
-- production Ruby module load from the repo: pass;
-- camera/fly/walk production self-test (23 checks): pass;
-- broker hello observed by the running daemon with the loaded add-on version: pass;
-- production Ruby Console self-test: pass;
-- automatic loader from the real Plugins directory: pass (fresh normal launch produced a new
-  `start` log and daemon handshake after selecting the blank template);
-- **`cursor` pivot offline math (synthetic pixel): pass in the self-test; the live Win32 cursor→
-  viewport mapping (`cursor.rb`) is UN-verified (SketchUp access declined) — see §5.5;**
-- physical trackball sign/feel and the current interaction matrix remain in `TODO.md`. Intrinsic
-  corrections belong in `host_profiles.json`, not Ruby camera constants.
+`TrackballNav::CursorTracker.selftest` is the maintained diagnostic for cursor-to-viewport mapping;
+it reports the derived viewport pixel in the add-on log without establishing live qualification by
+itself. Physical sign/feel and the current interaction matrix remain in
+[`TODO.md`](../../TODO.md). Intrinsic corrections belong in `host_profiles.json`, not Ruby camera
+constants.
 
 ## 8. Gotchas
 
@@ -304,8 +286,8 @@ Verified on this machine:
    is proven insufficient; if one is ever added, it may only enqueue bytes/frames.
 4. **Partial TCP lines are normal.** Keep `read_nonblock` plus the persistent receive buffer; a
    readable socket is not necessarily a complete newline-delimited frame.
-5. **Logical pixels changed in SketchUp 2025.** `vpwidth`/`vpheight` are Floats now; do not truncate
-   before `pickray`.
+5. **Viewport dimensions may be logical-pixel Floats.** Do not truncate `vpwidth`/`vpheight` before
+   `pickray`.
 6. **Units are inches.** Do not copy metre/cm constants blindly. Pan is based on visible span to
    avoid a fixed-inch speed that vanishes on architectural models.
 7. **SketchUp for Web is out of scope.** It cannot load the local Ruby extension.

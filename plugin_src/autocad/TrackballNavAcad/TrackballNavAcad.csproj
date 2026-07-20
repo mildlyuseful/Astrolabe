@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- TrackballNav AutoCAD plugin: NETLOAD-able .NET 8 assembly that gives the trackball daemon a
        SMOOTH, regen-free orbit via AutoCAD's GraphicsSystem (GsView) - the API native 3DORBIT uses,
-       which COM automation cannot reach (docs/autocad_driver_notes.md 8.10/8.13).
+       which external COM automation cannot reach. See docs/apps/autocad.md, "Keep one camera writer."
 
        Build (needs the .NET 8 SDK; VS not required):
            dotnet build -c Release plugin_src/autocad/TrackballNavAcad
@@ -18,7 +18,7 @@
     <AssemblyName>TrackballNavAcad</AssemblyName>
     <!-- Keep in sync with Plugin.PluginVersion; version.json for the daemon's update check is
          generated from this on Release build. -->
-    <Version>0.3.15</Version>
+    <Version>0.3.16</Version>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <DebugType>none</DebugType>

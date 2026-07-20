@@ -2,7 +2,8 @@
 
 Astrolabe keybindings combine normalized keyboard or BLE controls with a data-only action language.
 They do not execute Python, shell commands, imports, callbacks, JSON pointers, arbitrary virtual-key
-codes, or scancodes.
+codes, or scancodes. Shared input, state, and lifecycle ownership is defined in
+[`architecture.md`](architecture.md).
 
 ## Profiles and ownership
 
@@ -12,9 +13,10 @@ codes, or scancodes.
   controls, and keyboard fallbacks.
 - `keyboard_only` contains only keyboard controls and is usable with legacy rotation-only firmware.
 
-Selecting a profile does not copy or rewrite it. User edits are sparse patches stored under that
-profile ID in `%APPDATA%\TrackballDaemon\config.json`. Switching profiles preserves each profile's
-own patches and never switches automatically based on BLE presence.
+Fresh installs select `astrolabe_5way`; `keyboard_only` is an explicit user choice. Selecting a
+profile does not copy or rewrite it. User edits are sparse patches stored under that profile ID in
+`%APPDATA%\TrackballDaemon\config.json`. Switching profiles preserves each profile's own patches.
+The daemon never changes profiles merely because BLE hardware appears or disappears.
 
 The ordinary Keybindings editor exposes the control chord, one app context, plain-language action
 or setting, and setting behavior/value. It generates paired release/restoration actions for holds.
@@ -42,10 +44,11 @@ impossible, the dependent leaf is suppressed rather than producing a mixed state
 Shift directly to Pan or use the physically descriptive Ctrl+Shift chord; both use the same
 dependency closure.
 
-When definitions overlap, precedence is explicit priority, context specificity, exact matching,
-then activation recency in the runtime state layer. A more-specific definition for the same logical
-chord suppresses its fallback. The MVP UI deliberately leaves non-default priority editing in
-Advanced DSL; visual priority editing and profile export/import remain post-MVP work.
+When definitions overlap, runtime precedence is explicit priority, context specificity, exact
+matching, larger chord, then activation recency. The binding compiler separately suppresses a
+fallback when a more-specific definition matches the same logical chord. The ordinary editor leaves
+non-default priority editing in Advanced DSL; visual priority editing and profile export/import are
+open product work in [`../TODO.md`](../TODO.md).
 
 ## Hold, toggle, and setting actions
 

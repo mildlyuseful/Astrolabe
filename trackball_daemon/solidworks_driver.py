@@ -1,4 +1,4 @@
-"""In-process SolidWorks COM driver -- the SolidWorks analogue of NavBroker.
+"""Daemon-side SolidWorks COM driver -- the direct-transport analogue of NavBroker.
 
 Unlike the Fusion path (a socket add-in that connects to the nav broker), SolidWorks is
 driven by *external COM automation*: SolidWorks add-ins are COM/.NET and need admin
@@ -8,9 +8,9 @@ its COM API (pywin32) and moves the active view's camera directly. There is no f
 install and the socket broker is not involved.
 
 Threading model mirrors NavBroker exactly:
-  * submit() is called on the BLE thread and ONLY accumulates the per-frame orbit/pan/zoom
-    delta -- it never blocks and never touches COM (COM must be used on the thread that
-    initialized it).
+  * submit() is called on the navigation-delivery path and ONLY accumulates the per-frame
+    orbit/pan/zoom delta -- it never blocks and never touches COM (COM must be used on the thread
+    that initialized it).
   * a single worker thread calls pythoncom.CoInitialize(), lazily attaches to
     SldWorks.Application via GetActiveObject (ATTACH only -- it never launches SolidWorks),
     retries periodically when SolidWorks isn't running, and at bridge.rate_hz flushes the
@@ -256,9 +256,8 @@ def _safe_box(model, method, arg):
 
 
 class SolidWorksDriver:
-    """Accumulates nav deltas (BLE thread) and applies them to a live SolidWorks view from a
-    CoInitialized worker thread at a fixed rate. Public surface parallels NavBroker:
-    submit(), set_rate(), start(), stop(), plus is_connected()/version() for status."""
+    """Accumulates routed nav deltas and applies them to a live SolidWorks view from a
+    CoInitialized worker thread at a fixed rate."""
 
     def __init__(self, on_connection_changed=None, rate_hz=DEFAULT_FLUSH_HZ):
         self.on_connection_changed = on_connection_changed   # callback(connected: bool, version: str)
@@ -327,8 +326,7 @@ class SolidWorksDriver:
 
     def set_scheme(self, orbit_pivot, orbit_style, zoom_mode, selection_overrides_pivot=True,
                    orbit_pivot_fallbacks=None, level_horizon_on_entry=True):
-        """Set the control scheme applied on the next flush. Parallels NavBroker.set_scheme so
-        app._apply_schemes() drives SolidWorks the same way it drives the socket add-ons.
+        """Set the control scheme applied on the next flush from the effective runtime profile.
           orbit_pivot: camera | screen_center | cursor | selection | object | origin
               origin    -> rotate about the model origin, no view translation (the original behaviour);
               object    -> rotate about the model bounding-box centre;
@@ -376,7 +374,7 @@ class SolidWorksDriver:
             sec = DEFAULT_PIVOT_HOLD
         self._zoom_hold_sec = min(10.0, max(0.0, sec))
 
-    # --- producer side (BLE thread) -- only accumulates, never blocks / touches COM ------
+    # --- routed producer side -- only accumulates, never blocks / touches COM -------------
     def submit(self, ox, oy, oz, px, py, zoom):
         with self._lock:
             a = self._acc

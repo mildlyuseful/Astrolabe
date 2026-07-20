@@ -5,6 +5,9 @@ the code that moved the viewport over ActiveX/COM (`ActiveViewport` reassign orb
 pan/zoom, the deferred-orbit batching, and the rotating-cube preview overlay) — plus their
 tests, exactly as they shipped in daemon 0.1.37.
 
+Source is preserved verbatim. Archived tests are excluded by the repository's configured test path,
+and their original imports are not expected to run against current production modules.
+
 ## Why it was retired
 
 The compiled NETLOAD plugin (`plugin_src/autocad`, TrackballNavAcad.dll >= 0.2.8) drives the
@@ -27,11 +30,14 @@ extending TRUSTEDPATHS, and NETLOADing it into a running AutoCAD (once per sessi
 
 ## What is still valuable in here
 
-- `autocad_driver.py`'s module docstring is the verified COM view model (ROT attach, sysvar
-  ground truth, the reassign/regen ceiling, the treacherous `Center` property, SAFEARRAY
-  marshalling). The same facts live in `docs/apps/autocad.md` §1–§8.13.
+- `autocad_driver.py`'s module docstring preserves the verified COM view model (ROT attach, sysvar
+  ground truth, the reassign/regen ceiling, the treacherous `Center` property, and SAFEARRAY
+  marshalling). The active maintainer guide intentionally keeps only the current plugin contract and
+  load-bearing warnings.
 - `acad_overlay.py` is a self-contained click-through layered-window wireframe cube
   (pure Win32 via ctypes) — reusable for any "preview while the app catches up" need.
 
-If a future AutoCAD-like target has no in-process plugin path, this is the proven COM
-fallback pattern to resurrect.
+If a future AutoCAD-like target has no in-process plugin path, this is a proven external-COM
+pattern to study. Never copy these files over active `trackball_daemon` modules or run the archived
+transport concurrently with the AutoCAD plugin. Reproduce historical behavior only in an isolated
+checkout, under a non-production module name, against a disposable unsaved drawing.

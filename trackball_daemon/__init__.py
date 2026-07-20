@@ -5,19 +5,23 @@ or installs from GitHub without source changes):
 
   paths        - per-user config directory
   util         - logging (file-based, safe under pythonw / no console)
-  config       - the single source of truth (JSON in the per-user config dir)
+  config_store - sparse persistent configuration authority and immutable snapshots
+  config       - legacy migration/normalization helpers
+  runtime_state - immutable live interaction state
   output       - output/injection math (SendInput + quaternion + app-aware routing)
-  ble          - BLE/data-ingestion loop (scan/connect/subscribe/reconnect)
-  winfocus     - foreground-window process detection (route nav to the focused app)
-  navbroker    - 127.0.0.1 socket broker streaming nav deltas to the socket add-ons
-  solidworks_driver - in-process SolidWorks COM driver (no add-in)
-  onshape_bridge    - in-process Onshape TLS-WebSocket bridge (NL-Proxy emulator)
-  autocad_driver    - AutoCAD plugin loader (COM NETLOAD delivery only)
-  integrations - 3D-app registry (detect / install / enable / auto-update add-ons)
+  devices      - BLE/data-ingestion providers and descriptors
+  winfocus     - read-only foreground-window process detection
+  navigation_router - target/revision isolation and transport delivery
+  navbroker    - 127.0.0.1 socket broker streaming target-matched deltas to add-ons
+  solidworks_driver - daemon-side SolidWorks COM direct transport (no add-in)
+  onshape_bridge    - daemon-side Onshape TLS-WebSocket bridge (NL-Proxy emulator)
+  autocad_driver    - AutoCAD plugin loader (COM staging/trust/NETLOAD only)
+  app_registry - canonical app identity, order, transport, modes, and capabilities
+  integrations - host detection, setup, install, enable, and add-on auto-update
   tray         - pystray system-tray icon + menu (process lifecycle)
   ui           - Tkinter settings window (hides to tray on close)
   debugview    - optional pygame cube window (--debug only)
   app          - orchestrator that wires the above together
 """
 
-__version__ = "0.1.73"
+__version__ = "0.1.74"

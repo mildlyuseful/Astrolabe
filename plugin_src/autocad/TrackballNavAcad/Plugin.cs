@@ -1,35 +1,20 @@
-// TrackballNav AutoCAD plugin -- the smooth-orbit half of the AutoCAD integration.
+// TrackballNav AutoCAD plugin -- the sole AutoCAD camera transport.
 //
-// WHY THIS EXISTS: over external COM automation, ANY change to AutoCAD's 3D view direction forces a
-// full regen + ~34 ms of marshaling (verified exhaustively -- docs/apps/autocad.md
-// 8.10/8.13). In-process there are two tiers (both verified live with a WorldDraw-counting
-// DrawableOverrule, docs 8.15):
+// External COM is restricted to staging, TRUSTEDPATHS, and NETLOAD. This in-process plugin owns two
+// camera paths: the primary live GraphicsSystem view and the Editor view fallback used for paper space
+// or GS failure. Keep only one camera writer; see docs/apps/autocad.md.
 //
-//   1. THE GS TRANSPORT (primary, regen-free): ObtainAcGsView(vpn, KernelDescriptor{"3D Drawing"})
-//      returns the viewport's LIVE graphics-system view -- modern AutoCAD renders every visual
-//      style, including "2D Wireframe", through the 3D kernel. Driving it with SetView + Update is
-//      ~1.6 ms/frame with ZERO WorldDraw calls (no regen: the kernel re-renders its cached scene
-//      graph under the new camera), and the DB stays untouched until a single
-//      SetViewportFromView(vpn, view, regenRequired:false, rescaleRequired:false,
-//      syncRequired:true) at gesture end -- which is ALSO regen-free. Free-roll rides in the up
-//      vector. (GetCurrentAcGsView is a trap: it returns a DEFAULT camera disconnected from the
-//      display, and SetViewFromViewport cannot seed it. The kernel-descriptor accessor is the one
-//      native orbit uses.)
+// The GraphicsSystem path obtains the live view through ObtainAcGsView with the "3D Drawing" kernel,
+// drives a shadow camera during the gesture, and commits once at gesture end. GetCurrentAcGsView is not
+// a substitute: it can return a default camera disconnected from the displayed viewport. The Editor
+// fallback regenerates on each write and is intentionally secondary.
 //
-//   2. Editor.GetCurrentView()/SetCurrentView (fallback: paper space, GS failure): works
-//      everywhere but regens EVERY call (~5-7 ms/frame with real entities) -- smooth-ish motion,
-//      per-frame regeneration. WorldDraw measurements confirmed why this is fallback-only.
+// This assembly is NETLOADed into acad.exe by the daemon. It connects to 127.0.0.1 using the port
+// reread from %APPDATA%\TrackballDaemon\bridge.json on each reconnect, with 47900 as the compatibility
+// fallback. A background socket thread only parses and accumulates frames; a WinForms timer on
+// AutoCAD's UI thread performs every AutoCAD API call.
 //
-// This assembly is NETLOADed into acad.exe by the daemon. It connects to the trackball daemon's
-// nav broker (127.0.0.1:47900 -- the same socket protocol as the Fusion/Blender/FreeCAD/Unreal
-// add-ons), receives orbit/pan/zoom frames, and applies them per frame.
-//
-// Threading: a background socket thread only parses frames and accumulates deltas; a WinForms timer
-// (created in Initialize, so it lives on AutoCAD's UI thread) drains and applies them -- the exact
-// pattern of the FreeCAD add-on (socket thread + main-thread QTimer). All AutoCAD API calls happen
-// on the UI thread.
-//
-// Diagnostics: %APPDATA%\TrackballDaemon\acad_plugin.log  +  TBNAV / TBNAVTEST commands in AutoCAD.
+// Diagnostics: %APPDATA%\TrackballDaemon\acad_plugin.log and TBNAV / TBNAVTEST in AutoCAD.
 
 using System;
 using System.IO;
@@ -56,9 +41,8 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.15";  // keep in sync with bundled version metadata
+        public const string PluginVersion = "0.3.16";  // keep in sync with bundled version metadata
         const string BrokerHost = "127.0.0.1";
-        const int BrokerPort = 47900;
 
         // Host baseline moved to daemon config v6; plugin camera math is deliberately neutral.
         static readonly double[] OrbitSign = { 1.0, 1.0, 1.0 };  // pitch(x), yaw(y), roll(z)
@@ -329,7 +313,8 @@ namespace TrackballNav
                     using (var tcp = new TcpClient())
                     {
                         _tcp = tcp;
-                        tcp.Connect(BrokerHost, BrokerPort);
+                        int brokerPort = BrokerConfig.ResolvePort();
+                        tcp.Connect(BrokerHost, brokerPort);
                         using (var stream = tcp.GetStream())
                         {
                             var hello = JsonSerializer.Serialize(new
@@ -343,7 +328,7 @@ namespace TrackballNav
                             stream.Write(raw, 0, raw.Length);
                             _connected = true;
                             s_instanceConnected = true;
-                            Log("connected to nav broker");
+                            Log($"connected to nav broker on {BrokerHost}:{brokerPort}");
                             using (var reader = new StreamReader(stream, Encoding.UTF8))
                             {
                                 string line;
@@ -878,7 +863,7 @@ namespace TrackballNav
             return null;
         }
 
-        // --- the GS transport: live kernel view, regen-free (docs 8.15) -------------------------
+        // --- primary GS transport: live kernel view, gesture-end commit -------------------------
         bool TryApplyGs(Document doc, double[] d, string style, string opv, string zmv,
                         string zoomStyle,
                         bool selectionOverrides, List<string> pivotCandidates,
@@ -1119,14 +1104,12 @@ namespace TrackballNav
         }
 
         // Commit, two flavours:
-        //  - 3D visual styles (the driven view IS the presentation): re-impose the SHADOW camera,
-        //    SetViewportFromView(regenRequired:false), then belt-and-braces SetCurrentView(read-
-        //    back) + UpdateTiledViewportsInDatabase. ZERO WorldDraws measured live (docs 8.15).
-        //  - 2D Wireframe: build a ViewTableRecord from the SHADOW and push it through the classic
-        //    ed.SetCurrentView while the current view still holds the OLD camera -- that is the
-        //    one path that rebuilds the 2D projected display list, and it runs ONCE per gesture.
-        // A single commit failure can be transient (doc closed mid-gesture) -- the next gesture
-        // just re-seeds from the DB; only a RELIABLY failing commit demotes to the legacy path.
+        //  - 3D visual styles: re-impose the shadow camera, SetViewportFromView without regeneration,
+        //    then read back through SetCurrentView and update tiled viewports in the database.
+        //  - 2D Wireframe: build a ViewTableRecord from the shadow and use the crash-sensitive commit
+        //    order documented in docs/apps/autocad.md before the queued regeneration.
+        // A single commit failure can be transient (for example, the document closed mid-gesture).
+        // The next gesture re-seeds from the database; only repeated failure demotes to the fallback.
         int _commitFailures;
         void EndGesture(bool commit)
         {

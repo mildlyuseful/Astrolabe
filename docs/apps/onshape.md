@@ -1,12 +1,11 @@
-# Onshape 3D-navigation bridge — implementation notes & handoff
+# Onshape 3D navigation bridge — maintainer's guide
 
-This is the maintainer's guide to the **Onshape** integration in the Trackball Daemon. It documents
-what the bridge does, the reverse-engineered protocol, and — most importantly — the **gotchas and
-solved problems you would not discover by reading the code alone** (§8). If you only read one
-section, read §8.
+This guide owns the Onshape bridge protocol, browser/camera API facts, setup, threading, and earned
+warnings. Shared focus, state, mapping, routing, and lifecycle contracts are defined in
+[`../architecture.md`](../architecture.md).
 
 Primary code: [`trackball_daemon/onshape_bridge.py`](../../trackball_daemon/onshape_bridge.py). Wiring:
-`app.py`, `config.py`, `integrations.py`, `ui.py`, `winfocus.py`.
+`app_registry.py`, `navigation_router.py`, `config_store.py`, `integrations.py`, and `app.py`.
 
 ---
 
@@ -18,10 +17,9 @@ loopback endpoint `127.51.68.120:8181` over a **TLS WebSocket** speaking a **WAM
 We don't own a SpaceMouse, so instead of faking mouse drags we **stand up our own server
 impersonating that NL-Proxy**. Onshape connects to us, exposes accessors for its camera/scene, and
 **we run the navigation model**: read the camera, apply the trackball's orbit/pan/zoom about a
-pivot, write the new camera back. The in-process `OnshapeBridge` is the browser analogue of
-`solidworks_driver.py` (an external in-process driver, parallel to the socket broker) and exposes
-the same surface (`submit/set_rate/set_scheme/set_pivot_hold/set_zoom_hold/start/stop/is_connected/version` +
-`on_connection_changed`).
+pivot, write the new camera back. `OnshapeBridge` is a direct transport parallel to the socket broker;
+`NavigationRouter` is the sole delivery boundary and sends it only active, revision-matched Onshape
+envelopes.
 
 Prior art that made this possible: **`RmStorm/spacenav-ws`** (Python; same endpoint, reverse-engineered
 the same traffic for Linux) — we reused its **protocol** findings and its **HAR captures of a real
@@ -31,8 +29,8 @@ NL-Proxy session**, but not its camera math (we reuse the Fusion add-in's vector
 
 ## 2. Architecture & threading
 
-- `submit(ox,oy,oz,px,py,zoom)` is called on the **BLE thread**; it only accumulates a 6-float delta
-  under a lock. Never blocks, never touches the socket.
+- `submit(ox,oy,oz,px,py,zoom)` is called by `NavigationRouter` on the navigation-delivery path; it
+  only accumulates a six-float delta under a lock. It never blocks and never touches the socket.
 - A **server thread** runs the TLS accept loop on `127.51.68.120:8181`. Each accepted connection
   gets a **reader thread** (`_OnshapeConn.serve`) that does the HTTP/WS handshake, then parses WAMP
   frames: it answers the client's create/subscribe/focus calls and resolves our read/write replies
@@ -40,7 +38,7 @@ NL-Proxy session**, but not its camera math (we reuse the Fusion add-in's vector
 - A **worker thread** (`_run_worker`) waits until a client is subscribed+focused, then at `rate_hz`
   coalesces the accumulated delta and runs **one navigation step** (`_navigate`): read `view.affine`,
   apply the camera change, write it back — wrapped in the `motion`/`transaction` framing. **All
-  network round-trips happen on this worker, never on the BLE thread.**
+  network round-trips happen on this worker, never on the producer/delivery path.**
 - `on_connection_changed(connected, version)` fires on handshake-complete / disconnect so the
   tray/UI status updates (exactly like the SolidWorks COM driver).
 - Degrades gracefully: missing/invalid cert → server doesn't start (logged once), submit/flush
@@ -51,15 +49,18 @@ NL-Proxy session**, but not its camera math (we reuse the Fusion add-in's vector
 
 ## 3. Endpoint & discovery
 
-- Host/port: **`127.51.68.120:8181`, HTTPS/WSS only** (Onshape is https, so mixed-content rules
-  forbid `ws://`).
+- Host/port: **`127.51.68.120:8181`, HTTPS/WSS only**. The host is a fixed loopback security
+  boundary: config validation and `OnshapeBridge` reject any other bind address. Onshape is HTTPS, so
+  mixed-content rules forbid `ws://`.
 - HTTP discovery: Onshape first does `GET https://127.51.68.120:8181/3dconnexion/nlproxy`; we reply
   `{"port":8181,"version":"1.4.8.21486"}`. This is **cross-origin** (page is `https://cad.onshape.com`)
   so an allowed response carries CORS headers (`Access-Control-Allow-Origin`, echoing the request
   Origin only after `_allowed_web_origin` accepts HTTPS `onshape.com`/subdomains or the bridge's own
   local status origin). Other origins are rejected before HTTP handling or WebSocket upgrade; there
   is no wildcard reflected CORS.
-- WebSocket: path `/`, **subprotocol `wamp`** (echoed in our 101 response).
+- WebSocket: path `/`, **subprotocol `wamp`** (echoed in our 101 response). The hand-written reader
+  requires masked client frames, validates RSV/opcodes/fragmentation/control-frame rules and UTF-8,
+  and bounds frame, aggregate-message, and fragment counts before buffering payloads.
 - `GET /` (no upgrade) returns a tiny status page — handy for the one-time cert-trust visit (§6).
 
 ---
@@ -115,7 +116,7 @@ self:update pivot.visible  false
 self:update motion         false
 ```
 
-### Accessors Onshape actually supports (verified live with the probe, client lib v0.6.0)
+### Accessors supported by the current Onshape client
 - **Read:** `view.affine` (16 floats), `view.extents` (6: minx,miny,minz,maxx,maxy,maxz),
   `view.perspective` (bool — **false by default**, Onshape is orthographic), `view.target` (3),
   `model.extents` (6), `hit.lookat` (3, the hit-test result).
@@ -144,7 +145,8 @@ back  = (m[8],  m[9],  m[10])    # camera +Z in world (OUT of the screen); forwa
 eye   = (m[12], m[13], m[14])    # camera position in world
 ```
 With eye + a right/up/forward basis we apply the **same orbit/pan/zoom-about-a-pivot as the Fusion
-add-in** (`plugins/fusion360/TrackballNav/TrackballNav.py`):
+add-in**
+([`trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py`](../../trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py)):
 - **orbit** — rotate `eye` about the pivot and rotate the basis (free = about the composed camera
   axis; turntable = yaw about `WORLD_UP` + pitch about camera-right, roll dropped). Re-orthonormalize
   the basis each frame (`_orthonormalize`) to fight drift.
@@ -188,13 +190,13 @@ Algorithm:
    it **fabricates `hit.lookat`** as a point on the pick ray at roughly the scene's camera distance
    (§8.6), and the old 10%-of-diagonal margin let those fabrications become "orbit about empty air"
    pivots near the model.
-4. **Confirm the candidate is a real surface** (daemon 0.1.62): re-cast the SAME ray with
+4. **Confirm the candidate is a real surface:** re-cast the SAME ray with
    `hit.lookfrom` slid `_CONFIRM_BACKOFF` (4 × view half-extent) further back and require the same
    world point within `_CONFIRM_TOL`. A real surface hit is invariant to the ray origin; a
    fabricated at-depth point tracks it. (A fabrication computed from Onshape's own camera would
    survive the re-cast — the strict bbox test in step 3 is the backstop for that case.)
 5. No valid, confirmed hit at any aperture → the method is **unavailable**; resolution continues
-   through the **configured fallback chain** (Global → Failure fallback order).
+   through the **configured fallback chain** (**Global → Orbit → Orbit pivot fallback order**).
 6. **Hold the pivot for the whole gesture** (`_held_pivot`): captured once on the first orbit frame,
    reused every frame, re-picked only after a pan/zoom or the configured Pivot hold expires. The hit-test therefore runs
    **once per gesture (a handful of round-trips), not per frame.**
@@ -205,13 +207,13 @@ Other pivots: `origin` = world origin; `object` = model centre; `selection` read
 view is orthographic, where turn-in-place (rotating about the eye) degenerates to sliding the image
 around — so a `camera` primary or chain entry simply falls through to the next candidate. A camera
 primary still keeps its selection-override exemption (never hijacked by selection), the same
-convention as Fusion/SolidWorks/FreeCAD, whose resolvers also skip camera. Daemon
-0.1.58 wires `selection_overrides_pivot` into
-the in-process bridge, so a non-empty selection replaces the designated orbit pivot. Onshape builds
+convention as Fusion/SolidWorks/FreeCAD, whose resolvers also skip camera. The registered Selection
+override setting is consumed by the daemon-side direct bridge, so a non-empty selection replaces the
+designated orbit pivot. Onshape builds
 that omit the optional selection properties safely continue through the designated-pivot path. The
-scheme comes from `set_scheme` (Global → 3D control scheme, or per-app Onshape override).
+scheme comes from the resolved Global/app settings published through `set_scheme`.
 
-Config v8 separates **Pivot hold** (`orbit_pivot_hold_sec`) from **Zoom hold**
+**Pivot hold** (`orbit_pivot_hold_sec`) and **Zoom hold**
 (`zoom_cursor_hold_sec`). Pan and zoom invalidate the orbit pivot; pan preserves a held To Cursor
 zoom target, while orbit invalidates it. Orbit ray misses remain strict and continue through the
 explicit chain. To Cursor zoom has a different contract: if the cursor ray misses geometry, the
@@ -249,166 +251,108 @@ does not manufacture a transition, and the straight-up/down singularity is skipp
 
 ---
 
-## 8. GOTCHAS & SOLVED PROBLEMS (read this)
+## 8. Load-bearing warnings
 
-These are the non-obvious things, each as *symptom → cause → fix*. Most cost real debugging time.
+These are current protocol and camera invariants. Completed probe narratives and rejected approaches
+belong under `archive/`; keep this section concise.
 
-### 8.1 The affine convention is ROW-vector, not column — and it differs from the 3Dconnexion sample
-- **Symptom:** orbit produced garbage / the model jumped to nowhere; debug showed the decoded eye as
-  `(0,0,0)`.
-- **Cause:** the only HAR capture available was the 3Dconnexion **three.js sample**, whose
-  `view.affine` puts the **translation in the last column** (indices 3,7,11) — so the code originally
-  defaulted to that. **Real Onshape uses the opposite (row-vector) layout**: translation in the last
-  **row** (indices 12,13,14), basis as rows. Decoding with the wrong layout reads eye = the last
-  column = `(0,0,0)` and a transposed basis.
-- **How it was found:** with debug logging, the live affine's last column was `[0,0,0]` → that must be
-  the homogeneous `[0,0,0,1]` column → translation is in the last row. Confirmed by checking
-  `right × up == back` for the row interpretation.
-- **Fix:** `AFFINE_TRANSLATION_IN_COLUMN = False`. The constant is kept as a one-line escape hatch:
-  if a *different* navlib app ever drives this bridge and orbit/pan come out transposed, flip it.
+### 8.1 Decode `view.affine` as a row-vector transform
 
-### 8.2 Routing by window title silently drops every frame (the "connected but nothing moves" bug)
-- **Symptom:** the 3D-Apps row shows **connected**, but moving the ball does nothing.
-- **Cause:** `app.py::_foreground_app_key` originally required the foreground window **title to contain
-  "Onshape"**. But the browser titles the tab with the **document** name —
-  e.g. `monstera leaf | Part Studio 1 — Mozilla Firefox` — which contains no "Onshape". So
-  `_active_app_key` returned `None` and `_nav_sink` dropped every frame before it reached the bridge.
-- **Fix:** route to `onshape` when the **foreground process is a browser** (`_BROWSER_PROCS`:
-  chrome/msedge/firefox/brave/opera/vivaldi) **AND the bridge is connected**. The precision ("is the
-  user actually in the Onshape tab") comes from Onshape's own **focus** signal (§8.4), gated in the
-  worker — not from the window title. The obsolete title-query helper was removed.
+Real Onshape places translation in indices 12–14 and stores the camera basis as rows.
+`AFFINE_TRANSLATION_IN_COLUMN` must remain `False` for this bridge. The 3Dconnexion sample uses a
+different layout and is not authority for Onshape.
 
-### 8.3 Orthographic zoom "rubber-bands" (applies for one frame then snaps back)
-- **Symptom:** zoom in/out is visible for a frame, then the view springs back; it "fights itself".
-- **Cause:** in orthographic mode the magnification lives in `view.extents`, so the code wrote **only**
-  `view.extents`. But Onshape treats the **`view.affine` write as the frame's commit** — a frame
-  without an affine write is reverted on the next frame. Secondarily, `view.extents` was read from a
-  0.2s cache, so successive frames scaled from a stale value (steppy).
-- **Fix:** on every ortho-zoom frame, **also re-write the (unchanged) `view.affine`** alongside the
-  new extents (this matches the real NL-Proxy, which writes `view.affine` on *every* motion frame),
-  and **read `view.extents` fresh** so zoom compounds. See `_navigate` (ortho branch sets
-  `changed_affine = True`) and `_zoom_ortho` (no TTL on the extents read).
-- **General rule:** write `view.affine` on every motion frame. If you add a new motion type, don't
-  skip it.
+### 8.2 Browser process is only the coarse context
 
-### 8.4 Onshape's `focus` flag is reliable — use it, not heuristics
-- Onshape sends `3dx_rpc:update {"focus":true/false}` as its 3D view gains/loses focus (verified
-  `focus -> True` live). The worker only applies motion when `conn.focus` (or `_force_focus` for
-  tests). This is the authoritative "the user is in the Onshape viewport" signal and is what makes
-  §8.2's looser routing safe — a backgrounded Onshape tab reports `focus:false` and won't be moved.
+`app_registry.resolve_foreground_context` selects Onshape only when a supported browser is foreground
+and the bridge is connected. Browser titles are not reliable Onshape identifiers. The WAMP focus flag
+is the final camera-delivery gate. Onshape-scoped bindings and HUD context can still activate in an
+unrelated foreground browser tab; that open defect is tracked in [`TODO.md`](../../TODO.md).
 
-### 8.5 `view.target` is a poor orbit pivot (why §6 exists)
-- **Symptom:** "view" orbit swung about an arbitrary point in space.
-- **Cause:** `view.target` sits on the optical axis but at an **arbitrary depth** — measured ~1.5
-  units off the actual surface in one test. Orbiting about it swings the model.
-- **Fix:** the hit-test pivot (§6). `view.target` is no longer used.
+### 8.3 Write `view.affine` on every motion frame
 
-### 8.6 navlib hit-test specifics that aren't obvious
-- `hit.lookfrom`/`hit.direction`/`hit.aperture` are **write-only**; reading them returns "unknown
-  property" — that is expected, **not** a failure.
-- `pointer` is **not exposed**, but the hit-test accepts an **arbitrary ray**, so a cursor-position
-  pivot IS possible: the page reports exact `#canvas` NDC via userscript (`cursor` pivot, §8.14).
-  Win32 window geometry alone cannot size the canvas on Firefox; screen capture is not used.
-- A **no-hit** result is not signalled at all: Onshape **fabricates** `hit.lookat` as a point on
-  the pick ray at roughly the scene's distance from the camera (observed live: "a point below the
-  cursor the same distance from the camera as the objects"). Two guards keep fabrications from
-  becoming pivots — `_valid_hit` requires the point essentially inside the model bbox (0.1% of the
-  diagonal of slop; a real surface point always is), and `_hit_ray` **re-casts the same ray from
-  further back** and requires the same world point (real surfaces are ray-origin-invariant;
-  at-depth fabrications track the origin). Rejected ⇒ the method is unavailable and the configured
-  fallback chain continues.
-- **Cache-poisoning trap:** do **not** read `hit.lookat` through the caching `conn.read()` — a no-hit
-  CALLERROR would get cached in `conn._unsupported` and permanently disable the read. Use
-  `conn._rpc("self:read", ["hit.lookat"])` directly and catch `_PropUnsupported` per attempt. Only
-  the hit.* **writes** failing means the build lacks hit-testing (sets `conn._hit_unsupported`, which
-  stops further attempts).
+Orthographic magnification lives in `view.extents`, but the affine write commits the frame. Every
+orthographic zoom frame must read extents fresh, write the new extents, and re-write the unchanged
+affine. New motion types must preserve the same commit rule.
 
-### 8.7 Capture the pivot once per gesture and hold it
-- Re-raycasting every frame both chases the moving view (the pivot would crawl) and adds round-trips.
-  `_held_pivot` is captured on the first orbit frame and held; pan/zoom and the configured orbit
-  hold invalidate it. `_held_zoom_pivot` has an independent Zoom hold used only by To Cursor;
-  pan preserves it and orbit invalidates it. Mirrors the SolidWorks driver's split holds.
+### 8.4 Use the WAMP `focus` flag as the viewport gate
 
-### 8.8 Onshape is orthographic by default
-- `view.perspective` is `false`. The orthographic zoom path (scale extents, §8.3) is the one that
-  matters; the perspective dolly path exists but is rarely exercised. Test zoom in **ortho**.
+Onshape sends `3dx_rpc:update {"focus":true/false}` as the 3D view gains or loses focus. Apply camera
+motion only when `conn.focus` is true (or `_force_focus` in tests); do not replace this with window-title
+or browser heuristics.
 
-### 8.9 Cert trust is per-browser; Chrome ≠ Firefox
-- Chrome/Edge read the Windows store (so `certutil -user -addstore Root` works); **Firefox does not**
-  (own NSS store). A user can have the cert trusted in one browser and not the other. The IP **SAN is
-  mandatory** — browsers ignore CN.
+### 8.5 Do not use `view.target` as the orbit pivot
 
-### 8.10 Windows loopback & `navigator.platform`
-- Binding `127.51.68.120` needs no configuration on Windows (whole 127/8 is loopback). And no
-  userscript is needed (platform is already Win32). Both are Linux-only headaches.
+`view.target` is on the optical axis at an arbitrary depth, so it cannot anchor a surface-preserving
+orbit. Orbit pivots come from the configured hit-test chain. `_cursor_depth_point` may still read
+`view.target` as a depth fallback for synthesized To Cursor zoom; that does not make it an orbit pivot.
 
-### 8.11 Client-lib version varies / be version-tolerant
-- Normal is client lib **v0.6.0**. A stale/odd reconnect once reported **v0.3.11 / "v0"**. The
-  handshake does not gate on version — keep it that way.
+### 8.6 Treat hit testing as an adversarial protocol boundary
 
-### 8.12 EVENT topic must be the SHORT prefixed form
-- Publish EVENTs to `3dconnexion:3dcontroller/<instance>` (the short form the client subscribed to),
-  not the resolved long URI. The real proxy uses the short form.
+- `hit.lookfrom`, `hit.direction`, and `hit.aperture` are write-only; failed reads are expected.
+- Navlib exposes no pointer, but it accepts an arbitrary ray. Under Cursor therefore uses page-reported
+  `#canvas` NDC rather than browser-window geometry.
+- Onshape can fabricate `hit.lookat` for empty space. Accept a point only when it is inside the model
+  bounds and a second cast from farther back resolves to the same world point; otherwise continue the
+  fallback chain.
+- Read `hit.lookat` with direct `_rpc("self:read", ...)`, not caching `conn.read()`, so an expected
+  no-hit error cannot permanently poison capability detection.
 
-### 8.13 RPC timeout = disconnect
-- If the client doesn't answer a read/write within `_RPC_TIMEOUT` (2s), we treat the connection as
-  dead and drop it. A wedged/backgrounded tab will disconnect rather than hang the worker.
+### 8.7 Capture pivots once per gesture
 
-### 8.14 Under-cursor orbit: exact #canvas pointer from the page (✓ LIVE-VERIFIED)
-The `cursor` pivot orbits about the surface **under the mouse**. Two halves:
-- **Half B (the ray) — solid.** `_hit_cursor` → `_pixel_ray` → `_hit_ray` (same aperture/bbox/hold as `screen_center`).
-- **Half A (mouse → canvas NDC) — page-reported, exact.** navlib exposes no pointer. Win32
-  `GetCursorPos` + window geometry cannot recover the WebGL canvas on Firefox (client includes
-  chrome; no content HWND). Screen-DC / BitBlt measurement was tried and rejected (inaccurate /
-  user-forbidden). **`view.extents` aspect is not the canvas aspect** (live: `#canvas` ≈ 1.72 vs
-  extents halves ≈ 0.98), so auto-left from extents was wrong and removed.
+Capture `_held_pivot` on the first orbit frame and invalidate it on pan, zoom, hold expiry, or scheme
+change. `_held_zoom_pivot` is independent: pan preserves it and orbit invalidates it. Recasting every
+frame chases a moving view and adds round-trips.
 
-  **Why a userscript:** the only exact size is `document.getElementById("canvas").getBoundingClientRect()`
-  inside the page. A Violentmonkey/Tampermonkey script (served at
-  `https://127.51.68.120:8181/trackball/pointer.js`, also copyable from the daemon UI) posts canvas
-  NDC to `/trackball/pointer`. Mousemove updates the coordinates, and a short interval republishes
-  the last on-canvas sample so it remains fresh while the physical pointer is stationary after an
-  orbit or pan. The bridge caches samples (~0.75 s TTL). Off-canvas / stale / missing makes the
-  orbit method unavailable and the configured fallback chain continues; To Cursor zoom can
-  synthesize a target only when a fresh on-canvas ray exists.
+### 8.8 Qualify orthographic behavior explicitly
 
-- **Install (daemon UI):** 3D Apps → Onshape → Set up shows cert + SpaceMouse steps plus
-  **Copy userscript** and the install list. Per-App Bindings → Onshape has a dedicated
-  **Copy userscript…** button (copies immediately, then shows “Copied!” + steps). Choosing Orbit
-  pivot = **cursor (under mouse)** opens a one-time warning with the same copy/steps and an
-  optional **Do not show again** checkbox (`onshape.cursor_userscript_warn_dismissed`).
-- **Manual steps:** install Tampermonkey/Violentmonkey → new script → paste → save → reload Onshape.
-  Optional check: `GET /trackball/pointer` should show updating `ndc_x`/`ndc_y`.
-- **Verified live** (daemon 0.1.56+): under-cursor orbit works; residual error is small / mostly
-  imperceptible. Offline tests cover ray/parse/TTL/`_hit_cursor`/fallbacks and the extents≠canvas
-  aspect lock (`tests/test_onshape_cursor_pivot.py`).
+Onshape normally reports `view.perspective == false`. The orthographic extents path is therefore the
+primary zoom path; do not treat perspective-only coverage as host qualification.
 
-#### Simpler install alternatives (not shipped yet)
-Listed for future UX work — current path is copy-from-daemon + userscript manager:
+### 8.9 Certificate trust is browser-specific
 
-| Approach | User effort | Notes |
-|---|---|---|
-| Fold deeper into Set up (already partially done) | One dialog | Copy button + expandable Instructions |
-| Greasy Fork / GitHub raw + `@updateURL` | One “Install” click | Needs hosted script + version sync |
-| Bookmarklet | Drag bookmark; click per tab | No extension; easy to forget |
-| Tiny Firefox/Chrome extension | “Add to browser” once | Best long-term UX; review/signing cost |
-| Warn when `cursor` selected but no samples | Zero install change | Makes failure obvious (complementary) |
+Chrome and Edge use the Windows certificate store; Firefox uses its own NSS store unless enterprise
+roots are enabled. The certificate must contain the loopback IP as a SAN. Trust in one browser does not
+establish trust in another.
 
-### 8.15 "Connects in Firefox but not Chrome/Edge" — Private Network Access
-- **Symptom:** the bridge links from Firefox but a Chromium browser (Chrome/Edge) never connects, even
-  with the cert trusted in the Windows store.
-- **Cause:** Chromium enforces **Private Network Access (PNA)** — a page on a *public* origin
-  (`cad.onshape.com`) connecting to a *loopback* address (`127.51.68.120`) is blocked unless the local
-  server opts in. Chromium sends an `OPTIONS` **preflight** carrying
-  `Access-Control-Request-Private-Network: true` and requires `Access-Control-Allow-Private-Network:
-  true` in the response. Firefox doesn't enforce PNA yet, so it "just works" there — the classic
-  split-by-browser tell. (Cert trust is a *separate*, per-browser axis, §8.9 — Chrome reads the Windows
-  store, Firefox its own; both must be satisfied.)
-- **Fix:** the bridge now sends `Access-Control-Allow-Private-Network: true` on **every** CORS response
-  (`_http`), harmless to Firefox. `TB_ONSHAPE_DEBUG=1` logs each `onshape HTTP< METHOD /path
-  (origin=… pna_req=…)` so you can see the preflight arrive. If Chrome still won't connect, check its
-  **DevTools → Console/Network** for a cert error (`NET::ERR_CERT_*` → re-trust the cert in the Windows
-  store, §7) vs. a PNA error, and that the SpaceMouse/3Dconnexion option is enabled in Onshape.
+### 8.10 Keep the fixed Windows loopback endpoint
+
+Windows treats all of `127.0.0.0/8` as loopback, so `127.51.68.120` needs no alias. Onshape already sees
+a supported Windows platform, so the pointer userscript is required only for Under Cursor behavior,
+not for the base bridge connection.
+
+### 8.11 Keep negotiation capability-based
+
+Treat client-library version strings as diagnostic metadata. Do not gate the handshake on a copied
+version number.
+
+### 8.12 Publish the subscribed short EVENT topic
+
+Publish to `3dconnexion:3dcontroller/<instance>`, not the resolved long URI.
+
+### 8.13 An RPC timeout ends the connection
+
+If a read or write exceeds `_RPC_TIMEOUT`, drop the connection so a wedged or backgrounded tab cannot
+block the worker.
+
+### 8.14 Under Cursor requires exact page-reported canvas coordinates
+
+Navlib does not expose the pointer, and browser-window geometry does not identify the WebGL canvas.
+The served Tampermonkey/Violentmonkey script reads `#canvas.getBoundingClientRect()` in the page and
+posts NDC to `/trackball/pointer`. The bridge accepts only fresh on-canvas samples; stale or missing
+samples make the pivot unavailable so the fallback chain continues.
+
+Install through **3D Apps → Onshape → Set up** or the Per-App **Copy userscript…** action, then reload
+Onshape. `GET /trackball/pointer` is a diagnostic view of the cached sample. Offline tests cover
+parsing, TTL, ray construction, targeting, and fallback behavior; current live qualification belongs
+in [`TODO.md`](../../TODO.md), with completed evidence under `archive/release-evidence/`.
+
+### 8.15 Chromium requires Private Network Access opt-in
+
+Chromium sends an `OPTIONS` preflight when `cad.onshape.com` connects to the loopback bridge. Every
+CORS response must include `Access-Control-Allow-Private-Network: true`. Certificate trust remains a
+separate requirement. Use browser DevTools and `TB_ONSHAPE_DEBUG=1` to distinguish certificate, PNA,
+and missing Onshape-option failures.
 
 ---
 
@@ -431,10 +375,10 @@ developer-owned Onshape profile with the user's bindings. Effective calibration 
 | `_MOTION_IDLE` | `0.5` | fallback used when either configured hold value is absent/invalid |
 | `_RPC_TIMEOUT` | `2.0` | §8.13 |
 
-Per-app sensitivity/invert/scheme, the two hold values, horizon-entry override, and viewport rate
-come from config (Per-App Bindings), same as the other apps. `config.data["onshape"]` holds
-`{address, port, cert_path, key_path}` (additive
-block; blank cert paths → the generated defaults). Under-cursor orbit needs the userscript from
+Per-app sensitivity, axis routing, scheme, independent holds, horizon entry, and viewport rate
+resolve from sparse v9 settings. The immutable `ConfigSnapshot.onshape` block exposes validated
+operational/certificate state; the protocol host remains fixed at `127.51.68.120`, and blank
+certificate paths use generated defaults. Under-cursor orbit needs the userscript from
 `/trackball/pointer.js` (no canvas-inset calibration).
 
 ---
@@ -449,11 +393,12 @@ block; blank cert paths → the generated defaults). Under-cursor orbit needs th
   without the BLE device or the routing/focus gates**. The model should orbit on its own.
 - **Standalone:** `python -m trackball_daemon.onshape_bridge [--spin] [--force]` runs just the bridge
   (separate from the daemon). `--force` drives even if Onshape reports unfocused.
-- **Restarting the running daemon with env vars** (it's launched as `pythonw -m trackball_daemon`):
-  stop the `pythonw` process whose command line contains `trackball_daemon`, then relaunch from the
-  repo dir with the env var set. Logs go to `%APPDATA%\TrackballDaemon\daemon.log`.
+- **Restarting with environment variables:** use tray **Quit** first so providers, sockets, and held
+  controls shut down cleanly, then relaunch from the repository with the variable set. Forced
+  termination is recovery-only: identify the exact PID and verify its executable and complete command
+  line before stopping it. Logs go to `%APPDATA%\TrackballDaemon\daemon.log`.
 - **What a healthy session looks like in the log:** `onshape: created 3dcontroller for client
-  'Onshape' v0.6` → `onshape: client subscribed` → `onshape: focus -> True` → (on motion)
+  'Onshape' <client-version>` → `onshape: client subscribed` → `onshape: focus -> True` → (on motion)
   `onshape nav: … held_pivot=(a point ON the model)`.
 - **Verifying accessors before relying on them** (the lesson from §8.1): a throwaway probe that writes
   candidate accessors and logs whether Onshape ACKs or returns "unknown property" is the fast way to
@@ -463,24 +408,17 @@ block; blank cert paths → the generated defaults). Under-cursor orbit needs th
 
 ---
 
-## 11. Status & known limitations (at handoff)
+## 11. Current capabilities and limitations
 
-- **Working:** TLS + handshake + connection status; orbit with the hit-test `screen_center` pivot; under-mouse
-  **`cursor` pivot** (daemon 0.1.57 — page userscript posts exact `#canvas` NDC; **live-verified**,
-  small residual inaccuracy; install via Copy userscript in Set up, the expanded Instructions panel,
-  Per-App Bindings, or the cursor-pivot warning); ortho zoom (rubberband fixed); pan; control scheme
-  (screen_center/object/origin/selection/cursor, free/turntable, zoom modes — no `camera`: Onshape
-  is orthographic, so turn-in-place degenerates to an image slide and the method is skipped).
-- **Needs a live interaction pass:** the §8.6 fabricated-no-hit guard (strict bbox + confirmation
-  re-cast), stationary-pointer refresh, v8 independent holds/synthetic To Cursor target, and
-  free→turntable +Z leveling were added after the original live cursor verification.
-- **Limitations:** the fabricated-no-hit guard (daemon
-  0.1.62) is offline-tested only — live-verify that real screen-centre hits still land and that
-  empty-space misses now fall through the configured chain (a fabrication computed from Onshape's
-  own camera rather than the ray origin would only be caught by the bbox test);
-  Firefox needs its own cert trust; perspective path is lightly tested (Onshape defaults to ortho).
-  Under-cursor orbit requires the `/trackball/pointer.js` userscript (daemon UI copies it). There is
-  **no add-in** to install or update for Onshape — it's all the in-process bridge.
+The direct bridge supports TLS/WAMP connection status, screen-center and under-mouse surface pivots,
+orthographic zoom, pan, free/turntable orbit, origin/object/selection/cursor targets, and independent
+Orbit/To-Cursor gesture holds. Camera pivot is not exposed because turn-in-place under Onshape's
+normal orthographic projection degenerates into an image slide.
+
+Firefox uses its own certificate store, while Chromium browsers also require the Private Network
+Access response described in §8.15. Under-cursor behavior requires the supplied
+`/trackball/pointer.js` userscript. Onshape has no host add-in to install or update; the transport is
+the daemon-side bridge. Current live qualification is tracked only in [`TODO.md`](../../TODO.md).
 
 ---
 
@@ -488,17 +426,14 @@ block; blank cert paths → the generated defaults). Under-cursor orbit needs th
 
 - `onshape_bridge.py` — the driver: WS+WAMP server (`_OnshapeConn`), the worker/camera math
   (`OnshapeBridge`), cert generation, the standalone spike.
-- `app.py` — constructs `self.onshape_bridge`, starts/stops it, routes `onshape` frames in
-  `_nav_sink`, browser-based focus detection in `_foreground_app_key`, status merge in
-  `_on_onshape_connection_changed` / `_refresh_connected_apps`, rate/scheme push in
-  `_apply_rates`/`_apply_schemes`.
-- `config.py` — top-level `"onshape"` endpoint/certificate block plus the shared
-  `apps.onshape` profile. Config v8 owns the split hold migration; the per-app nullable horizon
-  value inherits the Global value until explicitly changed.
-- `integrations.py` — `setup_onshape` (generate cert + trust instructions; wired as the AppDef
-  `setup`). Onshape is **not** in `_ADDINS` (no add-in to copy/auto-update).
-- `ui.py` — the 3D-Apps row + Per-App Bindings render via the generic no-add-in path
-  (`appdef.setup is not None`, not in `ADDIN_KEYS`).
-- `winfocus.py` — `foreground_process_name`, used for browser-process routing (see §8.2).
+- `app.py` — bridge lifecycle, runtime profile publication, connection-status merge, and routing
+  through `NavigationRouter`.
+- `app_registry.py` — browser process selectors, coarse foreground context, modes, and capabilities.
+- `config_store.py` / `settings_schema.py` — validated operational Onshape state and sparse typed
+  settings. Legacy v8 reconstruction remains isolated in `config.py`.
+- `integrations.py` — `setup_onshape` generates the certificate and returns explicit trust steps.
+  Onshape is not in `_ADDINS`; there is no host add-in to copy or auto-update.
+- `ui.py` — generated 3D Apps and Per-App surfaces through the generic no-add-in setup path.
+- `winfocus.py` — read-only foreground process query used by `app_registry` context resolution.
 - `requirements.txt` — `cryptography` (win32 marker; recommended-but-optional, openssl is the
   fallback). The WSS server itself is stdlib-only (`ssl` + hand-rolled WebSocket).

@@ -39,10 +39,9 @@ namespace TrackballNav
                       c.Persp ? GsProjection.Perspective : GsProjection.Parallel);
         }
 
-        // DB VIEWTWIST equivalent of the camera's up vector (sign verified live: a pure +0.30
-        // NavMath roll landed as VIEWTWIST +0.3000 after commit). Used by the classic
-        // SetCurrentView commit that 2D-wireframe viewports need (their 2D display list only
-        // rebuilds through that path -- Plugin.EndGesture / notes 8.16).
+        // DB VIEWTWIST equivalent of the camera's up vector. Used by the classic SetCurrentView
+        // commit required by 2D Wireframe; see docs/apps/autocad.md, "2D Wireframe commit order
+        // is crash-sensitive."
         public static double TwistOf(CamState c)
         {
             var dir = c.Pos - c.Tgt;

@@ -1,5 +1,9 @@
 # Phase 4 navigation transport baseline
 
+> **Archived protocol and version snapshot.** Current transport authority is
+> [`../../../docs/architecture.md`](../../../docs/architecture.md) and the implementation; version
+> numbers below are historical.
+
 This freezes the broker and direct-driver contracts at Phase 4's starting commit `43832a7` before
 target isolation changes server-side ownership. It is an implementation checkpoint, not a promise
 that version numbers belong in evergreen user documentation.

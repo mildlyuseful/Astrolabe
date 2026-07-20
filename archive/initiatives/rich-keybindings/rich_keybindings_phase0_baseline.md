@@ -1,5 +1,8 @@
 # Rich keybindings Phase 0 baseline and glossary
 
+> **Archived pre-implementation baseline.** “Current behavior” and known defects below describe the
+> old boundary and may have been intentionally superseded.
+
 Status: Phase 0 behavior contract
 
 Starting commit: `d25944d`
@@ -9,7 +12,7 @@ Captured: 2026-07-13 on Windows `10.0.26200`, Python `3.11.9`, and .NET SDK `8.0
 This document records the behavior that later rich-keybinding phases must preserve or replace
 deliberately. It is not a description of the target architecture. The target and phase gates live
 in [`rich_keybindings_implementation_plan.md`](rich_keybindings_implementation_plan.md); the Windows
-provider decision lives in [`spikes/windows_keyboard_input.md`](spikes/windows_keyboard_input.md).
+provider decision lives in [`windows_keyboard_input.md`](../../spikes/windows_keyboard_input.md).
 
 ## Untouched-code baseline
 

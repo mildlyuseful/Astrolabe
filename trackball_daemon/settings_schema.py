@@ -1,8 +1,7 @@
-"""Stable setting/command registry for config, bindings, and generated settings UI.
+"""Stable setting and command registry for config, bindings, and generated settings UI.
 
-Phase 1 records the current v8 paths without changing their storage.  Phase 2 can move persistence
-to sparse System -> Global -> app maps while keeping these public setting IDs and capability
-predicates stable.
+Public setting IDs and capability predicates remain stable while persistence uses sparse
+System -> Global -> app resolution. Legacy paths are retained only where migration requires them.
 """
 from dataclasses import dataclass
 from enum import Enum
@@ -133,7 +132,7 @@ class SettingSpec:
 
 @dataclass(frozen=True)
 class CommandSpec:
-    """Allowlisted non-setting action available to the future declarative binding compiler."""
+    """Allowlisted non-setting action available to the declarative binding compiler."""
 
     command_id: str
     title: str
@@ -422,10 +421,10 @@ SETTING_SPECS_BY_APP_PATH = MappingProxyType(
     {spec.app_path: spec for spec in SETTING_SPECS if spec.app_path})
 
 
-# Stored profile mechanics that are deliberately not user controls. They remain classified until
-# the v9 migration can remove/restructure them rather than being mistaken for missing UI metadata.
+# Stored profile mechanics that are deliberately not public controls. Current v9 migration and
+# runtime materialization still consume these paths, so keep them classified outside UI metadata.
 APP_INTERNAL_PROFILE_PATHS = frozenset({
-    # Compatibility-only materialized field. Phase 8 moved layer activation into keybinding data.
+    # Compatibility-only materialized field; keybinding data owns layer activation.
     ("bindings", "toggle"),
     ("bindings", "orbit", "axis_sign", 0),
     ("bindings", "orbit", "axis_sign", 1),
@@ -441,9 +440,8 @@ APP_INTERNAL_PROFILE_PATHS = frozenset({
 APP_OPERATIONAL_PATHS = frozenset({
     ("enabled",), ("installed",), ("addin_version",),
 })
-# v8 still renders these three controls, but Phase 0 proved they have no controller-mode consumer.
-# They are classified here instead of becoming public SettingSpec IDs; Phase 2 removes them under
-# an explicit migration rule.
+# v8 rendered these controls even though controller mode had no consumer for them. Keep them
+# classified as deprecated migration input rather than public SettingSpec IDs.
 V8_DEPRECATED_USER_PATHS = frozenset({
     ("general", "buttons", "left"),
     ("general", "buttons", "right"),
@@ -469,11 +467,11 @@ COMMAND_SPECS = (
                 "Set the primary or secondary action layer.", "navigation",
                 targets=("primary", "secondary"), value_kind=ValueKind.ENUM),
     CommandSpec("pointer.button.press", "Press pointer button",
-                "Press one bounded OS pointer button through the Phase 8 output sink.", "pointer",
+                "Press one bounded OS pointer button through the bounded pointer output sink.", "pointer",
                 targets=("left", "right", "middle", "x1", "x2"),
                 value_kind=ValueKind.ENUM),
     CommandSpec("pointer.button.release", "Release pointer button",
-                "Release one bounded OS pointer button through the Phase 8 output sink.", "pointer",
+                "Release one bounded OS pointer button through the bounded pointer output sink.", "pointer",
                 targets=("left", "right", "middle", "x1", "x2"),
                 value_kind=ValueKind.ENUM),
 )

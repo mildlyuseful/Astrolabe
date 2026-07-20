@@ -1,4 +1,4 @@
-"""In-process Onshape bridge -- the browser analogue of the SolidWorks COM driver.
+"""Daemon-side Onshape bridge -- the browser analogue of the SolidWorks COM driver.
 
 Onshape runs in a browser and has NATIVE 3Dconnexion SpaceMouse support: its page ships the
 3Dconnexion client library, which (on Windows/Mac) connects to a LOCAL service -- the "NL-Proxy"
@@ -8,20 +8,19 @@ server impersonating that service: Onshape connects to us, hands us its camera, 
 trackball's orbit/pan/zoom. See ``docs/apps/onshape.md`` for the full reverse-engineered
 protocol + the cert/trust setup (and the prior art it is based on: RmStorm/spacenav-ws).
 
-This driver lives inside the daemon process, parallel to the broker and the SolidWorks driver, and
-mirrors ``SolidWorksDriver``'s public surface so ``app.py`` drives it identically:
-``submit/set_rate/set_scheme/start/stop/is_connected/version`` + the
-``on_connection_changed(connected, version)`` callback.
+This direct transport lives inside the daemon process, parallel to the broker and SolidWorks driver.
+``NavigationRouter`` is the sole delivery boundary and sends it only active, revision-matched Onshape
+motion.
 
 Threading model (mirrors SolidWorksDriver exactly):
-  * submit() is called on the BLE thread and ONLY accumulates the per-frame orbit/pan/zoom delta --
-    it never blocks and never touches a socket.
+  * submit() is called on the navigation-delivery path and ONLY accumulates the per-frame
+    orbit/pan/zoom delta -- it never blocks and never touches a socket.
   * a SERVER thread runs the TLS accept loop on 127.51.68.120:8181. Each accepted connection gets a
     READER thread (parse WAMP frames, answer the handshake, resolve read/write replies by call id).
   * a WORKER thread waits until a browser client is subscribed+focused, then at rate_hz coalesces
     the accumulated delta and runs ONE navigation step: read the camera (view.affine), apply the
     orbit/pan/zoom math, write the new camera back -- wrapped in the protocol's motion/transaction
-    framing. Every network round-trip happens here, never on the BLE thread.
+    framing. Every network round-trip happens here, never on the producer/delivery path.
   * on_connection_changed(connected, version) fires when a client completes the handshake / drops,
     so the tray/UI status line updates -- the analogue of the SW driver's connect/disconnect.
 
@@ -40,6 +39,7 @@ stdlib ``ssl`` + a tiny hand-rolled WebSocket are used (no FastAPI/uvicorn/numpy
 uses ``cryptography`` if importable else the ``openssl`` CLI, both guarded.
 """
 import base64
+import binascii
 import hashlib
 import json
 import math
@@ -81,6 +81,12 @@ NLPROXY_VERSION = "1.4.8.21486"
 # spacenav-ws bridge sends its own and Onshape accepts it), so we send a clear, honest one.
 WELCOME_IDENT = "NLProxy v%s (Trackball Daemon bridge)" % NLPROXY_VERSION
 _MAX_HTTP_BODY = 16 * 1024
+_MAX_WS_FRAME = 64 * 1024
+_MAX_WS_MESSAGE = 256 * 1024
+_MAX_WS_FRAGMENTS = 64
+_VALID_WS_CLOSE_CODES = frozenset({
+    1000, 1001, 1002, 1003, 1007, 1008, 1009, 1010, 1011, 1012, 1013, 1014,
+})
 
 
 def _allowed_web_origin(origin):
@@ -172,6 +178,10 @@ class _WAMP:
 
 class _ConnDead(Exception):
     """Raised by a connection's rpc()/reader when the socket is gone or the client went silent."""
+
+
+class _WSProtocolError(_ConnDead):
+    """Raised after rejecting an invalid or oversized client WebSocket frame."""
 
 
 class _PropUnsupported(Exception):
@@ -373,12 +383,14 @@ def _ws_encode(payload, opcode=0x1):
 
 
 class _WSReader:
-    """Buffered frame reader over a (TLS) socket. Reassembles fragmented text frames and answers
-    ping with pong. Raises _ConnDead when the socket closes."""
+    """Bounded RFC6455 reader for masked client text frames and control frames."""
+
+    _DATA_OPCODES = {0x0, 0x1}
+    _CONTROL_OPCODES = {0x8, 0x9, 0xA}
 
     def __init__(self, sock, send_fn):
         self._sock = sock
-        self._send = send_fn          # send_fn(bytes) -- used to reply to pings
+        self._send = send_fn          # send_fn(bytes) -- used for pong and close replies
         self._buf = b""
 
     def _need(self, n):
@@ -395,37 +407,100 @@ class _WSReader:
         out, self._buf = self._buf[:n], self._buf[n:]
         return out
 
+    def _reject(self, reason, code=1002):
+        payload = struct.pack(">H", code) + reason.encode("utf-8")[:123]
+        try:
+            self._send(_ws_encode(payload, opcode=0x8))
+        except _ConnDead:
+            pass
+        raise _WSProtocolError(reason)
+
     def _read_frame(self):
         b0, b1 = self._need(2)
-        fin = b0 & 0x80
+        fin = bool(b0 & 0x80)
+        if b0 & 0x70:
+            self._reject("reserved WebSocket bits are unsupported")
         opcode = b0 & 0x0F
-        masked = b1 & 0x80
-        ln = b1 & 0x7F
-        if ln == 126:
+        if opcode not in self._DATA_OPCODES | self._CONTROL_OPCODES:
+            self._reject("unsupported WebSocket opcode")
+        masked = bool(b1 & 0x80)
+        if not masked:
+            self._reject("client WebSocket frames must be masked")
+
+        length_code = b1 & 0x7F
+        ln = length_code
+        if length_code == 126:
             ln = struct.unpack(">H", self._need(2))[0]
-        elif ln == 127:
-            ln = struct.unpack(">Q", self._need(8))[0]
-        mask = self._need(4) if masked else b""
+            if ln < 126:
+                self._reject("non-minimal WebSocket payload length")
+        elif length_code == 127:
+            raw_len = self._need(8)
+            if raw_len[0] & 0x80:
+                self._reject("invalid WebSocket payload length")
+            ln = struct.unpack(">Q", raw_len)[0]
+            if ln < 65536:
+                self._reject("non-minimal WebSocket payload length")
+        if opcode in self._CONTROL_OPCODES and (not fin or ln > 125):
+            self._reject("invalid WebSocket control frame")
+        if ln > _MAX_WS_FRAME:
+            self._reject("WebSocket frame too large", code=1009)
+
+        mask = self._need(4)
         payload = self._need(ln) if ln else b""
-        if masked and payload:
+        if payload:
             payload = bytes(payload[i] ^ mask[i % 4] for i in range(len(payload)))
         return fin, opcode, payload
 
     def read_text(self):
-        """Return the next complete text message (bytes), handling control frames internally."""
+        """Return one valid UTF-8 text message while handling control frames internally."""
         chunks = []
+        total = 0
+        fragments = 0
+        fragmented = False
         while True:
             fin, opcode, payload = self._read_frame()
             if opcode == 0x8:                       # close
+                if len(payload) == 1:
+                    self._reject("invalid WebSocket close payload")
+                if payload:
+                    code = struct.unpack(">H", payload[:2])[0]
+                    if code not in _VALID_WS_CLOSE_CODES and not 3000 <= code < 5000:
+                        self._reject("invalid WebSocket close code")
+                    try:
+                        payload[2:].decode("utf-8")
+                    except UnicodeDecodeError:
+                        self._reject("invalid UTF-8 WebSocket close reason", code=1007)
+                try:
+                    self._send(_ws_encode(payload, opcode=0x8))
+                except _ConnDead:
+                    pass
                 raise _ConnDead()
             if opcode == 0x9:                       # ping -> pong
                 self._send(_ws_encode(payload, opcode=0xA))
                 continue
             if opcode == 0xA:                       # pong
                 continue
-            chunks.append(payload)                  # 0x1 text or 0x0 continuation
+            if opcode == 0x1:
+                if fragmented:
+                    self._reject("new text frame during fragmented message")
+                fragmented = not fin
+            elif not fragmented:
+                self._reject("continuation without fragmented message")
+
+            fragments += 1
+            if fragments > _MAX_WS_FRAGMENTS:
+                self._reject("too many WebSocket fragments", code=1009)
+            total += len(payload)
+            if total > _MAX_WS_MESSAGE:
+                self._reject("WebSocket message too large", code=1009)
+            chunks.append(payload)
             if fin:
-                return b"".join(chunks)
+                message = b"".join(chunks)
+                try:
+                    message.decode("utf-8")
+                except UnicodeDecodeError:
+                    self._reject("invalid UTF-8 WebSocket text", code=1007)
+                return message
 
 
 # --- one browser WebSocket connection (handshake + WAMP read/write) ---------------------------
@@ -486,8 +561,11 @@ class _OnshapeConn:
         header_blob, _, leftover = head.partition(b"\r\n\r\n")
         lines = header_blob.split(b"\r\n")
         try:
-            method, path, _ = lines[0].decode("latin-1").split(" ", 2)
-        except ValueError:
+            method, path, http_version = lines[0].decode("latin-1").split(" ", 2)
+            version_text = http_version.removeprefix("HTTP/")
+            version_parts = tuple(int(part) for part in version_text.split(".", 1))
+            valid_http_version = len(version_parts) == 2 and version_parts >= (1, 1)
+        except (ValueError, TypeError):
             return False
         headers = {}
         for ln in lines[1:]:
@@ -549,10 +627,25 @@ class _OnshapeConn:
                         "ndc_x": _PAGE_POINTER["ndc_x"], "ndc_y": _PAGE_POINTER["ndc_y"]}
             self._http(200, json.dumps(snap), origin, ctype="application/json")
             return False
-        if "websocket" in headers.get("upgrade", "").lower():
+        upgrades = {item.strip().lower() for item in
+                    headers.get("upgrade", "").split(",") if item.strip()}
+        if "websocket" in upgrades:
+            connection_tokens = {item.strip().lower() for item in
+                                 headers.get("connection", "").split(",") if item.strip()}
+            protocols = {item.strip() for item in
+                         headers.get("sec-websocket-protocol", "").split(",") if item.strip()}
+            if (method != "GET" or path_only != "/" or not valid_http_version or
+                    "upgrade" not in connection_tokens or
+                    headers.get("sec-websocket-version") != "13" or "wamp" not in protocols):
+                self._http(400, "invalid websocket upgrade", origin, ctype="text/plain")
+                return False
             key = headers.get("sec-websocket-key", "")
-            if not key:
-                self._http(400, "missing websocket key", origin, ctype="text/plain")
+            try:
+                decoded_key = base64.b64decode(key.encode("ascii"), validate=True)
+            except (UnicodeEncodeError, ValueError, binascii.Error):
+                decoded_key = b""
+            if len(decoded_key) != 16:
+                self._http(400, "invalid websocket key", origin, ctype="text/plain")
                 return False
             resp = ("HTTP/1.1 101 Switching Protocols\r\n"
                     "Upgrade: websocket\r\nConnection: Upgrade\r\n"
@@ -898,15 +991,19 @@ def _parse_pointer_body(raw):
 
 
 class OnshapeBridge:
-    """Accumulates nav deltas (BLE thread), serves the 3Dconnexion endpoint (server thread), and at
-    a fixed rate applies the accumulated delta to the focused Onshape view (worker thread). Public
-    surface parallels SolidWorksDriver so app.py drives it identically."""
+    """Accumulates routed nav deltas, serves the 3Dconnexion endpoint, and applies motion to the
+    focused Onshape view from its worker thread."""
 
     def __init__(self, on_connection_changed=None, rate_hz=DEFAULT_FLUSH_HZ,
                  host=BRIDGE_HOST, port=BRIDGE_PORT, cert_path=None, key_path=None):
         self.on_connection_changed = on_connection_changed
-        self._host = host or BRIDGE_HOST
-        self._port = int(port or BRIDGE_PORT)
+        requested_host = BRIDGE_HOST if host is None else host
+        if requested_host != BRIDGE_HOST:
+            raise ValueError("Onshape bridge must bind the fixed loopback endpoint")
+        self._host = BRIDGE_HOST
+        self._port = int(BRIDGE_PORT if port is None else port)
+        if not 1 <= self._port <= 65535:
+            raise ValueError("Onshape bridge port must be in 1..65535")
         d_cert, d_key = default_cert_paths()
         self._cert_path = cert_path or d_cert
         self._key_path = key_path or d_key

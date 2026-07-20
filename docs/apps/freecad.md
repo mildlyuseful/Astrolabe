@@ -1,13 +1,13 @@
 # FreeCAD navigation — maintainer's guide
 
-The **"what you can't see by reading the code"** document for the FreeCAD side of the Trackball
-Daemon: the architecture, the verified Coin camera model, and the FreeCAD-specific gotchas that cost
-real live debugging. FreeCAD is a **socket add-on** integration (like Fusion/Blender), not an
-in-process driver (SolidWorks/Onshape). Read this before touching the add-on.
+This guide owns FreeCAD-specific setup, Coin camera behavior, threading, and compatibility warnings.
+FreeCAD is a **broker-connected host add-on** integration (like Fusion and Blender), distinct from the
+daemon-side direct transports used for SolidWorks COM and Onshape. Shared focus, state, mapping,
+routing, and lifecycle contracts are defined in [`../architecture.md`](../architecture.md). Read both
+before changing the add-on.
 
-The camera model and bootstrap were originally verified live on FreeCAD 1.1.1 with PySide6 and
-Coin3D/pivy. Current code versions come from `ADDIN_VERSION`, `version.json`, and
-`trackball_daemon.__version__`; do not maintain a version snapshot here.
+Current code versions come from `ADDIN_VERSION`, `version.json`, and
+`trackball_daemon.__version__`; do not maintain a host or add-on version snapshot here.
 
 ---
 
@@ -24,14 +24,14 @@ python -m pytest tests -q
 
 To get the add-on into a running FreeCAD: edit `trackball_daemon/plugins/freecad/TrackballNav/`,
 **bump the version in two places** (`ADDIN_VERSION` in `tbnav_freecad.py` + `version.json` — see §7),
-then either let the daemon's `auto_update` re-copy it on next launch, or call
-`integrations.install_freecad(appdef, cfg)`. **Restart FreeCAD** to reload it (FreeCAD has no
-"reload add-on" — it's a restart). See §8/§10 for the restart rules.
+then restart the daemon for `auto_update` or use **Settings → 3D Apps → FreeCAD → Update**.
+**Restart FreeCAD** to reload it (FreeCAD has no add-on reload). See §8/§10 for the restart rules.
 
-Live end-to-end without hardware: run a `NavBroker` yourself, write `%APPDATA%\TrackballDaemon\
-bridge.json`, launch FreeCAD with the add-on installed, and `broker.submit(...)` some orbit deltas —
-watch `%APPDATA%\TrackballDaemon\freecad_addin.log` for `boot` / `rx orbit` / `screen-center-pivot` / `applied`
-lines. (That is exactly how this integration was verified; the daemon's BLE path isn't needed.)
+Live end-to-end without hardware: run a `NavBroker`, call `broker.activate_target("freecad")`,
+write `%APPDATA%\TrackballDaemon\bridge.json`, launch FreeCAD with the add-on installed, and submit
+with `broker.submit("freecad", ..., state_revision=...)`. Watch
+`%APPDATA%\TrackballDaemon\freecad_addin.log` for `boot`, `rx orbit`, `screen-center-pivot`, and
+`applied`; the daemon's BLE path is not required for this probe.
 
 ---
 
@@ -55,7 +55,8 @@ embedded-interpreter quirks.
 | `…/TrackballNav/tbnav_camera.py` | **Pure camera math** (quaternion/vector, the duck-typed `Camera`, orbit/pan/zoom). **No FreeCAD/pivy/PySide imports** → unit-testable headless under plain `python`. |
 | `…/TrackballNav/version.json` | Version the daemon reads for `auto_update` (like Fusion's `.manifest`). Keep in sync with `ADDIN_VERSION`. |
 | `trackball_daemon/integrations.py` | `install_freecad` (resolve the user Mod dir + copytree), `freecad_user_mod_dir`, the `_ADDINS["freecad"]` registry entry, `auto_update`. |
-| `trackball_daemon/navbroker.py` / `app.py` / `config.py` / `ui.py` | Generic broker-app plumbing — **no FreeCAD-specific code** (FreeCAD rides the same path as Fusion). |
+| `trackball_daemon/app_registry.py` / `navigation_router.py` / `navbroker.py` | FreeCAD identity plus target-isolated generic broker delivery. |
+| `trackball_daemon/config_store.py` / `settings_schema.py` / `system_defaults.json` | Sparse typed settings and current concrete defaults. |
 | `tests/test_freecad_nav_math.py` / `tests/test_freecad_cursor_pivot.py` / `tests/test_integrations_freecad.py` | The pure-math + cursor-pivot + wiring tests. |
 | `tools/freecad_cursor_probe.py` | Live GUI probe for the `cursor` pivot's event chain (synthetic QMouseEvents; see §9). |
 
@@ -67,8 +68,9 @@ FreeCAD's bundled Python). They only talk over the broker socket.
 ## 3. End-to-end data flow
 
 ```
-BLE trackball → output.py (per-app sensitivity/sign + Shift gating) → App._nav_sink
-  → (focused app == freecad, enabled) → NavBroker.submit  (accumulate; flush one coalesced frame/Hz)
+BLE trackball + immutable RuntimeSnapshot → output.py per-app mapping
+  → App._nav_sink creates a FreeCAD-targeted envelope → NavigationRouter / NavBroker
+  → per-target accumulation and configured-rate flush
         frame = {"o":[ox,oy,oz], "p":[px,py], "z":zoom, "op":…, "os":…, "zm":…}
   ──────────────────── localhost TCP ────────────────────
   → add-on reader thread (background; newline-JSON → queue.Queue)
@@ -76,10 +78,10 @@ BLE trackball → output.py (per-app sensitivity/sign + Shift gating) → App._n
   → _apply(): read the live Coin camera → tbnav_camera.{orbit,pan,zoom} → write it back → view.redraw()
 ```
 
-Routing is **entirely generic** — `app.py::_APP_PROC_HINTS` already had `"freecad":("freecad",)`, and
-`_nav_sink`'s else-branch sends every non-SolidWorks/non-Onshape app to the broker. So **no `app.py`
-change was needed**; FreeCAD is selected when the foreground process is `freecad.exe` and the app is
-enabled. (Verified by `tests/test_app_routing.py::test_freecad_routes_to_broker`.)
+Routing is generic and target-isolated. `app_registry.AppSpec` owns FreeCAD's process selector and
+broker transport. The shipped Shift binding requests the RuntimeStore secondary layer; `OutputEngine`
+consumes that immutable state, and `NavigationRouter` sends the envelope only to clients whose hello
+identity is `freecad`.
 
 **Contract:** the daemon composes FreeCAD's immutable host alignment with the saved user mapping
 before broker output. `tbnav_camera.py` is deliberately neutral to prevent double application. See
@@ -89,8 +91,8 @@ before broker output. `tbnav_camera.py` is deliberately neutral to prevent doubl
 
 ## 4. The verified Coin camera model
 
-All of this was confirmed live (console + GUI probes) on FreeCAD 1.1 — **do not re-derive it from
-matrix algebra, observe it** (the project's recurring lesson):
+These contracts come from direct console and GUI probes: **do not re-derive them from matrix
+algebra; observe host behavior when requalifying them:**
 
 ```python
 import FreeCADGui as Gui
@@ -138,11 +140,10 @@ view.redraw()                               # force a repaint (needed when drive
   bbox validation, and per-gesture hold as `screen_center`. Unavailable methods continue through the
   configured global chain. (`screen_center`/`cursor` is FreeCAD's
   *easiest* raycast of the apps — `getObjectInfo` does the pick and hands back world coords; no ray
-  construction needed.) Add-on 0.1.5 applies `selection_overrides_pivot`: a non-empty selection
-  wins over the designated orbit/to-cursor pivot; disabling it restores the requested pivot.
-  Add-on 0.1.6 excludes nested Part/Body child bounds from the project aggregate because those are
-  local-space duplicates of the correctly placed container Shape; this prevents placed models from
-  pulling the computed object centre back toward the origin.
+  construction needed.) `selection_overrides_pivot` lets a non-empty selection replace the
+  designated orbit/to-cursor pivot; disabling it restores the requested pivot. Project aggregation
+  excludes nested Part/Body child bounds because they are local-space duplicates of the correctly
+  placed container Shape; including them pulls the computed object centre toward the origin.
 - **Orbit style** (`scheme.orbit_style`): `free` (rotate about the camera's own right/up/fwd, twist
   allowed) or `turntable` (yaw about WORLD Z + pitch about camera-right, **roll dropped** so the
   horizon stays level).
@@ -187,28 +188,22 @@ with plain `python` — **no FreeCAD needed at all** (a step better than Blender
 ## 7. Install, versioning, update
 
 - **Install** (`integrations.install_freecad`): copytree the bundled add-on into FreeCAD's **user Mod
-  dir**, resolved by `freecad_user_mod_dir()` — FreeCAD ≥ 1.0 uses the **versioned**
-  `%APPDATA%\FreeCAD\v<maj>-<min>\Mod` (verified live on 1.1 via `App.getUserAppDataDir()` →
-  `…\FreeCAD\v1-1\`), ≤ 0.21 used the flat `%APPDATA%\FreeCAD\Mod`. No startup shim is needed (unlike
-  Blender) — FreeCAD auto-runs `InitGui.py`.
+  dir**, resolved by `freecad_user_mod_dir()`. FreeCAD 1.x uses the versioned
+  `%APPDATA%\FreeCAD\v<maj>-<min>\Mod`; older releases used the flat `%APPDATA%\FreeCAD\Mod`. No
+  startup shim is needed (unlike Blender) — FreeCAD auto-runs `InitGui.py`.
 - **Versioning**: bump **two** places that must match — `ADDIN_VERSION` in `tbnav_freecad.py` **and**
   `version.json`. `_ADDINS["freecad"]` reads `version.json` exactly like Fusion's `.manifest`. On a
   bump, `auto_update` re-copies on the daemon's next launch. The hello handshake reports
-  `ADDIN_VERSION` so the tray shows the **loaded** build (`Apps: freecad v0.1.0`) — your first check
-  FreeCAD picked up new code.
+  `ADDIN_VERSION` so the tray shows the loaded build as `Apps: freecad v<loaded-version>` — your first
+  check that FreeCAD picked up new code.
 
 ---
 
-## 8. GOTCHAS (the non-obvious stuff — all found live)
+## 8. Load-bearing FreeCAD warnings
 
-1. **`InitGui.py` runs with SEPARATE globals & locals.** FreeCAD execs each `Mod/*/InitGui.py` such
-   that a function *defined* at its top level captures a `__globals__` that does **not** contain the
-   file's own top-level names — so calling a helper defined in `InitGui.py` raises `NameError` on
-   every module-level reference (and if that helper is a `try/except`-wrapped logger, it fails
-   **silently**). This burned ~an hour of "InitGui isn't running" (it was; its writes were just
-   `NameError`-ing). **Fix:** keep `InitGui.py` a *shim* that only `import tbnav_freecad;
-   tbnav_freecad.start()` — an imported module gets a normal namespace where functions see module
-   globals. Don't put logic in `InitGui.py`.
+1. **Keep `InitGui.py` as an import shim.** FreeCAD executes `Mod/*/InitGui.py` with separate globals
+   and locals; helpers defined there can raise `NameError` when they access top-level names. Keep it to
+   `import tbnav_freecad; tbnav_freecad.start()` and put all logic in the imported module.
 2. **A Mod folder needs `Init.py` or FreeCAD ignores it entirely** — including its `InitGui.py`. A
    folder with only `InitGui.py` is silently skipped. Ship a (no-op) `Init.py` too.
 3. **`pivy.coin` must be imported before `view.getCameraNode()`** or touching the returned node
@@ -216,11 +211,9 @@ with plain `python` — **no FreeCAD needed at all** (a step better than Blender
    that and returned `None` every frame → `frames received but no active 3D view` while a view was
    plainly open. **Fix:** `from pivy import coin` once in `_boot()` (it loads the SWIG library
    process-wide). You don't have to *use* `coin.*` — just import it.
-4. **Qt work before `FreeCAD.GuiUp` can crash FreeCAD.** Creating/using Qt objects while the GUI
-   isn't fully up crashed FreeCAD on startup (and an unclean kill then left state that made the *next*
-   launch flaky). **Fix:** defer with `QtCore.QTimer.singleShot(…, _boot)` and have `_boot()`
-   re-check `FreeCAD.GuiUp`, rescheduling itself if False. (Pattern confirmed against the
-   `spkane/freecad-addon-robust-mcp-server` add-on, which solves the same race.)
+4. **Do not create Qt objects before `FreeCAD.GuiUp`.** Early Qt access can crash startup. Defer with
+   `QtCore.QTimer.singleShot(…, _boot)` and have `_boot()` re-check `FreeCAD.GuiUp`, rescheduling while
+   it is false.
 5. **Versioned user Mod dir on FreeCAD ≥ 1.0.** It's `%APPDATA%\FreeCAD\v1-1\Mod`, **not**
    `%APPDATA%\FreeCAD\Mod`. `freecad_user_mod_dir()` resolves it (newest existing `v*-*` dir, or
    derived from the detected install version; flat for ≤ 0.21). Get this wrong and "Set up" copies
@@ -234,18 +227,14 @@ with plain `python` — **no FreeCAD needed at all** (a step better than Blender
 8. **`getObjectInfo` returns `None` off-model** (and a dict with `'x'/'y'/'z'` on a hit) → validate
    against the model bbox and continue through the configured chain on failure; **hold the resolved
    pivot per gesture** (don't re-raycast every frame — it chases a moving target).
-9. **PySide flavour:** FreeCAD 1.1 ships **PySide6** (and a `from PySide import QtCore` shim that also
-   works). The add-on tries PySide6 → PySide2 → the shim.
+9. **PySide flavour varies by host release.** The add-on tries PySide6 → PySide2 → FreeCAD's
+   `from PySide import QtCore` compatibility shim; keep that fallback order.
 10. **Two interpreters → two reload rules.** A change to the add-on (`tbnav_*.py`) needs **FreeCAD
     restarted**; a change to the daemon needs the **daemon restarted**. A change to both needs both.
-11. **`SoLocation2Event.getPosition()` and `getObjectInfo()` share Coin's coordinate system** —
-    **device pixels, BOTTOM-left origin** — so the cached cursor pixel feeds `getObjectInfo`
-    **unflipped** (`CURSOR_Y_FLIP = False`), even at 125 % display scaling. Verified live
-    (`tools/freecad_cursor_probe.py`): widget 1270×683 logical @ dpr 1.25 ↔ `view.getSize()`
-    1587×853 device; a Qt event near the widget TOP (y=10) cached as y=840 (bottom-up); and a pixel
-    ABOVE centre hit the box's TOP edge (z=10) unflipped while the flipped query hit mid-face —
-    bottom-left on both sides. Don't "fix" the y axis; the flag exists in case a FreeCAD/Quarter
-    change ever breaks this.
+11. **`SoLocation2Event.getPosition()` and `getObjectInfo()` use the same Coin coordinates:** device
+    pixels with a bottom-left origin. Feed the cached cursor pixel to `getObjectInfo` unflipped
+    (`CURSOR_Y_FLIP = False`). Do not add a Qt-style top-left flip; requalify with
+    `tools/freecad_cursor_probe.py` if FreeCAD or Quarter changes this contract.
 12. **Qt mouse events reach Coin via the viewer's `viewport()`.** The 3D widget is
     `Gui::View3DInventorViewer` (a `QGraphicsView`); events posted/delivered to the QGraphicsView
     itself do NOT produce `SoLocation2Event`s — its **`viewport()`** widget does (that's where real
@@ -254,66 +243,30 @@ with plain `python` — **no FreeCAD needed at all** (a step better than Blender
     Gui.ActiveDocument.ActiveView` → True across reads), so `_ensure_cursor_hook` detects a view
     change with a plain `is` and re-binds the observer (dropping the cached pixel — the old view's
     coordinates are meaningless in the new one).
-14. **The cursor cache has no "mouse left the viewport" signal.** `SoLocation2Event` only fires
-    over the 3D view, so the cache keeps the last in-viewport pixel when the cursor leaves. The
-    bbox validation bounds the damage (a stale pixel still resolves to a point ON the model or falls
-    back). Live nuance, seen in the e2e run: after big orbits the model can rotate out from under a
-    stationary cursor — the raycast then misses and falls back (by design).
+14. **The cursor cache has no "mouse left the viewport" signal.** `SoLocation2Event` fires only over
+    the 3D view, so leaving the viewport retains the last in-view pixel. Bbox validation and the pivot
+    fallback chain bound stale samples; a stationary cursor may legitimately miss after camera motion.
 
 ---
 
-## 9. How it was verified (so you can re-verify)
+## 9. Verification boundary
 
-Everything in §4 came from two throwaway probes driven against live FreeCAD 1.1:
-- a **console** probe (`freecadcmd.exe script.py`) for the headless facts: `getUserAppDataDir`, the
-  Mod scan path, `pivy.coin` `SbRotation` order + `multVec`, `Shape.BoundBox`, Z-up.
-- a **GUI** probe (`freecad.exe script.py`, work deferred via `QTimer.singleShot` so a real 3D view
-  exists) for: `ActiveView`/`getCameraNode` types, the camera fields, `getCameraType`, `getSize`,
-  `getObjectInfo` shape, and that `position/orientation` `setValue` + `redraw` actually move the view.
+Use `freecadcmd.exe` for API and math probes that do not need a viewport, and a disposable GUI session
+for `ActiveView`, camera-field, redraw, pointer-event, and visible-motion claims. The maintained
+cursor probe is `tools/freecad_cursor_probe.py`; it exercises the real Qt → Quarter → Coin event path
+with synthetic pointer events.
 
-The **end-to-end** path was proven by running a real `NavBroker`, installing the add-on, launching
-FreeCAD with a box, and submitting orbit/pan/zoom bursts: the log showed `boot: pivy.coin loaded` →
-`scheme: …` → `rx orbit … screen-center-pivot: surface hit → (…)` → `applied op=screen_center ortho=True pos=(…)`, and
-the camera orientation measurably changed. Pan and zoom land the same way (`rx pan` / `rx zoom` →
-`applied`, no errors).
+> **Warning:** an `applied` log line proves only that a frame was processed. When qualifying camera
+> motion or host alignment, measure camera position/orientation/height or observe the viewport; do not
+> infer scale correctness from a self-referential log line.
 
-> **Lesson (0.1.0 → 0.1.1):** a `applied` log line proves the frame was *processed*, NOT that the view
-> *visibly moved*. The first cut shipped `PAN_SCALE = 0.0015` — pan logged `applied` every frame but
-> moved the camera ~0.002 world units/frame (sub-pixel → "pan does nothing"). The daemon **does** emit
-> pan frames on Shift (`output.py` always `_emit_nav(0,0,0,pdx,pdy,0)` unless twist dominates → zoom),
-> so the bug was purely the add-on's baseline scale. Fixed to `PAN_SCALE = 0.14` (matches the Fusion
-> add-in's proven baseline — the daemon sends the *same* pan deltas to every app), ~0.2 units/frame on
-> a framed part. **When calibrating a scale, measure the camera position/height delta, not just that
-> `applied` fired.**
+`SoLocation2Event` and `getObjectInfo` use device pixels with a bottom-left origin. Events must target
+the viewer's `viewport()` widget, and the observer must be rebound when `ActiveView` identity changes.
+Those are durable invariants; dated probe transcripts and completed run evidence belong under
+`archive/release-evidence/`.
 
-> **Cursor pivot (0.1.2 → 0.1.3): how it was verified without a human mouse.** Two live passes,
-> both scripted (FreeCAD GUI opens briefly and self-closes):
-> 1. `tools/freecad_cursor_probe.py` (`freecad.exe tools\freecad_cursor_probe.py`, log in
->    `%TEMP%\tbnav_cursor_probe.log`) drives **synthetic `QMouseEvent`s through the real
->    Qt → Quarter → Coin pipeline** — the same code path a physical mouse takes — and established
->    Gotchas #11–#13 (coordinate convention, viewport() target, ActiveView identity) plus
->    cursor-hit ≠ centre-hit on a real box.
-> 2. An end-to-end run with the INSTALLED 0.1.3 add-on: a scratch `NavBroker` on 47900 with
->    `set_scheme("cursor", "free", "to_cursor")` + a FreeCAD-side script posting cursor moves at
->    pixel P1, then P2. `freecad_addin.log` showed the full chain: `cursor: SoLocation2Event
->    observer registered` → `scheme: pivot=cursor` → gesture 1 `cursor-pivot: surface hit ->
->    (10.00,4.55,9.83)` held for the burst → after the idle gap, gesture 2 re-cast at P2 to a
->    DIFFERENT point `(6.55,10.00,5.38)` → `applied` with the eye→pivot distance preserved
->    (~244 units before/after, eye moved ≈ 244·0.02 for a 0.02 rad yaw — rigid orbit about the
->    cursor hit). The `to_cursor` zoom gesture exercised the MISS fallback live (the model had
->    rotated out from under the stationary cursor → look-at zoom, by design).
-> **Still wants a human pass:** the interactive feel of hovering the real mouse while orbiting with
-> the real trackball (synthetic events are the same objects, but nobody has *felt* it yet).
-
-> **Orbit scale (0.1.1 → 0.1.2): use 1.0, NOT Blender's 0.5.** The first cut copied Blender's
-> `ORBIT_SCALE = (0.5, 0.5, 0.5)` → FreeCAD orbited at **half** the ball angle. But `ORBIT_SCALE` is
-> **per-add-on and independent** (it never touches shared daemon code, so it can't "conflict" across
-> apps), and the right value depends on the camera model: the **eye+target** camera apps —
-> **Fusion, SolidWorks, Onshape — all use magnitude 1.0** (rotate by the full broker angle = the same
-> as the `--debug` cube = true 1:1). Only Blender uses 0.5, and that is specific to its `RegionView3D`.
-> FreeCAD's Coin `SoCamera` is an eye+look-at camera, so it belongs with the 1.0 group. Fixed to
-> `ORBIT_SCALE = (1.0, 1.0, 1.0)`; `tests/test_freecad_nav_math.py::test_orbit_scale_is_unity_full_angle`
-> locks it (a pure yaw of θ must rotate the view by θ, not θ/2).
+FreeCAD's eye-and-target camera uses a neutral full-angle orbit scale. Do not copy Blender-specific
+`RegionView3D` compensation into this add-on; suite alignment belongs in `host_profiles.json`.
 
 ---
 
@@ -327,8 +280,9 @@ the camera orientation measurably changed. Pan and zoom land the same way (`rx p
   pivot, the per-gesture hold + idle re-cast, bbox-validated fallbacks, the y-flip math, and the
   `to_cursor` zoom hold. `tests/test_integrations_freecad.py` covers the daemon wiring
   (FreeCAD is an `_ADDINS` app; install copies the add-on + marks enabled; `auto_update` re-copies on
-  a bump; versioned vs flat Mod-dir resolution; detection). `python -m pytest tests -q` is green.
-- **Live (the only thing tests can't cover):** install via the daemon's **Set up**, run the daemon,
+  a bump; versioned vs flat Mod-dir resolution; detection). Run the focused tests before the full
+  suite; do not copy a passing count into this guide.
+- **Live boundary:** install via the daemon's **Set up**, run the daemon,
   open a FreeCAD 3D view, switch to 3D mode, focus FreeCAD, and use the trackball. Lean on
   `%APPDATA%\TrackballDaemon\freecad_addin.log` (`scheme:` / `rx orbit|pan|zoom` / `screen-center-pivot` /
   `applied`). Suite alignment lives in `host_profiles.json`; use neutral user settings during a
@@ -343,14 +297,11 @@ the camera orientation measurably changed. Pan and zoom land the same way (`rx p
   arrived — distinguishes a daemon/Shift issue from an add-on issue), `screen-center-pivot: surface hit|…
   fallback`, `applied` (the camera actually changed). The tray's `Apps: freecad v…` confirms the
   hello handshake.
-- ~~True cursor-pixel pivot~~ — **DONE in add-on 0.1.3** as the under-mouse orbit pivot +
-  zoom (FreeCAD is the FIRST app with it; born as `cursor`/`to_cursor`, renamed to
-  `cursor`/`to_cursor` in add-on 0.1.4 / daemon config v3, when the old `cursor` value became
-  `selection`). Known limitation: no "mouse left the viewport" signal
-  (Gotcha #14) — the last in-viewport pixel is used, bounded by the bbox validation.
+- **Under Cursor stale-pixel warning:** FreeCAD exposes no reliable "mouse left the viewport" signal.
+  The add-on can retain the last in-viewport pixel, bounded by hit/bbox validation. Keep this warning
+  until the invalidation work in [`TODO.md`](../../TODO.md) is complete.
 - **`camera` (turn-in-place) is unsupported** — the add-on's
   resolver skips it like `cursor_3d` and the configured chain continues (a `camera` primary keeps
   its selection-override exemption). FreeCAD's Coin camera is an eye+orientation model, so a real
-  turn-in-place is implementable. Camera parity and the current live-verification matrix are tracked
-  in [`TODO.md`](../../TODO.md), including perspective feel, nested world-space bounds, horizon
-  entry, independent holds, and the physical under-cursor pass.
+  turn-in-place is implementable. Current camera parity and live qualification are tracked only in
+  [`TODO.md`](../../TODO.md).

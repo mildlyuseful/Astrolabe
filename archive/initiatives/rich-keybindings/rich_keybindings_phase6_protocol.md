@@ -1,5 +1,9 @@
 # Phase 6 BLE and firmware baseline
 
+> **Archived BLE and hardware checkpoint.** Current protocol authority is
+> [`../../../docs/ble_device_adapters.md`](../../../docs/ble_device_adapters.md); open production
+> hardware qualification is in [`../../../TODO.md`](../../../TODO.md).
+
 This record freezes the compatibility boundary at Phase 6 start commit `af373fa`. It distinguishes
 behavior proven by source/tests from behavior that still requires physical hardware.
 

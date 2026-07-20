@@ -5,7 +5,8 @@ products reasonably inspect: Bluetooth input, loopback listeners, COM automation
 scripts, one compiled AutoCAD add-in, optional global Raw Input keyboard observation, and an
 optional self-signed loopback certificate. None of the runtime paths require unrestricted inbound
 network access, silently install a certificate, suppress keyboard input, disable antivirus, or
-launch a supported 3D application.
+launch a supported 3D application. Shared ownership and lifecycle rules are defined in
+[`architecture.md`](architecture.md).
 
 ## Expected Windows and antivirus UX
 
@@ -50,15 +51,15 @@ launch a supported 3D application.
 | Unreal | Copies a Python editor plugin per engine or per project. | Engine path may require elevation; project path does not. Disable/delete `TrackballNav`. |
 | Rhino | Copies Python and may append a current-user startup command. | Remove the script folder and the TrackballNav startup command in Rhino Options. |
 | SOLIDWORKS | Attaches to an already-running instance through COM automation. | No host files, registration, registry writes, listener, or launch. Disable the integration. |
-| AutoCAD | Attaches to an already-running instance through COM, scopes `TRUSTEDPATHS`, and NETLOADs a per-user DLL. | Remove the exact trusted path, delete the APPDATA plugin after closing AutoCAD, and disable the integration. |
+| AutoCAD | Uses COM only to attach, scope `TRUSTEDPATHS`, and NETLOAD a per-user DLL; the host-loaded plugin is the sole camera transport. | Remove the exact trusted path, delete the APPDATA plugin after closing AutoCAD, and disable the integration. |
 | Onshape | Creates a per-user TLS key/certificate, listens on fixed loopback TLS, and optionally supplies an Onshape-only pointer userscript. | Delete the PEM files; remove the `127.51.68.120` certificate from the current-user trust store; remove the userscript. |
 | Host detection | Reads common install folders, process command lines, recent-project files, and Rhino's install registry key. | Detection is read-only. Hidden PowerShell/WMIC calls do not modify the system. |
 
-Sensitive in-process services are gated by both successful setup and the per-app **Enabled**
-checkbox. When Onshape, AutoCAD, or SOLIDWORKS has not been set up, the daemon does not bind the
-Onshape port, generate its certificate, enumerate COM applications, alter AutoCAD trust, or load a
-DLL. Disabling one of these integrations stops future attachment/listening; a DLL already loaded in
-AutoCAD remains loaded until AutoCAD exits.
+Sensitive daemon-side listeners, attachment services, and loaders are gated by both successful setup
+and the per-app **Enabled** checkbox. When Onshape, AutoCAD, or SOLIDWORKS has not been set up, the
+daemon does not bind the Onshape port, generate its certificate, enumerate COM applications, alter
+AutoCAD trust, or load a DLL. Disabling one of these integrations stops future attachment/listening;
+a DLL already loaded in AutoCAD remains loaded until AutoCAD exits.
 
 The Onshape HTTP/WebSocket service also rejects browser origins outside HTTPS `onshape.com` (plus
 its own local status page), limits request bodies, and never returns permissive wildcard CORS.
@@ -103,6 +104,11 @@ The receiver never owns foreground focus. Foreground app identity is published b
 read-only monitor, so stationary keyboard controls can resolve app context without trackball motion
 and without using the app selected in Settings as a runtime fallback.
 
+Raw Input is the approved backend. Do not add a low-level keyboard hook merely as a convenience
+fallback. Reopening that decision requires a recorded physical Raw Input product failure. Any hook
+proposal must include an enqueue-only callback, heartbeat/watchdog, reinstall plus
+`GetAsyncKeyState` reconciliation, and fail-safe release before it can be considered.
+
 BLE input-state packets are untrusted. The daemon validates protocol version, message kind, exact
 length, descriptor bit range, and unsigned wrap-aware sequence ordering before changing normalized
 pressed state. Invalid, duplicate, and stale packets cannot activate or release controls. A new
@@ -111,29 +117,24 @@ set. Community control descriptors are validated JSON data and cannot name Pytho
 callbacks, commands, config paths, or executable code. Automatic third-party adapter-code loading
 is not supported.
 
-## Release hardening before alpha distribution
+## Release security gates
 
-1. Build a per-user **Nuitka onedir** package. Avoid self-extracting one-file packers, which are more
-   likely to resemble malware droppers and repeatedly unpack executable content into temporary
-   directories.
-2. Authenticode-sign the daemon executable, installer, updater (if added), and AutoCAD DLL with one
-   consistent publisher certificate; timestamp every signature. Signing identifies the publisher
-   but does not instantly create SmartScreen reputation, so keep filenames, publisher identity, and
-   download origin stable across releases.
-3. Prefer a per-user installer with an `asInvoker` manifest. Offer Unreal engine-wide installation
-   as a clearly labeled optional elevated action; make project-local installation the default.
-4. Publish SHA-256 checksums, the source revision, dependency lock/SBOM, supported host versions,
-   and VirusTotal/Defender results for the exact release artifacts. Submit false positives to the
-   affected vendor rather than recommending exclusions.
-5. Keep all listeners loopback-only and add automated release checks for bind addresses, origin
-   filtering, absence of automatic certificate trust, and absence of `SECURELOAD=0` or antivirus
-   exclusions.
-6. Do not auto-install the Onshape certificate. If a future signed installer offers certificate
-   setup, keep it an explicit, reversible checkbox and show the certificate fingerprint first.
-7. Verify Raw Input lazy registration, pass-through/no-focus behavior, lock/suspend releases, and
-   the elevated-app access boundary against the exact packaged build. Do not add key suppression or
-   raw-keystroke logging as a workaround for an access limitation.
+Release blockers and unfinished hardening are tracked only in [`TODO.md`](../TODO.md). The evergreen
+artifact, signing, listener, trust, reversibility, and packaged-behavior checks are in
+[`release_verification.md`](release_verification.md).
 
-Packaged GUI behavior, SmartScreen reputation, AutoCAD/SketchUp trust prompts, and third-party AV
-classification require testing against the exact signed release artifact; source inspection cannot
-prove those external outcomes.
+Keep these requirements invariant across releases:
+
+- use a per-user, `asInvoker`, Nuitka onedir package rather than a self-extracting one-file wrapper;
+- sign executable artifacts with one timestamped publisher identity and publish the source revision,
+  whole-artifact SHA-256, and dependency/SBOM information;
+- keep every listener loopback-only and never disable host security, certificate validation,
+  SmartScreen, antivirus, or AutoCAD secure loading as a workaround;
+- keep certificate trust and elevated host installation explicit, narrowly scoped, and reversible;
+  and
+- qualify Raw Input pass-through, lifecycle release, and integrity-boundary behavior against the
+  exact packaged artifact.
+
+Source inspection cannot prove SmartScreen reputation, host trust prompts, GUI behavior, or
+third-party antivirus classification. Store completed release-run evidence as dated archive material,
+not as current status in this guide.

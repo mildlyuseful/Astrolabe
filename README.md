@@ -26,7 +26,7 @@ end-user builds have not been released yet.
 - Global physical-axis remapping plus per-app and per-action source, inversion, and gain controls.
 - Separate orbit-pivot and cursor-zoom hold times.
 - Optional one-shot horizon leveling when entering Turntable, Lock Horizon, or Walk.
-- Per-app refresh rates, neutral user profiles, and resettable shipped defaults.
+- Per-app refresh rates with explicit System defaults, Global values, and linked app overrides.
 - Local-only integration traffic and explicit consent before certificate, trust-path, startup, or
   project-file changes.
 
@@ -78,8 +78,9 @@ rotation service. With the daemon closed, the firmware's ordinary HID mouse path
 4. Select the hardware or keyboard-only input profile under **Keybindings**. Switch to **3D mode**,
    focus the host's 3D viewport, and move the ball. Hold **Shift** for pan/zoom with the shipped
    bindings; the keyboard-only profile uses **F12** to toggle Pointer/3D.
-5. Tune the app under **Per-App**. Use **Reset app** to remove app-specific user
-   overrides without disabling the integration or forgetting its installed add-on version.
+5. Tune the app under **Per-App**. **Reset app** pins that app's concrete System values and breaks
+   its Global links; **Link all to Global** removes app overrides. Neither action disables the
+   integration or forgets its installed add-on version.
 
 The status row and tray list the versions of add-ons that are actually connected. Bundled add-ons
 are versioned and copied again when a newer daemon bundle is available; host restart/reload is
@@ -109,14 +110,16 @@ are maintainer guides for the corresponding driver or add-on.
 | Godot | EditorPlugin copied into a selected project and enabled in `project.godot`. | [Godot](docs/apps/godot.md) |
 | Rhino 8 | Per-user Python scripts plus a startup command; restart Rhino. | [Rhino](docs/apps/rhino.md) |
 
-The Settings panel is the authority for currently supported host versions. An unverified version is
-not necessarily incompatible; a known-unsupported version is called out separately.
+The **3D Apps** panel displays the current host-support classification sourced from the integration
+registry. Maintainers should update `trackball_daemon/integrations.py`; an unverified version is not
+necessarily incompatible, while a known-unsupported version is called out separately.
 
 ## Controls and configuration
 
-All user state lives in `%APPDATA%\TrackballDaemon\config.json`. Settings changes apply live except
-for BLE device identity, which applies on reconnect, and host add-on code, which applies when that
-host reloads it.
+All persistent user configuration lives in `%APPDATA%\TrackballDaemon\config.json`; transient mode,
+pressed-control, focus, and gesture state lives only in the daemon's `RuntimeStore`. Settings changes
+apply live except for BLE device identity, which applies on reconnect, and host add-on code, which
+applies when that host reloads it.
 
 ### Pointer and 3D modes
 
@@ -127,21 +130,21 @@ host reloads it.
 
 ### Physical orientation and action routing
 
-**Global → Physical trackball orientation** maps physical sensor X/Y/Z to logical axes once, before
-both pointer and 3D routing. Source changes remain a permutation, so an axis cannot be accidentally
-duplicated or lost.
+**Global → Physical transform** maps physical sensor X/Y/Z to logical axes once, before both pointer
+and 3D routing. Source changes remain a permutation, so an axis cannot be accidentally duplicated or
+lost.
 
-**Per-App Bindings** then chooses the source, inversion, and gain for Orbit, Pan, Zoom, and the
-mode-specific actions offered by richer integrations. This is the user layer; software-convention
-corrections are supplied by immutable host baselines.
+Each app's **Per-App → Axis routing** category then chooses the source, inversion, and gain for
+Orbit, Pan, Zoom, and the mode-specific actions offered by richer integrations. This is the user
+layer; software-convention corrections are supplied by immutable host baselines.
 
 ### Orbit targets and fallback order
 
 The app's selected **Orbit pivot** is tried first. If it is unsupported or a raycast misses, the
-daemon restarts at the beginning of **Global → 3D control scheme → Failure fallback order**.
-Unsupported methods are skipped, duplicates are removed, and an empty list means no orbit is
-performed after the primary target fails. **Selection overrides orbit center** has higher priority
-when enabled, except that a Camera primary remains a true turn-in-place operation.
+daemon restarts at the beginning of **Global → Orbit → Orbit pivot fallback order**. Unsupported
+methods are skipped, duplicates are removed, and an empty list means no orbit is performed after the
+primary target fails. **Selection overrides orbit center** has higher priority when enabled, except
+that a Camera primary remains a true turn-in-place operation.
 
 ### Horizon entry and gesture holds
 
@@ -187,8 +190,9 @@ must be supplied from the real board rather than inferred from the bench sketch.
 
 ## Development and project documentation
 
-- [`HANDOFF.md`](HANDOFF.md) — system architecture, data flow, configuration ownership, integration
-  contracts, build/test workflow, and non-obvious solved problems.
+- [`AGENTS.md`](AGENTS.md) — task-first contributor routing and documentation ownership.
+- [`docs/architecture.md`](docs/architecture.md) — current shared firmware, daemon, state, mapping,
+  routing, lifecycle, and integration contracts.
 - [`TODO.md`](TODO.md) — open verification, parity gaps, risks, and product work.
 - [`docs/apps/`](docs/apps/) — host-specific implementation and maintenance guides.
 - [`docs/default_profiles.md`](docs/default_profiles.md) — host alignment and shipped-default data.
@@ -205,7 +209,7 @@ Run the automated checks with:
 ```powershell
 python -m pytest -q
 python -m compileall -q trackball_daemon tests
-dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj --no-restore
+dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj
 ```
 
 Host camera behavior still requires smoke testing inside the corresponding GUI. See `TODO.md` for

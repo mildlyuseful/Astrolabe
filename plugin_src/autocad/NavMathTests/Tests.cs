@@ -88,8 +88,41 @@ static class Tests
         }
     }
 
+    static void BrokerPortDiscovery()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "astrolabe-broker-config-" + Guid.NewGuid());
+        var path = Path.Combine(dir, "bridge.json");
+        Directory.CreateDirectory(dir);
+        try
+        {
+            Check(BrokerConfig.ResolvePort(path) == BrokerConfig.DefaultPort,
+                  "broker config: missing file uses fallback");
+            foreach (var invalid in new[] {
+                "not-json", "{}", "{\"port\":\"50000\"}", "{\"port\":1.5}",
+                "{\"port\":0}", "{\"port\":65536}"
+            })
+            {
+                File.WriteAllText(path, invalid);
+                Check(BrokerConfig.ResolvePort(path) == BrokerConfig.DefaultPort,
+                      $"broker config: invalid value uses fallback ({invalid})");
+            }
+            File.WriteAllText(path, "{\"port\":50001}");
+            Check(BrokerConfig.ResolvePort(path) == 50001,
+                  "broker config: valid custom port");
+            File.WriteAllText(path, "{\"port\":50002}");
+            Check(BrokerConfig.ResolvePort(path) == 50002,
+                  "broker config: rereads discovery file on reconnect");
+        }
+        finally
+        {
+            try { Directory.Delete(dir, recursive: true); } catch { }
+        }
+    }
+
     static void Main()
     {
+        BrokerPortDiscovery();
+
         // --- level-horizon is a one-shot transition operation, not an ordinary frame rule ------
         {
             var rolled = Cam();

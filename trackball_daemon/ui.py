@@ -940,7 +940,7 @@ class SettingsWindow:
         return var
 
     # Per-app viewport refresh rate: a dropdown of common rates that's also free-typeable.
-    # "Default" stores 0 (use the global bridge rate); any number is clamped to 1..240 Hz.
+    # "Default" is a UI-only compatibility value; ConfigStore converts it to a missing override.
     _RATE_PRESETS = ("Default", "15", "30", "45", "60", "90", "120")
 
     def _rate_combo(self, parent, label, keys, hint=""):

@@ -1,37 +1,13 @@
-"""AutoCAD plugin LOADER (COM) -- delivery only, no navigation.
+"""Daemon-side AutoCAD plugin loader -- COM staging/trust/NETLOAD only.
 
-Through daemon 0.1.37 this module was a full COM nav *transport* (ActiveViewport-reassign
-orbit + Zoom* pan/zoom + the rotating-cube overlay). That transport is ARCHIVED at
-archive/autocad_com_transport/ -- see its README for why. The compiled NETLOAD plugin
-(plugin_src/autocad, notes 8.15/8.16) is now the ONLY AutoCAD transport: it drives the
-viewport's live GraphicsSystem view in-process (~1.6 ms/frame, zero regens) and connects to
-the nav broker like every socket add-on, so app.py routes autocad frames to the broker
-unconditionally.
+The compiled in-host plugin is the sole AutoCAD camera transport and connects to NavBroker.
+This worker attaches to an already-running AutoCAD, never launches it, copies the bundled DLL and
+manifest to the per-user runtime directory, extends ``TRUSTEDPATHS``, and issues ``NETLOAD`` once per
+session. AutoCAD locks a loaded DLL, so an in-use runtime copy is a staged update for the next host
+session. After loading, the worker only monitors liveness.
 
-Why the transport had to go (not just tidiness): the COM driver attached FIRST -- before the
-plugin finished NETLOADing and its broker handshake -- and claimed the early frames, so the
-first gesture of a session went through the regen-per-frame reassign path (flicker + overlay
-cube), and a deferred orbit accumulated in those frames could land ~100 ms AFTER the plugin
-took over, fighting the GS view it now owned. With unconditional broker routing nothing else
-can ever drive the viewport.
-
-What remains here is the ONE job COM is still the right tool for: getting the plugin INTO a
-running AutoCAD with zero user friction. One daemon worker thread: CoInitialize, attach to a
-RUNNING AutoCAD via the Running Object Table (never launches one; GetActiveObject can return
-"Operation unavailable" even when AutoCAD is up -- verified live), and once a document is
-open, copy the bundled DLL + version.json to the runtime dir, extend TRUSTEDPATHS (so
-SECURELOAD never prompts) and NETLOAD -- once per AutoCAD session. The copy-then-load
-indirection matters: AutoCAD locks the loaded file for the whole session, so loading the
-bundled copy directly would break daemon updates (verified the hard way). A locked runtime
-copy just means this session already has the plugin -- the fresh DLL lands on AutoCAD's next
-start (the "STAGED" update flow in integrations.install_autocad).
-
-After the NETLOAD the worker only watches liveness (Documents.Count raises when the app is
-gone) so a NEW AutoCAD session gets its own NETLOAD. NETLOADing an already-loaded assembly
-is a no-op inside AutoCAD, so a daemon restart against a running session is harmless.
-
-Degrades gracefully: no pywin32 (e.g. a non-Windows dev box) -> start() logs once and the
-loader is a no-op; the plugin can still be NETLOADed by hand (APPLOAD / NETLOAD).
+Without pywin32 the loader logs once and becomes a no-op; the plugin can still be loaded manually.
+The retired COM navigation transport and its rationale live under ``archive/autocad_com_transport/``.
 """
 import shutil
 import threading

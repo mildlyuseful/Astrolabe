@@ -2,7 +2,8 @@
 
 Astrolabe keeps Bluetooth transport, packet meaning, and binding semantics separate. The binding
 engine sees only normalized `InputEvent` and `MotionSample` values; it does not know GATT UUIDs or
-bit positions.
+bit positions. Shared provider, state, and lifecycle ownership is defined in
+[`architecture.md`](architecture.md).
 
 ## Built-in protocol
 

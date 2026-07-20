@@ -6,9 +6,9 @@ Threading model (Windows):
   * tray thread       -> pystray icon loop (menu callbacks marshalled to Tk via root.after)
   * ble thread        -> asyncio BLE loop and packet-boundary focus routing
   * broker threads    -> NavBroker accept + sender (streams frames to the socket add-ons)
-  * SolidWorks worker -> its own CoInitialize'd COM thread (in-process driver)
-  * AutoCAD worker    -> its own CoInitialize'd COM thread (plugin loader; delivery only)
-  * Onshape threads   -> TLS accept + per-connection WAMP reader + nav worker (in-process bridge)
+  * SolidWorks worker -> its own CoInitialize'd COM thread (daemon-side direct driver)
+  * AutoCAD worker    -> its own CoInitialize'd COM thread (plugin staging/NETLOAD only)
+  * Onshape threads   -> TLS accept + per-connection WAMP reader + nav worker (daemon-side bridge)
   * debug thread      -> optional pygame cube (--debug)
 The process stays alive on the Tk mainloop and exits only when tray -> Quit tears it down.
 """
@@ -119,14 +119,14 @@ class App:
         snapshot = self.config.snapshot()
         self.broker = NavBroker(snapshot.bridge_port, self._on_clients_changed,
                                 rate_hz=snapshot.global_value("navigation.refresh_rate"))
-        # SolidWorks is driven by external COM automation, not a socket add-in: this in-process
+        # SolidWorks is driven by external COM automation, not a socket add-in: this daemon-side
         # driver attaches to a running SolidWorks and moves its camera directly. It lives parallel
-        # to the broker; _nav_sink routes solidworks frames here instead of to the broker.
+        # to the broker; NavigationRouter owns delivery to this direct transport.
         self.sw_driver = SolidWorksDriver(self._on_sw_connection_changed,
                                           rate_hz=snapshot.global_value("navigation.refresh_rate"))
-        # Onshape (browser) is driven by an in-process bridge that impersonates the 3Dconnexion
+        # Onshape (browser) is driven by a daemon-side bridge that impersonates the 3Dconnexion
         # local NL-Proxy service Onshape's page connects to (TLS WebSocket on 127.51.68.120:8181).
-        # Like the SW driver it lives parallel to the broker; _nav_sink routes onshape frames here.
+        # Like the SW driver it lives parallel to the broker; NavigationRouter owns delivery.
         ocfg = snapshot.onshape
         self.onshape_bridge = OnshapeBridge(
             self._on_onshape_connection_changed,
@@ -137,8 +137,8 @@ class App:
             self.broker, self.sw_driver, self.onshape_bridge)
         # AutoCAD is a BROKER app: its compiled NETLOAD plugin (plugin_src/autocad) drives the
         # live GraphicsSystem view in-process and connects to the nav broker like the other
-        # socket add-ons. COM's only remaining job is DELIVERY -- this loader NETLOADs the
-        # bundled plugin into a running AutoCAD (the old COM nav transport is archived at
+        # socket add-ons. COM is used only to stage, trust, and NETLOAD the bundled plugin into a
+        # running AutoCAD (the old COM nav transport is archived at
         # archive/autocad_com_transport/; it raced the plugin for the early frames).
         self.acad_loader = AutoCADPluginLoader()
         self.engine.nav_sink = self._nav_sink
@@ -205,11 +205,11 @@ class App:
             monitor.refresh()
 
     def configure_keyboard_controls(self, control_ids):
-        """Phase 7 compiler seam; an empty set keeps global keyboard reception unregistered."""
+        """Register only keyboard controls referenced by the compiled binding profile."""
         return self.input_aggregator.configure_provider("keyboard", control_ids)
 
     def configure_ble_controls(self, source_id, control_ids):
-        """Phase 7 compiler seam for one stable data-descriptor control namespace."""
+        """Register referenced controls for one stable device-descriptor namespace."""
         if source_id not in self.ble_input_providers:
             raise ValueError(f"unknown BLE input provider: {source_id}")
         return self.input_aggregator.configure_provider(source_id, control_ids)
