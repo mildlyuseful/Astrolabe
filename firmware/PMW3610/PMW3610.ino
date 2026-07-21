@@ -8,11 +8,13 @@
  *   R: CS=P0.20  MOTION=P0.17   L: CS=P1.00  MOTION=P0.11
  *   SCLK=P0.22   SDIO=P0.24
  * Five-way (active-low, internal pull-ups; SWITCH+ on the PCB is battery power, not switch common):
- *   LEFT=P1.13  CENTER=P1.15  UP=P0.02  RIGHT=P0.29  DOWN=P0.31
+ *   DOWN=P1.13  CENTER=P1.15  LEFT=P0.02  UP=P0.29  RIGHT=P0.31
+ *   (cardinals rotated 90° CW from silk so physical Up/Down/Left/Right match the housing)
  *
  * Advertises as "Astrolabe" and publishes the production five-way snapshot bit map
  * (bit0 Up, bit1 Down, bit2 Left, bit3 Right, bit4 Center). Standalone HID maps
- * Down=LMB, Right=RMB, Center=MMB. Daemon subscription suppresses HID pointer/buttons.
+ * Down=LMB, Right=RMB, Center=MMB. Daemon subscription suppresses HID pointer/buttons;
+ * with the daemon, those directions are Walk / Fly / mode-toggle bindings, not OS clicks.
  *
  * Power: MOTION/button IRQ opens an active window with 1 kHz dual-sensor polling
  * (XIAO3389 cadence). After MOTION_IDLE_MS with no activity, sensors enter rest and
@@ -35,11 +37,11 @@
 #define PIN_MOTION_L    P0_11     // D7  — LMOTION (active low)
 #define PIN_SCLK        P0_22     // D4
 #define PIN_SDIO        P0_24     // D5
-#define PIN_BTN_LEFT    P1_13     // D13
+#define PIN_BTN_DOWN    P1_13     // D13
 #define PIN_BTN_CENTER  P1_15     // D14
-#define PIN_BTN_UP      P0_02     // D15
-#define PIN_BTN_RIGHT   P0_29     // D16
-#define PIN_BTN_DOWN    P0_31     // D17
+#define PIN_BTN_LEFT    P0_02     // D15
+#define PIN_BTN_UP      P0_29     // D16
+#define PIN_BTN_RIGHT   P0_31     // D17
 #else
 #define PIN_CS_R        D3
 #define PIN_MOTION_R    D2
@@ -47,11 +49,11 @@
 #define PIN_MOTION_L    D7
 #define PIN_SCLK        D4
 #define PIN_SDIO        D5
-#define PIN_BTN_LEFT    D13
+#define PIN_BTN_DOWN    D13
 #define PIN_BTN_CENTER  D14
-#define PIN_BTN_UP      D15
-#define PIN_BTN_RIGHT   D16
-#define PIN_BTN_DOWN    D17
+#define PIN_BTN_LEFT      D15
+#define PIN_BTN_UP   D16
+#define PIN_BTN_RIGHT    D17
 #endif
 
 // L = sensor A rows, R = sensor B rows in the dual-sensor solver.
@@ -61,7 +63,7 @@
 #define SENSOR_R_THETA  130.0f
 #define SENSOR_L_MOUNT_DEG  270.0f
 #define SENSOR_L_FLIP       1
-#define SENSOR_R_MOUNT_DEG  180.0f
+#define SENSOR_R_MOUNT_DEG  270.0f
 #define SENSOR_R_FLIP       1
 
 #define SENSOR_CPI       1600
@@ -875,6 +877,16 @@ void loop(){
     g_inputSequence++;
     notifyInputState();
     lastActivityMs = nowMs;
+#if DEBUG_PRINT
+    Serial.print("BTN");
+    if(protocolButtons & BTN_BIT_UP)     Serial.print(" UP");
+    if(protocolButtons & BTN_BIT_DOWN)   Serial.print(" DOWN");
+    if(protocolButtons & BTN_BIT_LEFT)   Serial.print(" LEFT");
+    if(protocolButtons & BTN_BIT_RIGHT)  Serial.print(" RIGHT");
+    if(protocolButtons & BTN_BIT_CENTER) Serial.print(" CENTER");
+    if(!protocolButtons) Serial.print(" (none)");
+    Serial.print("  hid=0x"); Serial.println(hidButtons, HEX);
+#endif
   }
 
   flushOutputs(nowMs);
