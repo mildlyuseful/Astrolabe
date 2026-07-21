@@ -3,16 +3,15 @@
 from __future__ import annotations
 
 import importlib.util
-import math
+import sys
 from pathlib import Path
-
-import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location(
     "calibrate_sensor_mounts", ROOT / "tools" / "calibrate_sensor_mounts.py")
 assert SPEC and SPEC.loader
 calib = importlib.util.module_from_spec(SPEC)
+sys.modules[SPEC.name] = calib
 SPEC.loader.exec_module(calib)
 
 

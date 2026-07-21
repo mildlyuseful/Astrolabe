@@ -329,11 +329,6 @@ def filter_samples(
             ok = (left + right) >= min_norm
         if ok:
             kept.append((float(row[0]), float(row[1]), float(row[2]), float(row[3])))
-    if len(kept) < 20:
-        raise SystemExit(
-            f"only {len(kept)} samples after filtering (min_norm={min_norm}); "
-            "roll more / lower --min-norm"
-        )
     return kept
 
 
@@ -480,6 +475,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Wrote {args.save_csv}")
 
     samples = filter_samples(samples, args.min_norm, require_both=not args.allow_single)
+    if len(samples) < 20:
+        raise SystemExit(
+            f"only {len(samples)} samples after filtering (min_norm={args.min_norm}); "
+            "roll more / lower --min-norm"
+        )
     print(f"Using {len(samples)} filtered samples")
 
     ranked = rank_configs(samples, iter_configs(
