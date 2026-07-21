@@ -164,6 +164,7 @@ static const float R_COUNTS      = (BALL_DIAMETER_MM * 0.5f) * COUNTS_PER_MM;
 #define T_SRAD_US        35    // last address SCLK → first read SCLK
 #define T_SRR_US         20    // read transaction → next transaction
 #define T_SWW_US        120    // write transaction → next transaction
+#define T_SCLK_NCS_WR_US 10    // last falling SCLK of write → NCS↑ (tSCLK-NCS write)
 #define T_BEXIT_US        4    // NCS↑ hold / shared-bus settle
 #define T_CLK_ON_US     300    // after SPI_CLK_ON_REQ = 0xBA
 
