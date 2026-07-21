@@ -84,6 +84,11 @@
 #define DEBUG_PRINT     1
 #define IPS_REPORT_MS   8000
 #define HID_DRAIN_MAX   4       // mouseMove packets per send slot (backlog safety)
+// Emit CALIB,dxL,dyL,dxR,dyR on USB serial for tools/calibrate_sensor_mounts.py.
+// Set to 0 after mount/flip calibration to reduce serial traffic.
+#ifndef CALIB_SERIAL
+#define CALIB_SERIAL    1
+#endif
 
 // ---------------------------------------------------------------------------
 // [GATT] Custom 3-axis rotation service (purely additive; HID mouse untouched)
@@ -761,6 +766,18 @@ void loop(){
 
   bool sawMotion = a.isMotion || b.isMotion;
   if(sawMotion) lastActivityMs = nowMs;
+
+#if CALIB_SERIAL
+  // Raw dual-sensor bursts for residual mount search (tools/calibrate_sensor_mounts.py).
+  // Emit even when disconnected so capture does not need a BLE host.
+  if(sawMotion){
+    Serial.print("CALIB,");
+    Serial.print(a.dx); Serial.print(',');
+    Serial.print(a.dy); Serial.print(',');
+    Serial.print(b.dx); Serial.print(',');
+    Serial.println(b.dy);
+  }
+#endif
 
 #if DEBUG_PRINT
   if(a.isMotion){ float ips=countsToIps(a.dx,a.dy,dtSec);

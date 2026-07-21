@@ -75,6 +75,8 @@ def test_pmw3610_fiveway_contract_matches_astrolabe_descriptor():
     assert "if(protocol & BTN_BIT_DOWN)   hidOut |= 0x01;" in PMW3610
     assert "if(protocol & BTN_BIT_RIGHT)  hidOut |= 0x02;" in PMW3610
     assert "if(protocol & BTN_BIT_CENTER) hidOut |= 0x04;" in PMW3610
+    assert "CALIB_SERIAL" in PMW3610
+    assert 'Serial.print("CALIB,")' in PMW3610
     assert "POLL_INTERVAL_US 1000" in PMW3610
     assert "MOTION_IDLE_MS" in PMW3610
     assert "trySleepUntilInterrupt" in PMW3610
