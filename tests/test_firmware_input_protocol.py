@@ -86,6 +86,11 @@ def test_pmw3610_fiveway_contract_matches_astrolabe_descriptor():
     assert "if(g_okR) b = sensorR.readMotion();" in PMW3610
     assert "T_SRAD_US" in PMW3610
     assert "sdioRelease" in PMW3610
+    assert "T_SCLK_NCS_WR_US" in PMW3610
+    # PMW3610 DELTA_XY_H: upper nibble = X[11:8], lower nibble = Y[11:8]
+    assert "((xy_h & 0xF0) << 4) | x_l" in PMW3610
+    assert "((xy_h & 0x0F) << 8) | y_l" in PMW3610
+    assert "((xy_h & 0x0F) << 8) | x_l" not in PMW3610
     assert "HID_DRAIN_MAX" in PMW3610
     assert "rotationChar.notify(rbuf, sizeof(rbuf)) || !g_controller" in PMW3610
     assert "P0_20" in PMW3610 or "D3" in PMW3610

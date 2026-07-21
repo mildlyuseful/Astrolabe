@@ -281,7 +281,7 @@ public:
   }
 
   // Prefer discrete MOTION..DELTA_XY_H reads over burst: same latch, clearer framing on
-  // a shared SDIO bus (avoids burst byte-stream skew that produced +/-256 XY_H glitches).
+  // a shared SDIO bus.
   PMW3610_DATA readMotion() {
     PMW3610_DATA d = {false, true, 0, 0, 0};
     uint8_t motion = readRaw(REG_Motion);
@@ -290,9 +290,9 @@ public:
     uint8_t xy_h   = readRaw(REG_Delta_XY_H);
     d.isMotion = (motion & 0x80) != 0;
     d.isOnSurface = true;
-    // PixArt DELTA_XY_H: bits[3:0]=Delta_X[11:8], bits[7:4]=Delta_Y[11:8]
-    d.dx = signExtend12((uint16_t)(((xy_h & 0x0F) << 8) | x_l));
-    d.dy = signExtend12((uint16_t)(((xy_h & 0xF0) << 4) | y_l));
+    // PMW3610 DELTA_XY_H (0x05): bits[7:4]=Delta_X[11:8], bits[3:0]=Delta_Y[11:8]
+    d.dx = signExtend12((uint16_t)(((xy_h & 0xF0) << 4) | x_l));
+    d.dy = signExtend12((uint16_t)(((xy_h & 0x0F) << 8) | y_l));
     d.SQUAL = 0;
     return d;
   }
@@ -338,6 +338,8 @@ private:
     sdioDrive(true);
     bbWriteByte(addr | 0x80);
     bbWriteByte(data);
+    // tSCLK-NCS(write): min 10 us from last falling SCLK to NCS rising.
+    delayMicroseconds(T_SCLK_NCS_WR_US);
     csHigh();
     sdioDrive(true);
     delayMicroseconds(T_SWW_US);
