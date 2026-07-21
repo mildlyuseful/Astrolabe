@@ -376,6 +376,25 @@ def capture_serial(port: str, seconds: float, baud: int = 115200) -> list[tuple[
     return rows
 
 
+def _is_bus_garbage(dx_l: float, dy_l: float, dx_r: float, dy_r: float) -> bool:
+    """True for classic SDIO failure patterns, not large real coalesced deltas."""
+    def all_ones(dx: float, dy: float) -> bool:
+        return dx == -1.0 and dy == -1.0
+
+    def lone_exact_256(dx: float, dy: float, ox: float, oy: float) -> bool:
+        # One sensor stuck at exactly +/-256 with the other quiet — framing glitch.
+        quiet = abs(ox) < 1 and abs(oy) < 1
+        hit = any(abs(abs(ax) - 256.0) <= 1.0 for ax in (dx, dy))
+        return quiet and hit
+
+    return (
+        all_ones(dx_l, dy_l)
+        or all_ones(dx_r, dy_r)
+        or lone_exact_256(dx_l, dy_l, dx_r, dy_r)
+        or lone_exact_256(dx_r, dy_r, dx_l, dy_l)
+    )
+
+
 def diagnose_samples(samples: Sequence[Sequence[float]]) -> None:
     """Print capture-quality hints that residual ranking cannot see."""
     n = len(samples)
@@ -383,7 +402,8 @@ def diagnose_samples(samples: Sequence[Sequence[float]]) -> None:
         print("diagnose: no samples")
         return
     both = only_l = only_r = 0
-    glitch = 0
+    garbage = 0
+    large = 0
     for dx_l, dy_l, dx_r, dy_r in samples:
         l = math.hypot(dx_l, dy_l)
         r = math.hypot(dx_r, dy_r)
@@ -393,17 +413,19 @@ def diagnose_samples(samples: Sequence[Sequence[float]]) -> None:
             only_l += 1
         elif r >= 2:
             only_r += 1
-        for ax in (dx_l, dy_l, dx_r, dy_r):
-            # ±256 / ±255 show up when XY_H nibbles glitch (bit-11 / 0xF00).
-            if abs(abs(ax) - 256.0) <= 1.0:
-                glitch += 1
-                break
+        if _is_bus_garbage(dx_l, dy_l, dx_r, dy_r):
+            garbage += 1
+        if max(abs(dx_l), abs(dy_l), abs(dx_r), abs(dy_r)) >= 200:
+            large += 1
     print("Capture diagnose:")
     print(f"  samples={n}  both>={2}:{both}  only_L={only_l}  only_R={only_r}")
-    print(f"  rows with |delta|~=256 artifact: {glitch} ({100.0 * glitch / n:.1f}%)")
-    if glitch > n * 0.02:
-        print("  WARNING: frequent +/-256 spikes usually mean SDIO burst/turnaround "
-              "bit errors - remount search will look flat until SPI reads are clean.")
+    print(f"  bus-garbage patterns (ones/-1 or lone +/-256): {garbage} ({100.0 * garbage / n:.1f}%)")
+    print(f"  large |delta|>=200 (often real coalesced motion): {large} ({100.0 * large / n:.1f}%)")
+    if garbage > n * 0.02:
+        print("  WARNING: frequent bus-garbage patterns — SDIO timing/wiring still suspect.")
+    elif large > n * 0.05:
+        print("  NOTE: many large deltas are normal after IRQ wake (counts accumulate). "
+              "Do not treat |delta|~=256 alone as an SPI error.")
     if both < max(20, n // 5):
         print("  WARNING: few simultaneous L+R samples; residual mount search needs "
               "both sensors moving together.")
@@ -415,8 +437,11 @@ def filter_glitches(
 ) -> list[tuple[float, float, float, float]]:
     kept: list[tuple[float, float, float, float]] = []
     for row in samples:
-        if max(abs(row[0]), abs(row[1]), abs(row[2]), abs(row[3])) <= max_abs:
-            kept.append((float(row[0]), float(row[1]), float(row[2]), float(row[3])))
+        if _is_bus_garbage(row[0], row[1], row[2], row[3]):
+            continue
+        if max_abs > 0 and max(abs(row[0]), abs(row[1]), abs(row[2]), abs(row[3])) > max_abs:
+            continue
+        kept.append((float(row[0]), float(row[1]), float(row[2]), float(row[3])))
     return kept
 
 
@@ -548,8 +573,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="Also try swapping L/R measurement channels")
     parser.add_argument("--top", type=int, default=8, help="How many ranked configs to print")
     parser.add_argument("--save-csv", type=Path, help="Write captured samples to CSV")
-    parser.add_argument("--max-abs", type=float, default=200.0,
-                        help="Drop samples with any |delta| above this (SPI glitch guard); 0 disables")
+    parser.add_argument("--max-abs", type=float, default=0.0,
+                        help="Drop samples with any |delta| above this (0=disabled; "
+                             "bus-garbage patterns are always dropped)")
     parser.add_argument("--l-phi", type=float, default=DEFAULT_L_PHI)
     parser.add_argument("--l-theta", type=float, default=DEFAULT_L_THETA)
     parser.add_argument("--r-phi", type=float, default=DEFAULT_R_PHI)
@@ -603,10 +629,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Wrote {args.save_csv}")
 
     diagnose_samples(samples)
-    if args.max_abs > 0:
-        before = len(samples)
-        samples = filter_glitches(samples, args.max_abs)
-        print(f"Glitch filter |delta|<={args.max_abs:g}: kept {len(samples)}/{before}")
+    before = len(samples)
+    samples = filter_glitches(samples, args.max_abs)
+    print(f"After garbage filter"
+          f"{'' if args.max_abs <= 0 else f' + |delta|<={args.max_abs:g}'}: "
+          f"kept {len(samples)}/{before}")
     samples = filter_samples(samples, args.min_norm, require_both=not args.allow_single)
     if len(samples) < 20:
         raise SystemExit(

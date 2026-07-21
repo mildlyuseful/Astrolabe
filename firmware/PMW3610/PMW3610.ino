@@ -59,10 +59,10 @@
 #define SENSOR_L_THETA  130.0f
 #define SENSOR_R_PHI    230.0f
 #define SENSOR_R_THETA  130.0f
-#define SENSOR_L_MOUNT_DEG  90.0f
+#define SENSOR_L_MOUNT_DEG  270.0f
 #define SENSOR_L_FLIP       1
-#define SENSOR_R_MOUNT_DEG  0.0f
-#define SENSOR_R_FLIP       0
+#define SENSOR_R_MOUNT_DEG  180.0f
+#define SENSOR_R_FLIP       1
 
 #define SENSOR_CPI       1600
 #define CURSOR_GAIN      0.125f
