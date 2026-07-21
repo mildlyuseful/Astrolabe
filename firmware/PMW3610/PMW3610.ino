@@ -14,8 +14,9 @@
  * (bit0 Up, bit1 Down, bit2 Left, bit3 Right, bit4 Center). Standalone HID maps
  * Down=LMB, Right=RMB, Center=MMB. Daemon subscription suppresses HID pointer/buttons.
  *
- * Interrupt-driven sensor reads and button wakeups; MCU waits for events when idle
- * (battery-oriented). No simulated IPS throttling. Ball diameter = 2.0 in.
+ * Power: MOTION/button IRQ opens an active window with 1 kHz dual-sensor polling
+ * (XIAO3389 cadence). After MOTION_IDLE_MS with no activity, sensors enter rest and
+ * the MCU waits for the next interrupt. No simulated IPS throttling. Ball = 2.0 in.
  */
 #include <Adafruit_TinyUSB.h>
 #include <bluefruit.h>
@@ -77,9 +78,12 @@
 
 #define BLE_NAME        "Astrolabe"
 #define BLE_SEND_MS     7
+#define POLL_INTERVAL_US 1000   // 1 kHz while awake (matches XIAO3389)
+#define MOTION_IDLE_MS   80     // no motion/button activity -> MCU+sensor sleep
 #define DEBOUNCE_MS     8
 #define DEBUG_PRINT     1
 #define IPS_REPORT_MS   8000
+#define HID_DRAIN_MAX   4       // mouseMove packets per send slot (backlog safety)
 
 // ---------------------------------------------------------------------------
 // [GATT] Custom 3-axis rotation service (purely additive; HID mouse untouched)
@@ -188,8 +192,8 @@ public:
     spiClkOff();
 
     setCPI(cpi);
-    // Stay awake while the host is using the device; rest modes resume when disconnected.
-    setForceAwake(true);
+    // Boot in rest; MOTION IRQ + active-poll window force-awake when needed.
+    setForceAwake(false);
     return true;
   }
 
@@ -386,10 +390,11 @@ uint8_t  g_protocolButtons=0;
 uint8_t  g_hidButtons=0;
 uint16_t g_inputSequence=0;
 uint32_t lastScrollMs=0, lastSendMs=0, lastBlinkMs=0, lastIpsReportMs=0;
-uint32_t lastMotionUs=0;
+uint32_t lastPollUs=0, lastActivityMs=0;
 bool     ledState=false;
-bool     g_sensorsAwake=true;
+bool     g_sensorsAwake=false;
 bool     g_okL=false, g_okR=false;
+bool     g_debouncePending=false;
 
 volatile bool g_controller = false;
 uint16_t      g_ctrlConn   = BLE_CONN_HANDLE_INVALID;
@@ -405,17 +410,38 @@ static inline float countsToIps(int16_t dx, int16_t dy, float dtSec){
   return sqrtf((float)dx*dx + (float)dy*dy) / (float)SENSOR_CPI / dtSec;
 }
 
+static inline bool motionPinActive(){
+  return (g_okL && digitalRead(PIN_MOTION_L) == LOW)
+      || (g_okR && digitalRead(PIN_MOTION_R) == LOW);
+}
+
+static void sensorsForceAwake(){
+  if(g_sensorsAwake) return;
+  if(g_okL) sensorL.setForceAwake(true);
+  if(g_okR) sensorR.setForceAwake(true);
+  g_sensorsAwake = true;
+}
+
+static void sensorsEnterRest(){
+  if(!g_sensorsAwake) return;
+  if(g_okL) sensorL.enterRest();
+  if(g_okR) sensorR.enterRest();
+  g_sensorsAwake = false;
+}
+
+static void clearMotionAccumulators(){
+  gx = gy = gz = 0.0f;
+  accX = accY = accScroll = 0.0f;
+}
+
 static void onConnect(uint16_t conn_handle){
   BLEConnection* c = Bluefruit.Connection(conn_handle);
   c->requestConnectionParameter(9);
-  gx = gy = gz = 0.0f;
-  if(!g_sensorsAwake){
-    if(g_okL) sensorL.setForceAwake(true);
-    if(g_okR) sensorR.setForceAwake(true);
-    g_sensorsAwake=true;
-  }
+  // Drop any pre-connection residue so the first reports are not a backlog dump.
+  clearMotionAccumulators();
+  lastActivityMs = millis();
+  sensorsForceAwake();
 #if DEBUG_PRINT
-  delay(50);
   uint16_t iv = c->getConnectionInterval();
   Serial.print("conn interval = "); Serial.print(iv*1.25f,2);
   Serial.print(" ms (~"); Serial.print(1000.0f/(iv*1.25f),0); Serial.println(" Hz)");
@@ -425,10 +451,10 @@ static void onConnect(uint16_t conn_handle){
 static void onDisconnect(uint16_t conn_handle, uint8_t reason){
   (void)reason;
   if(conn_handle == g_ctrlConn){ g_controller = false; g_ctrlConn = BLE_CONN_HANDLE_INVALID; }
+  clearMotionAccumulators();
   if(!Bluefruit.connected()){
-    if(g_okL) sensorL.enterRest();
-    if(g_okR) sensorR.enterRest();
-    g_sensorsAwake = false;
+    lastHidButtons = 0;
+    sensorsEnterRest();
   }
 }
 
@@ -484,15 +510,19 @@ static void buttonIsr(){ g_buttonWake = true; }
 
 // Active-low five-way with internal pull-ups. Publish the full observed bitset.
 // HID standalone: Down=LMB, Right=RMB, Center=MMB (Up/Left are protocol-only).
-static void readButtons(uint8_t &protocolOut, uint8_t &hidOut){
+// Returns true while any channel is still inside its debounce window (keep polling).
+static bool readButtons(uint8_t &protocolOut, uint8_t &hidOut){
   static const uint8_t pins[5]  = {PIN_BTN_UP, PIN_BTN_DOWN, PIN_BTN_LEFT, PIN_BTN_RIGHT, PIN_BTN_CENTER};
   static const uint8_t masks[5] = {BTN_BIT_UP, BTN_BIT_DOWN, BTN_BIT_LEFT, BTN_BIT_RIGHT, BTN_BIT_CENTER};
   static bool stable[5]={0}, lastRaw[5]={0}; static uint32_t tChange[5]={0};
-  uint32_t nowMs=millis(); uint8_t protocol=0;
+  uint32_t nowMs=millis(); uint8_t protocol=0; bool pending=false;
   for(uint8_t i=0;i<5;i++){
     bool raw=(digitalRead(pins[i])==LOW);
     if(raw!=lastRaw[i]){lastRaw[i]=raw;tChange[i]=nowMs;}
-    if(raw!=stable[i] && (nowMs-tChange[i])>=DEBOUNCE_MS) stable[i]=raw;
+    if(raw!=stable[i]){
+      if((nowMs-tChange[i])>=DEBOUNCE_MS) stable[i]=raw;
+      else pending=true;
+    }
     if(stable[i]) protocol|=masks[i];
   }
   protocolOut = protocol;
@@ -500,6 +530,7 @@ static void readButtons(uint8_t &protocolOut, uint8_t &hidOut){
   if(protocol & BTN_BIT_DOWN)   hidOut |= 0x01;
   if(protocol & BTN_BIT_RIGHT)  hidOut |= 0x02;
   if(protocol & BTN_BIT_CENTER) hidOut |= 0x04;
+  return pending;
 }
 
 static void setupRotationService(){
@@ -527,6 +558,78 @@ static void startAdv(){
   Bluefruit.Advertising.setInterval(32, 244);
   Bluefruit.Advertising.setFastTimeout(30);
   Bluefruit.Advertising.start(0);
+}
+
+static void updateLed(uint32_t nowMs){
+  if(!Bluefruit.connected()){
+    if(nowMs - lastBlinkMs > 600){ lastBlinkMs=nowMs; ledState=!ledState;
+      digitalWrite(LED_BUILTIN, ledState?LED_STATE_ON:!LED_STATE_ON); }
+  } else if(g_controller){
+    if(nowMs - lastBlinkMs > 200){ lastBlinkMs=nowMs; ledState=!ledState;
+      digitalWrite(LED_BUILTIN, ledState?LED_STATE_ON:!LED_STATE_ON); }
+  } else if(!ledState){ digitalWrite(LED_BUILTIN,LED_STATE_ON); ledState=true; }
+}
+
+static void flushOutputs(uint32_t nowMs){
+  if(!Bluefruit.connected()) return;
+  if((nowMs - lastSendMs) < BLE_SEND_MS) return;
+
+  bool pendingMotionReport = (gx!=0.0f || gy!=0.0f || gz!=0.0f);
+  bool pendingHid = !g_controller && (accX!=0.0f || accY!=0.0f || accScroll!=0.0f
+                                      || g_hidButtons != lastHidButtons);
+  bool needHidRelease = g_controller && lastHidButtons;
+  if(!pendingMotionReport && !pendingHid && !needHidRelease) return;
+
+  lastSendMs = nowMs;
+  if(!g_controller){
+    if(g_hidButtons != lastHidButtons){
+      bool ok = g_hidButtons ? blehid.mouseButtonPress(g_hidButtons) : blehid.mouseButtonRelease();
+      if(ok) lastHidButtons = g_hidButtons;
+    }
+    // Drain backlog in-slot so a rare stall cannot become a long constant-speed line.
+    for(uint8_t n=0;n<HID_DRAIN_MAX;n++){
+      int8_t sx=clamp8(accX), sy=clamp8(accY);
+      if(!sx && !sy) break;
+      if(!blehid.mouseMove(sx,sy)) break;
+      accX-=sx; accY-=sy;
+    }
+    int32_t det=(int32_t)(accScroll/SCROLL_DIVISOR);
+    int8_t wheel=clamp8((float)det);
+    if(wheel){ if(blehid.mouseScroll(wheel)) accScroll-=(float)wheel*SCROLL_DIVISOR; }
+  } else if(lastHidButtons){
+    if(blehid.mouseButtonRelease()) lastHidButtons = 0;
+  }
+
+  if(pendingMotionReport){
+    float rbuf[3] = { gx*ROT_SIGN_X, gy*ROT_SIGN_Y, gz*ROT_SIGN_Z };
+    // Retain deltas if SoftDevice rejects the notify while a daemon is subscribed.
+    if(rotationChar.notify(rbuf, sizeof(rbuf)) || !g_controller){
+      gx = gy = gz = 0.0f;
+    }
+  }
+}
+
+// Race-safe idle: re-check wake flags after masking IRQs so an edge cannot be lost
+// between the predicate and waitForEvent().
+static void trySleepUntilInterrupt(uint32_t nowMs){
+  bool pendingOut = (gx!=0.0f || gy!=0.0f || gz!=0.0f)
+                 || (!g_controller && (accX!=0.0f || accY!=0.0f || accScroll!=0.0f
+                                       || g_hidButtons != lastHidButtons))
+                 || (g_controller && lastHidButtons);
+  if(pendingOut || g_debouncePending) return;
+  if((nowMs - lastActivityMs) < MOTION_IDLE_MS) return;
+  if(g_motionWake || g_buttonWake || motionPinActive()) return;
+
+  sensorsEnterRest();
+  updateLed(nowMs);
+
+  noInterrupts();
+  if(!g_motionWake && !g_buttonWake && !motionPinActive()){
+    interrupts();
+    waitForEvent();
+  } else {
+    interrupts();
+  }
 }
 
 void setup(){
@@ -597,41 +700,85 @@ void setup(){
   attachInterrupt(digitalPinToInterrupt(PIN_BTN_CENTER), buttonIsr, CHANGE);
 
   lastScrollMs = millis() - SCROLL_HOLD_MS - 1;
-  lastMotionUs = micros();
+  lastPollUs = micros();
+  lastActivityMs = millis();
 }
 
 void loop(){
   uint32_t nowMs = millis();
-  bool motionPending = g_motionWake
-                    || (g_okL && digitalRead(PIN_MOTION_L) == LOW)
-                    || (g_okR && digitalRead(PIN_MOTION_R) == LOW);
+
+  // MOTION/button IRQ (or still-asserted MOTION) opens an active-poll window.
+  if(g_motionWake || g_buttonWake || motionPinActive()){
+    lastActivityMs = nowMs;
+    sensorsForceAwake();
+  }
+
+  bool inActiveWindow = ((nowMs - lastActivityMs) < MOTION_IDLE_MS)
+                     || g_debouncePending
+                     || motionPinActive()
+                     || g_motionWake
+                     || g_buttonWake;
+
+  if(!inActiveWindow){
+    // Discard unsent motion while disconnected so sleep cannot be blocked by a cache.
+    if(!Bluefruit.connected()) clearMotionAccumulators();
+    trySleepUntilInterrupt(nowMs);
+    return;
+  }
+
+  // ---- active: 1 kHz dual-sensor poll (XIAO3389 cadence) ----
+  uint32_t nowUs = micros();
+  if((uint32_t)(nowUs - lastPollUs) < POLL_INTERVAL_US){
+    // Between polls: still service buttons/BLE/LED at full loop rate.
+    uint8_t protocolButtons=0, hidButtons=0;
+    g_debouncePending = readButtons(protocolButtons, hidButtons);
+    g_hidButtons = hidButtons;
+    if(protocolButtons != g_protocolButtons){
+      g_protocolButtons = protocolButtons;
+      g_inputSequence++;
+      notifyInputState();
+      lastActivityMs = nowMs;
+    }
+    flushOutputs(nowMs);
+    updateLed(nowMs);
+    return;
+  }
+
+  float dtSec = (float)(uint32_t)(nowUs - lastPollUs) * 1e-6f;
+  lastPollUs = nowUs;
+  // Consume edge flags only once we are in the poll path (after wake handling).
   g_motionWake = false;
   g_buttonWake = false;
 
-  if(motionPending && (g_okL || g_okR)){
-    uint32_t nowUs = micros();
-    float dtSec = (float)(uint32_t)(nowUs - lastMotionUs) * 1e-6f;
-    if(dtSec < 0.0002f) dtSec = 0.0002f;   // avoid huge ips spikes on back-to-back IRQs
-    lastMotionUs = nowUs;
+  sensorsForceAwake();
 
-    if(!g_sensorsAwake){
-      if(g_okL) sensorL.setForceAwake(true);
-      if(g_okR) sensorR.setForceAwake(true);
-      g_sensorsAwake = true;
-    }
+  // Always burst-read both sensors while awake — matches XIAO3389 and keeps the
+  // dual-sensor least-squares solve fully determined. Gate contributions on isMotion.
+  PMW3610_DATA a = {false, true, 0, 0, 0};
+  PMW3610_DATA b = {false, true, 0, 0, 0};
+  if(g_okL) a = sensorL.readBurst();
+  if(g_okR) b = sensorR.readBurst();
 
-    PMW3610_DATA a = {false, true, 0, 0, 0};
-    PMW3610_DATA b = {false, true, 0, 0, 0};
-    if(g_okL && digitalRead(PIN_MOTION_L) == LOW) a = sensorL.readBurst();
-    if(g_okR && digitalRead(PIN_MOTION_R) == LOW) b = sensorR.readBurst();
+  bool sawMotion = a.isMotion || b.isMotion;
+  if(sawMotion) lastActivityMs = nowMs;
 
 #if DEBUG_PRINT
-    if(a.isMotion){ float ips=countsToIps(a.dx,a.dy,dtSec);
-      if(ips>gPeakIpsL) gPeakIpsL=ips; if(ips>gMaxIpsL) gMaxIpsL=ips; }
-    if(b.isMotion){ float ips=countsToIps(b.dx,b.dy,dtSec);
-      if(ips>gPeakIpsR) gPeakIpsR=ips; if(ips>gMaxIpsR) gMaxIpsR=ips; }
+  if(a.isMotion){ float ips=countsToIps(a.dx,a.dy,dtSec);
+    if(ips>gPeakIpsL) gPeakIpsL=ips; if(ips>gMaxIpsL) gMaxIpsL=ips; }
+  if(b.isMotion){ float ips=countsToIps(b.dx,b.dy,dtSec);
+    if(ips>gPeakIpsR) gPeakIpsR=ips; if(ips>gMaxIpsR) gMaxIpsR=ips; }
+  if(nowMs - lastIpsReportMs >= IPS_REPORT_MS){
+    lastIpsReportMs = nowMs;
+    Serial.print("peak ips L="); Serial.print(gPeakIpsL,1);
+    Serial.print(" R=");         Serial.print(gPeakIpsR,1);
+    Serial.print("  | session max L="); Serial.print(gMaxIpsL,1);
+    Serial.print(" R=");                Serial.println(gMaxIpsR,1);
+    gPeakIpsL = gPeakIpsR = 0.0f;
+  }
 #endif
 
+  // Only fuse/accumulate while a host is connected — prevents reconnect dumps.
+  if(Bluefruit.connected() && sawMotion){
     float m[4]={0,0,0,0};
     if(a.isMotion){ m[0]=a.dx; m[1]=a.dy; }
     if(b.isMotion){ m[2]=b.dx; m[3]=b.dy; }
@@ -663,73 +810,16 @@ void loop(){
     }
   }
 
-#if DEBUG_PRINT
-  if(nowMs - lastIpsReportMs >= IPS_REPORT_MS){
-    lastIpsReportMs = nowMs;
-    Serial.print("peak ips L="); Serial.print(gPeakIpsL,1);
-    Serial.print(" R=");         Serial.print(gPeakIpsR,1);
-    Serial.print("  | session max L="); Serial.print(gMaxIpsL,1);
-    Serial.print(" R=");                Serial.println(gMaxIpsR,1);
-    gPeakIpsL = gPeakIpsR = 0.0f;
-  }
-#endif
-
   uint8_t protocolButtons=0, hidButtons=0;
-  readButtons(protocolButtons, hidButtons);
+  g_debouncePending = readButtons(protocolButtons, hidButtons);
   g_hidButtons = hidButtons;
   if(protocolButtons != g_protocolButtons){
     g_protocolButtons = protocolButtons;
     g_inputSequence++;
     notifyInputState();
+    lastActivityMs = nowMs;
   }
 
-  bool pendingMotionReport = (gx!=0.0f || gy!=0.0f || gz!=0.0f);
-  bool pendingHid = !g_controller && (accX!=0.0f || accY!=0.0f || accScroll!=0.0f
-                                      || g_hidButtons != lastHidButtons);
-  bool needHidRelease = g_controller && lastHidButtons;
-  bool dueSend = Bluefruit.connected() && ((nowMs-lastSendMs) >= BLE_SEND_MS)
-                 && (pendingMotionReport || pendingHid || needHidRelease);
-
-  if(dueSend){
-    lastSendMs = nowMs;
-    if(!g_controller){
-      if(g_hidButtons != lastHidButtons){
-        bool ok = g_hidButtons ? blehid.mouseButtonPress(g_hidButtons) : blehid.mouseButtonRelease();
-        if(ok) lastHidButtons = g_hidButtons;
-      }
-      int8_t sx=clamp8(accX), sy=clamp8(accY);
-      if(sx||sy){ if(blehid.mouseMove(sx,sy)){ accX-=sx; accY-=sy; } }
-      int32_t det=(int32_t)(accScroll/SCROLL_DIVISOR);
-      int8_t wheel=clamp8((float)det);
-      if(wheel){ if(blehid.mouseScroll(wheel)) accScroll-=(float)wheel*SCROLL_DIVISOR; }
-    } else if(lastHidButtons){
-      if(blehid.mouseButtonRelease()) lastHidButtons = 0;
-    }
-
-    if(pendingMotionReport){
-      float rbuf[3] = { gx*ROT_SIGN_X, gy*ROT_SIGN_Y, gz*ROT_SIGN_Z };
-      rotationChar.notify(rbuf, sizeof(rbuf));
-      gx = gy = gz = 0.0f;
-    }
-  }
-
-  // LED: disconnected = slow blink; controller = fast blink; mouse = solid.
-  if(!Bluefruit.connected()){
-    if(nowMs - lastBlinkMs > 600){ lastBlinkMs=nowMs; ledState=!ledState;
-      digitalWrite(LED_BUILTIN, ledState?LED_STATE_ON:!LED_STATE_ON); }
-  } else if(g_controller){
-    if(nowMs - lastBlinkMs > 200){ lastBlinkMs=nowMs; ledState=!ledState;
-      digitalWrite(LED_BUILTIN, ledState?LED_STATE_ON:!LED_STATE_ON); }
-  } else if(!ledState){ digitalWrite(LED_BUILTIN,LED_STATE_ON); ledState=true; }
-
-  // Sleep the MCU when nothing is pending. Motion/button IRQs and SoftDevice wake us.
-  bool idle = !g_motionWake && !g_buttonWake
-           && (gx==0.0f && gy==0.0f && gz==0.0f)
-           && (g_controller || (accX==0.0f && accY==0.0f && accScroll==0.0f
-                                && g_hidButtons == lastHidButtons))
-           && (!g_okL || digitalRead(PIN_MOTION_L) == HIGH)
-           && (!g_okR || digitalRead(PIN_MOTION_R) == HIGH);
-  if(idle){
-    waitForEvent();
-  }
+  flushOutputs(nowMs);
+  updateLed(nowMs);
 }

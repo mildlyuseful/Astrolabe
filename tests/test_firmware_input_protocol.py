@@ -75,6 +75,15 @@ def test_pmw3610_fiveway_contract_matches_astrolabe_descriptor():
     assert "if(protocol & BTN_BIT_DOWN)   hidOut |= 0x01;" in PMW3610
     assert "if(protocol & BTN_BIT_RIGHT)  hidOut |= 0x02;" in PMW3610
     assert "if(protocol & BTN_BIT_CENTER) hidOut |= 0x04;" in PMW3610
+    assert "POLL_INTERVAL_US 1000" in PMW3610
+    assert "MOTION_IDLE_MS" in PMW3610
+    assert "trySleepUntilInterrupt" in PMW3610
+    assert "sensorsEnterRest" in PMW3610
+    assert "clearMotionAccumulators" in PMW3610
+    assert "if(g_okL) a = sensorL.readBurst();" in PMW3610
+    assert "if(g_okR) b = sensorR.readBurst();" in PMW3610
+    assert "HID_DRAIN_MAX" in PMW3610
+    assert "rotationChar.notify(rbuf, sizeof(rbuf)) || !g_controller" in PMW3610
     assert "P0_20" in PMW3610 or "D3" in PMW3610
     assert "P1_00" in PMW3610 or "D6" in PMW3610
     assert "warnBlink" in PMW3610
