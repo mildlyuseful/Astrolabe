@@ -60,9 +60,9 @@
 #define SENSOR_R_PHI    230.0f
 #define SENSOR_R_THETA  130.0f
 #define SENSOR_L_MOUNT_DEG  90.0f
-#define SENSOR_L_FLIP       0
-#define SENSOR_R_MOUNT_DEG  90.0f
-#define SENSOR_R_FLIP       0
+#define SENSOR_L_FLIP       1
+#define SENSOR_R_MOUNT_DEG  0.0f
+#define SENSOR_R_FLIP       1
 
 #define SENSOR_CPI       1600
 #define CURSOR_GAIN      0.125f
@@ -231,13 +231,16 @@ public:
     PMW3610_DATA d = {false, true, 0, 0, 0};
     uint8_t buf[5];
     csLow();
+    delayMicroseconds(1);
     writeByte(REG_Burst_Read);
-    delayMicroseconds(5);
+    delayMicroseconds(10);          // address → data turnaround (tSRAD)
     pinMode(PIN_SDIO, INPUT);
+    delayMicroseconds(2);
     for (uint8_t i = 0; i < 5; i++) buf[i] = readByte();
     pinMode(PIN_SDIO, OUTPUT);
     digitalWrite(PIN_SDIO, HIGH);
     csHigh();
+    delayMicroseconds(4);           // settle shared SDIO before the other CS
 
     d.isMotion = (buf[0] & 0x80) != 0;
     // PMW3610 has no dedicated lift bit like PMW3389; treat as on-surface when reporting.

@@ -375,6 +375,50 @@ def capture_serial(port: str, seconds: float, baud: int = 115200) -> list[tuple[
     return rows
 
 
+def diagnose_samples(samples: Sequence[Sequence[float]]) -> None:
+    """Print capture-quality hints that residual ranking cannot see."""
+    n = len(samples)
+    if n == 0:
+        print("diagnose: no samples")
+        return
+    both = only_l = only_r = 0
+    glitch = 0
+    for dx_l, dy_l, dx_r, dy_r in samples:
+        l = math.hypot(dx_l, dy_l)
+        r = math.hypot(dx_r, dy_r)
+        if l >= 2 and r >= 2:
+            both += 1
+        elif l >= 2:
+            only_l += 1
+        elif r >= 2:
+            only_r += 1
+        for ax in (dx_l, dy_l, dx_r, dy_r):
+            # ±256 / ±255 show up when XY_H nibbles glitch (bit-11 / 0xF00).
+            if abs(abs(ax) - 256.0) <= 1.0:
+                glitch += 1
+                break
+    print("Capture diagnose:")
+    print(f"  samples={n}  both>={2}:{both}  only_L={only_l}  only_R={only_r}")
+    print(f"  rows with |delta|~=256 artifact: {glitch} ({100.0 * glitch / n:.1f}%)")
+    if glitch > n * 0.02:
+        print("  WARNING: frequent ±256 spikes usually mean SDIO burst/turnaround "
+              "bit errors — remount search will look flat until SPI reads are clean.")
+    if both < max(20, n // 5):
+        print("  WARNING: few simultaneous L+R samples; residual mount search needs "
+              "both sensors moving together.")
+
+
+def filter_glitches(
+    samples: Sequence[Sequence[float]],
+    max_abs: float,
+) -> list[tuple[float, float, float, float]]:
+    kept: list[tuple[float, float, float, float]] = []
+    for row in samples:
+        if max(abs(row[0]), abs(row[1]), abs(row[2]), abs(row[3])) <= max_abs:
+            kept.append((float(row[0]), float(row[1]), float(row[2]), float(row[3])))
+    return kept
+
+
 def filter_samples(
     samples: Sequence[Sequence[float]],
     min_norm: float,
@@ -492,6 +536,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="Also try swapping L/R measurement channels")
     parser.add_argument("--top", type=int, default=8, help="How many ranked configs to print")
     parser.add_argument("--save-csv", type=Path, help="Write captured samples to CSV")
+    parser.add_argument("--max-abs", type=float, default=200.0,
+                        help="Drop samples with any |delta| above this (SPI glitch guard); 0 disables")
     parser.add_argument("--l-phi", type=float, default=DEFAULT_L_PHI)
     parser.add_argument("--l-theta", type=float, default=DEFAULT_L_THETA)
     parser.add_argument("--r-phi", type=float, default=DEFAULT_R_PHI)
@@ -544,11 +590,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             writer.writerows(samples)
         print(f"Wrote {args.save_csv}")
 
+    diagnose_samples(samples)
+    if args.max_abs > 0:
+        before = len(samples)
+        samples = filter_glitches(samples, args.max_abs)
+        print(f"Glitch filter |delta|<={args.max_abs:g}: kept {len(samples)}/{before}")
     samples = filter_samples(samples, args.min_norm, require_both=not args.allow_single)
     if len(samples) < 20:
         raise SystemExit(
             f"only {len(samples)} samples after filtering (min_norm={args.min_norm}); "
-            "roll more / lower --min-norm"
+            "roll more / lower --min-norm / raise --max-abs"
         )
     print(f"Using {len(samples)} filtered samples")
 
@@ -575,15 +626,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
 
     best = ranked[0]
-    second = ranked[1] if len(ranked) > 1 else None
+    second = next((item for item in ranked[1:] if abs(item.rms - best.rms) > 1e-6), None)
     print()
     print("Best firmware defines:")
     print(best.config.firmware_defines())
     if second is not None and second.rms > 0:
         ratio = best.rms / second.rms
         print()
-        print(f"Separation vs #2: best/second rms = {ratio:.3f} "
-              f"(<<1 means a clear winner; ~1 means ambiguous — capture more axes)")
+        print(f"Separation vs next distinct rms: best/next = {ratio:.3f} "
+              f"(tied rows above are discrete mount symmetries, not disagreement)")
     print()
     print("After pasting mounts/flips: if the cursor still feels mirrored, flip "
           "ROT_SIGN_* / CURSOR_INVERT_* — residual search cannot choose world signs.")
