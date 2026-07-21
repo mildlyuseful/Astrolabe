@@ -75,6 +75,11 @@ def test_pmw3610_fiveway_contract_matches_astrolabe_descriptor():
     assert "if(protocol & BTN_BIT_DOWN)   hidOut |= 0x01;" in PMW3610
     assert "if(protocol & BTN_BIT_RIGHT)  hidOut |= 0x02;" in PMW3610
     assert "if(protocol & BTN_BIT_CENTER) hidOut |= 0x04;" in PMW3610
+    assert "P0_20" in PMW3610 or "D3" in PMW3610
+    assert "P1_00" in PMW3610 or "D6" in PMW3610
+    assert "warnBlink" in PMW3610
+    assert "BLE advertising as Astrolabe" in PMW3610
+    assert "PIN_017" not in PMW3610
     assert "attachInterrupt(digitalPinToInterrupt(PIN_MOTION_L)" in PMW3610
     assert "attachInterrupt(digitalPinToInterrupt(PIN_MOTION_R)" in PMW3610
     assert "waitForEvent();" in PMW3610

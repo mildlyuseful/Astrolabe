@@ -1,7 +1,8 @@
 /*
  * Dual PMW3610 Trackball -> BLE HID Mouse + Astrolabe rotation/input
- * Board: SuperMini nRF52840 (Nice!Nano-compatible), Adafruit nRF52 Arduino / Bluefruit.
- * Use a Nice!Nano or SuperMini board package that defines PIN_0xx / PIN_1xx macros.
+ * Board: SuperMini nRF52840 via "nRFMicro-like Boards" (Tools → SuperMini nRF52840).
+ * That package renumbers GPIOs as D0..D20 / P0_xx / P1_xx — do NOT treat silkscreen
+ * "017" as Arduino pin 17 (that mapping is wrong and was blocking BLE bring-up).
  *
  * Sensors (shared half-duplex SDIO + SCLK, separate CS + MOTION):
  *   R: CS=P0.20  MOTION=P0.17   L: CS=P1.00  MOTION=P0.11
@@ -21,56 +22,36 @@
 #include <math.h>
 
 #ifndef LED_STATE_ON
-#define LED_STATE_ON LOW
+#define LED_STATE_ON HIGH
 #endif
 
-// Arduino pin aliases for Nice!Nano / SuperMini silkscreen P-numbers.
-#ifndef PIN_017
-#define PIN_017 17
+// SuperMini_nRF52840 variant macros (P0_xx / P1_xx / Dx). Fall back to the same
+// Arduino pin numbers if building under a package that only exposes Dx.
+#if defined(P0_20)
+#define PIN_CS_R        P0_20     // D3  — R/CS
+#define PIN_MOTION_R    P0_17     // D2  — RMOTION (active low)
+#define PIN_CS_L        P1_00     // D6  — L/CS
+#define PIN_MOTION_L    P0_11     // D7  — LMOTION (active low)
+#define PIN_SCLK        P0_22     // D4
+#define PIN_SDIO        P0_24     // D5
+#define PIN_BTN_LEFT    P1_13     // D13
+#define PIN_BTN_CENTER  P1_15     // D14
+#define PIN_BTN_UP      P0_02     // D15
+#define PIN_BTN_RIGHT   P0_29     // D16
+#define PIN_BTN_DOWN    P0_31     // D17
+#else
+#define PIN_CS_R        D3
+#define PIN_MOTION_R    D2
+#define PIN_CS_L        D6
+#define PIN_MOTION_L    D7
+#define PIN_SCLK        D4
+#define PIN_SDIO        D5
+#define PIN_BTN_LEFT    D13
+#define PIN_BTN_CENTER  D14
+#define PIN_BTN_UP      D15
+#define PIN_BTN_RIGHT   D16
+#define PIN_BTN_DOWN    D17
 #endif
-#ifndef PIN_020
-#define PIN_020 20
-#endif
-#ifndef PIN_022
-#define PIN_022 22
-#endif
-#ifndef PIN_024
-#define PIN_024 24
-#endif
-#ifndef PIN_100
-#define PIN_100 32
-#endif
-#ifndef PIN_011
-#define PIN_011 11
-#endif
-#ifndef PIN_002
-#define PIN_002 2
-#endif
-#ifndef PIN_029
-#define PIN_029 29
-#endif
-#ifndef PIN_031
-#define PIN_031 31
-#endif
-#ifndef PIN_113
-#define PIN_113 45
-#endif
-#ifndef PIN_115
-#define PIN_115 47
-#endif
-
-#define PIN_CS_R        PIN_020   // R/CS
-#define PIN_MOTION_R    PIN_017   // RMOTION (active low)
-#define PIN_CS_L        PIN_100   // L/CS
-#define PIN_MOTION_L    PIN_011   // LMOTION (active low)
-#define PIN_SCLK        PIN_022
-#define PIN_SDIO        PIN_024
-
-#define PIN_BTN_LEFT    PIN_113
-#define PIN_BTN_CENTER  PIN_115
-#define PIN_BTN_UP      PIN_002
-#define PIN_BTN_RIGHT   PIN_029
-#define PIN_BTN_DOWN    PIN_031
 
 // L = sensor A rows, R = sensor B rows in the dual-sensor solver.
 #define SENSOR_L_PHI    140.0f
@@ -194,13 +175,9 @@ public:
     spiClkOn();
     writeReg(REG_Observation1, 0x00);
     delay(10);
-    uint8_t obs = readReg(REG_Observation1);
-    if ((obs & 0x0F) != 0x0F) {
-      // Observation sticky bits should settle after reset; retry once.
-      delay(10);
-      obs = readReg(REG_Observation1);
-      if ((obs & 0x0F) != 0x0F) return false;
-    }
+    // Observation sticky bits should settle after reset; do not fail bring-up if
+    // they are slow — product ID already proved the bus is alive.
+    (void)readReg(REG_Observation1);
 
     for (uint8_t r = REG_Motion; r <= REG_Delta_XY_H; r++) (void)readReg(r);
 
@@ -412,6 +389,7 @@ uint32_t lastScrollMs=0, lastSendMs=0, lastBlinkMs=0, lastIpsReportMs=0;
 uint32_t lastMotionUs=0;
 bool     ledState=false;
 bool     g_sensorsAwake=true;
+bool     g_okL=false, g_okR=false;
 
 volatile bool g_controller = false;
 uint16_t      g_ctrlConn   = BLE_CONN_HANDLE_INVALID;
@@ -431,7 +409,11 @@ static void onConnect(uint16_t conn_handle){
   BLEConnection* c = Bluefruit.Connection(conn_handle);
   c->requestConnectionParameter(9);
   gx = gy = gz = 0.0f;
-  if(!g_sensorsAwake){ sensorL.setForceAwake(true); sensorR.setForceAwake(true); g_sensorsAwake=true; }
+  if(!g_sensorsAwake){
+    if(g_okL) sensorL.setForceAwake(true);
+    if(g_okR) sensorR.setForceAwake(true);
+    g_sensorsAwake=true;
+  }
 #if DEBUG_PRINT
   delay(50);
   uint16_t iv = c->getConnectionInterval();
@@ -444,8 +426,8 @@ static void onDisconnect(uint16_t conn_handle, uint8_t reason){
   (void)reason;
   if(conn_handle == g_ctrlConn){ g_controller = false; g_ctrlConn = BLE_CONN_HANDLE_INVALID; }
   if(!Bluefruit.connected()){
-    sensorL.enterRest();
-    sensorR.enterRest();
+    if(g_okL) sensorL.enterRest();
+    if(g_okR) sensorR.enterRest();
     g_sensorsAwake = false;
   }
 }
@@ -472,6 +454,18 @@ static bool notifyInputState(uint16_t conn_hdl = BLE_CONN_HANDLE_INVALID){
 static void inputCccdCallback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t value){
   (void)value;
   if(chr->notifyEnabled(conn_hdl)) notifyInputState(conn_hdl);
+}
+
+// Non-fatal warn: blink then return so BLE HID still advertises.
+static void warnBlink(uint8_t blinks, const char *msg){
+  pinMode(LED_BUILTIN, OUTPUT);
+#if DEBUG_PRINT
+  Serial.println(msg);
+#endif
+  for(uint8_t n=0;n<3;n++){
+    for(uint8_t i=0;i<blinks;i++){ digitalWrite(LED_BUILTIN,LED_STATE_ON);delay(150);
+      digitalWrite(LED_BUILTIN,!LED_STATE_ON);delay(200);} delay(400);
+  }
 }
 
 static void haltBlink(uint8_t blinks, const char *msg){
@@ -553,27 +547,14 @@ void setup(){
 #if DEBUG_PRINT
   Serial.begin(115200);
   for(uint32_t t0=millis(); !Serial && (millis()-t0)<2000; ) delay(10);
+  Serial.println("PMW3610 Astrolabe bring-up");
+  Serial.print("pins CS_L="); Serial.print((int)PIN_CS_L);
+  Serial.print(" CS_R="); Serial.print((int)PIN_CS_R);
+  Serial.print(" SCLK="); Serial.print((int)PIN_SCLK);
+  Serial.print(" SDIO="); Serial.println((int)PIN_SDIO);
 #endif
 
-  bool solverOK = buildSolver();
-
-  bool okL = sensorL.begin(PIN_CS_L, SENSOR_CPI);
-  if(!okL){ delay(100); okL = sensorL.begin(PIN_CS_L, SENSOR_CPI); }
-  bool okR = sensorR.begin(PIN_CS_R, SENSOR_CPI);
-  if(!okR){ delay(100); okR = sensorR.begin(PIN_CS_R, SENSOR_CPI); }
-
-  if(!solverOK) haltBlink(4, "Geometry singular");
-  if(!okL)      haltBlink(2, "Sensor L not detected (CS=P1.00)");
-  if(!okR)      haltBlink(3, "Sensor R not detected (CS=P0.20)");
-
-  attachInterrupt(digitalPinToInterrupt(PIN_MOTION_L), motionIsr, FALLING);
-  attachInterrupt(digitalPinToInterrupt(PIN_MOTION_R), motionIsr, FALLING);
-  attachInterrupt(digitalPinToInterrupt(PIN_BTN_LEFT),   buttonIsr, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(PIN_BTN_RIGHT),  buttonIsr, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(PIN_BTN_UP),     buttonIsr, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(PIN_BTN_DOWN),   buttonIsr, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(PIN_BTN_CENTER), buttonIsr, CHANGE);
-
+  // BLE first so a sensor fault cannot prevent HID advertising.
   Bluefruit.begin(2, 0);
   Bluefruit.setTxPower(4);
   Bluefruit.setName(BLE_NAME);
@@ -588,6 +569,32 @@ void setup(){
   Bluefruit.Periph.setConnInterval(6, 9);
   setupRotationService();
   startAdv();
+#if DEBUG_PRINT
+  Serial.println("BLE advertising as Astrolabe");
+#endif
+
+  bool solverOK = buildSolver();
+  if(!solverOK) haltBlink(4, "Geometry singular");
+
+  g_okL = sensorL.begin(PIN_CS_L, SENSOR_CPI);
+  if(!g_okL){ delay(100); g_okL = sensorL.begin(PIN_CS_L, SENSOR_CPI); }
+  g_okR = sensorR.begin(PIN_CS_R, SENSOR_CPI);
+  if(!g_okR){ delay(100); g_okR = sensorR.begin(PIN_CS_R, SENSOR_CPI); }
+
+  if(!g_okL) warnBlink(2, "Sensor L not detected (CS=P1.00 / D6)");
+  if(!g_okR) warnBlink(3, "Sensor R not detected (CS=P0.20 / D3)");
+#if DEBUG_PRINT
+  Serial.print("sensors L="); Serial.print(g_okL ? "ok" : "FAIL");
+  Serial.print(" R="); Serial.println(g_okR ? "ok" : "FAIL");
+#endif
+
+  if(g_okL) attachInterrupt(digitalPinToInterrupt(PIN_MOTION_L), motionIsr, FALLING);
+  if(g_okR) attachInterrupt(digitalPinToInterrupt(PIN_MOTION_R), motionIsr, FALLING);
+  attachInterrupt(digitalPinToInterrupt(PIN_BTN_LEFT),   buttonIsr, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PIN_BTN_RIGHT),  buttonIsr, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PIN_BTN_UP),     buttonIsr, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PIN_BTN_DOWN),   buttonIsr, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(PIN_BTN_CENTER), buttonIsr, CHANGE);
 
   lastScrollMs = millis() - SCROLL_HOLD_MS - 1;
   lastMotionUs = micros();
@@ -596,27 +603,27 @@ void setup(){
 void loop(){
   uint32_t nowMs = millis();
   bool motionPending = g_motionWake
-                    || (digitalRead(PIN_MOTION_L) == LOW)
-                    || (digitalRead(PIN_MOTION_R) == LOW);
+                    || (g_okL && digitalRead(PIN_MOTION_L) == LOW)
+                    || (g_okR && digitalRead(PIN_MOTION_R) == LOW);
   g_motionWake = false;
   g_buttonWake = false;
 
-  if(motionPending){
+  if(motionPending && (g_okL || g_okR)){
     uint32_t nowUs = micros();
     float dtSec = (float)(uint32_t)(nowUs - lastMotionUs) * 1e-6f;
     if(dtSec < 0.0002f) dtSec = 0.0002f;   // avoid huge ips spikes on back-to-back IRQs
     lastMotionUs = nowUs;
 
     if(!g_sensorsAwake){
-      sensorL.setForceAwake(true);
-      sensorR.setForceAwake(true);
+      if(g_okL) sensorL.setForceAwake(true);
+      if(g_okR) sensorR.setForceAwake(true);
       g_sensorsAwake = true;
     }
 
     PMW3610_DATA a = {false, true, 0, 0, 0};
     PMW3610_DATA b = {false, true, 0, 0, 0};
-    if(digitalRead(PIN_MOTION_L) == LOW) a = sensorL.readBurst();
-    if(digitalRead(PIN_MOTION_R) == LOW) b = sensorR.readBurst();
+    if(g_okL && digitalRead(PIN_MOTION_L) == LOW) a = sensorL.readBurst();
+    if(g_okR && digitalRead(PIN_MOTION_R) == LOW) b = sensorR.readBurst();
 
 #if DEBUG_PRINT
     if(a.isMotion){ float ips=countsToIps(a.dx,a.dy,dtSec);
@@ -720,8 +727,8 @@ void loop(){
            && (gx==0.0f && gy==0.0f && gz==0.0f)
            && (g_controller || (accX==0.0f && accY==0.0f && accScroll==0.0f
                                 && g_hidButtons == lastHidButtons))
-           && (digitalRead(PIN_MOTION_L) == HIGH)
-           && (digitalRead(PIN_MOTION_R) == HIGH);
+           && (!g_okL || digitalRead(PIN_MOTION_L) == HIGH)
+           && (!g_okR || digitalRead(PIN_MOTION_R) == HIGH);
   if(idle){
     waitForEvent();
   }
