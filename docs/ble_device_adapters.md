@@ -93,10 +93,15 @@ format requires only reviewed descriptor data.
 - `astrolabe_5way` / `ble.astrolabe`: bit 0 Up, bit 1 Down, bit 2 Left, bit 3 Right,
   bit 4 Center; advertised name `Astrolabe`.
 - `xiao3389_3button` / `ble.xiao3389`: bit 0 Left, bit 1 Right, bit 2 Middle; advertised name
-  `Trackball BLE`. This is the working dual-PMW3389 test bench, not the production five-way board.
+  `Trackball BLE`. This is the dual-PMW3389 three-button test bench, not the five-way board.
 
-The production five-way switch is active-low with internal pull-ups, with debounce owned by
-firmware. Its mechanism ordinarily permits only one direction at a time. That is descriptive
-hardware metadata, not a decoder restriction: the protocol and provider accept any combination of
-declared bits so an unusually fast/forceful transition, a fault, or future hardware cannot strand a
-hold. Final production pins and debounce timing remain hardware-design inputs.
+The working five-way publisher is
+[`firmware/PMW3610/PMW3610.ino`](../firmware/PMW3610/PMW3610.ino): SuperMini nRF52840, dual
+PMW3610 sensors, interrupt-driven reads, and the production five-way bit map under the `Astrolabe`
+advertised name. Standalone HID maps Down/Right/Center to left/right/middle mouse buttons; Up and
+Left are protocol-only. Physical pins, 2.0 in ball diameter, and mount angles live in that sketch.
+
+The five-way switch is active-low with internal pull-ups, with debounce owned by firmware. Its
+mechanism ordinarily permits only one direction at a time. That is descriptive hardware metadata,
+not a decoder restriction: the protocol and provider accept any combination of declared bits so an
+unusually fast/forceful transition, a fault, or future hardware cannot strand a hold.

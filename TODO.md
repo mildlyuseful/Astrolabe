@@ -24,19 +24,24 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 ### Production hardware
 
 - Freeze the complete production hardware contract before replacing the honest
-  `firmware/Astrolabe` placeholder:
-  - final sensor model and count, mounting geometry, buses, chip selects, interrupt/power pins, and
-    two-versus-three-sensor fusion expectations;
-  - Up/Down/Left/Right/Center pins, polarity, debounce timing, and simultaneous-input behavior;
+  `firmware/Astrolabe` placeholder. `firmware/PMW3610` currently publishes the SuperMini
+  dual-PMW3610 + five-way board (pins, 2.0 in ball, L/R angles, interrupt-driven reads, active-low
+  five-way) under advertised name `Astrolabe`; treat that sketch as the candidate contract to freeze
+  or diverge from, not as a finished production claim:
+  - confirm sensor model/count, mounting geometry, buses, chip selects, interrupt/power pins, and
+    two-versus-three-sensor fusion expectations against the final assembly;
+  - confirm Up/Down/Left/Right/Center pins, polarity, debounce timing, and simultaneous-input behavior;
   - battery/power design, USB/BLE expectations, host-profile behavior, and an always-reachable
     mode/recovery control.
 - Repeat the physical switch, sensor, reconnect, held-input, sleep/wake, and mode-transition matrix on
-  final hardware. The XIAO jumper gate validates the software boundary, not the production device.
+  final hardware. The XIAO three-button bench validates the software boundary; PMW3610 is the current
+  five-way hardware path pending that freeze.
 
 ### Build and artifact integrity
 
-- Compile `firmware/XIAO3389/XIAO3389.ino` in CI with pinned board-core and library versions; report
-  artifact size. Add a pinned `west` build when the ZMK module begins.
+- Compile `firmware/PMW3610/PMW3610.ino` and `firmware/XIAO3389/XIAO3389.ino` in CI with pinned
+  board-core and library versions; report artifact size. Add a pinned `west` build when the ZMK
+  module begins.
 - Make `tools/build_autocad_plugin.ps1` the sole publisher of the bundled AutoCAD DLL and provenance
   manifest. A bare Release build currently overwrites them with an intentionally fail-closed minimal
   manifest; gate or remove that project target in the next attributed plugin-source commit.

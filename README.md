@@ -177,16 +177,18 @@ restore three-axis orbit without overwriting the user's choice.
 
 ## Firmware
 
-The active test-bench firmware is
-[`firmware/XIAO3389/XIAO3389.ino`](firmware/XIAO3389/XIAO3389.ino). It reads two PMW3389 sensors,
-fuses their measurements, exposes BLE HID input, and publishes the custom rotation characteristic
-used by the daemon. Input-capable firmware publishes a separate versioned full-state characteristic;
-legacy rotation-only firmware remains supported. The current XIAO sketch maps its three existing
-buttons through the test-bench descriptor. See
-[`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) for the packet and descriptor contract.
-[`firmware/Astrolabe/Astrolabe.ino`](firmware/Astrolabe/Astrolabe.ino) is the production-hardware
-placeholder and is not yet a replacement for the test-bench firmware; its five-way pin/polarity map
-must be supplied from the real board rather than inferred from the bench sketch.
+The active five-way firmware is
+[`firmware/PMW3610/PMW3610.ino`](firmware/PMW3610/PMW3610.ino) (SuperMini nRF52840, dual PMW3610,
+advertised name `Astrolabe`). It fuses the two sensors, exposes BLE HID, publishes the custom
+rotation characteristic, and publishes the production five-way input-state snapshot used by the
+daemon. The older
+[`firmware/XIAO3389/XIAO3389.ino`](firmware/XIAO3389/XIAO3389.ino) dual-PMW3389 three-button bench
+remains supported under advertised name `Trackball BLE`. Legacy rotation-only firmware also remains
+supported. See [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) for the packet and
+descriptor contract.
+[`firmware/Astrolabe/Astrolabe.ino`](firmware/Astrolabe/Astrolabe.ino) is still the production-
+hardware placeholder pending a final freeze; current SuperMini dual-PMW3610 pins and geometry live
+in the PMW3610 sketch rather than in that placeholder.
 
 ## Development and project documentation
 
