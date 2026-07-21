@@ -401,8 +401,8 @@ def diagnose_samples(samples: Sequence[Sequence[float]]) -> None:
     print(f"  samples={n}  both>={2}:{both}  only_L={only_l}  only_R={only_r}")
     print(f"  rows with |delta|~=256 artifact: {glitch} ({100.0 * glitch / n:.1f}%)")
     if glitch > n * 0.02:
-        print("  WARNING: frequent ±256 spikes usually mean SDIO burst/turnaround "
-              "bit errors — remount search will look flat until SPI reads are clean.")
+        print("  WARNING: frequent +/-256 spikes usually mean SDIO burst/turnaround "
+              "bit errors - remount search will look flat until SPI reads are clean.")
     if both < max(20, n // 5):
         print("  WARNING: few simultaneous L+R samples; residual mount search needs "
               "both sensors moving together.")
@@ -637,7 +637,7 @@ def main(argv: Sequence[str] | None = None) -> int:
               f"(tied rows above are discrete mount symmetries, not disagreement)")
     print()
     print("After pasting mounts/flips: if the cursor still feels mirrored, flip "
-          "ROT_SIGN_* / CURSOR_INVERT_* — residual search cannot choose world signs.")
+          "ROT_SIGN_* / CURSOR_INVERT_* - residual search cannot choose world signs.")
     return 0
 
 
