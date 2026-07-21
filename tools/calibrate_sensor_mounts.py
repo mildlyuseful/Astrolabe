@@ -17,7 +17,9 @@ Capture
    about one axis only).
 4. Run::
 
-     python tools/calibrate_sensor_mounts.py --serial COM20 --seconds 30
+     python tools/calibrate_sensor_mounts.py --serial auto --seconds 30
+     python tools/calibrate_sensor_mounts.py --serial COM21 --seconds 30 --save-csv capture.csv
+     python tools/calibrate_sensor_mounts.py --list-ports
      python tools/calibrate_sensor_mounts.py --csv capture.csv
 
 Output is ranked configs plus the ``#define`` block to paste into the sketch.
@@ -282,9 +284,57 @@ def load_csv(path: Path) -> list[tuple[float, float, float, float]]:
     return rows
 
 
+def list_serial_ports() -> list[str]:
+    try:
+        from serial.tools import list_ports  # type: ignore
+    except ImportError as exc:
+        raise SystemExit(
+            "pyserial is required for serial capture (pip install pyserial)"
+        ) from exc
+    lines: list[str] = []
+    for port in list_ports.comports():
+        lines.append(f"  {port.device}: {port.description} [{port.hwid}]")
+    return lines
+
+
+def resolve_serial_port(requested: str | None) -> str:
+    """Return an explicit port, or the SuperMini CDC port when --serial auto."""
+    try:
+        from serial.tools import list_ports  # type: ignore
+    except ImportError as exc:
+        raise SystemExit(
+            "pyserial is required for serial capture (pip install pyserial)"
+        ) from exc
+
+    ports = list(list_ports.comports())
+    if requested and requested.lower() != "auto":
+        return requested
+
+    # Adafruit/nRFMicro SuperMini USB CDC (boards.txt vid/pid).
+    matches = [
+        p for p in ports
+        if "VID:PID=1209:5285" in (p.hwid or "").upper()
+        or "VID:PID=1209:5284" in (p.hwid or "").upper()
+    ]
+    if len(matches) == 1:
+        print(f"Auto-selected {matches[0].device} ({matches[0].description})")
+        return matches[0].device
+    if not matches and len(ports) == 1:
+        print(f"Auto-selected sole port {ports[0].device} ({ports[0].description})")
+        return ports[0].device
+
+    listed = "\n".join(list_serial_ports()) or "  (none)"
+    raise SystemExit(
+        "Could not auto-select a serial port. Available ports:\n"
+        f"{listed}\n"
+        "Pass --serial COMx explicitly (close Arduino Serial Monitor first)."
+    )
+
+
 def capture_serial(port: str, seconds: float, baud: int = 115200) -> list[tuple[float, float, float, float]]:
     try:
         import serial  # type: ignore
+        from serial import SerialException  # type: ignore
     except ImportError as exc:
         raise SystemExit(
             "pyserial is required for --serial capture (pip install pyserial)"
@@ -292,7 +342,18 @@ def capture_serial(port: str, seconds: float, baud: int = 115200) -> list[tuple[
 
     rows: list[tuple[float, float, float, float]] = []
     print(f"Listening on {port} @ {baud} for {seconds:.0f}s — roll the ball on all axes…")
-    with serial.Serial(port, baud, timeout=0.1) as ser:
+    try:
+        ser = serial.Serial(port, baud, timeout=0.1)
+    except SerialException as exc:
+        listed = "\n".join(list_serial_ports()) or "  (none)"
+        raise SystemExit(
+            f"could not open {port!r}: {exc}\n"
+            f"Available ports:\n{listed}\n"
+            "Close Arduino Serial Monitor / other apps using the port, then retry "
+            "(SuperMini often renumerates after flash — try --serial auto)."
+        ) from exc
+
+    with ser:
         ser.reset_input_buffer()
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
@@ -414,9 +475,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     src = parser.add_mutually_exclusive_group(required=True)
-    src.add_argument("--serial", help="Serial port that emits CALIB,dxL,dyL,dxR,dyR lines")
+    src.add_argument("--serial", nargs="?", const="auto",
+                     help="Serial port (COMx) or omit/'auto' to pick SuperMini CDC")
     src.add_argument("--csv", type=Path, help="CSV or CALIB-line capture file")
     src.add_argument("--self-test", action="store_true", help="Recover a synthetic known mount")
+    src.add_argument("--list-ports", action="store_true", help="List serial ports and exit")
     parser.add_argument("--seconds", type=float, default=30.0, help="Serial capture duration")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--min-norm", type=float, default=2.0,
@@ -434,6 +497,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--r-phi", type=float, default=DEFAULT_R_PHI)
     parser.add_argument("--r-theta", type=float, default=DEFAULT_R_THETA)
     args = parser.parse_args(argv)
+
+    if args.list_ports:
+        listed = "\n".join(list_serial_ports()) or "  (none)"
+        print("Available serial ports:")
+        print(listed)
+        return 0
 
     if args.self_test:
         truth = Config(
@@ -462,7 +531,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
 
     if args.serial:
-        samples = capture_serial(args.serial, args.seconds, args.baud)
+        port = resolve_serial_port(args.serial)
+        samples = capture_serial(port, args.seconds, args.baud)
     else:
         samples = load_csv(args.csv)
 
