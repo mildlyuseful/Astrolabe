@@ -44,6 +44,7 @@ DEFAULT_R_PHI = 230.0
 DEFAULT_R_THETA = 130.0
 MOUNT_GRID = (0.0, 90.0, 180.0, 270.0)
 PHI_OFFSETS = (0.0, 90.0, 180.0, 270.0)
+THETA_OFFSETS = (0.0, -90.0, 90.0)
 
 Vec3 = tuple[float, float, float]
 Mat3 = list[list[float]]
@@ -440,6 +441,7 @@ def filter_samples(
 def iter_configs(
     *,
     search_phi: bool,
+    search_theta: bool,
     search_swap: bool,
     l_phi0: float,
     l_theta0: float,
@@ -447,29 +449,37 @@ def iter_configs(
     r_theta0: float,
 ) -> Iterable[Config]:
     phi_offsets = PHI_OFFSETS if search_phi else (0.0,)
+    theta_offsets = THETA_OFFSETS if search_theta else (0.0,)
     swap_flags = (False, True) if search_swap else (False,)
     for swap in swap_flags:
         for dphi_l in phi_offsets:
             for dphi_r in phi_offsets:
-                for mount_l in MOUNT_GRID:
-                    for mount_r in MOUNT_GRID:
-                        for flip_l in (False, True):
-                            for flip_r in (False, True):
-                                left = SensorPose(
-                                    (l_phi0 + dphi_l) % 360.0,
-                                    l_theta0,
-                                    mount_l,
-                                    flip_l,
-                                )
-                                right = SensorPose(
-                                    (r_phi0 + dphi_r) % 360.0,
-                                    r_theta0,
-                                    mount_r,
-                                    flip_r,
-                                )
-                                if swap:
-                                    left, right = right, left
-                                yield Config(left=left, right=right, swapped=swap)
+                for dth_l in theta_offsets:
+                    for dth_r in theta_offsets:
+                        for mount_l in MOUNT_GRID:
+                            for mount_r in MOUNT_GRID:
+                                for flip_l in (False, True):
+                                    for flip_r in (False, True):
+                                        th_l = l_theta0 + dth_l
+                                        th_r = r_theta0 + dth_r
+                                        # Reject non-physical polar angles.
+                                        if not (5.0 <= th_l <= 175.0 and 5.0 <= th_r <= 175.0):
+                                            continue
+                                        left = SensorPose(
+                                            (l_phi0 + dphi_l) % 360.0,
+                                            th_l,
+                                            mount_l,
+                                            flip_l,
+                                        )
+                                        right = SensorPose(
+                                            (r_phi0 + dphi_r) % 360.0,
+                                            th_r,
+                                            mount_r,
+                                            flip_r,
+                                        )
+                                        if swap:
+                                            left, right = right, left
+                                        yield Config(left=left, right=right, swapped=swap)
 
 
 @dataclass(frozen=True)
@@ -532,6 +542,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="Keep samples where only one sensor moved")
     parser.add_argument("--search-phi", action="store_true",
                         help="Also try L/R phi offsets of 0/90/180/270 from nominal")
+    parser.add_argument("--search-theta", action="store_true",
+                        help="Also try L/R theta offsets of -90/0/+90 from nominal")
     parser.add_argument("--search-swap", action="store_true",
                         help="Also try swapping L/R measurement channels")
     parser.add_argument("--top", type=int, default=8, help="How many ranked configs to print")
@@ -557,7 +569,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         samples = synthesize_samples(truth)
         ranked = rank_configs(samples, iter_configs(
-            search_phi=False, search_swap=False,
+            search_phi=False, search_theta=False, search_swap=False,
             l_phi0=DEFAULT_L_PHI, l_theta0=DEFAULT_L_THETA,
             r_phi0=DEFAULT_R_PHI, r_theta0=DEFAULT_R_THETA,
         ))
@@ -605,6 +617,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     ranked = rank_configs(samples, iter_configs(
         search_phi=args.search_phi,
+        search_theta=args.search_theta,
         search_swap=args.search_swap,
         l_phi0=args.l_phi,
         l_theta0=args.l_theta,

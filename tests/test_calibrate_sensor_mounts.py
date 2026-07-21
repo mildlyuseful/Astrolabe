@@ -42,6 +42,7 @@ def test_residual_search_recovers_known_mount_and_flip():
         samples,
         calib.iter_configs(
             search_phi=False,
+            search_theta=False,
             search_swap=False,
             l_phi0=calib.DEFAULT_L_PHI,
             l_theta0=calib.DEFAULT_L_THETA,

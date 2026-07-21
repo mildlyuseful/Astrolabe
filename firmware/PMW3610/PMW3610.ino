@@ -62,7 +62,7 @@
 #define SENSOR_L_MOUNT_DEG  90.0f
 #define SENSOR_L_FLIP       1
 #define SENSOR_R_MOUNT_DEG  0.0f
-#define SENSOR_R_FLIP       1
+#define SENSOR_R_FLIP       0
 
 #define SENSOR_CPI       1600
 #define CURSOR_GAIN      0.125f
@@ -156,6 +156,17 @@ static const float R_COUNTS      = (BALL_DIAMETER_MM * 0.5f) * COUNTS_PER_MM;
 #define REST1_RATE_INIT         0x04
 #define REST1_DOWNSHIFT_INIT    0x0F
 
+// PixArt 3-wire serial port (SPI Mode 3: CPOL=1, CPHA=1).
+// PMW3610DM-SUDU lists fSCLK max 2 MHz. Address→data and inter-command gaps match the
+// PixArt mouse-sensor serial AC table used by PMW3360/3389/3610 (tSRAD, tSRR, tSWW).
+#define T_SCLK_HALF_US   2     // bit period 4 us → 250 kHz (safe margin under 2 MHz)
+#define T_NCS_SCLK_US    1     // NCS↓ setup before first SCLK
+#define T_SRAD_US        35    // last address SCLK → first read SCLK
+#define T_SRR_US         20    // read transaction → next transaction
+#define T_SWW_US        120    // write transaction → next transaction
+#define T_BEXIT_US        4    // NCS↑ hold / shared-bus settle
+#define T_CLK_ON_US     300    // after SPI_CLK_ON_REQ = 0xBA
+
 struct PMW3610_DATA {
   bool isMotion;
   bool isOnSurface;
@@ -164,40 +175,81 @@ struct PMW3610_DATA {
   uint8_t SQUAL;
 };
 
+// Shared half-duplex bus helpers (single SDIO + SCLK for both chip-selects).
+static void sdioDrive(bool high) {
+  pinMode(PIN_SDIO, OUTPUT);
+  digitalWrite(PIN_SDIO, high ? HIGH : LOW);
+}
+static void sdioRelease() {
+  pinMode(PIN_SDIO, INPUT);   // Hi-Z so the selected sensor can drive
+}
+static void sclkIdleHigh() {
+  pinMode(PIN_SCLK, OUTPUT);
+  digitalWrite(PIN_SCLK, HIGH);
+}
+
+// Mode 3 write: idle CLK high; change SDIO on falling edge; sample on rising.
+static void bbWriteByte(uint8_t v) {
+  sdioDrive(false);
+  for (uint8_t i = 0; i < 8; i++) {
+    digitalWrite(PIN_SCLK, LOW);
+    digitalWrite(PIN_SDIO, (v & 0x80) ? HIGH : LOW);
+    delayMicroseconds(T_SCLK_HALF_US);
+    digitalWrite(PIN_SCLK, HIGH);
+    delayMicroseconds(T_SCLK_HALF_US);
+    v <<= 1;
+  }
+}
+
+// Mode 3 read: SDIO must already be Hi-Z; sample on rising edge.
+static uint8_t bbReadByte() {
+  uint8_t v = 0;
+  for (uint8_t i = 0; i < 8; i++) {
+    digitalWrite(PIN_SCLK, LOW);
+    delayMicroseconds(T_SCLK_HALF_US);
+    digitalWrite(PIN_SCLK, HIGH);
+    v = (uint8_t)((v << 1) | (digitalRead(PIN_SDIO) ? 1 : 0));
+    delayMicroseconds(T_SCLK_HALF_US);
+  }
+  return v;
+}
+
+static int16_t signExtend12(uint16_t v12) {
+  if (v12 & 0x0800) v12 |= 0xF000;
+  return (int16_t)v12;
+}
+
 class PMW3610 {
 public:
   bool begin(uint8_t csPin, uint16_t cpi) {
     _cs = csPin;
     pinMode(_cs, OUTPUT);
     digitalWrite(_cs, HIGH);
-    pinMode(PIN_SCLK, OUTPUT);
-    digitalWrite(PIN_SCLK, HIGH);   // Mode 3 idle high
-    pinMode(PIN_SDIO, OUTPUT);
-    digitalWrite(PIN_SDIO, HIGH);
+    sclkIdleHigh();
+    sdioDrive(true);
 
-    writeReg(REG_Power_Up_Reset, 0x5A);
+    // Power-up reset (no SPI clock domain required for 0x3A).
+    writeRaw(REG_Power_Up_Reset, 0x5A);
     delay(50);
 
-    if (readReg(REG_Product_ID) != PMW3610_PRODUCT_ID) return false;
-    if (readReg(REG_Not_Product_ID) != PMW3610_NOT_PRODUCT_ID) return false;
+    if (readRaw(REG_Product_ID) != PMW3610_PRODUCT_ID) return false;
+    if (readRaw(REG_Not_Product_ID) != PMW3610_NOT_PRODUCT_ID) return false;
 
     spiClkOn();
-    writeReg(REG_Observation1, 0x00);
+    writeRaw(REG_Observation1, 0x00);
     delay(10);
-    // Observation sticky bits should settle after reset; do not fail bring-up if
-    // they are slow — product ID already proved the bus is alive.
-    (void)readReg(REG_Observation1);
+    (void)readRaw(REG_Observation1);
 
-    for (uint8_t r = REG_Motion; r <= REG_Delta_XY_H; r++) (void)readReg(r);
+    // Datasheet: clear motion registers after reset by reading 0x02..0x05.
+    for (uint8_t r = REG_Motion; r <= REG_Delta_XY_H; r++) (void)readRaw(r);
 
-    writeReg(REG_Performance, PERFORMANCE_INIT);
-    writeReg(REG_Run_Downshift, RUN_DOWNSHIFT_INIT);
-    writeReg(REG_Rest1_Rate, REST1_RATE_INIT);
-    writeReg(REG_Rest1_Downshift, REST1_DOWNSHIFT_INIT);
+    writeRaw(REG_Performance, PERFORMANCE_INIT);
+    writeRaw(REG_Run_Downshift, RUN_DOWNSHIFT_INIT);
+    writeRaw(REG_Rest1_Rate, REST1_RATE_INIT);
+    writeRaw(REG_Rest1_Downshift, REST1_DOWNSHIFT_INIT);
     spiClkOff();
 
     setCPI(cpi);
-    // Boot in rest; MOTION IRQ + active-poll window force-awake when needed.
     setForceAwake(false);
     return true;
   }
@@ -207,106 +259,88 @@ public:
     if (cpi > 3200) cpi = 3200;
     cpi = (cpi / 200) * 200;
     spiClkOn();
-    writeReg(REG_Spi_Page, SPI_PAGE1);
-    uint8_t val = readReg(REG_Res_Step);
+    writeRaw(REG_Spi_Page, SPI_PAGE1);
+    uint8_t val = readRaw(REG_Res_Step);
     val = (uint8_t)((val & ~0x1F) | (cpi / 200));
-    writeReg(REG_Res_Step, val);
-    writeReg(REG_Spi_Page, SPI_PAGE0);
+    writeRaw(REG_Res_Step, val);
+    writeRaw(REG_Spi_Page, SPI_PAGE0);
     spiClkOff();
   }
 
   void setForceAwake(bool enable) {
     spiClkOn();
-    uint8_t val = readReg(REG_Performance);
+    uint8_t val = readRaw(REG_Performance);
     val = (uint8_t)((val & ~0xF0) | (enable ? PERFORMANCE_FORCE_AWAKE : 0x00));
-    writeReg(REG_Performance, val);
-    spiClkOff();
+    writeRaw(REG_Performance, val);
+    // Leave SPI clock enabled while force-awake so motion polls need no clk-on dance.
+    if (!enable) spiClkOff();
   }
 
   void enterRest() {
     setForceAwake(false);
   }
 
-  PMW3610_DATA readBurst() {
+  // Prefer discrete MOTION..DELTA_XY_H reads over burst: same latch, clearer framing on
+  // a shared SDIO bus (avoids burst byte-stream skew that produced +/-256 XY_H glitches).
+  PMW3610_DATA readMotion() {
     PMW3610_DATA d = {false, true, 0, 0, 0};
-    uint8_t buf[5];
-    csLow();
-    delayMicroseconds(1);
-    writeByte(REG_Burst_Read);
-    delayMicroseconds(10);          // address → data turnaround (tSRAD)
-    pinMode(PIN_SDIO, INPUT);
-    delayMicroseconds(2);
-    for (uint8_t i = 0; i < 5; i++) buf[i] = readByte();
-    pinMode(PIN_SDIO, OUTPUT);
-    digitalWrite(PIN_SDIO, HIGH);
-    csHigh();
-    delayMicroseconds(4);           // settle shared SDIO before the other CS
-
-    d.isMotion = (buf[0] & 0x80) != 0;
-    // PMW3610 has no dedicated lift bit like PMW3389; treat as on-surface when reporting.
+    uint8_t motion = readRaw(REG_Motion);
+    uint8_t x_l    = readRaw(REG_Delta_X_L);
+    uint8_t y_l    = readRaw(REG_Delta_Y_L);
+    uint8_t xy_h   = readRaw(REG_Delta_XY_H);
+    d.isMotion = (motion & 0x80) != 0;
     d.isOnSurface = true;
-    int16_t x = (int16_t)(((uint16_t)(buf[3] & 0x0F) << 8) | buf[1]);
-    int16_t y = (int16_t)(((uint16_t)(buf[3] & 0xF0) << 4) | buf[2]);
-    if (x & 0x0800) x |= (int16_t)0xF000;
-    if (y & 0x0800) y |= (int16_t)0xF000;
-    d.dx = x;
-    d.dy = y;
-    d.SQUAL = buf[4];
+    // PixArt DELTA_XY_H: bits[3:0]=Delta_X[11:8], bits[7:4]=Delta_Y[11:8]
+    d.dx = signExtend12((uint16_t)(((xy_h & 0x0F) << 8) | x_l));
+    d.dy = signExtend12((uint16_t)(((xy_h & 0xF0) << 4) | y_l));
+    d.SQUAL = 0;
     return d;
-  }
-
-  uint8_t readReg(uint8_t addr) {
-    csLow();
-    writeByte(addr & 0x7F);
-    delayMicroseconds(5);
-    pinMode(PIN_SDIO, INPUT);
-    uint8_t data = readByte();
-    pinMode(PIN_SDIO, OUTPUT);
-    digitalWrite(PIN_SDIO, HIGH);
-    csHigh();
-    delayMicroseconds(1);
-    return data;
-  }
-
-  void writeReg(uint8_t addr, uint8_t data) {
-    csLow();
-    writeByte(addr | 0x80);
-    writeByte(data);
-    csHigh();
-    delayMicroseconds(20);
   }
 
 private:
   uint8_t _cs = 0xFF;
 
-  void spiClkOn()  { writeReg(REG_Spi_Clk_On_Req, SPI_CLK_ON);  delayMicroseconds(300); }
-  void spiClkOff() { writeReg(REG_Spi_Clk_On_Req, SPI_CLK_OFF); }
-
-  void csLow()  { digitalWrite(_cs, LOW);  delayMicroseconds(1); }
-  void csHigh() { digitalWrite(_cs, HIGH); delayMicroseconds(1); }
-
-  // SPI Mode 3 bit-bang: idle CLK high; change data on falling, sample on rising.
-  void writeByte(uint8_t v) {
-    for (uint8_t i = 0; i < 8; i++) {
-      digitalWrite(PIN_SCLK, LOW);
-      digitalWrite(PIN_SDIO, (v & 0x80) ? HIGH : LOW);
-      delayMicroseconds(1);
-      digitalWrite(PIN_SCLK, HIGH);
-      delayMicroseconds(1);
-      v <<= 1;
-    }
+  void csLow() {
+    digitalWrite(_cs, LOW);
+    delayMicroseconds(T_NCS_SCLK_US);
+  }
+  void csHigh() {
+    digitalWrite(_cs, HIGH);
+    delayMicroseconds(T_BEXIT_US);
   }
 
-  uint8_t readByte() {
-    uint8_t v = 0;
-    for (uint8_t i = 0; i < 8; i++) {
-      digitalWrite(PIN_SCLK, LOW);
-      delayMicroseconds(1);
-      digitalWrite(PIN_SCLK, HIGH);
-      v = (uint8_t)((v << 1) | (digitalRead(PIN_SDIO) ? 1 : 0));
-      delayMicroseconds(1);
-    }
-    return v;
+  void spiClkOn() {
+    writeRaw(REG_Spi_Clk_On_Req, SPI_CLK_ON);
+    delayMicroseconds(T_CLK_ON_US);
+  }
+  void spiClkOff() {
+    writeRaw(REG_Spi_Clk_On_Req, SPI_CLK_OFF);
+  }
+
+  uint8_t readRaw(uint8_t addr) {
+    sclkIdleHigh();
+    csLow();
+    sdioDrive(true);
+    bbWriteByte(addr & 0x7F);
+    // Critical: release SDIO to Hi-Z BEFORE tSRAD so the sensor can drive the bus.
+    sdioRelease();
+    delayMicroseconds(T_SRAD_US);
+    uint8_t data = bbReadByte();
+    csHigh();
+    sdioDrive(true);
+    delayMicroseconds(T_SRR_US);
+    return data;
+  }
+
+  void writeRaw(uint8_t addr, uint8_t data) {
+    sclkIdleHigh();
+    csLow();
+    sdioDrive(true);
+    bbWriteByte(addr | 0x80);
+    bbWriteByte(data);
+    csHigh();
+    sdioDrive(true);
+    delayMicroseconds(T_SWW_US);
   }
 };
 
@@ -764,8 +798,8 @@ void loop(){
   // dual-sensor least-squares solve fully determined. Gate contributions on isMotion.
   PMW3610_DATA a = {false, true, 0, 0, 0};
   PMW3610_DATA b = {false, true, 0, 0, 0};
-  if(g_okL) a = sensorL.readBurst();
-  if(g_okR) b = sensorR.readBurst();
+  if(g_okL) a = sensorL.readMotion();
+  if(g_okR) b = sensorR.readMotion();
 
   bool sawMotion = a.isMotion || b.isMotion;
   if(sawMotion) lastActivityMs = nowMs;

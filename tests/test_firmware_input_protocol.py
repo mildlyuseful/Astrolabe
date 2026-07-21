@@ -82,8 +82,10 @@ def test_pmw3610_fiveway_contract_matches_astrolabe_descriptor():
     assert "trySleepUntilInterrupt" in PMW3610
     assert "sensorsEnterRest" in PMW3610
     assert "clearMotionAccumulators" in PMW3610
-    assert "if(g_okL) a = sensorL.readBurst();" in PMW3610
-    assert "if(g_okR) b = sensorR.readBurst();" in PMW3610
+    assert "if(g_okL) a = sensorL.readMotion();" in PMW3610
+    assert "if(g_okR) b = sensorR.readMotion();" in PMW3610
+    assert "T_SRAD_US" in PMW3610
+    assert "sdioRelease" in PMW3610
     assert "HID_DRAIN_MAX" in PMW3610
     assert "rotationChar.notify(rbuf, sizeof(rbuf)) || !g_controller" in PMW3610
     assert "P0_20" in PMW3610 or "D3" in PMW3610
