@@ -19,6 +19,10 @@
  * Power: MOTION/button IRQ opens an active window with 1 kHz dual-sensor polling
  * (XIAO3389 cadence). After MOTION_IDLE_MS with no activity, sensors enter rest and
  * the MCU waits for the next interrupt. No simulated IPS throttling. Ball = 2.0 in.
+ *
+ * LED: solid while connected, 600 ms blink only while disconnected AND sensors are
+ * asleep. The LED is visible to the sensors off the ball; any toggle while they are
+ * imaging reads as a phantom slide (see updateLed).
  */
 #include <Adafruit_TinyUSB.h>
 #include <bluefruit.h>
@@ -81,15 +85,31 @@
 #define BLE_NAME        "Astrolabe"
 #define BLE_SEND_MS     7
 #define POLL_INTERVAL_US 1000   // 1 kHz while awake (matches XIAO3389)
-#define MOTION_IDLE_MS   80     // no motion/button activity -> MCU+sensor sleep
+// Rest/run policy. The PMW3610 emits bogus motion while re-locking its frame-rate and
+// exposure servos on every rest->run transition (the "phantom slide": both sensors in
+// lockstep, ~x0.75 decay per frame, occasionally railing +/-2048 with cratered SQUAL).
+// The old 80 ms idle timeout re-entered rest between ordinary interaction pauses, so
+// nearly every button press or first touch woke the sensors and fired the transient.
+// Keep run mode through normal use and pay the transition cost only after real idle,
+// then discard the settle frames — invalid-by-design output, not a data heuristic.
+#define MOTION_IDLE_MS   2000   // no motion/button activity -> MCU+sensor sleep
+#define WAKE_SETTLE_MS   40     // ignore motion this long after a rest->run transition
 #define DEBOUNCE_MS     8
 #define DEBUG_PRINT     1
 #define IPS_REPORT_MS   8000
 #define HID_DRAIN_MAX   4       // mouseMove packets per send slot (backlog safety)
-// Emit CALIB,dxL,dyL,dxR,dyR on USB serial for tools/calibrate_sensor_mounts.py.
+// Emit CALIB,dxL,dyL,dxR,dyR[,telemetry...] on USB serial for
+// tools/calibrate_sensor_mounts.py (it ignores the extra columns).
 // Set to 0 after mount/flip calibration to reduce serial traffic.
 #ifndef CALIB_SERIAL
 #define CALIB_SERIAL    1
+#endif
+// Diagnostic build: keep the daemon subscribed but never transmit input/rotation
+// notifies, so a button press generates zero radio TX while everything else is
+// unchanged. If press phantoms survive with this at 1, radio activity is exonerated
+// and the disturbance is mechanical/power-path; if they vanish, it is TX-correlated.
+#ifndef DIAG_MUTE_NOTIFIES
+#define DIAG_MUTE_NOTIFIES 0
 #endif
 
 // ---------------------------------------------------------------------------
@@ -176,6 +196,7 @@ struct PMW3610_DATA {
   int16_t dx;
   int16_t dy;
   uint8_t SQUAL;
+  uint16_t shutter;  // exposure servo state, same latch as the deltas
 };
 
 // Shared half-duplex bus helpers (single SDIO + SCLK for both chip-selects).
@@ -283,20 +304,31 @@ public:
     setForceAwake(false);
   }
 
-  // Prefer discrete MOTION..DELTA_XY_H reads over burst: same latch, clearer framing on
-  // a shared SDIO bus.
+  // Motion Burst (0x12): one CS-framed transaction returns Motion, both deltas, and
+  // SQUAL from a single latch. Discrete per-register reads are NOT a shared snapshot — a
+  // SoftDevice radio IRQ landing between the X_L and XY_H reads tears the low byte and
+  // high nibble across two frames, turning a real +/-2 count into +/-250-ish garbage.
+  // Burst latches all bytes at burst start, so a mid-burst stall can no longer tear them.
   PMW3610_DATA readMotion() {
-    PMW3610_DATA d = {false, true, 0, 0, 0};
-    uint8_t motion = readRaw(REG_Motion);
-    uint8_t x_l    = readRaw(REG_Delta_X_L);
-    uint8_t y_l    = readRaw(REG_Delta_Y_L);
-    uint8_t xy_h   = readRaw(REG_Delta_XY_H);
+    PMW3610_DATA d = {false, true, 0, 0, 0, 0};
+    uint8_t burst[7];
+    readBurst(REG_Burst_Read, burst, sizeof(burst));
+    uint8_t motion = burst[0];   // 0x02 Motion
+    uint8_t x_l    = burst[1];   // 0x03 Delta_X_L
+    uint8_t y_l    = burst[2];   // 0x04 Delta_Y_L
+    uint8_t xy_h   = burst[3];   // 0x05 Delta_XY_H
     d.isMotion = (motion & 0x80) != 0;
     d.isOnSurface = true;
     // PMW3610 DELTA_XY_H (0x05): bits[7:4]=Delta_X[11:8], bits[3:0]=Delta_Y[11:8]
     d.dx = signExtend12((uint16_t)(((xy_h & 0xF0) << 4) | x_l));
     d.dy = signExtend12((uint16_t)(((xy_h & 0x0F) << 8) | y_l));
-    d.SQUAL = 0;
+    // SQUAL and shutter ride along in the same latch as surface/exposure telemetry:
+    // SQUAL collapses when the tracker loses the surface (defocus, lift); the shutter
+    // servo swings hard on an illumination or supply transient but only modestly on a
+    // mechanical shift. Together they classify phantom-motion events in the CALIB
+    // stream without magnitude heuristics.
+    d.SQUAL   = burst[4];        // 0x06 SQUAL
+    d.shutter = (uint16_t)(((uint16_t)burst[5] << 8) | burst[6]);  // shutter hi/lo
     return d;
   }
 
@@ -346,6 +378,23 @@ private:
     csHigh();
     sdioDrive(true);
     delayMicroseconds(T_SWW_US);
+  }
+
+  // Burst: one address byte, then clock N data bytes back-to-back under a single CS. All
+  // bytes come from the latch established at burst start, so they cannot tear against each
+  // other the way successive readRaw() transactions can.
+  void readBurst(uint8_t addr, uint8_t *buf, uint8_t n) {
+    sclkIdleHigh();
+    csLow();
+    sdioDrive(true);
+    bbWriteByte(addr & 0x7F);
+    // Release SDIO to Hi-Z BEFORE tSRAD so the sensor can drive the bus.
+    sdioRelease();
+    delayMicroseconds(T_SRAD_US);
+    for (uint8_t i = 0; i < n; i++) buf[i] = bbReadByte();
+    csHigh();
+    sdioDrive(true);
+    delayMicroseconds(T_SRR_US);
   }
 };
 
@@ -438,6 +487,8 @@ uint8_t  g_hidButtons=0;
 uint16_t g_inputSequence=0;
 uint32_t lastScrollMs=0, lastSendMs=0, lastBlinkMs=0, lastIpsReportMs=0;
 uint32_t lastPollUs=0, lastActivityMs=0;
+uint32_t g_lastTxUs=0;   // last successful BLE notify/report, for CALIB txAge telemetry
+uint32_t g_wakeSettleUntilMs=0;  // motion reports invalid until then after rest->run
 bool     ledState=false;
 bool     g_sensorsAwake=false;
 bool     g_okL=false, g_okR=false;
@@ -467,6 +518,9 @@ static void sensorsForceAwake(){
   if(g_okL) sensorL.setForceAwake(true);
   if(g_okR) sensorR.setForceAwake(true);
   g_sensorsAwake = true;
+  // Rest->run transition just happened: the trackers' output is invalid while their
+  // servos re-lock. Reads continue (they clear the sensors) but are not believed.
+  g_wakeSettleUntilMs = millis() + WAKE_SETTLE_MS;
 }
 
 static void sensorsEnterRest(){
@@ -512,6 +566,10 @@ static void rotCccdCallback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t 
 }
 
 static bool notifyInputState(uint16_t conn_hdl = BLE_CONN_HANDLE_INVALID){
+#if DIAG_MUTE_NOTIFIES
+  (void)conn_hdl;
+  return true;
+#else
   uint8_t packet[ASTROLABE_INPUT_PACKET_BYTES] = {
     ASTROLABE_INPUT_PROTOCOL_VERSION,
     ASTROLABE_INPUT_KIND_STATE,
@@ -520,8 +578,12 @@ static bool notifyInputState(uint16_t conn_hdl = BLE_CONN_HANDLE_INVALID){
     ASTROLABE_INPUT_STATE_BYTES,
     g_protocolButtons
   };
-  if(conn_hdl == BLE_CONN_HANDLE_INVALID) return inputStateChar.notify(packet, sizeof(packet));
-  return inputStateChar.notify(conn_hdl, packet, sizeof(packet));
+  bool ok = (conn_hdl == BLE_CONN_HANDLE_INVALID)
+      ? inputStateChar.notify(packet, sizeof(packet))
+      : inputStateChar.notify(conn_hdl, packet, sizeof(packet));
+  if(ok) g_lastTxUs = micros();
+  return ok;
+#endif
 }
 
 static void inputCccdCallback(uint16_t conn_hdl, BLECharacteristic* chr, uint16_t value){
@@ -607,12 +669,19 @@ static void startAdv(){
   Bluefruit.Advertising.start(0);
 }
 
+// The board LED shares the housing with two auto-exposure optical sensors. Every toggle
+// is an illumination step the PMW3610s see off the ball, and the tracker answers a step
+// with a phantom slide — hundreds of counts/ms in a geometry-fixed direction, decaying
+// over ~10-20 frames while the shutter servo re-converges — and the step can even wake a
+// resting sensor, chaining into the next blink. The old 200 ms controller blink was the
+// daemon-mode-only cursor jerk (solid-LED HID mode was clean; the 600 ms disconnected
+// blink polluted calibration captures). So: solid while connected — daemon vs HID
+// indication belongs on the host — and blink only while disconnected AND the sensors are
+// asleep, accepting a rare light-step wake as the cost of a pairing beacon.
 static void updateLed(uint32_t nowMs){
   if(!Bluefruit.connected()){
+    if(g_sensorsAwake) return;
     if(nowMs - lastBlinkMs > 600){ lastBlinkMs=nowMs; ledState=!ledState;
-      digitalWrite(LED_BUILTIN, ledState?LED_STATE_ON:!LED_STATE_ON); }
-  } else if(g_controller){
-    if(nowMs - lastBlinkMs > 200){ lastBlinkMs=nowMs; ledState=!ledState;
       digitalWrite(LED_BUILTIN, ledState?LED_STATE_ON:!LED_STATE_ON); }
   } else if(!ledState){ digitalWrite(LED_BUILTIN,LED_STATE_ON); ledState=true; }
 }
@@ -622,7 +691,9 @@ static void flushOutputs(uint32_t nowMs){
   if((nowMs - lastSendMs) < BLE_SEND_MS) return;
 
   bool pendingMotionReport = (gx!=0.0f || gy!=0.0f || gz!=0.0f);
-  bool pendingHid = !g_controller && (accX!=0.0f || accY!=0.0f || accScroll!=0.0f
+  // Sendable-only, mirroring trySleepUntilInterrupt: sub-unit residue can't report.
+  bool pendingHid = !g_controller && (fabsf(accX)>=1.0f || fabsf(accY)>=1.0f
+                                      || fabsf(accScroll)>=SCROLL_DIVISOR
                                       || g_hidButtons != lastHidButtons);
   bool needHidRelease = g_controller && lastHidButtons;
   if(!pendingMotionReport && !pendingHid && !needHidRelease) return;
@@ -631,7 +702,7 @@ static void flushOutputs(uint32_t nowMs){
   if(!g_controller){
     if(g_hidButtons != lastHidButtons){
       bool ok = g_hidButtons ? blehid.mouseButtonPress(g_hidButtons) : blehid.mouseButtonRelease();
-      if(ok) lastHidButtons = g_hidButtons;
+      if(ok){ lastHidButtons = g_hidButtons; g_lastTxUs = micros(); }
     }
     // Drain backlog in-slot so a rare stall cannot become a long constant-speed line.
     for(uint8_t n=0;n<HID_DRAIN_MAX;n++){
@@ -639,28 +710,42 @@ static void flushOutputs(uint32_t nowMs){
       if(!sx && !sy) break;
       if(!blehid.mouseMove(sx,sy)) break;
       accX-=sx; accY-=sy;
+      g_lastTxUs = micros();
     }
     int32_t det=(int32_t)(accScroll/SCROLL_DIVISOR);
     int8_t wheel=clamp8((float)det);
-    if(wheel){ if(blehid.mouseScroll(wheel)) accScroll-=(float)wheel*SCROLL_DIVISOR; }
+    if(wheel){ if(blehid.mouseScroll(wheel)){ accScroll-=(float)wheel*SCROLL_DIVISOR; g_lastTxUs = micros(); } }
   } else if(lastHidButtons){
-    if(blehid.mouseButtonRelease()) lastHidButtons = 0;
+    if(blehid.mouseButtonRelease()){ lastHidButtons = 0; g_lastTxUs = micros(); }
   }
 
   if(pendingMotionReport){
+#if DIAG_MUTE_NOTIFIES
+    // Consume as if sent so accumulation/idle behavior stays identical to a real build.
+    gx = gy = gz = 0.0f;
+#else
     float rbuf[3] = { gx*ROT_SIGN_X, gy*ROT_SIGN_Y, gz*ROT_SIGN_Z };
     // Retain deltas if SoftDevice rejects the notify while a daemon is subscribed.
-    if(rotationChar.notify(rbuf, sizeof(rbuf)) || !g_controller){
+    if(rotationChar.notify(rbuf, sizeof(rbuf))){
+      g_lastTxUs = micros();
+      gx = gy = gz = 0.0f;
+    } else if(!g_controller){
       gx = gy = gz = 0.0f;
     }
+#endif
   }
 }
 
 // Race-safe idle: re-check wake flags after masking IRQs so an edge cannot be lost
 // between the predicate and waitForEvent().
 static void trySleepUntilInterrupt(uint32_t nowMs){
+  // "Pending" means SENDABLE: clamp8/wheel truncation leaves sub-unit float residue in
+  // the HID accumulators that can never produce a report. Testing != 0.0f here kept the
+  // sensors force-awake forever after any HID-mode motion — which incidentally masked
+  // the rest->run wake transient in HID mode while every other mode suffered it.
   bool pendingOut = (gx!=0.0f || gy!=0.0f || gz!=0.0f)
-                 || (!g_controller && (accX!=0.0f || accY!=0.0f || accScroll!=0.0f
+                 || (!g_controller && (fabsf(accX)>=1.0f || fabsf(accY)>=1.0f
+                                       || fabsf(accScroll)>=SCROLL_DIVISOR
                                        || g_hidButtons != lastHidButtons))
                  || (g_controller && lastHidButtons);
   if(pendingOut || g_debouncePending) return;
@@ -801,10 +886,28 @@ void loop(){
 
   // Always burst-read both sensors while awake — matches XIAO3389 and keeps the
   // dual-sensor least-squares solve fully determined. Gate contributions on isMotion.
-  PMW3610_DATA a = {false, true, 0, 0, 0};
-  PMW3610_DATA b = {false, true, 0, 0, 0};
+  PMW3610_DATA a = {false, true, 0, 0, 0, 0};
+  PMW3610_DATA b = {false, true, 0, 0, 0, 0};
   if(g_okL) a = sensorL.readMotion();
   if(g_okR) b = sensorR.readMotion();
+
+  // Inside the wake-settle window the sensors are still re-locking after rest->run and
+  // their motion output is invalid by design — discard it (SETTLE lines show what was
+  // dropped). It must not accumulate, and must not count as activity: phantom frames
+  // holding the poll window open was the old runaway-jerk feedback loop.
+  if((int32_t)(nowMs - g_wakeSettleUntilMs) < 0){
+#if DEBUG_PRINT
+    if(a.isMotion || b.isMotion){
+      Serial.print("SETTLE,");
+      Serial.print(a.dx); Serial.print(',');
+      Serial.print(a.dy); Serial.print(',');
+      Serial.print(b.dx); Serial.print(',');
+      Serial.println(b.dy);
+    }
+#endif
+    a.isMotion = false;
+    b.isMotion = false;
+  }
 
   bool sawMotion = a.isMotion || b.isMotion;
   if(sawMotion) lastActivityMs = nowMs;
@@ -812,12 +915,26 @@ void loop(){
 #if CALIB_SERIAL
   // Raw dual-sensor bursts for residual mount search (tools/calibrate_sensor_mounts.py).
   // Emit even when disconnected so capture does not need a BLE host.
+  // CALIB,dxL,dyL,dxR,dyR,squalL,squalR,shutterL,shutterR,dtUs,txAgeUs
+  // Telemetry columns classify phantom-motion events: SQUAL craters on surface loss;
+  // shutter swings hard on illumination/supply transients but only modestly on a
+  // mechanical shift; dtUs exposes stretched polls (coalescing); txAgeUs (time since
+  // the last successful BLE TX) shows whether events cluster right after radio
+  // activity. calibrate_sensor_mounts.py ignores everything past the four deltas.
   if(sawMotion){
+    uint32_t txAgeUs = (uint32_t)(nowUs - g_lastTxUs);
+    if(txAgeUs > 9999999UL) txAgeUs = 9999999UL;
     Serial.print("CALIB,");
     Serial.print(a.dx); Serial.print(',');
     Serial.print(a.dy); Serial.print(',');
     Serial.print(b.dx); Serial.print(',');
-    Serial.println(b.dy);
+    Serial.print(b.dy); Serial.print(',');
+    Serial.print(a.SQUAL); Serial.print(',');
+    Serial.print(b.SQUAL); Serial.print(',');
+    Serial.print(a.shutter); Serial.print(',');
+    Serial.print(b.shutter); Serial.print(',');
+    Serial.print((uint32_t)(dtSec*1e6f)); Serial.print(',');
+    Serial.println(txAgeUs);
   }
 #endif
 

@@ -235,8 +235,10 @@ def parse_calib_line(line: str) -> tuple[float, float, float, float] | None:
     if not line:
         return None
     if line.startswith("CALIB,"):
+        # CALIB,dxL,dyL,dxR,dyR with optional trailing telemetry columns (SQUAL pair on
+        # current firmware) — only the four deltas participate in the residual search.
         parts = line.split(",")
-        if len(parts) != 5:
+        if len(parts) < 5:
             return None
         try:
             return (float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4]))

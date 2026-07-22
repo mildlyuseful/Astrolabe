@@ -92,7 +92,10 @@ def test_pmw3610_fiveway_contract_matches_astrolabe_descriptor():
     assert "((xy_h & 0x0F) << 8) | y_l" in PMW3610
     assert "((xy_h & 0x0F) << 8) | x_l" not in PMW3610
     assert "HID_DRAIN_MAX" in PMW3610
-    assert "rotationChar.notify(rbuf, sizeof(rbuf)) || !g_controller" in PMW3610
+    # Failed-notify retention while a controller is subscribed: the success branch and
+    # the !g_controller fallback both clear the accumulators, and nothing else may.
+    assert "if(rotationChar.notify(rbuf, sizeof(rbuf)))" in PMW3610
+    assert "} else if(!g_controller){" in PMW3610
     assert "P0_20" in PMW3610 or "D3" in PMW3610
     assert "P1_00" in PMW3610 or "D6" in PMW3610
     assert "warnBlink" in PMW3610
