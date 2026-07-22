@@ -73,7 +73,8 @@ def test_app_foreground_change_updates_runtime_without_a_ble_packet():
     app.config = _Config()
     app.runtime = RuntimeStore(lambda _context: RuntimeBaseState("pointer"))
     app.commands = SerializedCommandQueue(app.runtime)
-    app.onshape_bridge = SimpleNamespace(is_connected=lambda: False)
+    app.onshape_bridge = SimpleNamespace(
+        is_connected=lambda: False, is_viewport_focused=lambda: False)
     app.navigation = SimpleNamespace(targets=[], activate=lambda key: app.navigation.targets.append(key))
     app.engine = SimpleNamespace(bound=[], set_active_bindings=lambda key: app.engine.bound.append(key))
     app._engine_app = None
@@ -93,6 +94,58 @@ def test_app_foreground_change_updates_runtime_without_a_ble_packet():
     assert app.navigation.targets[-1] is None
     assert app.keyboard_provider.reconciliations == [
         "foreground_change", "foreground_change"]
+
+
+def test_onshape_focus_change_forces_stationary_foreground_refresh():
+    app = App.__new__(App)
+    app.foreground_monitor = SimpleNamespace(
+        refreshes=0,
+        refresh=lambda: setattr(
+            app.foreground_monitor, "refreshes", app.foreground_monitor.refreshes + 1),
+    )
+
+    app._on_onshape_focus_changed(True)
+    app._on_onshape_focus_changed(False)
+
+    assert app.foreground_monitor.refreshes == 2
+
+
+def test_onshape_viewport_focus_recomputes_stationary_runtime_context():
+    class OnshapeConfig:
+        class Snapshot:
+            app_operational = {"onshape": {"enabled": True}}
+
+        def snapshot(self):
+            return self.Snapshot()
+
+    app = App.__new__(App)
+    app.config = OnshapeConfig()
+    app.runtime = RuntimeStore(lambda _context: RuntimeBaseState("pointer"))
+    app.commands = SerializedCommandQueue(app.runtime)
+    focus = [False]
+    app.onshape_bridge = SimpleNamespace(
+        is_connected=lambda: True, is_viewport_focused=lambda: focus[0])
+    app.navigation = SimpleNamespace(targets=[], activate=lambda key: app.navigation.targets.append(key))
+    app.engine = SimpleNamespace(bound=[], set_active_bindings=lambda key: app.engine.bound.append(key))
+    app._engine_app = None
+    app.keyboard_provider = None
+    app.foreground_monitor = ForegroundMonitor(
+        app._on_foreground_process_changed, query=lambda: "chrome.exe")
+
+    app.foreground_monitor.poll_once()
+    assert app.runtime.snapshot().focused_context == FocusedContext(None, "chrome.exe")
+
+    focus[0] = True
+    app._on_onshape_focus_changed(True)
+    app.foreground_monitor.poll_once()
+    assert app.runtime.snapshot().focused_context == FocusedContext("onshape", "chrome.exe")
+    assert app.navigation.targets[-1] == "onshape"
+
+    focus[0] = False
+    app._on_onshape_focus_changed(False)
+    app.foreground_monitor.poll_once()
+    assert app.runtime.snapshot().focused_context == FocusedContext(None, "chrome.exe")
+    assert app.navigation.targets[-1] is None
 
 
 def test_app_shutdown_releases_inputs_before_stopping_focus_and_transports():

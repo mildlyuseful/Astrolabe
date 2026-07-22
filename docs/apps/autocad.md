@@ -47,9 +47,9 @@ The socket thread never touches AutoCAD APIs. It parses target-isolated broker f
 motion. A WinForms timer created on AutoCAD's UI thread drains that state, applies the resolved
 profile, and owns the complete GraphicsSystem gesture lifecycle.
 
-`NavigationRouter` is the only daemon delivery boundary. `app_registry.py` currently selects AutoCAD
-with normalized substring matching on `acad`; exact executable-identity matching remains tracked in
-[`TODO.md`](../../TODO.md).
+`NavigationRouter` is the only daemon delivery boundary. `app_registry.py` selects AutoCAD only for
+the normalized exact executable identity `acad.exe`; AutoCAD LT and similarly named processes do not
+inherit its runtime context.
 
 ## Setup, update, and reload
 
@@ -69,8 +69,9 @@ build refuses modified or untracked plugin sources, injects an existing full sou
 assembly informational version, and records the plugin source-tree ID, DLL hash, target framework,
 .NET SDK, and exact AutoCAD managed-reference versions and hashes in `version.json`. The artifact
 commit can follow the recorded source revision; requiring a binary to name the commit that contains
-that same binary would be circular. `tools/verify_autocad_artifact.py`, the Python suite, and release
-smoke fail when the committed plugin source tree or bundled DLL no longer matches the manifest.
+that same binary would be circular. `tools/verify_autocad_artifact.py` and the source-checkout Python
+suite fail when current plugin source no longer matches the manifest. Packaged release smoke has no
+Git checkout to compare; it validates the DLL bytes and the manifest's intrinsic provenance instead.
 
 The production build targets the managed API references for the supported AutoCAD generation. A
 successful compile alone does not establish runtime compatibility with another binary era. The known
@@ -95,8 +96,11 @@ Supported behavior:
   change magnification in a parallel projection.
 - **Gesture state:** Orbit-pivot and To-Cursor zoom holds are independent. Pan/zoom invalidate orbit
   state as defined by the shared architecture; scheme changes clear both.
-- **Stationary pointer:** the plugin reprojects its cached cursor-plane sample after camera motion so
-  a pan followed by orbit can recast without requiring a mouse jog.
+- **Pointer freshness:** each PointMonitor world sample is owned by the simultaneous Win32 screen
+  pixel. Gesture capture rejects it if the physical cursor has since moved, preventing an old ray
+  from producing a plausible stale hit. When the cursor is stationary, the plugin reprojects the
+  cached cursor-plane sample after camera motion so a pan followed by orbit can recast without a
+  mouse jog.
 
 Screen Center and Under Cursor accept a real entity/AABB/curve hit only. Empty space makes the pivot
 candidate unavailable and continues the configured fallback chain. To Cursor zoom may synthesize a

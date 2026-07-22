@@ -18,10 +18,12 @@ Astrolabe has three responsibility layers:
 - Host integrations translate the shared navigation contract into a host camera/view API. They do
   not own device bindings, foreground policy, user configuration, or global navigation state.
 
-The active firmware fuses two optical sensors into three-axis ball rotation. The custom motion value
-contains three little-endian `float32` rotation deltas in radians. Input-capable devices add sequenced
-full-state control snapshots; exact UUIDs, packet layouts, descriptor rules, and sequence handling
-are defined in [`ble_device_adapters.md`](ble_device_adapters.md).
+The current validation firmware fuses two optical sensors into three-axis ball rotation; the product
+controller target is the Seeed Studio XIAO nRF52840, with remaining hardware choices tracked in
+[`../TODO.md`](../TODO.md). The custom motion value contains three little-endian `float32` rotation
+deltas in radians. Input-capable devices add sequenced full-state control snapshots; exact UUIDs,
+packet layouts, descriptor rules, and sequence handling are defined in
+[`ble_device_adapters.md`](ble_device_adapters.md).
 
 Subscribing to the rotation stream transfers pointer ownership to the daemon: firmware suppresses
 its HID pointer/button output so the same physical action is not delivered twice. Unsubscribe or
@@ -200,9 +202,11 @@ See [`default_profiles.md`](default_profiles.md) for default ownership and host-
 
 ## Focus, routing, and transport isolation
 
-Foreground app identity is resolved through `app_registry.py`. Integrations may add a downstream
-viewport-focus gate, but transport connection alone must not broadcast motion or make another app a
-delivery target.
+Foreground app identity is resolved through `app_registry.py`. Desktop executable basenames are
+normalized and matched exactly; narrowly scoped full-name families are allowed only when the host
+embeds a version in the executable name. Transport connection alone must not broadcast motion or make
+another app a delivery target. Browser-hosted integrations must include their best available active-
+tab/viewport ownership signal in runtime context selection as well as camera delivery.
 
 `NavigationEnvelope` is immutable and carries one registered target app, finite orbit/pan/zoom
 deltas, and the runtime-state revision under which those deltas were produced.
@@ -237,8 +241,12 @@ Transport, setup, reload, and host-thread details belong in the matching [`apps/
 
 - SolidWorks uses a direct out-of-process COM driver attached to an existing application instance.
 - Onshape uses the fixed loopback TLS/WAMP endpoint `127.51.68.120:8181`; configuration cannot widen
-  that listener. Browser foreground plus bridge connection selects the coarse context, and the
-  bridge's own focus signal is the final camera-delivery gate.
+  that listener. Onshape becomes runtime context only while a supported browser is foreground, the
+  bridge has an active subscribed controller, and that controller explicitly owns viewport focus.
+  Focus and subscription are independent WAMP state and may arrive in either order; neither browser
+  process identity nor subscription alone implies viewport focus. A physical transport close clears
+  connection, focus, queued input, and gesture state immediately. A replacement controller takes
+  ownership explicitly, and the worker checks that same controller focus before applying motion.
 - AutoCAD navigation uses only the in-process GraphicsSystem plugin. Daemon-side AutoCAD COM code
   stages, trusts, and `NETLOAD`s the plugin; it is not a concurrent camera transport. The retired COM
   navigation implementation remains under `archive/autocad_com_transport/` as historical evidence.

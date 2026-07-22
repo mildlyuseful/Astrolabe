@@ -34,8 +34,9 @@ end-user builds have not been released yet.
 
 - Windows 10 or 11.
 - Python 3.9 or newer for a source install.
-- The Astrolabe firmware on a compatible BLE trackball. The current test-bench firmware targets the
-  Seeed XIAO nRF52840 and two PMW3389 sensors.
+- The Astrolabe firmware on a compatible BLE trackball. The product controller target is the Seeed
+  Studio XIAO nRF52840; the repository also retains XIAO/PMW3389 and SuperMini/PMW3610 validation
+  sketches while the final hardware contract is completed.
 - A supported 3D application only if you want its navigation integration.
 
 ## Install and run
@@ -177,18 +178,20 @@ restore three-axis orbit without overwriting the user's choice.
 
 ## Firmware
 
-The active five-way firmware is
+The working five-way validation firmware is
 [`firmware/PMW3610/PMW3610.ino`](firmware/PMW3610/PMW3610.ino) (SuperMini nRF52840, dual PMW3610,
 advertised name `Astrolabe`). It fuses the two sensors, exposes BLE HID, publishes the custom
-rotation characteristic, and publishes the production five-way input-state snapshot used by the
-daemon. The older
+rotation characteristic, and publishes the five-way input-state snapshot used by the daemon. Its
+validation loop is complete, but its SuperMini controller and board are not the product hardware. The
+older
 [`firmware/XIAO3389/XIAO3389.ino`](firmware/XIAO3389/XIAO3389.ino) dual-PMW3389 three-button bench
 remains supported under advertised name `Trackball BLE`. Legacy rotation-only firmware also remains
 supported. See [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) for the packet and
 descriptor contract.
 [`firmware/Astrolabe/Astrolabe.ino`](firmware/Astrolabe/Astrolabe.ino) is still the production-
-hardware placeholder pending a final freeze; current SuperMini dual-PMW3610 pins and geometry live
-in the PMW3610 sketch rather than in that placeholder.
+hardware placeholder for the Seeed Studio XIAO nRF52840 target pending the remaining sensor, switch,
+power, and recovery-control freeze. Prototype-only SuperMini pins and geometry remain in the PMW3610
+sketch rather than being copied into that placeholder.
 
 ## Development and project documentation
 

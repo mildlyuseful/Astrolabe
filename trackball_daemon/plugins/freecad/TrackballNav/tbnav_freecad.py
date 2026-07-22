@@ -25,7 +25,7 @@ import traceback
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.13"         # keep in sync with version.json
+ADDIN_VERSION = "0.1.14"         # keep in sync with version.json
 _DEFAULT_PORT = 47900
 STARTUP_DELAY_MS = 1500          # defer boot so the GUI is fully up (FreeCAD.GuiUp race)
 PUMP_MS = 11                     # ~90 Hz main-thread queue drain
@@ -64,7 +64,12 @@ _last_scheme = {"v": None}
 # the observer is currently registered on (View3DInventorPy identity is stable: FreeCAD caches one
 # Python object per MDI view, so `is` detects a view change).
 _cursor = {"px": None, "t": 0.0}
-_cursor_hook = {"view": None, "checked": 0.0}
+_cursor_hook = {
+    "view": None,
+    "checked": 0.0,
+    "leave_filter": None,
+    "leave_widgets": [],
+}
 
 
 # ======================================================================================
@@ -313,10 +318,110 @@ def _cursor_event_cb(event_cb):
         pass
 
 
+def _invalidate_cursor(reason):
+    """Drop cursor-derived samples and holds when their viewport ownership is lost."""
+    had_target = (_cursor["px"] is not None or _gesture["pivot"] is not None or
+                  _zoom_gesture["pivot"] is not None)
+    _cursor.update(px=None, t=0.0)
+    _gesture["pivot"] = None
+    _zoom_gesture["pivot"] = None
+    if had_target:
+        _log_rl("cursor-invalid", "cursor: invalidated (%s) -> fallback until re-entry" % reason)
+
+
+def _qt_leave_event_type():
+    if _QtCore is None:
+        return None
+    qevent = _QtCore.QEvent
+    return getattr(getattr(qevent, "Type", qevent), "Leave", None)
+
+
+def _make_cursor_leave_filter():
+    """Create the Qt event filter after the host's PySide flavour has been selected."""
+    if _QtCore is None:
+        return None
+
+    class CursorLeaveFilter(_QtCore.QObject):
+        def eventFilter(self, watched, event):  # noqa: N802 - Qt virtual method spelling
+            try:
+                leave_type = _qt_leave_event_type()
+                if leave_type is not None and event.type() == leave_type:
+                    _invalidate_cursor("viewport_leave")
+            except Exception:
+                pass
+            return False
+
+    return CursorLeaveFilter()
+
+
+def _detach_cursor_leave_filter():
+    event_filter = _cursor_hook.get("leave_filter")
+    if event_filter is not None:
+        for widget in list(_cursor_hook.get("leave_widgets") or []):
+            try:
+                widget.removeEventFilter(event_filter)
+            except Exception:
+                pass
+    _cursor_hook["leave_widgets"] = []
+    _cursor_hook["leave_filter"] = None
+
+
+def _ensure_cursor_leave_filter():
+    """Watch FreeCAD's real Quarter viewport receivers for Qt Leave events.
+
+    Coin publishes pointer movement only while the mouse is inside the 3D view. Qt owns the missing
+    leave boundary, so install one passive filter on each live 3D viewport receiver. Clearing extra
+    state is fail-safe: the next in-view SoLocation2Event immediately repopulates the pixel.
+    """
+    if _QtCore is None:
+        return
+    try:
+        import FreeCADGui as Gui
+        main_window = Gui.getMainWindow()
+        candidates = []
+        for obj in main_window.findChildren(_QtCore.QObject):
+            try:
+                class_name = str(obj.metaObject().className())
+            except Exception:
+                continue
+            if "Quarter" not in class_name and "View3DInventor" not in class_name:
+                continue
+            try:
+                receiver = obj.viewport() if callable(getattr(obj, "viewport", None)) else obj
+            except Exception:
+                receiver = obj
+            if receiver is not None and not any(receiver is item for item in candidates):
+                candidates.append(receiver)
+        current = list(_cursor_hook.get("leave_widgets") or [])
+        if (len(current) == len(candidates) and
+                all(any(old is new for new in candidates) for old in current)):
+            return
+        _detach_cursor_leave_filter()
+        if not candidates:
+            return
+        event_filter = _make_cursor_leave_filter()
+        if event_filter is None:
+            return
+        installed = []
+        for widget in candidates:
+            try:
+                widget.installEventFilter(event_filter)
+                installed.append(widget)
+            except Exception:
+                pass
+        if installed:
+            _cursor_hook["leave_filter"] = event_filter
+            _cursor_hook["leave_widgets"] = installed
+            _log("cursor: Qt leave filter registered on %d 3D viewport(s)" % len(installed))
+    except Exception:
+        _log_rl("ptrleave", "cursor: could not register the viewport-leave filter")
+
+
 def _ensure_cursor_hook(view):
     """Keep the SoLocation2Event observer registered on the CURRENT active view (main thread).
     Re-registers when the active view changes; a cached pixel from the old view is dropped
     (its coordinates are meaningless in the new one)."""
+    _ensure_cursor_leave_filter()
     if view is _cursor_hook["view"]:
         return
     try:
@@ -329,7 +434,7 @@ def _ensure_cursor_hook(view):
             old.removeEventCallbackPivy(coin.SoLocation2Event.getClassTypeId(), _cursor_event_cb)
         except Exception:
             pass
-    _cursor["px"] = None
+    _invalidate_cursor("view_change")
     try:
         view.addEventCallbackPivy(coin.SoLocation2Event.getClassTypeId(), _cursor_event_cb)
         _cursor_hook["view"] = view
@@ -678,6 +783,7 @@ def start():
 
 def stop():
     _stop.set()
+    _detach_cursor_leave_filter()
     try:
         if _timer is not None:
             _timer.stop()

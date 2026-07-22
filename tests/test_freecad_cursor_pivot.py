@@ -111,7 +111,8 @@ def _reset_addon_state():
     fc._zoom_gesture.update(pivot=None)
     fc._obj_cache.update(t=0.0, center=None, bbox=None)
     fc._cursor.update(px=None, t=0.0)
-    fc._cursor_hook.update(view=None, checked=0.0)
+    fc._cursor_hook.update(
+        view=None, checked=0.0, leave_filter=None, leave_widgets=[])
     yield
 
 
@@ -136,6 +137,36 @@ def test_cursor_event_cb_caches_pixel():
 
 def test_cursor_event_cb_never_raises():
     fc._cursor_event_cb(object())            # wrong shape -> swallowed, cache untouched
+    assert fc._cursor["px"] is None
+
+
+def test_cursor_invalidation_clears_pixel_and_both_cursor_derived_holds():
+    fc._cursor.update(px=(12, 34), t=123.0)
+    fc._gesture["pivot"] = (1.0, 2.0, 3.0)
+    fc._zoom_gesture["pivot"] = (4.0, 5.0, 6.0)
+
+    fc._invalidate_cursor("test_leave")
+
+    assert fc._cursor == {"px": None, "t": 0.0}
+    assert fc._gesture["pivot"] is None
+    assert fc._zoom_gesture["pivot"] is None
+
+
+def test_qt_leave_filter_invalidates_without_consuming_the_event(monkeypatch):
+    class QObject:
+        pass
+
+    class QEvent:
+        Leave = 17
+
+    monkeypatch.setattr(fc, "_QtCore", types.SimpleNamespace(QObject=QObject, QEvent=QEvent))
+    fc._cursor.update(px=(12, 34), t=123.0)
+    event_filter = fc._make_cursor_leave_filter()
+
+    consumed = event_filter.eventFilter(
+        object(), types.SimpleNamespace(type=lambda: QEvent.Leave))
+
+    assert consumed is False
     assert fc._cursor["px"] is None
 
 

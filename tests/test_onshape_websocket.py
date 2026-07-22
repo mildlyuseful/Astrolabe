@@ -160,18 +160,26 @@ def test_reader_rejects_new_text_frame_during_fragmentation():
 
 def test_reader_rejects_oversized_frame_before_reading_payload():
     reader, sent = reader_for(
-        client_frame(declared_len=ob._MAX_WS_FRAME + 1),
+        client_frame(declared_len=ob._MAX_WS_MESSAGE + 1),
     )
     with pytest.raises(ob._WSProtocolError):
         reader.read_text()
     assert close_code(sent[-1]) == 1009
 
 
+def test_reader_accepts_current_onshape_sized_unfragmented_message():
+    payload = b"x" * 380_204
+    reader, sent = reader_for(client_frame(payload))
+
+    assert reader.read_text() == payload
+    assert sent == []
+
+
 def test_reader_rejects_oversized_fragmented_message():
-    chunk = b"x" * (ob._MAX_WS_FRAME - 1)
+    chunk = b"x" * (ob._MAX_WS_MESSAGE // 2)
     frames = [client_frame(chunk, fin=False)]
-    frames.extend(client_frame(chunk, opcode=0x0, fin=False) for _ in range(3))
-    frames.append(client_frame(chunk, opcode=0x0, fin=True))
+    frames.append(client_frame(chunk, opcode=0x0, fin=False))
+    frames.append(client_frame(b"x", opcode=0x0, fin=True))
     reader, sent = reader_for(*frames)
 
     with pytest.raises(ob._WSProtocolError):
@@ -271,3 +279,82 @@ def test_valid_websocket_upgrade_selects_wamp():
     assert response.startswith(b"HTTP/1.1 101")
     assert b"Sec-WebSocket-Protocol: wamp" in response
     assert sock.timeouts == [10.0, 1.0]
+
+
+def test_subscription_without_focus_update_waits_for_explicit_viewport_focus():
+    focus_changes = []
+    bridge = ob.OnshapeBridge(on_focus_changed=focus_changes.append)
+    conn = ob._OnshapeConn(bridge, FakeSocket(b""))
+    conn.version_str = lambda: "web"
+
+    conn._dispatch([ob._WAMP.SUBSCRIBE, "topic"])
+
+    assert bridge.is_connected()
+    assert not bridge.is_viewport_focused()
+    assert focus_changes == []
+
+
+def test_explicit_focus_before_subscription_is_preserved():
+    focus_changes = []
+    bridge = ob.OnshapeBridge(on_focus_changed=focus_changes.append)
+    conn = ob._OnshapeConn(bridge, FakeSocket(b""))
+    conn.version_str = lambda: "web"
+
+    conn._handle_call([
+        ob._WAMP.CALL, "focus-early", "3dx_rpc:update", None, {"focus": True}])
+    conn._dispatch([ob._WAMP.SUBSCRIBE, "topic"])
+
+    assert conn.focus_reported
+    assert bridge.is_connected()
+    assert bridge.is_viewport_focused()
+    assert focus_changes == [True]
+
+
+def test_explicit_unfocus_before_subscription_is_not_promoted():
+    bridge = ob.OnshapeBridge()
+    conn = ob._OnshapeConn(bridge, FakeSocket(b""))
+    conn.version_str = lambda: "web"
+
+    conn._handle_call([
+        ob._WAMP.CALL, "focus-early", "3dx_rpc:update", None, {"focus": False}])
+    conn._dispatch([ob._WAMP.SUBSCRIBE, "topic"])
+
+    assert conn.focus_reported
+    assert not bridge.is_viewport_focused()
+
+
+def test_explicit_focus_updates_publish_fine_grained_bridge_state():
+    focus_changes = []
+    bridge = ob.OnshapeBridge(on_focus_changed=focus_changes.append)
+    conn = ob._OnshapeConn(bridge, FakeSocket(b""))
+    conn.version_str = lambda: "web"
+    conn.subscribed = True
+    bridge._on_conn_ready(conn)
+
+    conn._handle_call([
+        ob._WAMP.CALL, "focus-1", "3dx_rpc:update", None, {"focus": True}])
+    assert bridge.is_viewport_focused()
+    conn._handle_call([
+        ob._WAMP.CALL, "focus-2", "3dx_rpc:update", None, {"focus": False}])
+
+    assert not bridge.is_viewport_focused()
+    assert focus_changes == [True, False]
+
+
+def test_replacement_connection_clears_previous_tabs_focused_state():
+    focus_changes = []
+    bridge = ob.OnshapeBridge(on_focus_changed=focus_changes.append)
+    first = ob._OnshapeConn(bridge, FakeSocket(b""))
+    first.version_str = lambda: "first"
+    first.subscribed = True
+    bridge._on_conn_ready(first)
+    first._set_focus(True)
+
+    replacement = ob._OnshapeConn(bridge, FakeSocket(b""))
+    replacement.version_str = lambda: "replacement"
+    replacement.subscribed = True
+    bridge._on_conn_ready(replacement)
+
+    assert bridge._conn is replacement
+    assert not bridge.is_viewport_focused()
+    assert focus_changes == [True, False]

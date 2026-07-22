@@ -130,6 +130,7 @@ class App:
         ocfg = snapshot.onshape
         self.onshape_bridge = OnshapeBridge(
             self._on_onshape_connection_changed,
+            on_focus_changed=self._on_onshape_focus_changed,
             rate_hz=snapshot.global_value("navigation.refresh_rate"),
             cert_path=ocfg.get("cert_path") or None, key_path=ocfg.get("key_path") or None)
         self.navigation = NavigationRouter(
@@ -382,7 +383,14 @@ class App:
 
     def _foreground_context_for_process(self, proc):
         connected = bool(self.onshape_bridge is not None and self.onshape_bridge.is_connected())
-        return resolve_foreground_context(proc, onshape_connected=connected)
+        viewport_focused = bool(
+            connected and self.onshape_bridge is not None and
+            self.onshape_bridge.is_viewport_focused())
+        return resolve_foreground_context(
+            proc,
+            onshape_connected=connected,
+            onshape_viewport_focused=viewport_focused,
+        )
 
     def _foreground_app_key(self):
         return self._foreground_app_context().app_id
@@ -492,6 +500,14 @@ class App:
         with self._apps_lock:
             self._onshape_apps = [("onshape", version or "web", 0)] if connected else []
             self._refresh_connected_apps()
+        monitor = getattr(self, "foreground_monitor", None)
+        if monitor is not None:
+            monitor.refresh()
+
+    def _on_onshape_focus_changed(self, _focused):
+        # The WAMP focus flag is the fine-grained browser-tab/viewport gate. Re-resolve the
+        # current foreground process even while the ball and desktop foreground are stationary so
+        # Onshape-scoped bindings, HUD state, mappings, and delivery change as one context.
         monitor = getattr(self, "foreground_monitor", None)
         if monitor is not None:
             monitor.refresh()

@@ -91,6 +91,11 @@ S->C  [3,"<id>",{}]
   `3dconnexion:3dcontroller/<id>` (what the real proxy does and what the client subscribes to).
 - The `<instance_id>` we return in the create result is echoed by the client's SUBSCRIBE; use the
   same value as the topic suffix.
+- Preserve a focus update whether it arrives before or after SUBSCRIBE; subscription and viewport
+  focus are separate pieces of state.
+- Bound each incoming text message, including the total of all fragments, to 1 MiB. An individual
+  data frame uses that same ceiling: fragmentation is a wire-format choice and must not make an
+  otherwise valid message acceptable or unacceptable.
 
 ### Driving navigation (server reads/writes the app's scene)
 To read a property we send an EVENT to the controller topic carrying a nested CALL; the client
@@ -198,8 +203,8 @@ Algorithm:
 5. No valid, confirmed hit at any aperture → the method is **unavailable**; resolution continues
    through the **configured fallback chain** (**Global → Orbit → Orbit pivot fallback order**).
 6. **Hold the pivot for the whole gesture** (`_held_pivot`): captured once on the first orbit frame,
-   reused every frame, re-picked only after a pan/zoom or the configured Pivot hold expires. The hit-test therefore runs
-   **once per gesture (a handful of round-trips), not per frame.**
+   reused every frame, re-picked only after a pan/zoom or the configured Pivot hold expires. The
+   hit-test therefore runs **once per gesture (a handful of round-trips), not per frame.**
 
 Other pivots: `origin` = world origin; `object` = model centre; `selection` reads navlib's
 `selection.extents`; when unavailable, resolution continues through the configured chain.
@@ -262,12 +267,13 @@ Real Onshape places translation in indices 12–14 and stores the camera basis a
 `AFFINE_TRANSLATION_IN_COLUMN` must remain `False` for this bridge. The 3Dconnexion sample uses a
 different layout and is not authority for Onshape.
 
-### 8.2 Browser process is only the coarse context
+### 8.2 Browser process and bridge focus form one context
 
 `app_registry.resolve_foreground_context` selects Onshape only when a supported browser is foreground
-and the bridge is connected. Browser titles are not reliable Onshape identifiers. The WAMP focus flag
-is the final camera-delivery gate. Onshape-scoped bindings and HUD context can still activate in an
-unrelated foreground browser tab; that open defect is tracked in [`TODO.md`](../../TODO.md).
+and its connected controller explicitly reports viewport focus. Browser titles are not reliable
+Onshape identifiers. A WAMP focus transition forces the foreground monitor to re-resolve context
+even while the browser process and ball are stationary, keeping Onshape-scoped bindings, HUD state,
+mapping, and delivery aligned. Connection or subscription alone never grants Onshape context.
 
 ### 8.3 Write `view.affine` on every motion frame
 
@@ -275,11 +281,13 @@ Orthographic magnification lives in `view.extents`, but the affine write commits
 orthographic zoom frame must read extents fresh, write the new extents, and re-write the unchanged
 affine. New motion types must preserve the same commit rule.
 
-### 8.4 Use the WAMP `focus` flag as the viewport gate
+### 8.4 Use explicit WAMP `focus` as the viewport gate
 
-Onshape sends `3dx_rpc:update {"focus":true/false}` as the 3D view gains or loses focus. Apply camera
-motion only when `conn.focus` is true (or `_force_focus` in tests); do not replace this with window-title
-or browser heuristics.
+Onshape sends `3dx_rpc:update {"focus":true/false}` as the 3D view gains or loses focus. Preserve and
+honor the update regardless of whether it precedes SUBSCRIBE. Apply camera motion only when
+`conn.focus` is true (or `_force_focus` in the standalone diagnostic), and publish focus transitions
+to the daemon context gate. Do not infer focus from subscription, window titles, or browser process
+identity alone.
 
 ### 8.5 Do not use `view.target` as the orbit pivot
 
@@ -398,8 +406,9 @@ certificate paths use generated defaults. Under-cursor orbit needs the userscrip
   termination is recovery-only: identify the exact PID and verify its executable and complete command
   line before stopping it. Logs go to `%APPDATA%\TrackballDaemon\daemon.log`.
 - **What a healthy session looks like in the log:** `onshape: created 3dcontroller for client
-  'Onshape' <client-version>` → `onshape: client subscribed` → `onshape: focus -> True` → (on motion)
-  `onshape nav: … held_pivot=(a point ON the model)`.
+  'Onshape' <client-version>` → `onshape: client subscribed` → `onshape: focus -> True` (with
+  `TB_ONSHAPE_DEBUG=1`) → on first successful motion, `onshape: orbit reached the view.affine camera
+  write`. If pivot resolution prevents orbit from reaching that write, a one-shot message says so.
 - **Verifying accessors before relying on them** (the lesson from §8.1): a throwaway probe that writes
   candidate accessors and logs whether Onshape ACKs or returns "unknown property" is the fast way to
   confirm the protocol against a new Onshape version. (One was used to confirm the hit-test exists.)
@@ -428,7 +437,8 @@ the daemon-side bridge. Current live qualification is tracked only in [`TODO.md`
   (`OnshapeBridge`), cert generation, the standalone spike.
 - `app.py` — bridge lifecycle, runtime profile publication, connection-status merge, and routing
   through `NavigationRouter`.
-- `app_registry.py` — browser process selectors, coarse foreground context, modes, and capabilities.
+- `app_registry.py` — exact browser identities, bridge-focus-aware foreground context, modes, and
+  capabilities.
 - `config_store.py` / `settings_schema.py` — validated operational Onshape state and sparse typed
   settings. Legacy v8 reconstruction remains isolated in `config.py`.
 - `integrations.py` — `setup_onshape` generates the certificate and returns explicit trust steps.

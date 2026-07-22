@@ -6,36 +6,36 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 
 ## P0 — Current correctness and state-safety defects
 
-- Replace substring desktop-process routing with normalized exact executable identities or explicit
-  aliases. Add negative coverage for Unity Hub, launchers, AutoCAD LT, and similarly named processes.
-- Prevent Onshape-scoped bindings and HUD/runtime context from activating merely because the bridge is
-  connected while an unrelated browser tab or window is foreground. Route the bridge's viewport-focus
-  state into the context decision or add an equivalent fine-grained gate.
+- Publish and live-test the AutoCAD physical-pixel freshness fix in the next attributed plugin DLL.
+  The bundled v0.3.16 artifact can reuse a stale PointMonitor ray after the cursor moves; current
+  plugin source rejects a sample whose owning Win32 screen pixel no longer matches, but an unbundled
+  source fix is not a completed live result.
+- Live-retest Onshape orbit and pan with the source daemon after correcting the WebSocket message
+  budget. The reconnect loop was the bridge rejecting an approximately 380 KiB Onshape client
+  update under an inconsistent 64 KiB frame ceiling; current source uses one bounded 1 MiB message
+  contract, explicit WAMP viewport focus, immediate disconnect cleanup, and acknowledged camera RPCs.
 - Make AutoCAD paper-space/GraphicsSystem fallback capability loss explicit. Preserve cursor-pivot and
   Dolly semantics, dynamically suppress unavailable choices, or surface a clear degraded-state
   diagnostic instead of silently substituting view-center orbit or a no-op.
-- Invalidate or qualify FreeCAD's cached Under Cursor target when the pointer leaves the 3D viewport;
-  until then, retain a prominent warning and live-test the stale-last-pixel fallback.
-- Treat newly reproduced stuck-input, stale-target, cross-app routing, and duplicate-action regressions
-  as P0 until resolved.
 
 ## P1 — Production and release blockers
 
 ### Production hardware
 
-- Freeze the complete production hardware contract before replacing the honest
-  `firmware/Astrolabe` placeholder. `firmware/PMW3610` currently publishes the SuperMini
-  dual-PMW3610 + five-way board (pins, 2.0 in ball, L/R angles, interrupt-driven reads, active-low
-  five-way) under advertised name `Astrolabe`; treat that sketch as the candidate contract to freeze
-  or diverge from, not as a finished production claim:
+- Complete the production hardware contract around the fixed Seeed Studio XIAO nRF52840 controller
+  before replacing the honest `firmware/Astrolabe` placeholder. `firmware/PMW3610` is the completed
+  SuperMini dual-PMW3610 + five-way validation prototype, not the product controller or a finished
+  production claim. Freeze or deliberately change its remaining candidate choices against the final
+  XIAO assembly:
   - confirm sensor model/count, mounting geometry, buses, chip selects, interrupt/power pins, and
     two-versus-three-sensor fusion expectations against the final assembly;
   - confirm Up/Down/Left/Right/Center pins, polarity, debounce timing, and simultaneous-input behavior;
   - battery/power design, USB/BLE expectations, host-profile behavior, and an always-reachable
     mode/recovery control.
-- Repeat the physical switch, sensor, reconnect, held-input, sleep/wake, and mode-transition matrix on
-  final hardware. The XIAO three-button bench validates the software boundary; PMW3610 is the current
-  five-way hardware path pending that freeze.
+- Port the frozen contract to the final XIAO nRF52840 assembly and repeat the physical switch, sensor,
+  reconnect, held-input, sleep/wake, and mode-transition matrix there. The XIAO three-button bench
+  validates the protocol boundary and the completed SuperMini PMW3610 loop validates the five-way
+  prototype; neither qualifies the final product hardware.
 
 ### Build and artifact integrity
 
@@ -114,8 +114,7 @@ For every applicable host:
 - **Fusion 360:** occurrence/assembly bodies with `findBRepUsingRay`; confirm whether root-component
   queries miss occurrence-only geometry.
 - **SolidWorks:** COM throughput on representative large assemblies and multi-monitor DPI behavior.
-- **FreeCAD:** perspective-camera behavior, nested/placed world-space bounds, and cursor-leave
-  invalidation.
+- **FreeCAD:** perspective-camera behavior and nested/placed world-space bounds.
 - **Rhino:** startup-registration fallback and live Under Cursor/Object Center behavior.
 
 ## P3 — Advertised host feature parity

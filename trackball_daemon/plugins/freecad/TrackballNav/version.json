@@ -1,4 +1,4 @@
 {
-  "version": "0.1.13",
-  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_freecad.py. 0.1.13: independent orbit/zoom holds."
+  "version": "0.1.14",
+  "_comment": "Kept in sync with ADDIN_VERSION in tbnav_freecad.py. 0.1.14: invalidate cursor targets on viewport leave."
 }

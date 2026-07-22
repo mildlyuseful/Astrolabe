@@ -115,6 +115,8 @@ namespace TrackballNav
         bool _ptrOnEntity;
         Point3d _ptrPoint;
         DateTime _ptrAt;
+        CursorPoint _ptrScreen;
+        bool _ptrScreenValid;               // physical screen pixel that owns _ptrPoint
 
         // "cursor"/"to_cursor" per-gesture holds: captured at the first orbit/zoom frame of a
         // gesture from the pointer cache. A missing surface target makes orbit continue through
@@ -125,7 +127,11 @@ namespace TrackballNav
         Point3d? _heldOrbitPivot; bool _heldOrbitSet;
         Point3d? _heldZoomPivot;  bool _heldZoomSet;
 
+        [StructLayout(LayoutKind.Sequential)]
+        struct CursorPoint { public int X; public int Y; }
+
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern bool GetCursorPos(out CursorPoint point);
 
         // --- lifecycle -------------------------------------------------------------------------
         public void Initialize()
@@ -226,6 +232,7 @@ namespace TrackballNav
             inst._ptrPoint = P;
             inst._ptrValid = true;
             inst._ptrOnEntity = true;              // synthetic point is already at scene depth
+            inst._ptrScreenValid = false;           // self-test is intentionally mouse-independent
             inst._ptrAt = DateTime.UtcNow;
             inst._ptrTestPivot = P;
             inst._ptrTestSeeded = false;
@@ -564,6 +571,7 @@ namespace TrackballNav
                 _pmDoc = null;
                 _ptrValid = false;                 // the old doc's point is meaningless here
                 _ptrOnEntity = false;
+                _ptrScreenValid = false;
             }
             if (doc == null)
                 return;
@@ -620,6 +628,7 @@ namespace TrackballNav
                 _ptrPoint = pt;
                 _ptrOnEntity = onEntity;
                 _ptrValid = true;
+                _ptrScreenValid = GetCursorPos(out _ptrScreen);
                 _ptrAt = DateTime.UtcNow;
             }
             catch (System.Exception ex) { LogOnce("pm-handler", ex); }
@@ -783,6 +792,21 @@ namespace TrackballNav
             if (!_ptrValid)
             {
                 LogRL("ptr-none", "pointer pivot: no cursor point cached yet -> next candidate");
+                return null;
+            }
+            if (_ptrScreenValid && GetCursorPos(out var currentScreen)
+                    && (currentScreen.X != _ptrScreen.X || currentScreen.Y != _ptrScreen.Y))
+            {
+                // PointMonitor can remain silent across an idle physical cursor move. Its WCS
+                // point then still describes the OLD screen ray; expanding that ray makes a
+                // convincing but stale surface hit. A cached sample owns exactly the Win32 pixel
+                // observed with it. Stationary-pointer camera reprojection remains valid because
+                // the physical pixel is unchanged.
+                _ptrValid = false;
+                _ptrOnEntity = false;
+                _ptrScreenValid = false;
+                LogRL("ptr-stale-pixel",
+                      "pointer pivot: cursor moved beyond the cached sample -> next candidate");
                 return null;
             }
             var p = _ptrPoint;
