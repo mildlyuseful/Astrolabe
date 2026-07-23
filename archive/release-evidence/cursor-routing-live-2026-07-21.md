@@ -23,8 +23,20 @@ remains in [`../../TODO.md`](../../TODO.md).
 - Result: fail. Separate gestures repeatedly reported identical expanded hits, including
   `(11.807,4.391,12.085)`, despite cursor movement. The cached PointMonitor world sample was not tied
   to its physical screen pixel, so the old ray remained eligible for expansion.
-- Baseline change: stale PointMonitor reuse is P0 until the physical-pixel ownership fix in current
-  plugin source is published as an attributed DLL and passes the same live matrix.
+- Initial baseline change: stale PointMonitor reuse is P0 until the physical-pixel ownership fix in
+  current plugin source is published as an attributed DLL and passes the same live matrix.
+
+### AutoCAD attributed-artifact retest
+
+- Artifact: TrackballNav v0.3.17, attributed to source revision
+  `a9cf321936953cffd03fb7b2b1ec48e94fc9894e`.
+- Exercise: repeat separate Under Cursor orbit gestures after moving the physical cursor, including
+  gestures with and without a fresh PointMonitor sample plus empty-space fallback.
+- Result: pass. A moved cursor without a fresh sample reported
+  `cached sample no longer owns the current cursor pixel -> next candidate`; fresh samples produced
+  distinct expanded surface hits, and empty or uncached positions continued to the next candidate.
+  No prior target was silently reused.
+- Baseline change: physical-pixel ownership is live-verified and the stale PointMonitor P0 is closed.
 
 ## Onshape — connection/control failed, then transport root cause isolated
 

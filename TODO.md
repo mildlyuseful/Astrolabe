@@ -6,9 +6,6 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 
 ## P0 — Current correctness and state-safety defects
 
-- Live-test the bundled AutoCAD v0.3.17 physical-pixel freshness fix. The attributed artifact rejects
-  a PointMonitor sample whose owning Win32 screen pixel no longer matches; repeat the moved-cursor
-  Under Cursor matrix before closing the defect.
 - Make AutoCAD paper-space/GraphicsSystem fallback capability loss explicit. Preserve cursor-pivot and
   Dolly semantics, dynamically suppress unavailable choices, or surface a clear degraded-state
   diagnostic instead of silently substituting view-center orbit or a no-op.
