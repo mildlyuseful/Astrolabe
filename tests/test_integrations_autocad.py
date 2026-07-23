@@ -178,7 +178,14 @@ def test_autocad_plugin_consumes_advanced_settings_and_all_generic_pivots():
     assert "_gsViewportId != viewportId" in source
     assert "return GsApplyResult.Deferred" in source
     assert "_levelPending |= levelOnEntry" in source
-    assert "dbView is Viewport floating" in source
+    owner_gate = source[source.index("bool isTiled = doc.Database.TileMode"):
+                        source.index("if (_gsActive &&", source.index(
+                            "bool isTiled = doc.Database.TileMode"))]
+    assert "if (!isTiled)" in owner_gate
+    assert "CurrentViewportObjectId" in owner_gate
+    assert "IsTiled2DWireframe(doc, vpn)" in source
+    assert "PersistTiled2DShadowCamera(doc, vpn, cam)" in source
+    assert "PersistFloating2DShadowCamera(doc, viewportId, cam)" in source
     assert "floating.UpdateDisplay()" in source
     assert "if (isTiled)" in source
     assert "_fallbackReason != FallbackReason.PaperSpace" in source

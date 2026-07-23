@@ -41,7 +41,7 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.19";  // keep in sync with bundled version metadata
+        public const string PluginVersion = "0.3.20";  // keep in sync with bundled version metadata
         const string BrokerHost = "127.0.0.1";
 
         // Host baseline moved to daemon config v6; plugin camera math is deliberately neutral.
@@ -76,7 +76,7 @@ namespace TrackballNav
         // --- GS gesture state (UI thread only) --------------------------------------------------
         GsView _gsView;
         int _gsVpn = -1;
-        ObjectId _gsViewportId = ObjectId.Null;
+        ObjectId _gsViewportId = ObjectId.Null; // floating layout owner only; Model uses stable vpn
         Document _gsDoc;
         bool _gsActive;
         bool _gsIs2D;                      // viewport is in the "2D Wireframe" visual style: the 2D
@@ -1027,14 +1027,20 @@ namespace TrackballNav
                     EnterFallback(FallbackReason.GraphicsSystemUnavailable, doc);
                     return GsApplyResult.Fallback;
                 }
-                ObjectId viewportId = doc.Editor.CurrentViewportObjectId;
-                if (viewportId.IsNull)
+                bool isTiled = doc.Database.TileMode;
+                ObjectId viewportId = ObjectId.Null;
+                if (!isTiled)
                 {
-                    EnterFallback(FallbackReason.GraphicsSystemUnavailable, doc);
-                    return GsApplyResult.Fallback;
+                    viewportId = doc.Editor.CurrentViewportObjectId;
+                    if (viewportId.IsNull)
+                    {
+                        EnterFallback(FallbackReason.GraphicsSystemUnavailable, doc);
+                        return GsApplyResult.Fallback;
+                    }
                 }
                 if (_gsActive && (!ReferenceEquals(_gsDoc, doc) || _gsVpn != vpn ||
-                                  _gsViewportId != viewportId))
+                                  _gsIsTiled != isTiled ||
+                                  (!isTiled && _gsViewportId != viewportId)))
                 {
                     EndGesture(commit: true);          // doc/viewport switched mid-stream
                     if (_regenPending || _regenInFlight)
@@ -1058,7 +1064,10 @@ namespace TrackballNav
                     try { v.BeginInteractivity(60.0); } catch { }
                     _gsView = v; _gsVpn = vpn; _gsViewportId = viewportId;
                     _gsDoc = doc; _gsActive = true;
-                    _gsIs2D = Is2DWireframe(doc, viewportId, out _gsIsTiled);
+                    _gsIsTiled = isTiled;
+                    _gsIs2D = isTiled
+                        ? IsTiled2DWireframe(doc, vpn)
+                        : IsFloating2DWireframe(doc, viewportId);
                     _cam = NavMath.Read(v);            // seed the shadow ONCE per gesture
                     _heldOrbitSet = _heldZoomSet = false;   // fresh gesture -> fresh pivots
                     _heldOrbitPivot = _heldZoomPivot = null;
@@ -1251,42 +1260,47 @@ namespace TrackballNav
         // and the next repaint re-presents the OLD view -- the user-reported snap-back.
         // (GetCurrent3dAcGsView is NOT a usable discriminator: it goes non-null permanently once
         // anyone -- including us -- has obtained the 3D view. Read the style type instead.)
-        static bool Is2DWireframe(Document doc, ObjectId viewportId, out bool isTiled)
+        // The Model-tab path deliberately retains the v0.3.18 VPORT-number lookup. On that surface,
+        // Editor.CurrentViewportObjectId can be null even while ObtainAcGsView(vpn) is valid.
+        static bool IsTiled2DWireframe(Document doc, int vpn)
         {
-            isTiled = doc.Database.TileMode;
             try
             {
                 var db = doc.Database;
                 using (var tr = db.TransactionManager.StartOpenCloseTransaction())
                 {
-                    var dbView = tr.GetObject(viewportId, OpenMode.ForRead);
-                    isTiled = dbView is ViewportTableRecord;
-                    ObjectId visualStyleId = dbView switch
+                    var vt = (ViewportTable)tr.GetObject(db.ViewportTableId, OpenMode.ForRead);
+                    foreach (ObjectId id in vt)
                     {
-                        Viewport floating => floating.VisualStyleId,
-                        ViewportTableRecord tiled => tiled.VisualStyleId,
-                        _ => ObjectId.Null,
-                    };
-                    if (!visualStyleId.IsNull)
-                    {
-                        var vs = (DBVisualStyle)tr.GetObject(visualStyleId, OpenMode.ForRead);
+                        var r = (ViewportTableRecord)tr.GetObject(id, OpenMode.ForRead);
+                        if (r.Number != vpn)
+                            continue;
+                        var vs = (DBVisualStyle)tr.GetObject(r.VisualStyleId, OpenMode.ForRead);
                         return vs.Type ==
                             Autodesk.AutoCAD.GraphicsInterface.VisualStyleType.Wireframe2D;
                     }
                 }
             }
-            catch (System.Exception ex) { LogOnce("style-detect", ex); }
+            catch (System.Exception ex) { LogOnce("tiled-style-detect", ex); }
             return false;                              // unknown -> assume 3D (regen-free commit)
         }
 
-        static void WriteShadowCamera(ViewportTableRecord tiled, CamState cam)
+        static bool IsFloating2DWireframe(Document doc, ObjectId viewportId)
         {
-            tiled.ViewDirection = cam.Pos - cam.Tgt;
-            tiled.Target = cam.Tgt;
-            tiled.CenterPoint = new Point2d(0.0, 0.0);  // target IS the centre
-            tiled.Height = cam.Fh;
-            tiled.Width = cam.Fw;
-            tiled.ViewTwist = NavMath.TwistOf(cam);
+            try
+            {
+                using (var tr = doc.Database.TransactionManager.StartOpenCloseTransaction())
+                {
+                    var floating = tr.GetObject(viewportId, OpenMode.ForRead) as Viewport;
+                    if (floating == null)
+                        return false;
+                    var vs = (DBVisualStyle)tr.GetObject(floating.VisualStyleId, OpenMode.ForRead);
+                    return vs.Type ==
+                        Autodesk.AutoCAD.GraphicsInterface.VisualStyleType.Wireframe2D;
+                }
+            }
+            catch (System.Exception ex) { LogOnce("floating-style-detect", ex); }
+            return false;
         }
 
         static void WriteShadowCamera(Viewport floating, CamState cam)
@@ -1300,24 +1314,43 @@ namespace TrackballNav
             floating.UpdateDisplay();
         }
 
-        static void Persist2DShadowCamera(Document doc, ObjectId viewportId, bool isTiled,
-                                          CamState cam)
+        static void PersistTiled2DShadowCamera(Document doc, int vpn, CamState cam)
+        {
+            // Keep the crash-tested v0.3.18 sequence intact for Model-tab VPORT records.
+            var db = doc.Database;
+            using (var tr = db.TransactionManager.StartTransaction())
+            {
+                var vt = (ViewportTable)tr.GetObject(db.ViewportTableId, OpenMode.ForRead);
+                foreach (ObjectId rid in vt)
+                {
+                    var r = (ViewportTableRecord)tr.GetObject(rid, OpenMode.ForRead);
+                    if (r.Number != vpn)
+                        continue;
+                    r.UpgradeOpen();
+                    r.ViewDirection = cam.Pos - cam.Tgt;
+                    r.Target = cam.Tgt;
+                    r.CenterPoint = new Point2d(0.0, 0.0);
+                    r.Height = cam.Fh;
+                    r.Width = cam.Fw;
+                    r.ViewTwist = NavMath.TwistOf(cam);
+                }
+                tr.Commit();
+            }
+            doc.Editor.UpdateTiledViewportsFromDatabase();
+        }
+
+        static void PersistFloating2DShadowCamera(Document doc, ObjectId viewportId, CamState cam)
         {
             var db = doc.Database;
             using (var tr = db.TransactionManager.StartTransaction())
             {
-                var dbView = tr.GetObject(viewportId, OpenMode.ForWrite);
-                if (isTiled && dbView is ViewportTableRecord tiled)
-                    WriteShadowCamera(tiled, cam);
-                else if (!isTiled && dbView is Viewport floating)
-                    WriteShadowCamera(floating, cam);
-                else
+                var floating = tr.GetObject(viewportId, OpenMode.ForWrite) as Viewport;
+                if (floating == null)
                     throw new InvalidOperationException(
-                        "Current viewport storage changed during the navigation gesture.");
+                        "The floating viewport owner changed during the navigation gesture.");
+                WriteShadowCamera(floating, cam);
                 tr.Commit();
             }
-            if (isTiled)
-                doc.Editor.UpdateTiledViewportsFromDatabase();
         }
 
         // Commit, two flavours:
@@ -1358,7 +1391,10 @@ namespace TrackballNav
                         // The Model tab and a layout model viewport do not share persistence:
                         // UpdateTiledViewportsFromDatabase is valid only for the former. The latter
                         // owns an AcDbViewport entity and updates its display when that entity closes.
-                        Persist2DShadowCamera(doc, viewportId, isTiled, cam);
+                        if (isTiled)
+                            PersistTiled2DShadowCamera(doc, vpn, cam);
+                        else
+                            PersistFloating2DShadowCamera(doc, viewportId, cam);
                         LogRL(isTiled ? "2d-commit-tiled" : "2d-commit-floating",
                               $"2D Wireframe commit: persisted the " +
                               $"{(isTiled ? "Model-tab VPORT record" : "floating Viewport entity")}");

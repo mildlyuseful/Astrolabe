@@ -6,10 +6,10 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 
 ## P0 — Current correctness and state-safety defects
 
-- Live-test the bundled AutoCAD v0.3.19 viewport-ownership fix in 2D Wireframe: Model-tab and floating
-  layout viewports must persist the post-gesture camera through their respective record/entity APIs,
-  Paper space must pause without `eBadPaperspaceView`, and returning to a floating viewport must
-  restore full GraphicsSystem navigation without `eNotApplicable` or session demotion.
+- Live-test the bundled AutoCAD v0.3.20 split viewport fix in 2D Wireframe: the Model tab must retain
+  its v0.3.18 CVPORT/VPORT path with cursor pivots and stable rendering, floating layout viewports must
+  retain their v0.3.19 entity-backed commits, and transitions through Paper space must not demote the
+  GraphicsSystem session.
 
 ## P1 — Production and release blockers
 

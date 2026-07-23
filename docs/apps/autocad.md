@@ -58,7 +58,9 @@ space pauses model-camera navigation; genuine GraphicsSystem loss uses the `SetC
 
 `CVPORT=2` identifies the active floating slot, not a durable viewport owner. The current viewport
 object ID owns the gesture and distinguishes layout `Viewport` entities when the user changes the
-active floating viewport.
+active floating viewport. This object-ID rule is layout-only: on the Model tab,
+`Editor.CurrentViewportObjectId` may be null while the numbered GraphicsSystem/VPORT path is valid,
+so Model-tab navigation must remain keyed by `CVPORT`.
 
 ## Setup, update, and reload
 
