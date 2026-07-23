@@ -6,14 +6,9 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 
 ## P0 — Current correctness and state-safety defects
 
-- Publish and live-test the AutoCAD physical-pixel freshness fix in the next attributed plugin DLL.
-  The bundled v0.3.16 artifact can reuse a stale PointMonitor ray after the cursor moves; current
-  plugin source rejects a sample whose owning Win32 screen pixel no longer matches, but an unbundled
-  source fix is not a completed live result.
-- Live-retest Onshape orbit and pan with the source daemon after correcting the WebSocket message
-  budget. The reconnect loop was the bridge rejecting an approximately 380 KiB Onshape client
-  update under an inconsistent 64 KiB frame ceiling; current source uses one bounded 1 MiB message
-  contract, explicit WAMP viewport focus, immediate disconnect cleanup, and acknowledged camera RPCs.
+- Live-test the bundled AutoCAD v0.3.17 physical-pixel freshness fix. The attributed artifact rejects
+  a PointMonitor sample whose owning Win32 screen pixel no longer matches; repeat the moved-cursor
+  Under Cursor matrix before closing the defect.
 - Make AutoCAD paper-space/GraphicsSystem fallback capability loss explicit. Preserve cursor-pivot and
   Dolly semantics, dynamically suppress unavailable choices, or surface a clear degraded-state
   diagnostic instead of silently substituting view-center orbit or a no-op.

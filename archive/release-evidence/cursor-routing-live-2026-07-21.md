@@ -54,4 +54,7 @@ remains in [`../../TODO.md`](../../TODO.md).
   buffering. Explicit focus, acknowledged RPC ordering, and immediate physical-disconnect cleanup are
   retained; reconnect grace, logical session carry-over, batching, and unacknowledged writes are not.
 - Transport tests now include an unfragmented 380,204-byte client message and true oversized frame and
-  fragmented-message rejection. Full orbit/pan remains P0 until exercised with the source daemon.
+  fragmented-message rejection.
+- Subsequent source-daemon live retest passed: the connection remained stable, orbit and pan returned
+  to normal latency and frame rate, and switching away from and back to the Onshape tab produced no
+  routing or control issue. The Onshape retest is no longer active work.
