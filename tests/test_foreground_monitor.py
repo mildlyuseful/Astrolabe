@@ -129,6 +129,13 @@ def test_onshape_viewport_focus_recomputes_stationary_runtime_context():
     app.engine = SimpleNamespace(bound=[], set_active_bindings=lambda key: app.engine.bound.append(key))
     app._engine_app = None
     app.keyboard_provider = None
+    app._apps_lock = threading.Lock()
+    app._broker_apps = []
+    app._sw_apps = []
+    app._onshape_apps = []
+    app._onshape_connection_version = "1.4.8"
+    app.connected_apps = []
+    app.observed_addin_versions = {}
     app.foreground_monitor = ForegroundMonitor(
         app._on_foreground_process_changed, query=lambda: "chrome.exe")
 
@@ -140,12 +147,14 @@ def test_onshape_viewport_focus_recomputes_stationary_runtime_context():
     app.foreground_monitor.poll_once()
     assert app.runtime.snapshot().focused_context == FocusedContext("onshape", "chrome.exe")
     assert app.navigation.targets[-1] == "onshape"
+    assert app.connected_apps == [("onshape", "1.4.8", 0)]
 
     focus[0] = False
     app._on_onshape_focus_changed(False)
     app.foreground_monitor.poll_once()
     assert app.runtime.snapshot().focused_context == FocusedContext(None, "chrome.exe")
     assert app.navigation.targets[-1] is None
+    assert app.connected_apps == []
 
 
 def test_app_shutdown_releases_inputs_before_stopping_focus_and_transports():

@@ -26,7 +26,7 @@ Each notification carries the integrated rotation delta since the previous packe
 three little-endian float32 (rx, ry, rz) in radians. In CUBE mode we treat that vector as
 an axis-angle increment and compose it into a running quaternion (no gimbal lock / drift).
 
-Stack: bleak (BLE) + pygame + PyOpenGL + ctypes (SendInput).  See requirements.txt.
+Stack: bleak (BLE) + pygame + PyOpenGL + ctypes (SendInput). Install the ``debug`` package extra.
 Keys:  SPACE = cube <-> cursor mode   SHIFT (in cube) = pan/zoom   R = recenter view   ESC = quit
 """
 

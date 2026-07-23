@@ -55,6 +55,7 @@ from urllib.parse import urlsplit
 
 from .config import ONSHAPE_BRIDGE_HOST, ONSHAPE_BRIDGE_PORT, orbit_pivot_candidates
 from .paths import user_config_dir
+from .service_health import ServiceHealth, ServiceHealthState
 from .util import get_logger
 
 # Cert generation is optional and guarded -- the WSS server itself needs only stdlib ssl. We mint a
@@ -363,6 +364,20 @@ def ensure_cert(cert_path, key_path):
 
 # --- minimal RFC6455 WebSocket framing --------------------------------------------------------
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+_TLS_CERTIFICATE_ALERTS = (
+    "alert unknown ca",
+    "alert bad certificate",
+    "alert certificate unknown",
+    "certificate verify failed",
+)
+
+
+def _tls_certificate_rejected(exc):
+    """Whether a server-side TLS failure explicitly identifies certificate rejection."""
+    if not isinstance(exc, ssl.SSLError):
+        return False
+    detail = str(exc).casefold()
+    return any(marker in detail for marker in _TLS_CERTIFICATE_ALERTS)
 
 
 def _ws_accept(key):
@@ -745,7 +760,7 @@ class _OnshapeConn:
                 else:
                     self.bridge._warn_once(
                         "transport-close", message + "; later repeats are suppressed")
-            self.bridge._on_conn_closed(self)
+            self.bridge._on_conn_closed(self, close_reason)
 
     def _resolve(self, uri):
         if ":" not in uri:
@@ -1038,9 +1053,10 @@ class OnshapeBridge:
 
     def __init__(self, on_connection_changed=None, rate_hz=DEFAULT_FLUSH_HZ,
                  host=BRIDGE_HOST, port=BRIDGE_PORT, cert_path=None, key_path=None,
-                 on_focus_changed=None):
+                 on_focus_changed=None, on_health_changed=None):
         self.on_connection_changed = on_connection_changed
         self.on_focus_changed = on_focus_changed
+        self.on_health_changed = on_health_changed
         requested_host = BRIDGE_HOST if host is None else host
         if requested_host != BRIDGE_HOST:
             raise ValueError("Onshape bridge must bind the fixed loopback endpoint")
@@ -1054,6 +1070,7 @@ class OnshapeBridge:
         self._key_path = key_path or d_key
 
         self._lock = threading.Lock()
+        self._health_lock = threading.Lock()
         self._acc = [0.0] * 6
         self._stop = threading.Event()
         self._enabled = threading.Event()          # explicit Onshape setup/Enabled gate
@@ -1073,6 +1090,9 @@ class OnshapeBridge:
         self._force_focus = bool(_SPIN)   # spike/test: drive even if the client reports unfocused
         self._log = get_logger()
         self._warned = set()
+        self._health = ServiceHealth(
+            "onshape", ServiceHealthState.DISABLED, "integration is disabled")
+        self._publish_health(self._health)
         # Control scheme (orbit pivot / orbit style / zoom mode); a dict ref-swap is atomic, so the
         # worker reads it lock-free each flush (same pattern as the broker / SW driver).
         self._scheme = {"op": "screen_center", "os": "free", "zm": "to_center"}
@@ -1149,10 +1169,39 @@ class OnshapeBridge:
     def version(self):
         return self._version
 
+    def health(self):
+        with self._health_lock:
+            return self._health
+
+    def _set_health(self, state, detail):
+        health = ServiceHealth("onshape", state, detail)
+        with self._health_lock:
+            if health == self._health:
+                return
+            self._health = health
+        self._publish_health(health)
+
+    def _publish_health(self, health):
+        if self.on_health_changed:
+            try:
+                self.on_health_changed(health)
+            except Exception:
+                pass
+
     def set_enabled(self, enabled):
         """Bind/generate credentials only while the configured integration is enabled."""
         if enabled:
             self._enabled.set()
+            if self._connected:
+                self._set_health(
+                    ServiceHealthState.HEALTHY,
+                    f"Onshape controller {self._version or 'web'} connected",
+                )
+            else:
+                self._set_health(
+                    ServiceHealthState.WAITING,
+                    f"starting local bridge on https://{self._host}:{self._port}",
+                )
             return
         self._enabled.clear()
         self._set_viewport_focused(False)
@@ -1170,10 +1219,16 @@ class OnshapeBridge:
                 conn.sock.close()
             except Exception:
                 pass
+        self._set_health(ServiceHealthState.DISABLED, "integration is disabled")
 
     def start(self):
         if self._server_thread is not None:
             return
+        if self._enabled.is_set() and not self._connected:
+            self._set_health(
+                ServiceHealthState.WAITING,
+                f"starting local bridge on https://{self._host}:{self._port}",
+            )
         self._server_thread = threading.Thread(target=self._run_server, name="onshape-server",
                                                daemon=True)
         self._worker_thread = threading.Thread(target=self._run_worker, name="onshape-worker",
@@ -1198,15 +1253,29 @@ class OnshapeBridge:
                 conn.sock.close()
             except Exception:
                 pass
+        self._set_health(ServiceHealthState.DISABLED, "bridge stopped")
 
     # --- server thread ------------------------------------------------------------------------
     def _run_server(self):
+        try:
+            self._run_server_loop()
+        except Exception as exc:
+            self._set_health(
+                ServiceHealthState.FAILED,
+                f"Onshape server stopped unexpectedly: {exc}",
+            )
+
+    def _run_server_loop(self):
         while not self._stop.is_set():
             if not self._enabled.wait(0.25):
                 continue
             if not ensure_cert(self._cert_path, self._key_path):
                 self._log.info("onshape: no TLS cert (run Onshape 'Set up', or install "
                                "cryptography/openssl); bridge disabled")
+                self._set_health(
+                    ServiceHealthState.FAILED,
+                    "TLS certificate is unavailable; run Onshape Set up",
+                )
                 self._enabled.clear()
                 continue
             self._serve_enabled()
@@ -1218,6 +1287,10 @@ class OnshapeBridge:
             ctx.load_cert_chain(self._cert_path, self._key_path)
         except Exception as exc:
             self._log.info("onshape: failed to load TLS cert (%r); bridge disabled", exc)
+            self._set_health(
+                ServiceHealthState.FAILED,
+                f"could not load the Onshape TLS certificate: {exc}",
+            )
             return
         try:
             srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1229,7 +1302,15 @@ class OnshapeBridge:
         except OSError as exc:
             self._log.info("onshape: cannot bind %s:%d (%r) -- is 3DxWare installed?",
                            self._host, self._port, exc)
+            self._set_health(
+                ServiceHealthState.FAILED,
+                f"cannot bind {self._host}:{self._port}: {exc}; close 3DxWare or the port owner",
+            )
             return
+        self._set_health(
+            ServiceHealthState.WAITING,
+            f"listening on {self._host}:{self._port}; waiting for an Onshape controller",
+        )
         self._log.info("onshape: NL-Proxy bridge listening on https://%s:%d", self._host, self._port)
         while not self._stop.is_set() and self._enabled.is_set():
             try:
@@ -1256,10 +1337,21 @@ class OnshapeBridge:
         try:
             raw.settimeout(10.0)
             tls = ctx.wrap_socket(raw, server_side=True)
-        except Exception:
-            # TLS handshake failed -- typically a browser probing an untrusted cert. Expected; the
-            # user must trust the cert (setup_onshape). Don't spam: log once.
-            self._warn_once("tls", "onshape: a client refused the TLS cert (not trusted yet?)")
+        except Exception as exc:
+            # Browsers create and abandon speculative loopback sockets alongside the subscribed
+            # controller. EOF/reset/wrong-version failures on those sockets are not certificate
+            # evidence and must never demote a healthy controller.
+            if _tls_certificate_rejected(exc):
+                self._warn_once(
+                    "tls", "onshape: a client explicitly rejected the local TLS certificate")
+                if not self._connected:
+                    self._set_health(
+                        ServiceHealthState.DEGRADED,
+                        "a browser rejected the local TLS certificate; trust the Onshape "
+                        "certificate",
+                    )
+            elif _DEBUG:
+                self._log.info("onshape: ignored incomplete auxiliary TLS connection (%r)", exc)
             try:
                 raw.close()
             except Exception:
@@ -1280,10 +1372,20 @@ class OnshapeBridge:
         self._version = conn.version_str()
         self._set_connected(True)
         self._set_viewport_focused(conn.focus)
+        focus = "focused" if conn.focus else "connected in the background"
+        self._set_health(
+            ServiceHealthState.HEALTHY,
+            f"Onshape controller {self._version or 'web'} is {focus}",
+        )
 
     def _on_conn_focus_changed(self, conn, focused):
         if self._conn is conn:
             self._set_viewport_focused(focused)
+            self._set_health(
+                ServiceHealthState.HEALTHY,
+                f"Onshape controller {self._version or 'web'} is "
+                f"{'focused' if focused else 'connected in the background'}",
+            )
 
     def _set_viewport_focused(self, focused):
         focused = bool(focused)
@@ -1296,13 +1398,25 @@ class OnshapeBridge:
             except Exception:
                 pass
 
-    def _on_conn_closed(self, conn):
+    def _on_conn_closed(self, conn, reason="connection closed"):
         if self._conn is conn:
             self._conn = None
             self._set_viewport_focused(False)
             self._set_connected(False)
             self._drain()
             self._clear_gesture_state()
+            if self._enabled.is_set():
+                normal_close = (
+                    str(reason).startswith("client WebSocket close 1000") or
+                    str(reason).startswith("client WebSocket close 1001") or
+                    str(reason) == "client closed the socket"
+                )
+                self._set_health(
+                    ServiceHealthState.WAITING if normal_close else ServiceHealthState.DEGRADED,
+                    f"Onshape controller disconnected ({reason}); waiting for reconnect",
+                )
+            else:
+                self._set_health(ServiceHealthState.DISABLED, "integration is disabled")
 
     def _clear_gesture_state(self):
         self._in_motion = False
@@ -1325,6 +1439,15 @@ class OnshapeBridge:
 
     # --- worker thread (the navigation model) -------------------------------------------------
     def _run_worker(self):
+        try:
+            self._run_worker_loop()
+        except Exception as exc:
+            self._set_health(
+                ServiceHealthState.FAILED,
+                f"Onshape navigation worker stopped unexpectedly: {exc}",
+            )
+
+    def _run_worker_loop(self):
         last_motion = 0.0
         while not self._stop.is_set():
             cycle = time.monotonic()

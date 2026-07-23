@@ -76,12 +76,16 @@ class TrayController:
     def _apps_text(self, _item):
         return f"Apps: {self.app.app_connection_summary()}"
 
+    def _health_text(self, _item):
+        return f"Health: {self.app.runtime_health_summary()}"
+
     def _build_menu(self):
         return pystray.Menu(
             pystray.MenuItem("Open Settings", lambda icon, item: self.app.open_settings(),
                              default=True),
             pystray.MenuItem(self._status_text, None, enabled=False),
             pystray.MenuItem(self._apps_text, None, enabled=False),
+            pystray.MenuItem(self._health_text, None, enabled=False),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Recenter 3D view", lambda icon, item: self.app.engine.reset_view()),
             pystray.MenuItem("Show control panel", self._toggle_hud,

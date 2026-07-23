@@ -15,8 +15,17 @@ import socket
 import threading
 import time
 
+from .app_registry import APP_SPECS, TransportKind
+from .service_health import ServiceHealth, ServiceHealthState
+
 
 DEFAULT_FLUSH_HZ = 30.0
+_BROKER_APP_IDS = frozenset(
+    spec.app_id for spec in APP_SPECS if spec.transport is TransportKind.BROKER)
+
+
+class _HandshakeError(ValueError):
+    pass
 
 
 class _Client:
@@ -51,16 +60,23 @@ class _TargetState:
 
 
 class NavBroker:
-    def __init__(self, port, on_clients_changed=None, rate_hz=DEFAULT_FLUSH_HZ):
+    def __init__(self, port, on_clients_changed=None, rate_hz=DEFAULT_FLUSH_HZ,
+                 on_health_changed=None):
         self.port = int(port)
         self.on_clients_changed = on_clients_changed
+        self.on_health_changed = on_health_changed
         self._lock = threading.Lock()
+        self._health_lock = threading.Lock()
         self._clients = []
         self._targets = {}
         self._active_target = None
         self._default_period = 1.0 / self._clamp_rate(rate_hz)
         self._stop = threading.Event()
         self._srv = None
+        self._started = False
+        self._health = ServiceHealth(
+            "navigation-broker", ServiceHealthState.DISABLED, "broker has not started")
+        self._publish_health(self._health)
 
     @staticmethod
     def _clamp_rate(hz):
@@ -175,8 +191,34 @@ class NavBroker:
         with self._lock:
             return [(c.app, c.version, c.pid) for c in self._clients]
 
+    def health(self):
+        with self._health_lock:
+            return self._health
+
+    def _set_health(self, state, detail):
+        health = ServiceHealth("navigation-broker", state, detail)
+        with self._health_lock:
+            if health == self._health:
+                return
+            self._health = health
+        self._publish_health(health)
+
+    def _publish_health(self, health):
+        if self.on_health_changed:
+            try:
+                self.on_health_changed(health)
+            except Exception:
+                pass
+
     # --- lifecycle -----------------------------------------------------------------
     def start(self):
+        if self._started:
+            return
+        self._started = True
+        self._set_health(
+            ServiceHealthState.WAITING,
+            f"starting loopback listener on 127.0.0.1:{self.port}",
+        )
         threading.Thread(target=self._serve, name="navbroker-accept", daemon=True).start()
         threading.Thread(target=self._sender, name="navbroker-send", daemon=True).start()
 
@@ -187,6 +229,7 @@ class NavBroker:
                 self._srv.close()
         except Exception:
             pass
+        self._set_health(ServiceHealthState.DISABLED, "broker stopped")
 
     # --- server --------------------------------------------------------------------
     def _serve(self):
@@ -197,8 +240,16 @@ class NavBroker:
             srv.listen(8)
             srv.settimeout(0.5)
             self._srv = srv
-        except OSError:
+        except OSError as exc:
+            self._set_health(
+                ServiceHealthState.FAILED,
+                f"cannot listen on 127.0.0.1:{self.port}: {exc}",
+            )
             return
+        self._set_health(
+            ServiceHealthState.WAITING,
+            f"listening on 127.0.0.1:{self.port}; waiting for an add-on handshake",
+        )
         while not self._stop.is_set():
             try:
                 conn, _ = srv.accept()
@@ -210,19 +261,21 @@ class NavBroker:
 
     def _handle_client(self, conn):
         client = _Client(conn)
+        registered = False
         try:
             conn.settimeout(5.0)
-            line = self._read_line(conn)
-            if line:
-                try:
-                    hello = json.loads(line)
-                    client.app = str(hello.get("app", "?"))
-                    client.version = str(hello.get("version", "?"))
-                    client.pid = int(hello.get("pid", 0))
-                except (ValueError, TypeError):
-                    pass
+            try:
+                client.app, client.version, client.pid = self._parse_hello(
+                    self._read_line(conn))
+            except _HandshakeError as exc:
+                self._set_health(
+                    ServiceHealthState.DEGRADED,
+                    f"rejected add-on handshake: {exc}",
+                )
+                return
             with self._lock:
                 self._clients.append(client)
+                registered = True
             self._changed()
             conn.settimeout(1.0)
             while not self._stop.is_set():
@@ -236,26 +289,58 @@ class NavBroker:
                     break
         finally:
             with self._lock:
-                if client in self._clients:
+                if registered and client in self._clients:
                     self._clients.remove(client)
             try:
                 conn.close()
             except Exception:
                 pass
-            self._changed()
+            if registered:
+                self._changed()
 
     @staticmethod
     def _read_line(conn):
         buf = b""
-        while b"\n" not in buf and len(buf) < 4096:
+        while b"\n" not in buf:
+            if len(buf) >= 4096:
+                raise _HandshakeError("hello exceeds 4096 bytes")
             try:
                 chunk = conn.recv(256)
-            except OSError:
-                return None
+            except socket.timeout as exc:
+                raise _HandshakeError("timed out waiting for hello") from exc
+            except OSError as exc:
+                raise _HandshakeError(f"could not read hello: {exc}") from exc
             if not chunk:
-                break
+                raise _HandshakeError("connection closed before a complete hello")
             buf += chunk
-        return buf.split(b"\n", 1)[0].decode("utf-8", "replace")
+        line = buf.split(b"\n", 1)[0]
+        try:
+            return line.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise _HandshakeError("hello is not valid UTF-8") from exc
+
+    @staticmethod
+    def _parse_hello(line):
+        try:
+            hello = json.loads(line)
+        except (TypeError, ValueError) as exc:
+            raise _HandshakeError("hello is not valid JSON") from exc
+        if not isinstance(hello, dict):
+            raise _HandshakeError("hello must be a JSON object")
+        if hello.get("type") != "hello":
+            raise _HandshakeError("message type must be 'hello'")
+        app = hello.get("app")
+        if not isinstance(app, str) or not app or app != app.strip().lower():
+            raise _HandshakeError("app must be a normalized supported app ID")
+        if app not in _BROKER_APP_IDS:
+            raise _HandshakeError(f"unsupported app ID {app!r}")
+        version = hello.get("version")
+        if not isinstance(version, str) or not version.strip():
+            raise _HandshakeError("version must be a non-empty string")
+        pid = hello.get("pid")
+        if not isinstance(pid, int) or isinstance(pid, bool) or pid < 0:
+            raise _HandshakeError("pid must be a non-negative integer")
+        return app, version.strip(), pid
 
     def _next_wait(self):
         with self._lock:
@@ -300,14 +385,35 @@ class NavBroker:
                     if client in self._clients:
                         self._clients.remove(client)
             self._changed()
+            self._set_health(
+                ServiceHealthState.DEGRADED,
+                f"lost {len(dead)} add-on connection(s) while sending navigation; awaiting reconnect",
+            )
 
     def _sender(self):
-        while not self._stop.wait(self._next_wait()):
-            self._flush_once()
+        try:
+            while not self._stop.wait(self._next_wait()):
+                self._flush_once()
+        except Exception as exc:
+            self._set_health(
+                ServiceHealthState.FAILED,
+                f"navigation sender stopped unexpectedly: {exc}",
+            )
 
     def _changed(self):
+        infos = self.client_infos()
+        if infos:
+            self._set_health(
+                ServiceHealthState.HEALTHY,
+                f"{len(infos)} supported add-on connection(s) active",
+            )
+        else:
+            self._set_health(
+                ServiceHealthState.WAITING,
+                f"listening on 127.0.0.1:{self.port}; waiting for an add-on handshake",
+            )
         if self.on_clients_changed:
             try:
-                self.on_clients_changed(self.client_infos())
+                self.on_clients_changed(infos)
             except Exception:
                 pass

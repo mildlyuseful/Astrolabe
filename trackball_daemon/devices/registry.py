@@ -20,6 +20,15 @@ class DeviceAdapterRegistry:
     def providers(self):
         return tuple(self._providers[item.source_id] for item in self._descriptors)
 
+    def discovery_service_uuids(self, config):
+        """Advertised services expected for the configured name/rotation protocol."""
+        config = BleConnectionConfig.from_value(config)
+        return frozenset(
+            descriptor.service_uuid for descriptor in self._descriptors
+            if descriptor.matches_name(config.name)
+            and descriptor.motion_characteristic == config.rotation_characteristic
+        )
+
     def select(self, config, session, motion_callback, protocol_error_callback=None):
         config = BleConnectionConfig.from_value(config)
         if not isinstance(session, DeviceSession):

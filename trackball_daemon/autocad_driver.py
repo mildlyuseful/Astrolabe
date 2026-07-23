@@ -9,11 +9,11 @@ session. After loading, the worker only monitors liveness.
 Without pywin32 the loader logs once and becomes a no-op; the plugin can still be loaded manually.
 The retired COM navigation transport and its rationale live under ``archive/autocad_com_transport/``.
 """
-import shutil
 import threading
 from pathlib import Path
 
 from .paths import user_config_dir
+from .service_health import ServiceHealth, ServiceHealthState
 from .util import get_logger
 
 # pywin32 is Windows-only and optional. Import guarded so the daemon still runs (with this
@@ -55,48 +55,99 @@ class AutoCADPluginLoader:
     No nav, no status entry in the connected-apps list -- "autocad" appears there only when
     the plugin itself handshakes with the nav broker, exactly like the other socket add-ons."""
 
-    def __init__(self):
+    def __init__(self, on_health_changed=None):
+        self.on_health_changed = on_health_changed
         self._stop = threading.Event()
         self._thread = None
+        self._health_lock = threading.Lock()
         self._log = get_logger()
         self._warned = set()                                  # one-time logs for failing ops
         # COM handle -- created and used ONLY on the worker thread.
         self._acad = None
         self._netload_done = False                            # NETLOAD attempted this session
         self._enabled = threading.Event()                     # setup/Enabled gate; off by default
+        self._health = ServiceHealth(
+            "autocad", ServiceHealthState.DISABLED, "integration is disabled")
+        self._publish_health(self._health)
+
+    def health(self):
+        with self._health_lock:
+            return self._health
+
+    def _set_health(self, state, detail):
+        health = ServiceHealth("autocad", state, detail)
+        with self._health_lock:
+            if health == self._health:
+                return
+            self._health = health
+        self._publish_health(health)
+
+    def _publish_health(self, health):
+        if self.on_health_changed:
+            try:
+                self.on_health_changed(health)
+            except Exception:
+                pass
 
     # --- lifecycle -----------------------------------------------------------------------
     def start(self):
         if not _PYWIN32:
             self._log.info("autocad: pywin32 not available; plugin loader disabled")
+            self._set_health(
+                ServiceHealthState.FAILED,
+                "pywin32 is unavailable; reinstall the Windows runtime",
+            )
             return
         if self._thread is not None:
             return
+        if self._enabled.is_set():
+            self._set_health(
+                ServiceHealthState.WAITING,
+                "waiting for a running AutoCAD drawing",
+            )
         self._thread = threading.Thread(target=self._run, name="autocad-loader", daemon=True)
         self._thread.start()
 
     def stop(self):
         self._stop.set()
+        self._set_health(ServiceHealthState.DISABLED, "loader stopped")
 
     def set_enabled(self, enabled):
         """Allow COM attachment/NETLOAD only after the user enabled this integration."""
         if enabled:
             self._enabled.set()
+            self._set_health(
+                ServiceHealthState.WAITING,
+                "waiting for a running AutoCAD drawing",
+            )
         else:
             self._enabled.clear()
+            self._set_health(ServiceHealthState.DISABLED, "integration is disabled")
 
     # --- worker thread (owns COM) ----------------------------------------------------------
     def _run(self):
-        pythoncom.CoInitialize()
+        try:
+            pythoncom.CoInitialize()
+        except Exception as exc:
+            self._set_health(
+                ServiceHealthState.FAILED,
+                f"could not initialize the AutoCAD COM worker: {exc}",
+            )
+            return
         try:
             while not self._stop.is_set():
                 try:
                     self._tick()
-                except Exception:
+                except Exception as exc:
                     # AutoCAD closed / COM handle dropped -> re-attach (and re-NETLOAD) later.
                     if self._acad is not None:
                         self._log.info("autocad: session ended (loader will re-attach)")
                     self._acad = None
+                    if self._enabled.is_set():
+                        self._set_health(
+                            ServiceHealthState.DEGRADED,
+                            f"AutoCAD loader lost its session ({exc}); waiting to reattach",
+                        )
                 self._stop.wait(_POLL_PERIOD)
         finally:
             self._acad = None
@@ -115,6 +166,10 @@ class AutoCADPluginLoader:
             self._acad = acad
             self._netload_done = False           # fresh attach (new acad session) -> NETLOAD
             self._warned.clear()
+            self._set_health(
+                ServiceHealthState.WAITING,
+                "attached to AutoCAD; waiting for an open drawing",
+            )
             self._log.info("autocad: attached to running instance (plugin loader)")
         # Liveness probe AND the NETLOAD precondition in one call: SendCommand needs an open
         # document, and Documents.Count raises once the app is gone (-> _run drops the handle).
@@ -162,24 +217,34 @@ class AutoCADPluginLoader:
         best-effort -- a failure is logged once; the user can still APPLOAD/NETLOAD by hand."""
         self._netload_done = True
         try:
+            from .integrations import _install_payloads_transactionally
+
             src = _bundled_plugin_path()
             if not src.exists():
+                self._set_health(
+                    ServiceHealthState.FAILED,
+                    "bundled AutoCAD plugin is missing",
+                )
                 return
             dst_dir = _runtime_plugin_dir()
-            dst_dir.mkdir(parents=True, exist_ok=True)
             dst = dst_dir / _PLUGIN_DLL
+            manifest = src.parent / "version.json"
+            payloads = [(src, dst)]
+            if manifest.exists():
+                payloads.append((manifest, dst_dir / "version.json"))
+            update_error = None
             try:
-                shutil.copy2(src, dst)       # locked == already loaded this session -> fine
-            except OSError:
-                pass
-            else:                            # DLL fresh -> keep the version manifest in step
-                ver = src.parent / "version.json"
-                if ver.exists():
-                    try:
-                        shutil.copy2(ver, dst_dir / "version.json")
-                    except OSError:
-                        pass
+                _install_payloads_transactionally(payloads)
+            except OSError as exc:
+                # A loaded DLL is expected to be locked. The transaction leaves both the DLL and
+                # manifest at their previous version, and setup/next launch retries from bundle.
+                self._warn_once("plugin update", exc)
+                update_error = exc
             if not dst.exists():
+                self._set_health(
+                    ServiceHealthState.FAILED,
+                    f"no runtime AutoCAD plugin is available at {dst}",
+                )
                 return
             try:                              # one-time trust so SECURELOAD loads silently
                 cur = str(doc.GetVariable("TRUSTEDPATHS") or "")
@@ -188,8 +253,23 @@ class AutoCADPluginLoader:
             except Exception:
                 pass
             doc.SendCommand('(command "_.NETLOAD" "%s")(princ) ' % str(dst).replace("\\", "/"))
+            if update_error is not None:
+                self._set_health(
+                    ServiceHealthState.DEGRADED,
+                    f"could not update the in-use AutoCAD plugin ({update_error}); "
+                    "the prior copy was kept",
+                )
+            else:
+                self._set_health(
+                    ServiceHealthState.WAITING,
+                    "NETLOAD requested; waiting for the AutoCAD plugin handshake",
+                )
             self._log.info(f"autocad: NETLOADed smooth-orbit plugin ({dst})")
         except Exception as exc:
+            self._set_health(
+                ServiceHealthState.DEGRADED,
+                f"AutoCAD NETLOAD failed ({exc}); use NETLOAD manually or retry setup",
+            )
             self._warn_once("netload", exc)
 
     def _warn_once(self, what, exc):

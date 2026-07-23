@@ -47,6 +47,7 @@ from .output import OutputEngine
 from .paths import user_config_dir
 from .solidworks_driver import SolidWorksDriver
 from .runtime_state import ConfigRuntimeBaseResolver, FocusedContext, RuntimeStore
+from .service_health import ServiceHealth, ServiceHealthState
 from .settings_schema import SETTING_SPECS
 from .tray import TrayController
 from .ui import SettingsWindow
@@ -104,6 +105,9 @@ class App:
         self.stop_event = threading.Event()
         self._status = "starting"
         self._last_pushed = None
+        self._health_lock = threading.Lock()
+        self.service_health = {}
+        self._last_health_pushed = None
         self.root = None
         self.ui = None
         self.hud = None
@@ -117,13 +121,20 @@ class App:
         # 3D-app nav bridge (127.0.0.1). The engine forwards orbit/pan/zoom deltas here,
         # gated on the focused CAD app; socket add-ons connect and drive their app's camera.
         snapshot = self.config.snapshot()
-        self.broker = NavBroker(snapshot.bridge_port, self._on_clients_changed,
-                                rate_hz=snapshot.global_value("navigation.refresh_rate"))
+        self.broker = NavBroker(
+            snapshot.bridge_port,
+            self._on_clients_changed,
+            rate_hz=snapshot.global_value("navigation.refresh_rate"),
+            on_health_changed=self._on_service_health_changed,
+        )
         # SolidWorks is driven by external COM automation, not a socket add-in: this daemon-side
         # driver attaches to a running SolidWorks and moves its camera directly. It lives parallel
         # to the broker; NavigationRouter owns delivery to this direct transport.
-        self.sw_driver = SolidWorksDriver(self._on_sw_connection_changed,
-                                          rate_hz=snapshot.global_value("navigation.refresh_rate"))
+        self.sw_driver = SolidWorksDriver(
+            self._on_sw_connection_changed,
+            rate_hz=snapshot.global_value("navigation.refresh_rate"),
+            on_health_changed=self._on_service_health_changed,
+        )
         # Onshape (browser) is driven by a daemon-side bridge that impersonates the 3Dconnexion
         # local NL-Proxy service Onshape's page connects to (TLS WebSocket on 127.51.68.120:8181).
         # Like the SW driver it lives parallel to the broker; NavigationRouter owns delivery.
@@ -132,7 +143,10 @@ class App:
             self._on_onshape_connection_changed,
             on_focus_changed=self._on_onshape_focus_changed,
             rate_hz=snapshot.global_value("navigation.refresh_rate"),
-            cert_path=ocfg.get("cert_path") or None, key_path=ocfg.get("key_path") or None)
+            cert_path=ocfg.get("cert_path") or None,
+            key_path=ocfg.get("key_path") or None,
+            on_health_changed=self._on_service_health_changed,
+        )
         self.navigation = NavigationRouter(
             self.broker, self.sw_driver, self.onshape_bridge)
         # AutoCAD is a BROKER app: its compiled NETLOAD plugin (plugin_src/autocad) drives the
@@ -140,14 +154,16 @@ class App:
         # socket add-ons. COM is used only to stage, trust, and NETLOAD the bundled plugin into a
         # running AutoCAD (the old COM nav transport is archived at
         # archive/autocad_com_transport/; it raced the plugin for the early frames).
-        self.acad_loader = AutoCADPluginLoader()
+        self.acad_loader = AutoCADPluginLoader(
+            on_health_changed=self._on_service_health_changed)
         self.engine.nav_sink = self._nav_sink
         # Connected-app status feeds the tray "Apps:" line + the 3D-Apps rows. It merges the
         # broker's socket add-ons with the SolidWorks COM driver and the Onshape bridge states.
         self._apps_lock = threading.Lock()
         self._broker_apps = []                     # [(app, version, pid)] from the broker
         self._sw_apps = []                         # [(app, version, pid)] from the SW driver (0/1)
-        self._onshape_apps = []                    # [(app, version, pid)] from the Onshape bridge
+        self._onshape_apps = []                    # focused Onshape viewport, if any
+        self._onshape_connection_version = None    # subscribed transport, including background tabs
         self.connected_apps = []
         # The handshake version belongs to the copy actually loaded by the current/most recently
         # connected host document. Preserve it after disconnect so update UX does not fall back to
@@ -160,6 +176,8 @@ class App:
         self._packet_state_revision = _NO_PACKET_REVISION
         self._last_scheme_pushed = {}
         self._last_runtime_rate = {}
+        self._quit_started = False
+        self._shutdown_complete = False
         self.foreground_monitor = ForegroundMonitor(self._on_foreground_process_changed)
         self._apply_rates()
         self._apply_schemes()
@@ -180,6 +198,36 @@ class App:
 
     def is_connected(self):
         return self._status.startswith(("connected", "subscribed"))
+
+    def _on_service_health_changed(self, health):
+        if not isinstance(health, ServiceHealth):
+            raise TypeError("service health callback requires a ServiceHealth value")
+        with self._health_lock:
+            if self.service_health.get(health.service_id) == health:
+                return
+            self.service_health[health.service_id] = health
+        self.log.info(
+            "health %s: %s (%s)",
+            health.service_id,
+            health.state.value,
+            health.detail,
+        )
+
+    def runtime_health_snapshot(self):
+        with self._health_lock:
+            return dict(self.service_health)
+
+    def runtime_health_summary(self):
+        health = tuple(self.runtime_health_snapshot().values())
+        for state in (
+                ServiceHealthState.FAILED,
+                ServiceHealthState.DEGRADED,
+                ServiceHealthState.WAITING,
+                ServiceHealthState.HEALTHY):
+            matching = sorted(item.service_id for item in health if item.state is state)
+            if matching:
+                return f"{state.value}: {', '.join(matching)}"
+        return "disabled"
 
     def on_config_changed(self, _event):
         if (_event.changes and all(
@@ -424,7 +472,9 @@ class App:
         return key
 
     def _on_foreground_process_changed(self, process_name):
-        self._apply_foreground_context(self._foreground_context_for_process(process_name))
+        context = self._foreground_context_for_process(process_name)
+        self._apply_foreground_context(context)
+        self._sync_onshape_active_row(context.app_id == "onshape")
         keyboard = getattr(self, "keyboard_provider", None)
         if keyboard is not None:
             keyboard.reconcile("foreground_change")
@@ -496,9 +546,13 @@ class App:
             self._refresh_connected_apps()
 
     def _on_onshape_connection_changed(self, connected, version):
-        # Onshape browser bridge connected/disconnected (bridge server/reader thread).
+        # Subscription presence is transport state, not foreground application state. Keep the
+        # version while the tab is subscribed, then let the foreground monitor publish the row
+        # only when that exact viewport is both focused and in the foreground browser.
         with self._apps_lock:
-            self._onshape_apps = [("onshape", version or "web", 0)] if connected else []
+            self._onshape_connection_version = (version or "web") if connected else None
+            if not connected:
+                self._onshape_apps = []
             self._refresh_connected_apps()
         monitor = getattr(self, "foreground_monitor", None)
         if monitor is not None:
@@ -511,6 +565,19 @@ class App:
         monitor = getattr(self, "foreground_monitor", None)
         if monitor is not None:
             monitor.refresh()
+
+    def _sync_onshape_active_row(self, active):
+        """Expose Onshape as active only for the foreground, focused viewport."""
+        lock = getattr(self, "_apps_lock", None)
+        if lock is None:
+            return
+        with lock:
+            version = getattr(self, "_onshape_connection_version", None)
+            visible = [("onshape", version, 0)] if active and version else []
+            if visible == self._onshape_apps:
+                return
+            self._onshape_apps = visible
+            self._refresh_connected_apps()
 
     def _refresh_connected_apps(self):
         # Caller holds _apps_lock. Rebuild the combined list (a new object => lockless readers ok).
@@ -531,52 +598,55 @@ class App:
 
     # --- lifecycle ----------------------------------------------------------------
     def start(self):
-        self.root = tk.Tk()
-        self.root.withdraw()                       # headless: no window on startup
-        self.ui = SettingsWindow(self.root, self)
-        self.hud = ControlHUD(self.root, self.runtime, self.config)
-
-        self.tray = TrayController(self)
-        self.tray.start()
-
-        # Publish the bridge port for the add-ons, then start the broker.
         try:
+            self.root = tk.Tk()
+            self.root.withdraw()                       # headless: no window on startup
+            self.ui = SettingsWindow(self.root, self)
+            self.hud = ControlHUD(self.root, self.runtime, self.config)
+
+            self.tray = TrayController(self)
+            self.tray.start()
+
+            # Publish the bridge port for the add-ons, then start the broker.
             with open(user_config_dir() / "bridge.json", "w", encoding="utf-8") as f:
                 json.dump({"port": self.config.snapshot().bridge_port}, f)
-        except OSError:
-            pass
-        self.broker.start()
-        # Workers may exist while disabled, but their gates prevent COM enumeration, certificate
-        # creation, socket binding, TRUSTEDPATHS edits, and NETLOAD until setup has succeeded and
-        # Enabled is checked. Config changes update these gates live.
-        self._apply_service_gates()
-        self.sw_driver.start()
-        self.onshape_bridge.start()
-        self.acad_loader.start()
-        self.foreground_monitor.start()
+            self.broker.start()
+            # Workers may exist while disabled, but their gates prevent COM enumeration,
+            # certificate creation, socket binding, TRUSTEDPATHS edits, and NETLOAD until setup
+            # has succeeded and Enabled is checked. Config changes update these gates live.
+            self._apply_service_gates()
+            self.sw_driver.start()
+            self.onshape_bridge.start()
+            self.acad_loader.start()
+            self.foreground_monitor.start()
 
-        # One-click-free add-in refresh: re-copy any installed add-in the daemon now ships a
-        # newer version of (e.g. this release's viewport-refresh fix). Takes effect on the
-        # CAD app's next launch.
-        for key, old, new in integrations.auto_update(self.config):
-            self.log.info(f"updated {key} add-in {old} -> {new} (restart {key} to apply)")
+            # One-click-free add-in refresh: re-copy any installed add-in the daemon now ships a
+            # newer version of. Takes effect on the CAD app's next launch.
+            for key, old, new in integrations.auto_update(self.config):
+                self.log.info(f"updated {key} add-in {old} -> {new} (restart {key} to apply)")
 
-        start_ble_thread(
-            self.get_ble_params,
-            self.device_adapters,
-            self._handle_ble_motion,
-            self.set_status,
-            self.stop_event,
-        )
+            start_ble_thread(
+                self.get_ble_params,
+                self.device_adapters,
+                self._handle_ble_motion,
+                self.set_status,
+                self.stop_event,
+            )
 
-        if self.debug:
-            from .debugview import start_debug_view
-            start_debug_view(self.engine, self, self.stop_event)
+            if self.debug:
+                from .debugview import start_debug_view
+                start_debug_view(self.engine, self, self.stop_event)
 
-        if self.first_run:
-            self.root.after(500, self.open_settings)
-        self.root.after(300, self._poll)
-        self.root.mainloop()
+            if self.first_run:
+                self.root.after(500, self.open_settings)
+            self.root.after(300, self._poll)
+            self.root.mainloop()
+        except BaseException:
+            # main() cannot clean a partially started App whose start() raised. Stop every owned
+            # boundary here, then destroy Tk synchronously because its event loop may never start.
+            self.quit()
+            self._shutdown()
+            raise
 
     def open_settings(self):
         # Safe from any thread: marshal the GUI work onto the Tk thread.
@@ -601,6 +671,16 @@ class App:
                 self.tray.refresh()
             if self.ui is not None:
                 self.ui.update_app_connections(self.connected_apps)
+        health = self.runtime_health_snapshot()
+        health_signature = tuple(sorted(
+            (service_id, item.state.value, item.detail)
+            for service_id, item in health.items()))
+        if health_signature != self._last_health_pushed:
+            self._last_health_pushed = health_signature
+            if self.tray is not None:
+                self.tray.refresh()
+            if self.ui is not None:
+                self.ui.update_service_health(health)
         hud_visible = self.config.snapshot().global_value("hud.visible")
         if hud_visible != self._last_hud_visible:
             self._last_hud_visible = hud_visible
@@ -611,32 +691,56 @@ class App:
 
     def quit(self):
         # Called from the tray thread.
+        if getattr(self, "_quit_started", False):
+            return
+        self._quit_started = True
         self.stop_event.set()
-        if getattr(self, "binding_controller", None) is not None:
+
+        def stop_owned(label, callback):
             try:
-                self.binding_controller.release_all("daemon_shutdown")
-            finally:
-                self.pointer_button_output.release_all()
+                callback()
+            except Exception:
+                self.log.exception("%s failed during daemon shutdown", label)
+
+        if getattr(self, "binding_controller", None) is not None:
+            stop_owned(
+                "binding release",
+                lambda: self.binding_controller.release_all("daemon_shutdown"),
+            )
+        if getattr(self, "pointer_button_output", None) is not None:
+            stop_owned("pointer-button release", self.pointer_button_output.release_all)
         if getattr(self, "input_aggregator", None) is not None:
-            self.input_aggregator.shutdown("daemon_shutdown")
+            stop_owned(
+                "input-provider shutdown",
+                lambda: self.input_aggregator.shutdown("daemon_shutdown"),
+            )
         if getattr(self, "foreground_monitor", None) is not None:
-            self.foreground_monitor.stop()
+            stop_owned("foreground monitor", self.foreground_monitor.stop)
         if self.broker is not None:
-            self.broker.stop()
+            stop_owned("navigation broker", self.broker.stop)
         if self.sw_driver is not None:
-            self.sw_driver.stop()
+            stop_owned("SolidWorks driver", self.sw_driver.stop)
         if self.onshape_bridge is not None:
-            self.onshape_bridge.stop()
+            stop_owned("Onshape bridge", self.onshape_bridge.stop)
         if self.acad_loader is not None:
-            self.acad_loader.stop()
+            stop_owned("AutoCAD loader", self.acad_loader.stop)
         if self.tray is not None:
-            self.tray.stop()
+            stop_owned("tray", self.tray.stop)
         if self.root is not None:
-            self.root.after(0, self._shutdown)
+            try:
+                self.root.after(0, self._shutdown)
+            except Exception:
+                self._shutdown()
 
     def _shutdown(self):
+        if getattr(self, "_shutdown_complete", False):
+            return
+        self._shutdown_complete = True
         if self.hud is not None:
-            self.hud.stop()
+            try:
+                self.hud.stop()
+            except Exception:
+                self.log.exception("control HUD failed during daemon shutdown")
         try:
             self.root.quit()
         except Exception:

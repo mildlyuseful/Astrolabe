@@ -88,6 +88,18 @@ execution of files found on disk. Third-party Python adapter loading is intentio
 A device with a different wire protocol requires reviewed code; a device using this snapshot wire
 format requires only reviewed descriptor data.
 
+## Discovery identity
+
+A configured BLE address is authoritative and bypasses name discovery. Without an address,
+`BleTransport` compares the configured name case-insensitively with both the current advertisement's
+local name and the operating system's cached device name. Some peripherals put the name in a
+separate scan response, so either source may be the only one available during a scan.
+
+Seeing a descriptor-compatible service UUID without the configured name is diagnostic evidence, not
+permission to connect. Built-in devices may share the same service and motion characteristic while
+publishing different input layouts, so the transport reports the observed address/name and asks for
+an explicit Device name or address instead of guessing a descriptor.
+
 ## Built-in mappings
 
 - `astrolabe_5way` / `ble.astrolabe`: bit 0 Up, bit 1 Down, bit 2 Left, bit 3 Right,

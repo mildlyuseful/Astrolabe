@@ -18,6 +18,7 @@ from .settings_ui_model import CATEGORY_TITLES, SettingsUIModel
 from .config import (ORBIT_PIVOT_METHODS,
                      normalize_axis_permutation, normalize_orbit_pivot_fallbacks,
                      swap_axis_source)
+from .service_health import ServiceHealthState
 
 _PAD = {"padx": 8, "pady": 4}
 _PIVOT_LABELS = {
@@ -106,6 +107,7 @@ class SettingsWindow:
         self.cfg = app.config
         self.win = None
         self.status_var = None
+        self._broker_health_label = None
         self._app_status_labels = {}      # key -> ttk.Label (3D Apps tab)
         self._app_action_buttons = {}     # key -> setup/update button
         self._refresh_twist_warning = None
@@ -157,6 +159,7 @@ class SettingsWindow:
         if not self._app_status_labels:
             return
         connected = {a: v for a, v, _ in infos}
+        health = self.app.runtime_health_snapshot()
         for key, lbl in self._app_status_labels.items():
             try:
                 if not lbl.winfo_exists():
@@ -166,12 +169,29 @@ class SettingsWindow:
                     stale = (key in integrations.ADDIN_KEYS and
                              integrations.update_available(key, installed_version=version))
                     suffix = "  •  update available" if stale else ""
-                    lbl.config(text=f"active • connected (v{version}){suffix}",
-                               foreground="#1a7f37")
+                    item = health.get(key)
+                    if item is not None and item.state in (
+                            ServiceHealthState.DEGRADED, ServiceHealthState.FAILED):
+                        lbl.config(
+                            text=(
+                                f"active • connected (v{version}){suffix}\n"
+                                f"runtime {item.state.value}: {item.detail}"
+                            ),
+                            foreground=self._health_color(item.state),
+                        )
+                    else:
+                        lbl.config(
+                            text=f"active • connected (v{version}) • runtime healthy{suffix}",
+                            foreground="#1a7f37",
+                        )
                 else:
                     appdef = integrations.APPS_BY_KEY.get(key)
                     if appdef is not None:
-                        lbl.config(text=self._app_status_text(appdef), foreground="#666")
+                        item = health.get(key)
+                        lbl.config(
+                            text=self._app_status_text(appdef),
+                            foreground=self._health_color(item.state) if item else "#666",
+                        )
             except tk.TclError:
                 pass
         for key, button in self._app_action_buttons.items():
@@ -185,6 +205,30 @@ class SettingsWindow:
                     button.pack_forget()
             except tk.TclError:
                 pass
+
+    @staticmethod
+    def _health_color(state):
+        return {
+            ServiceHealthState.HEALTHY: "#1a7f37",
+            ServiceHealthState.DEGRADED: "#b45309",
+            ServiceHealthState.FAILED: "#b42318",
+        }.get(state, "#666")
+
+    def update_service_health(self, health):
+        """Render transport health without conflating it with host connection presence."""
+        broker = health.get("navigation-broker")
+        if self._broker_health_label is not None:
+            try:
+                if self._broker_health_label.winfo_exists():
+                    if broker is None:
+                        text, color = "Navigation broker: status unavailable", "#666"
+                    else:
+                        text = f"Navigation broker: {broker.state.value} — {broker.detail}"
+                        color = self._health_color(broker.state)
+                    self._broker_health_label.config(text=text, foreground=color)
+            except tk.TclError:
+                pass
+        self.update_app_connections(getattr(self.app, "connected_apps", ()))
 
     # --- build --------------------------------------------------------------------
     def _build(self):
@@ -1262,11 +1306,20 @@ class SettingsWindow:
         ttk.Label(outer, text="Supported 3D apps — enable integrations, check host compatibility, "
                               "and expand honest setup/manual-install instructions.",
                   wraplength=600, foreground="#555").pack(anchor="w", padx=10, pady=(10, 6))
+        self._broker_health_label = ttk.Label(
+            outer,
+            text="Navigation broker: status unavailable",
+            wraplength=600,
+            justify="left",
+            foreground="#666",
+        )
+        self._broker_health_label.pack(anchor="w", padx=10, pady=(0, 6))
         holder = ttk.Frame(outer)
         holder.pack(fill="both", expand=True)
         body = self._scrollable(holder)
         for appdef in integrations.APPS:
             self._app_row(body, appdef)
+        self.update_service_health(self.app.runtime_health_snapshot())
         return outer
 
     def _app_status_text(self, appdef):
@@ -1275,7 +1328,10 @@ class SettingsWindow:
         stale = (integrations.update_available(appdef.key, installed_version=observed)
                  if observed is not None else integrations.update_available(appdef.key))
         if appdef.key in integrations.ADDIN_KEYS and stale:
-            return base + "  •  update available"
+            base += "  •  update available"
+        health = self.app.runtime_health_snapshot().get(appdef.key)
+        if health is not None:
+            base += f"\nruntime {health.state.value}: {health.detail}"
         return base
 
     def _app_button_text(self, appdef):

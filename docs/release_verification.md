@@ -10,28 +10,43 @@ rather than copying test counts, artifact hashes, or dated environment claims in
 
 ## Build and automated checks
 
-Install the development and release extras, then run:
+Install the pinned `uv` version required by `pyproject.toml`, synchronize the checked-in lock, then
+run:
 
 ```powershell
-python -m pip install -e ".[dev,release,onshape]"
-python -m pytest -q
-python -m compileall -q trackball_daemon tests tools
-python -m trackball_daemon.validate_bindings
-python tools/verify_autocad_artifact.py
-python -m trackball_daemon --release-smoke
+uv sync --locked --all-extras
+uv run --locked --all-extras python -m pytest -q
+uv run --locked --all-extras python -m compileall -q trackball_daemon tests tools
+uv run --locked --all-extras python -m trackball_daemon.validate_bindings
+uv run --locked --all-extras python tools/verify_autocad_artifact.py
+uv run --locked --all-extras python -m trackball_daemon --release-smoke
 dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj --configuration Release
 & ".\tools\build_release.ps1"
 git diff --check
 ```
 
-`build_release.ps1` refuses output paths outside the repository, verifies the bundled AutoCAD DLL
-against its source-tree and hash manifest, builds the sdist and wheel in an isolated PEP 517
-environment, keeps Nuitka downloads/cache under `build/release`, explicitly includes the AutoCAD DLL,
-creates a Windows standalone onedir executable, and runs its side-effect-free packaged-resource smoke.
-The smoke validates the AutoCAD DLL and loads defaults, profiles, descriptors, schemas, and examples,
-then compiles both System profiles without acquiring the controller mutex, opening BLE or Raw Input,
-starting the tray, loading host integrations, or writing user config. The script prints SHA-256 values
-for both the executable and packaged AutoCAD DLL.
+`build_release.ps1` refuses output paths outside the repository and synchronizes an exact,
+non-editable build environment from `uv.lock`; the PEP 517 backend is constrained separately because
+build dependencies are outside the application lock. It verifies the bundled AutoCAD DLL against
+its source-tree and hash manifest, builds the sdist and wheel in an isolated PEP 517 environment,
+keeps dependency and Nuitka caches under `build/release`, explicitly includes the AutoCAD DLL,
+creates a Windows standalone onedir executable, and runs its side-effect-free packaged-resource
+smoke. The Windows build explicitly includes PyWinRT's projection package because collection
+projections used by BLE advertisement callbacks are imported dynamically and are invisible to static
+freezer analysis. The smoke imports that runtime projection, validates the AutoCAD DLL, loads
+defaults, profiles, descriptors, schemas, and examples, then compiles both System profiles without
+acquiring the controller mutex, opening BLE or Raw Input, starting the tray, loading host
+integrations, or writing user config. The script creates a deterministic ZIP of the complete onedir
+tree with a checksum file. It then synchronizes a separate production-runtime environment from the
+same lock and uses the pinned CycloneDX tool to produce a reproducible, validated SBOM of the
+packages actually selected for that environment; the release step then stamps the root application
+with the version resolved from the package's authoritative dynamic version source. The script
+prints SHA-256 values for the executable, packaged DLL, archive, and SBOM.
+
+CI also builds and installs the wheel outside the checkout before running its smoke and binding
+validation. A separate job compiles both retained validation-firmware sketches with pinned Arduino
+CLI and board-core inputs, reports binary sizes, and retains the firmware artifacts. These checks
+establish reproducible buildability; they do not qualify the final product hardware.
 
 Before release, also install the wheel into a clean Windows account without Python or a source
 checkout, exercise the onedir GUI there, uninstall/reverse every path in `security.md`, and retain

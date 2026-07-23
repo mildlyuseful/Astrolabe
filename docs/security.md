@@ -55,6 +55,11 @@ launch a supported 3D application. Shared ownership and lifecycle rules are defi
 | Onshape | Creates a per-user TLS key/certificate, listens on fixed loopback TLS, and optionally supplies an Onshape-only pointer userscript. | Delete the PEM files; remove the `127.51.68.120` certificate from the current-user trust store; remove the userscript. |
 | Host detection | Reads common install folders, process command lines, recent-project files, and Rhino's install registry key. | Detection is read-only. Hidden PowerShell/WMIC calls do not modify the system. |
 
+Copied host payloads are staged and byte-validated next to their destination before replacement.
+Existing copies move to fixed-name sibling backups only for the swap, grouped payloads roll back
+together on failure, and the next setup run recovers an interrupted backup before retrying. A
+successful exact directory replacement removes files no longer present in the bundled add-in.
+
 Sensitive daemon-side listeners, attachment services, and loaders are gated by both successful setup
 and the per-app **Enabled** checkbox. When Onshape, AutoCAD, or SOLIDWORKS has not been set up, the
 daemon does not bind the Onshape port, generate its certificate, enumerate COM applications, alter

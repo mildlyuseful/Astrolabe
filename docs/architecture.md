@@ -47,6 +47,7 @@ host-specific signs, scales, pivots, or camera conventions.
 | Legacy migration compatibility | `config.py` and frozen `default_profiles.json`; new defaults do not belong there |
 | Device control namespaces and BLE snapshot mappings | `trackball_daemon/devices/descriptor_data/` |
 | Portable contributor data shapes | `trackball_daemon/schemas/`; daemon parsers remain authoritative |
+| Python dependency resolution | `pyproject.toml` plus the checked-in `uv.lock` |
 | Open defects, deferred work, and unclosed verification | [`../TODO.md`](../TODO.md) |
 
 `app_registry.py` is the only code-owned supported-app identity and ordering table. Setup definitions,
@@ -230,12 +231,23 @@ Socket integrations use loopback newline-delimited JSON. A client hello identifi
 code version, host information where available, and process. A daemon frame contains `o`, `p`, `z`,
 `op`, `os`, and `zm`, with an optional additive `adv` object. Clients ignore unknown additive keys and
 use safe defaults when keys are absent. There is no separate broker protocol-version field; target
-isolation uses the existing hello app identity.
+isolation uses the existing hello app identity. The broker accepts a client only after a bounded
+UTF-8 JSON hello declares `type=hello`, a canonical broker-owned app ID, a non-empty version, and a
+non-negative integer process ID. Malformed and unsupported handshakes are closed before they enter
+the client set and become a visible degraded-health detail.
 
 `adv` is the complete additive profile for the frame target. The daemon runtime is authoritative for
 the delivered navigation mode; host-local mode state must not compete with it.
 
 Transport, setup, reload, and host-thread details belong in the matching [`apps/`](apps/) guide.
+
+Host add-in payload installation is an exact, recoverable replacement rather than an overlay copy.
+Every file or directory in one logical destination group is staged beside its destination and
+byte-validated before any installed copy moves. The group then swaps under one process lock; a
+failure rolls every changed destination back. Fixed sibling backup and staging names let the next
+setup run recover an interrupted swap, and exact directory replacement removes files retired from
+the bundled payload. Installers continue across independent host versions or projects and report
+each destination that could not be updated.
 
 ### Direct transports
 
@@ -303,7 +315,20 @@ supported host as a side effect.
 
 Shutdown and failure paths release binding-owned state, provider-held controls, and pointer-button
 ownership before transports disappear. Reloading a profile or replacing an owner follows the same
-release-first rule.
+release-first rule. Startup owns its partial-failure cleanup: any exception at a UI, tray,
+discovery-file, broker, direct-driver, add-in-update, BLE, or mainloop boundary runs the same
+idempotent release-first shutdown, and one cleanup failure cannot prevent later owners from stopping.
+Publishing the add-on discovery file is a required startup step rather than a swallowed best-effort
+write. BLE connection state is visible in the main status row and tray; normalized input-provider
+health is visible with its binding source.
+
+Long-lived navigation services publish one immutable health value with a current detail. The shared
+states are `disabled` for a gated or stopped owner, `waiting` for a running owner awaiting its host
+or client, `healthy` for an operational connection, `degraded` for a recoverable transport or
+protocol fault, and `failed` when the owner cannot provide its service without a retry or corrective
+action. The navigation broker has a global row; SolidWorks, AutoCAD, and Onshape report through
+their 3D Apps rows. The tray summarizes the highest-severity non-disabled state. A fault detail
+remains visible until a later meaningful lifecycle or connection transition replaces it.
 
 One host operation failure should be logged and skip that operation without blanking a view,
 terminating the BLE stream, or disconnecting unrelated integrations. Document/view/pivot/cursor

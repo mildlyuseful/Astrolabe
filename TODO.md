@@ -4,13 +4,6 @@ This is the sole ledger for unresolved engineering, verification, parity, and re
 Current cross-component contracts live in [`docs/architecture.md`](docs/architecture.md); completed
 plans, dated evidence, and implementation history belong under [`archive/`](archive/).
 
-## P0 — Current correctness and state-safety defects
-
-- Live-test the bundled AutoCAD v0.3.20 split viewport fix in 2D Wireframe: the Model tab must retain
-  its v0.3.18 CVPORT/VPORT path with cursor pivots and stable rendering, floating layout viewports must
-  retain their v0.3.19 entity-backed commits, and transitions through Paper space must not demote the
-  GraphicsSystem session.
-
 ## P1 — Production and release blockers
 
 ### Production hardware
@@ -30,28 +23,10 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
   validates the protocol boundary and the completed SuperMini PMW3610 loop validates the five-way
   prototype; neither qualifies the final product hardware.
 
-### Build and artifact integrity
-
-- Compile `firmware/PMW3610/PMW3610.ino` and `firmware/XIAO3389/XIAO3389.ino` in CI with pinned
-  board-core and library versions; report artifact size. Add a pinned `west` build when the ZMK
-  module begins.
-- Build the sdist and wheel in CI, install the wheel outside the checkout, and run binding validation
-  and release smoke against the installed package.
-- Produce a deterministic archive of the complete Nuitka onedir output and publish its checksum. The
-  executable hash alone does not authenticate bundled DLLs, schemas, defaults, or host add-ins.
-- Make host add-in install/update transactional: stage and validate payloads, swap with a recoverable
-  backup, remove obsolete files, report per-destination results, and test interrupted updates.
-- Add a whole-application startup/shutdown smoke with deterministic transport, UI, tray, filesystem,
-  and host-driver fakes. Verify cleanup after every startup-stage failure and while controls are held.
-- Surface broker, discovery-file, BLE, Raw Input, SolidWorks, AutoCAD, Onshape, and add-on protocol
-  health instead of allowing silent startup or connection failures.
-
 ### Release qualification
 
 - Exercise the exact release wheel and onedir GUI on a clean Windows account without Python or a
   source checkout.
-- Establish a dependency lock and generate a CycloneDX or SPDX SBOM from the actual release
-  environment. Reconcile `requirements.txt` with package extras.
 - Add the project license, bundled-component notices, complete package metadata, vulnerability
   reporting instructions, and release notes before publishing an alpha.
 - Authenticode-sign the daemon, eventual installer/updater, and bundled AutoCAD DLL with one

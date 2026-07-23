@@ -88,6 +88,7 @@ import threading
 import time
 
 from .config import orbit_pivot_candidates
+from .service_health import ServiceHealth, ServiceHealthState
 from .util import get_logger
 
 # pywin32 is Windows-only and optional. Import guarded so the daemon still runs (with this
@@ -259,9 +260,12 @@ class SolidWorksDriver:
     """Accumulates routed nav deltas and applies them to a live SolidWorks view from a
     CoInitialized worker thread at a fixed rate."""
 
-    def __init__(self, on_connection_changed=None, rate_hz=DEFAULT_FLUSH_HZ):
+    def __init__(self, on_connection_changed=None, rate_hz=DEFAULT_FLUSH_HZ,
+                 on_health_changed=None):
         self.on_connection_changed = on_connection_changed   # callback(connected: bool, version: str)
+        self.on_health_changed = on_health_changed
         self._lock = threading.Lock()
+        self._health_lock = threading.Lock()
         self._acc = [0.0] * 6
         self._stop = threading.Event()
         self._enabled = threading.Event()                    # explicit setup/Enabled gate
@@ -271,6 +275,9 @@ class SolidWorksDriver:
         self._version = ""
         self._log = get_logger()
         self._warned = set()                                  # one-time logs for failing ops
+        self._health = ServiceHealth(
+            "solidworks", ServiceHealthState.DISABLED, "integration is disabled")
+        self._publish_health(self._health)
         # Control scheme (orbit pivot / orbit style / zoom mode), set live via set_scheme. Mirrors
         # NavBroker; a dict ref-swap is atomic, so the worker reads it lock-free each flush.
         self._scheme = {"op": "screen_center", "os": "free", "zm": "to_center", "sel_override": True}
@@ -392,32 +399,79 @@ class SolidWorksDriver:
     def version(self):
         return self._version
 
+    def health(self):
+        with self._health_lock:
+            return self._health
+
+    def _set_health(self, state, detail):
+        health = ServiceHealth("solidworks", state, detail)
+        with self._health_lock:
+            if health == self._health:
+                return
+            self._health = health
+        self._publish_health(health)
+
+    def _publish_health(self, health):
+        if self.on_health_changed:
+            try:
+                self.on_health_changed(health)
+            except Exception:
+                pass
+
     # --- lifecycle -----------------------------------------------------------------------
     def start(self):
         if not _PYWIN32:
             self._log.info("solidworks: pywin32 not available; COM driver disabled")
+            self._set_health(
+                ServiceHealthState.FAILED,
+                "pywin32 is unavailable; reinstall the Windows runtime",
+            )
             return
         if self._thread is not None:
             return
+        if self._enabled.is_set():
+            self._set_health(
+                ServiceHealthState.WAITING,
+                "waiting for a running SOLIDWORKS instance",
+            )
         self._thread = threading.Thread(target=self._run, name="solidworks-driver", daemon=True)
         self._thread.start()
 
     def stop(self):
         self._stop.set()
+        self._set_health(ServiceHealthState.DISABLED, "driver stopped")
 
     def set_enabled(self, enabled):
         """Gate COM attachment behind the app's explicit Enabled/setup state."""
         if enabled:
             self._enabled.set()
+            if self._connected:
+                self._set_health(
+                    ServiceHealthState.HEALTHY,
+                    f"connected to SOLIDWORKS {self._version or 'COM'}",
+                )
+            else:
+                self._set_health(
+                    ServiceHealthState.WAITING,
+                    "waiting for a running SOLIDWORKS instance",
+                )
         else:
             self._enabled.clear()
+            self._set_health(ServiceHealthState.DISABLED, "integration is disabled")
 
     # --- worker thread (owns COM) --------------------------------------------------------
     def _run(self):
-        pythoncom.CoInitialize()
-        self._make_thread_dpi_aware()               # so GetCursorPos/ScreenToClient return PHYSICAL
-        last_attach = 0.0
         try:
+            pythoncom.CoInitialize()
+        except Exception as exc:
+            self._set_health(
+                ServiceHealthState.FAILED,
+                f"could not initialize the SOLIDWORKS COM worker: {exc}",
+            )
+            return
+        try:
+            self._make_thread_dpi_aware()           # cursor APIs must return PHYSICAL coordinates
+            last_attach = 0.0
             while not self._stop.is_set():
                 cycle_start = time.monotonic()
                 period = self._period               # re-read each loop so set_rate() applies live
@@ -444,13 +498,19 @@ class SolidWorksDriver:
                 if has:
                     try:
                         self._flush(delta)
-                    except Exception:
+                    except Exception as exc:
                         # SolidWorks closed / COM handle dropped -> disconnect, re-attach later.
-                        self._handle_drop()
+                        self._handle_drop(f"COM navigation failed: {exc}")
                 self._sleep_remainder(cycle_start, period)
+        except Exception as exc:
+            self._set_health(
+                ServiceHealthState.FAILED,
+                f"SOLIDWORKS worker stopped unexpectedly: {exc}",
+            )
         finally:
             self._swApp = None
             self._mathUtil = None
+            self._set_connected(False)
             pythoncom.CoUninitialize()
 
     def _sleep_remainder(self, cycle_start, period):
@@ -481,6 +541,10 @@ class SolidWorksDriver:
         except Exception:
             self._version = "COM"
         self._set_connected(True)
+        self._set_health(
+            ServiceHealthState.HEALTHY,
+            f"connected to SOLIDWORKS {self._version}",
+        )
         self._log.info(f"solidworks: attached to running instance (v{self._version})")
         return True
 
@@ -534,7 +598,7 @@ class SolidWorksDriver:
                                       [float(x), float(y), float(z)])
         return self._mathUtil.CreateVector(arr)
 
-    def _handle_drop(self):
+    def _handle_drop(self, detail=None):
         if self._connected:
             self._log.info("solidworks: lost COM connection (app or document closed)")
         self._swApp = None
@@ -543,6 +607,17 @@ class SolidWorksDriver:
         self._selection_cache = (None, 0.0, None)
         self._invalidate_view()
         self._set_connected(False)
+        if self._enabled.is_set():
+            if detail:
+                self._set_health(
+                    ServiceHealthState.DEGRADED,
+                    f"{detail}; retrying attachment",
+                )
+            else:
+                self._set_health(
+                    ServiceHealthState.WAITING,
+                    "SOLIDWORKS connection closed; waiting to reattach",
+                )
 
     def _invalidate_view(self):
         """Drop the cached view handles + tracked state so the next flush re-fetches them."""

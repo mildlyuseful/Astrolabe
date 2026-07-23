@@ -21,21 +21,134 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: "3.9"
-          cache: pip
+
+      - name: Set up pinned uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.28"
+          enable-cache: true
 
       - name: Set up .NET
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: "8.0.x"
 
-      - name: Install Python package and test runner
-        run: python -m pip install -e .[dev]
+      - name: Synchronize locked Python environment
+        run: uv sync --locked --all-extras --python 3.9
 
       - name: Compile Python sources
-        run: python -m compileall -q trackball_daemon tests
+        run: uv run --locked --all-extras python -m compileall -q trackball_daemon tests
 
       - name: Run Python suite
-        run: python -m pytest -q
+        run: uv run --locked --all-extras python -m pytest -q
 
       - name: Run AutoCAD NavMath console suite
         run: dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj --configuration Release
+
+      - name: Build sdist and wheel
+        run: uv build --out-dir build/ci-python
+
+      - name: Export locked runtime requirements
+        run: uv export --locked --no-dev --extra onshape --no-emit-project --format requirements.txt --output-file build/ci-python/runtime-requirements.txt
+
+      - name: Install and smoke-test the wheel outside the checkout
+        shell: pwsh
+        run: |
+          $Wheel = (Get-ChildItem build/ci-python/*.whl | Select-Object -First 1).FullName
+          if (-not $Wheel) { throw "Built wheel was not found." }
+          $Requirements = (Resolve-Path build/ci-python/runtime-requirements.txt).Path
+          $SbomTool = (Resolve-Path .venv/Scripts/cyclonedx-py.exe).Path
+          $FinalizeSbom = (Resolve-Path tools/finalize_sbom.py).Path
+          $Pyproject = (Resolve-Path pyproject.toml).Path
+          $Sbom = (Join-Path (Resolve-Path build/ci-python).Path "runtime.cdx.json")
+          $Venv = Join-Path $env:RUNNER_TEMP "astrolabe-wheel-smoke"
+          python -m venv $Venv
+          if ($LASTEXITCODE -ne 0) { throw "Wheel smoke environment creation failed." }
+          & "$Venv\Scripts\python.exe" -m pip install --require-hashes -r $Requirements
+          if ($LASTEXITCODE -ne 0) { throw "Locked runtime dependency install failed." }
+          & "$Venv\Scripts\python.exe" -m pip install --no-deps $Wheel
+          if ($LASTEXITCODE -ne 0) { throw "Wheel installation failed." }
+          Push-Location $env:RUNNER_TEMP
+          try {
+            & "$Venv\Scripts\python.exe" -m trackball_daemon --release-smoke
+            if ($LASTEXITCODE -ne 0) { throw "Installed wheel release smoke failed." }
+            & "$Venv\Scripts\python.exe" -m trackball_daemon.validate_bindings
+            if ($LASTEXITCODE -ne 0) { throw "Installed wheel binding validation failed." }
+            & $SbomTool environment "$Venv\Scripts\python.exe" --pyproject $Pyproject `
+              --mc-type application --spec-version 1.6 --output-format JSON `
+              --output-reproducible --output-file $Sbom
+            if ($LASTEXITCODE -ne 0) { throw "Installed wheel SBOM generation failed." }
+            $InstalledVersion = (& "$Venv\Scripts\python.exe" -c `
+              "from importlib.metadata import version; print(version('trackball-daemon'))").Trim()
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($InstalledVersion)) {
+              throw "Installed wheel version could not be resolved."
+            }
+            & "$Venv\Scripts\python.exe" $FinalizeSbom --sbom $Sbom `
+              --name "trackball-daemon" --version $InstalledVersion
+            if ($LASTEXITCODE -ne 0) { throw "Installed wheel SBOM metadata finalization failed." }
+          }
+          finally {
+            Pop-Location
+          }
+
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ARDUINO_DIRECTORIES_USER: ${{ runner.temp }}/astrolabe-arduino-sketchbook
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install pinned Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
+        with:
+          version: "1.5.0"
+
+      - name: Install pinned validation board cores
+        env:
+          NRF_MICRO_INDEX: https://raw.githubusercontent.com/pdcook/nRFMicro-Arduino-Core/3dab6477754d9b28053fe36b06c718cde6e93d3f/package_nRFMicro_index.json
+          SEEED_INDEX: https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
+        run: |
+          mkdir -p "$ARDUINO_DIRECTORIES_USER"
+          INDEXES="$NRF_MICRO_INDEX,$SEEED_INDEX"
+          arduino-cli core update-index --additional-urls "$INDEXES"
+          arduino-cli core install "nRFMicro-like-Boards:nrf52@1.0.0" --additional-urls "$INDEXES"
+          arduino-cli core install "Seeeduino:nrf52@1.1.12" --additional-urls "$INDEXES"
+
+      - name: Compile SuperMini PMW3610 validation firmware
+        run: |
+          arduino-cli compile \
+            --fqbn "nRFMicro-like-Boards:nrf52:supermini:softdevice=s140v6,debug=l0" \
+            --warnings all \
+            --output-dir build/firmware/PMW3610 \
+            firmware/PMW3610
+
+      - name: Compile XIAO PMW3389 protocol-bench firmware
+        run: |
+          arduino-cli compile \
+            --fqbn "Seeeduino:nrf52:xiaonRF52840:softdevice=s140v6,debug=l0" \
+            --warnings all \
+            --output-dir build/firmware/XIAO3389 \
+            firmware/XIAO3389
+
+      - name: Report firmware artifact sizes
+        shell: bash
+        run: |
+          {
+            echo "### Validation firmware artifacts"
+            echo
+            echo "| Artifact | Bytes |"
+            echo "|---|---:|"
+            while IFS= read -r file; do
+              printf '| `%s` | %s |\n' "$file" "$(stat --format=%s "$file")"
+            done < <(find build/firmware -type f \( -name '*.bin' -o -name '*.elf' -o -name '*.hex' -o -name '*.uf2' \) | sort)
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain validation firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-firmware
+          path: build/firmware
+          if-no-files-found: error

@@ -253,6 +253,10 @@ does not manufacture a transition, and the straight-up/down singularity is skipp
   optional pointer userscript is required only for Under Cursor orbit/To Cursor zoom (§8.14).
 - `integrations.setup_onshape` generates the cert and returns the exact trust steps; it never
   installs into a trust store on its own.
+- Browsers may open and abandon auxiliary TLS sockets while one controller remains subscribed.
+  Only an explicit TLS certificate alert can report rejected trust, and it cannot demote an already
+  healthy controller. EOFs, resets, and wrong-protocol probes are ignored; a normal WebSocket close
+  returns the bridge to waiting for a reconnect.
 
 ---
 
@@ -273,7 +277,9 @@ different layout and is not authority for Onshape.
 and its connected controller explicitly reports viewport focus. Browser titles are not reliable
 Onshape identifiers. A WAMP focus transition forces the foreground monitor to re-resolve context
 even while the browser process and ball are stationary, keeping Onshape-scoped bindings, HUD state,
-mapping, and delivery aligned. Connection or subscription alone never grants Onshape context.
+mapping, delivery, and the 3D Apps active row aligned. A background tab may keep its transport
+subscribed and healthy, but connection or subscription alone never grants Onshape context or an
+active status.
 
 ### 8.3 Write `view.affine` on every motion frame
 
@@ -445,5 +451,6 @@ the daemon-side bridge. Current live qualification is tracked only in [`TODO.md`
   Onshape is not in `_ADDINS`; there is no host add-in to copy or auto-update.
 - `ui.py` — generated 3D Apps and Per-App surfaces through the generic no-add-in setup path.
 - `winfocus.py` — read-only foreground process query used by `app_registry` context resolution.
-- `requirements.txt` — `cryptography` (win32 marker; recommended-but-optional, openssl is the
-  fallback). The WSS server itself is stdlib-only (`ssl` + hand-rolled WebSocket).
+- `pyproject.toml` — the `onshape` extra supplies `cryptography` on Windows; `openssl` is the
+  certificate-generation fallback. The WSS server itself is stdlib-only (`ssl` + hand-rolled
+  WebSocket).

@@ -1,6 +1,7 @@
 """Protocol and resource-boundary tests for the local Onshape WebSocket server."""
 import base64
 import json
+import ssl
 import struct
 
 import pytest
@@ -279,6 +280,58 @@ def test_valid_websocket_upgrade_selects_wamp():
     assert response.startswith(b"HTTP/1.1 101")
     assert b"Sec-WebSocket-Protocol: wamp" in response
     assert sock.timeouts == [10.0, 1.0]
+
+
+def test_tls_health_requires_explicit_certificate_alert_and_never_demotes_connection():
+    assert ob._tls_certificate_rejected(
+        ssl.SSLError("[SSL: TLSV1_ALERT_UNKNOWN_CA] tlsv1 alert unknown ca"))
+    assert not ob._tls_certificate_rejected(
+        ssl.SSLEOFError("EOF occurred in violation of protocol"))
+
+    health = []
+    bridge = ob.OnshapeBridge(on_health_changed=health.append)
+    bridge._enabled.set()
+    bridge._connected = True
+    bridge._set_health(
+        ob.ServiceHealthState.HEALTHY,
+        "Onshape controller connected",
+    )
+
+    class Raw:
+        closed = False
+
+        def settimeout(self, _timeout):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    class Context:
+        @staticmethod
+        def wrap_socket(_raw, server_side):
+            assert server_side is True
+            raise ssl.SSLError(
+                "[SSL: TLSV1_ALERT_UNKNOWN_CA] tlsv1 alert unknown ca")
+
+    raw = Raw()
+    bridge._handle_raw(raw, Context())
+
+    assert raw.closed
+    assert health[-1].state is ob.ServiceHealthState.HEALTHY
+
+
+def test_normal_onshape_controller_close_returns_to_waiting_health():
+    health = []
+    bridge = ob.OnshapeBridge(on_health_changed=health.append)
+    bridge._enabled.set()
+    conn = ob._OnshapeConn(bridge, FakeSocket(b""))
+    bridge._conn = conn
+    bridge._connected = True
+
+    bridge._on_conn_closed(conn, "client WebSocket close 1001")
+
+    assert health[-1].state is ob.ServiceHealthState.WAITING
+    assert "waiting for reconnect" in health[-1].detail
 
 
 def test_subscription_without_focus_update_waits_for_explicit_viewport_focus():
