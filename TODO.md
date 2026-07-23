@@ -42,9 +42,6 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 - Compile `firmware/PMW3610/PMW3610.ino` and `firmware/XIAO3389/XIAO3389.ino` in CI with pinned
   board-core and library versions; report artifact size. Add a pinned `west` build when the ZMK
   module begins.
-- Make `tools/build_autocad_plugin.ps1` the sole publisher of the bundled AutoCAD DLL and provenance
-  manifest. A bare Release build currently overwrites them with an intentionally fail-closed minimal
-  manifest; gate or remove that project target in the next attributed plugin-source commit.
 - Build the sdist and wheel in CI, install the wheel outside the checkout, and run binding validation
   and release smoke against the installed package.
 - Produce a deterministic archive of the complete Nuitka onedir output and publish its checksum. The

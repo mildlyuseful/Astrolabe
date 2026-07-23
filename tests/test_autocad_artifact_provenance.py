@@ -40,6 +40,12 @@ def test_controlled_autocad_build_injects_and_checks_provenance():
     assert "Get-FileHash -Algorithm SHA256" in script
 
 
+def test_bare_release_build_cannot_publish_the_bundled_artifact():
+    project = ET.parse(PLUGIN_SOURCE / "TrackballNavAcad.csproj").getroot()
+
+    assert project.find("./Target[@Name='CopyToPlugins']") is None
+
+
 def test_autocad_artifact_verifier_accepts_the_checked_in_bundle():
     manifest = json.loads((BUNDLE / "version.json").read_text(encoding="utf-8"))
     result = subprocess.run(

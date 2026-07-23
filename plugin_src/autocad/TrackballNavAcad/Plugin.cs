@@ -41,7 +41,7 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.16";  // keep in sync with bundled version metadata
+        public const string PluginVersion = "0.3.17";  // keep in sync with bundled version metadata
         const string BrokerHost = "127.0.0.1";
 
         // Host baseline moved to daemon config v6; plugin camera math is deliberately neutral.
@@ -622,13 +622,23 @@ namespace TrackballNav
                         }
                     }
                 }
+                // A PointMonitor world point is useful only when it has a simultaneous physical
+                // screen-pixel owner. Without that owner a later gesture cannot distinguish a
+                // current ray from a silent stale cache, so fail closed and wait for a fresh event.
+                if (!GetCursorPos(out _ptrScreen))
+                {
+                    _ptrValid = false;
+                    _ptrOnEntity = false;
+                    _ptrScreenValid = false;
+                    return;
+                }
                 if (!_ptrValid)
                     Log($"pointer: first cursor point cached ({pt.X:0.###},{pt.Y:0.###},{pt.Z:0.###})"
                         + (onEntity ? " (entity)" : " (plane)"));
                 _ptrPoint = pt;
                 _ptrOnEntity = onEntity;
                 _ptrValid = true;
-                _ptrScreenValid = GetCursorPos(out _ptrScreen);
+                _ptrScreenValid = true;
                 _ptrAt = DateTime.UtcNow;
             }
             catch (System.Exception ex) { LogOnce("pm-handler", ex); }
@@ -794,8 +804,9 @@ namespace TrackballNav
                 LogRL("ptr-none", "pointer pivot: no cursor point cached yet -> next candidate");
                 return null;
             }
-            if (_ptrScreenValid && GetCursorPos(out var currentScreen)
-                    && (currentScreen.X != _ptrScreen.X || currentScreen.Y != _ptrScreen.Y))
+            if (_ptrScreenValid
+                    && (!GetCursorPos(out var currentScreen)
+                        || currentScreen.X != _ptrScreen.X || currentScreen.Y != _ptrScreen.Y))
             {
                 // PointMonitor can remain silent across an idle physical cursor move. Its WCS
                 // point then still describes the OLD screen ray; expanding that ray makes a
@@ -806,7 +817,8 @@ namespace TrackballNav
                 _ptrOnEntity = false;
                 _ptrScreenValid = false;
                 LogRL("ptr-stale-pixel",
-                      "pointer pivot: cursor moved beyond the cached sample -> next candidate");
+                      "pointer pivot: cached sample no longer owns the current cursor pixel"
+                      + " -> next candidate");
                 return null;
             }
             var p = _ptrPoint;

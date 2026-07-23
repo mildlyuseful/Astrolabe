@@ -165,9 +165,11 @@ def test_autocad_plugin_consumes_advanced_settings_and_all_generic_pivots():
     assert 'case "object":' in source and "CaptureDrawingCenter()" in source
     assert "NavMath.ReprojectScreenSample(_ptrPoint, camBefore, _cam)" in source
     assert "_ptrOnEntity = false;" in source
-    assert "_ptrScreenValid = GetCursorPos(out _ptrScreen);" in source
+    assert "if (!GetCursorPos(out _ptrScreen))" in source
+    assert "_ptrScreenValid = true;" in source
+    assert "!GetCursorPos(out var currentScreen)" in source
     assert "currentScreen.X != _ptrScreen.X || currentScreen.Y != _ptrScreen.Y" in source
-    assert "cursor moved beyond the cached sample -> next candidate" in source
+    assert "cached sample no longer owns the current cursor pixel" in source
     assert "if (hasPan || (hasOrbit && idleMs > orbitHoldMs))" in source
     assert "if (hasOrbit)                                  // next cursor zoom re-captures" in source
     frame_parser = source[source.index("void HandleFrame"):source.index("// --- UI-thread timer")]

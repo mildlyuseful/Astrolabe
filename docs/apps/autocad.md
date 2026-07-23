@@ -64,14 +64,15 @@ A locked installed DLL is staged and applied on a later AutoCAD start. Plugin so
 new build and an AutoCAD restart; daemon loader changes require a daemon restart. Keep the project
 version, `Plugin.PluginVersion`, bundled DLL, and manifest synchronized.
 
-Build a shippable DLL with `tools/build_autocad_plugin.ps1`, not a bare Release build. The controlled
-build refuses modified or untracked plugin sources, injects an existing full source revision into the
-assembly informational version, and records the plugin source-tree ID, DLL hash, target framework,
-.NET SDK, and exact AutoCAD managed-reference versions and hashes in `version.json`. The artifact
-commit can follow the recorded source revision; requiring a binary to name the commit that contains
-that same binary would be circular. `tools/verify_autocad_artifact.py` and the source-checkout Python
-suite fail when current plugin source no longer matches the manifest. Packaged release smoke has no
-Git checkout to compare; it validates the DLL bytes and the manifest's intrinsic provenance instead.
+Build a shippable DLL with `tools/build_autocad_plugin.ps1`. A bare Release build compiles only to the
+project output and cannot modify the bundled DLL or manifest. The controlled build refuses modified
+or untracked plugin sources, injects an existing full source revision into the assembly informational
+version, and records the plugin source-tree ID, DLL hash, target framework, .NET SDK, and exact
+AutoCAD managed-reference versions and hashes in `version.json`. The artifact commit can follow the
+recorded source revision; requiring a binary to name the commit that contains that same binary would
+be circular. `tools/verify_autocad_artifact.py` and the source-checkout Python suite fail when current
+plugin source no longer matches the manifest. Packaged release smoke has no Git checkout to compare;
+it validates the DLL bytes and the manifest's intrinsic provenance instead.
 
 The production build targets the managed API references for the supported AutoCAD generation. A
 successful compile alone does not establish runtime compatibility with another binary era. The known
