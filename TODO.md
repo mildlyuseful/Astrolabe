@@ -6,10 +6,10 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 
 ## P0 — Current correctness and state-safety defects
 
-- Live-test the bundled AutoCAD v0.3.18 space/fallback fix: a floating layout model viewport must
-  retain full GraphicsSystem navigation, while actual paper space or GraphicsSystem loss must report
-  the limited SetCurrentView capabilities instead of silently substituting view-center behavior or a
-  no-op.
+- Live-test the bundled AutoCAD v0.3.19 viewport-ownership fix in 2D Wireframe: Model-tab and floating
+  layout viewports must persist the post-gesture camera through their respective record/entity APIs,
+  Paper space must pause without `eBadPaperspaceView`, and returning to a floating viewport must
+  restore full GraphicsSystem navigation without `eNotApplicable` or session demotion.
 
 ## P1 — Production and release blockers
 

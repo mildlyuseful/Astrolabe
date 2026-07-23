@@ -51,10 +51,14 @@ profile, and owns the complete GraphicsSystem gesture lifecycle.
 the normalized exact executable identity `acad.exe`; AutoCAD LT and similarly named processes do not
 inherit its runtime context.
 
-AutoCAD space selection uses both `TILEMODE` and `CVPORT`. On a layout, `CVPORT=1` is the paper
-canvas; values above 1 identify Model space inside a floating viewport and remain eligible for the
-full GraphicsSystem path. `TILEMODE=0` alone does not imply Paper space. Actual Paper space and
-genuine GraphicsSystem failure use the `SetCurrentView` fallback.
+AutoCAD space selection uses both `TILEMODE` and `CVPORT`. On a layout, `CVPORT=2` identifies Model
+space inside the active floating viewport and remains eligible for the full GraphicsSystem path;
+other layout values identify Paper space. `TILEMODE=0` alone does not imply Paper space. Actual Paper
+space pauses model-camera navigation; genuine GraphicsSystem loss uses the `SetCurrentView` fallback.
+
+`CVPORT=2` identifies the active floating slot, not a durable viewport owner. The current viewport
+object ID owns the gesture and distinguishes layout `Viewport` entities when the user changes the
+active floating viewport.
 
 ## Setup, update, and reload
 
@@ -122,14 +126,18 @@ multipliers are neutral. Do not compensate in both the host profile and `NavMath
 The 3D visual-style path can commit without a per-frame regeneration. AutoCAD's 2D Wireframe
 presentation uses a separate view-dependent cache, so gesture end must perform this sequence:
 
-1. write the shadow camera into the existing active VPORT record;
-2. immediately call `UpdateTiledViewportsFromDatabase()`;
-3. queue one `_.REGEN` through the plugin's quiescent-state interlock; and
-4. block new GraphicsSystem driving while that regeneration is in flight.
+1. identify the exact current viewport object captured with the gesture;
+2. for a Model-tab viewport, write the shadow camera into its existing VPORT record and immediately
+   call `UpdateTiledViewportsFromDatabase()`;
+3. for a floating layout viewport, write the shadow camera into its `Viewport` entity and update that
+   entity's display without calling either tiled-viewport update method;
+4. queue one `_.REGEN` through the plugin's quiescent-state interlock; and
+5. block new GraphicsSystem driving while that regeneration is in flight.
 
-Do not reorder or split the record write and database reapply. Earlier experiments that recreated the
-VPORT record, left a write unapplied, or overlapped REGEN with an active GS view produced native
-access violations that managed exception handling cannot catch.
+Do not reorder or split a tiled record write and database reapply, and never use a tiled-viewport
+update method for a floating layout viewport. Earlier experiments that recreated the VPORT record,
+left a write unapplied, or overlapped REGEN with an active GS view produced native access violations
+that managed exception handling cannot catch.
 
 ### Keep one camera writer
 
@@ -150,10 +158,12 @@ math.
 
 ### The fallback is deliberately explicit and limited
 
-The `SetCurrentView` fallback supports view-center orbit, pan, and centered Zoom. It cannot preserve
-configured or selection pivots, To Cursor/Object anchoring, or Dolly. On entry, the plugin writes one
-transition message to the AutoCAD command line and log; `TBNAV` reports the cause and limitations.
-Do not silently promote the fallback to full capability or infer Paper space from `TILEMODE` alone.
+When GraphicsSystem is unavailable in Model space, the `SetCurrentView` fallback supports view-center
+orbit, pan, and centered Zoom. It cannot preserve configured or selection pivots, To Cursor/Object
+anchoring, or Dolly. The Paper-space canvas has no active model camera, so navigation pauses there
+instead of calling `SetCurrentView`. On each transition, the plugin writes one message to the AutoCAD
+command line and log; `TBNAV` reports the current cause and limitations. Do not silently promote the
+fallback to full capability or infer Paper space from `TILEMODE` alone.
 
 ### Do not probe against production modules or user drawings
 

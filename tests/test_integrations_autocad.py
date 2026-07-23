@@ -174,6 +174,15 @@ def test_autocad_plugin_consumes_advanced_settings_and_all_generic_pivots():
     assert "if (hasOrbit)                                  // next cursor zoom re-captures" in source
     assert "NavMath.IsModelView(doc.Database.TileMode, vpn)" in source
     assert "EnterFallback(FallbackReason.PaperSpace, doc)" in source
+    assert "doc.Editor.CurrentViewportObjectId" in source
+    assert "_gsViewportId != viewportId" in source
+    assert "return GsApplyResult.Deferred" in source
+    assert "_levelPending |= levelOnEntry" in source
+    assert "dbView is Viewport floating" in source
+    assert "floating.UpdateDisplay()" in source
+    assert "if (isTiled)" in source
+    assert "_fallbackReason != FallbackReason.PaperSpace" in source
+    assert "model-camera navigation is paused" in source
     assert "configured/selection pivots" in source
     assert "To Cursor/Object anchoring" in source
     assert "Dolly are unavailable" in source

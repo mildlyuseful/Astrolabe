@@ -126,7 +126,7 @@ static class Tests
         Check(NavMath.IsModelView(true, 7), "space: tiled Model viewport");
         Check(NavMath.IsModelView(false, 2), "space: floating layout viewport is Model space");
         Check(!NavMath.IsModelView(false, 1), "space: layout canvas is Paper space");
-        Check(NavMath.IsModelView(false, 3), "space: additional floating viewport is Model space");
+        Check(!NavMath.IsModelView(false, 3), "space: non-model layout CVPORT is Paper space");
 
         BrokerPortDiscovery();
 
