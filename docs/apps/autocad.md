@@ -51,6 +51,11 @@ profile, and owns the complete GraphicsSystem gesture lifecycle.
 the normalized exact executable identity `acad.exe`; AutoCAD LT and similarly named processes do not
 inherit its runtime context.
 
+AutoCAD space selection uses both `TILEMODE` and `CVPORT`. On a layout, `CVPORT=1` is the paper
+canvas; values above 1 identify Model space inside a floating viewport and remain eligible for the
+full GraphicsSystem path. `TILEMODE=0` alone does not imply Paper space. Actual Paper space and
+genuine GraphicsSystem failure use the `SetCurrentView` fallback.
+
 ## Setup, update, and reload
 
 Settings → **3D Apps → AutoCAD → Set up**:
@@ -142,6 +147,13 @@ math.
   AutoCAD's command/quiescent state.
 - Motion in 3D styles but not 2D Wireframe: inspect the VPORT commit and regeneration interlock before
   changing camera math.
+
+### The fallback is deliberately explicit and limited
+
+The `SetCurrentView` fallback supports view-center orbit, pan, and centered Zoom. It cannot preserve
+configured or selection pivots, To Cursor/Object anchoring, or Dolly. On entry, the plugin writes one
+transition message to the AutoCAD command line and log; `TBNAV` reports the cause and limitations.
+Do not silently promote the fallback to full capability or infer Paper space from `TILEMODE` alone.
 
 ### Do not probe against production modules or user drawings
 

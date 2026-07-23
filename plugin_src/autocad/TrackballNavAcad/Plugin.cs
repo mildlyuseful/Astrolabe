@@ -41,7 +41,7 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.17";  // keep in sync with bundled version metadata
+        public const string PluginVersion = "0.3.18";  // keep in sync with bundled version metadata
         const string BrokerHost = "127.0.0.1";
 
         // Host baseline moved to daemon config v6; plugin camera math is deliberately neutral.
@@ -99,6 +99,14 @@ namespace TrackballNav
         DateTime _regenFiredAt;
         Document _regenWatchDoc;
         static volatile bool s_gsBroken;   // any GS failure -> legacy transport for the session
+        enum FallbackReason
+        {
+            None,
+            PaperSpace,
+            GraphicsSystemUnavailable,
+            GraphicsSystemFailed,
+        }
+        FallbackReason _fallbackReason;
         static Plugin s_instance;          // the one IExtensionApplication (for diagnostics)
 
         // --- the live cursor cache (half A of the "cursor" pivot; UI thread only ----------------
@@ -168,9 +176,10 @@ namespace TrackballNav
                 ptr = $"({inst._ptrPoint.X:0.##},{inst._ptrPoint.Y:0.##},{inst._ptrPoint.Z:0.##}) " +
                       $"{(DateTime.UtcNow - inst._ptrAt).TotalSeconds:0.0}s ago";
             var doc = AcadApp.DocumentManager.MdiActiveDocument;
+            string transport = inst?.TransportStatus(doc) ?? "not initialized";
             doc?.Editor.WriteMessage(
                 $"\nTrackballNav v{PluginVersion}: broker={(s_instanceConnected ? "connected" : "not connected")}, " +
-                $"transport={(s_gsBroken ? "legacy SetCurrentView (GS failed)" : "GS '3D Drawing' kernel (regen-free)")}, " +
+                $"transport={transport}, " +
                 $"frames applied={Interlocked.Read(ref _framesApplied)}, " +
                 $"gestures committed={Interlocked.Read(ref _gesturesCommitted)}, " +
                 $"pointer={ptr}, log={_log}\n");
@@ -526,9 +535,14 @@ namespace TrackballNav
                 double idleMs = _gsActive
                     ? (DateTime.UtcNow - _lastFrameAt).TotalMilliseconds
                     : double.PositiveInfinity;
-                if (s_gsBroken || !TryApplyGs(doc, delta, style, opv, zmv, zoomStyle, selectionOverrides,
-                                              pivotCandidates, idleMs, pivotHoldMs, zoomHoldMs,
-                                              levelOnEntry))
+                bool appliedGs = false;
+                if (s_gsBroken)
+                    EnterFallback(FallbackReason.GraphicsSystemFailed, doc);
+                else
+                    appliedGs = TryApplyGs(doc, delta, style, opv, zmv, zoomStyle,
+                                           selectionOverrides, pivotCandidates, idleMs,
+                                           pivotHoldMs, zoomHoldMs, levelOnEntry);
+                if (!appliedGs)
                     Apply(doc, delta, style, levelOnEntry, zoomStyle); // legacy fallback (regens per frame;
                                                        // no pointer pivot -- view-centre orbit)
                 _lastFrameAt = DateTime.UtcNow;
@@ -555,6 +569,75 @@ namespace TrackballNav
                 return;
             s_rl[key] = now;
             Log(msg);
+        }
+
+        const string FallbackCapabilities =
+            "view-centre orbit, pan, and centred Zoom remain available; configured/selection pivots, " +
+            "To Cursor/Object anchoring, and Dolly are unavailable";
+
+        static string FallbackCause(FallbackReason reason)
+        {
+            return reason switch
+            {
+                FallbackReason.PaperSpace => "actual paper space is active",
+                FallbackReason.GraphicsSystemUnavailable =>
+                    "no live 3D GraphicsSystem view is available",
+                FallbackReason.GraphicsSystemFailed =>
+                    "GraphicsSystem failed for this AutoCAD session",
+                _ => "the full GraphicsSystem path is available",
+            };
+        }
+
+        string TransportStatus(Document doc)
+        {
+            if (s_gsBroken)
+                return $"limited SetCurrentView ({FallbackCause(FallbackReason.GraphicsSystemFailed)}; " +
+                       $"{FallbackCapabilities})";
+            if (doc == null)
+                return "no active document";
+            try
+            {
+                int vpn = Convert.ToInt32(AcadApp.GetSystemVariable("CVPORT"));
+                if (!NavMath.IsModelView(doc.Database.TileMode, vpn))
+                    return $"limited SetCurrentView ({FallbackCause(FallbackReason.PaperSpace)}; " +
+                           $"{FallbackCapabilities})";
+                if (vpn < 2 || _fallbackReason == FallbackReason.GraphicsSystemUnavailable)
+                    return $"limited SetCurrentView (" +
+                           $"{FallbackCause(FallbackReason.GraphicsSystemUnavailable)}; " +
+                           $"{FallbackCapabilities})";
+            }
+            catch (System.Exception ex)
+            {
+                LogOnce("transport-status", ex);
+                return "unknown (status query failed)";
+            }
+            return "GS '3D Drawing' kernel (full navigation)";
+        }
+
+        void EnterFallback(FallbackReason reason, Document doc)
+        {
+            if (_fallbackReason == reason)
+                return;
+
+            var previous = _fallbackReason;
+            if (reason != FallbackReason.None && _gsActive)
+                EndGesture(commit: true);
+            _fallbackReason = reason;
+
+            string message;
+            if (reason == FallbackReason.None)
+            {
+                if (previous == FallbackReason.None)
+                    return;
+                message = "TrackballNav: full GraphicsSystem navigation restored.";
+            }
+            else
+            {
+                message = $"TrackballNav: limited fallback because {FallbackCause(reason)}; " +
+                          $"{FallbackCapabilities}.";
+            }
+            try { doc?.Editor.WriteMessage($"\n{message}\n"); } catch { }
+            Log(message);
         }
 
         // --- half A of the "cursor" pivot: the live cursor point via Editor.PointMonitor --------
@@ -908,11 +991,17 @@ namespace TrackballNav
         {
             try
             {
-                if (!doc.Database.TileMode)
-                    return false;                      // paper space -> legacy path
                 int vpn = Convert.ToInt32(AcadApp.GetSystemVariable("CVPORT"));
-                if (vpn < 2)
+                if (!NavMath.IsModelView(doc.Database.TileMode, vpn))
+                {
+                    EnterFallback(FallbackReason.PaperSpace, doc);
                     return false;
+                }
+                if (vpn < 2)
+                {
+                    EnterFallback(FallbackReason.GraphicsSystemUnavailable, doc);
+                    return false;
+                }
                 if (_gsActive && (!ReferenceEquals(_gsDoc, doc) || _gsVpn != vpn))
                     EndGesture(commit: true);          // doc/viewport switched mid-stream
                 if (!_gsActive)
@@ -922,7 +1011,10 @@ namespace TrackballNav
                     desc.addRequirement(AcUnique.Intern("3D Drawing"));
                     var v = gm.ObtainAcGsView(vpn, desc);
                     if (v == null)
+                    {
+                        EnterFallback(FallbackReason.GraphicsSystemUnavailable, doc);
                         return false;                  // no live kernel view -> legacy
+                    }
                     gm.SetViewFromViewport(v, vpn);    // seed with the on-screen camera
                     try { v.BeginInteractivity(60.0); } catch { }
                     _gsView = v; _gsVpn = vpn; _gsDoc = doc; _gsActive = true;
@@ -946,6 +1038,7 @@ namespace TrackballNav
                         LogOnce("gs-clobber",
                                 new System.Exception("GS view externally reset mid-gesture (self-healed from shadow)"));
                 }
+                EnterFallback(FallbackReason.None, doc);
                 // Resolve held orbit/zoom pivots once per gesture (capture once, then hold).
                 bool hasOrbit = d[0] != 0 || d[1] != 0 || d[2] != 0;
                 bool hasPan = d[3] != 0 || d[4] != 0;
@@ -1021,6 +1114,7 @@ namespace TrackballNav
                 LogOnce("gs-apply", ex);
                 s_gsBroken = true;
                 EndGesture(commit: false);
+                EnterFallback(FallbackReason.GraphicsSystemFailed, doc);
                 return false;
             }
         }

@@ -172,6 +172,11 @@ def test_autocad_plugin_consumes_advanced_settings_and_all_generic_pivots():
     assert "cached sample no longer owns the current cursor pixel" in source
     assert "if (hasPan || (hasOrbit && idleMs > orbitHoldMs))" in source
     assert "if (hasOrbit)                                  // next cursor zoom re-captures" in source
+    assert "NavMath.IsModelView(doc.Database.TileMode, vpn)" in source
+    assert "EnterFallback(FallbackReason.PaperSpace, doc)" in source
+    assert "configured/selection pivots" in source
+    assert "To Cursor/Object anchoring" in source
+    assert "Dolly are unavailable" in source
     frame_parser = source[source.index("void HandleFrame"):source.index("// --- UI-thread timer")]
     assert "_horizonFixed = fixedHorizon" in frame_parser
     assert "_levelPending = true" in frame_parser

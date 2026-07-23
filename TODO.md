@@ -6,9 +6,10 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 
 ## P0 — Current correctness and state-safety defects
 
-- Make AutoCAD paper-space/GraphicsSystem fallback capability loss explicit. Preserve cursor-pivot and
-  Dolly semantics, dynamically suppress unavailable choices, or surface a clear degraded-state
-  diagnostic instead of silently substituting view-center orbit or a no-op.
+- Live-test the bundled AutoCAD v0.3.18 space/fallback fix: a floating layout model viewport must
+  retain full GraphicsSystem navigation, while actual paper space or GraphicsSystem loss must report
+  the limited SetCurrentView capabilities instead of silently substituting view-center behavior or a
+  no-op.
 
 ## P1 — Production and release blockers
 
