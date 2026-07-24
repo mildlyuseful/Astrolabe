@@ -27,7 +27,14 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 
 - Exercise the exact release wheel and onedir GUI on a clean Windows account without Python or a
   source checkout.
-- Add complete package metadata and release notes before publishing an alpha.
+- Write release notes before publishing an alpha.
+- Migrate the legacy on-disk identity to the frozen product identity in `trackball_daemon/product.py`.
+  The `%APPDATA%\TrackballDaemon` configuration directory, the `TrackballDaemon` HKCU Run value, and
+  the `Local\TrackballDaemon.Controller.v1` mutex are still what is written on disk. Moving them
+  needs a staged, validated configuration copy that keeps the legacy directory for rollback, a Run
+  value that is not left registered under both names, a mutex change that cannot let an old and a
+  new build own the controller at once, and host add-ons that still find a newer daemon after the
+  move.
 - Rename the onedir tree the release ZIP contains. Nuitka names it after the entry script, so
   `Astrolabe-<version>-windows-x64.zip` currently unpacks to a folder called `release_entry.dist`.
   The archive, the executable, and the installer are already named for the product; this last

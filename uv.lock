@@ -19,6 +19,51 @@ wheels = [
 ]
 
 [[package]]
+name = "astrolabe-daemon"
+source = { editable = "." }
+dependencies = [
+    { name = "bleak" },
+    { name = "pillow" },
+    { name = "pystray" },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+]
+
+[package.optional-dependencies]
+debug = [
+    { name = "pygame" },
+    { name = "pyopengl" },
+]
+dev = [
+    { name = "jsonschema", extra = ["format"] },
+    { name = "pytest" },
+]
+onshape = [
+    { name = "cryptography", marker = "sys_platform == 'win32'" },
+]
+release = [
+    { name = "cyclonedx-bom" },
+    { name = "nuitka" },
+    { name = "setuptools" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "bleak", specifier = ">=1.1,<2" },
+    { name = "cryptography", marker = "sys_platform == 'win32' and extra == 'onshape'", specifier = ">=41.0" },
+    { name = "cyclonedx-bom", marker = "extra == 'release'", specifier = "==7.3.0" },
+    { name = "jsonschema", extras = ["format"], marker = "extra == 'dev'" },
+    { name = "nuitka", marker = "extra == 'release'" },
+    { name = "pillow", specifier = ">=10.0.0" },
+    { name = "pygame", marker = "extra == 'debug'", specifier = ">=2.5.0" },
+    { name = "pyopengl", marker = "extra == 'debug'", specifier = ">=3.1.7" },
+    { name = "pystray", specifier = ">=0.19.5" },
+    { name = "pytest", marker = "extra == 'dev'" },
+    { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=306" },
+    { name = "setuptools", marker = "extra == 'release'", specifier = "==82.0.1" },
+]
+provides-extras = ["debug", "onshape", "dev", "release"]
+
+[[package]]
 name = "attrs"
 version = "26.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -866,51 +911,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/e8/c4/ba2f8066cceb6f233
 wheels = [
     { url = "https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl", hash = "sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0", size = 29575, upload-time = "2021-05-16T22:03:41.177Z" },
 ]
-
-[[package]]
-name = "trackball-daemon"
-source = { editable = "." }
-dependencies = [
-    { name = "bleak" },
-    { name = "pillow" },
-    { name = "pystray" },
-    { name = "pywin32", marker = "sys_platform == 'win32'" },
-]
-
-[package.optional-dependencies]
-debug = [
-    { name = "pygame" },
-    { name = "pyopengl" },
-]
-dev = [
-    { name = "jsonschema", extra = ["format"] },
-    { name = "pytest" },
-]
-onshape = [
-    { name = "cryptography", marker = "sys_platform == 'win32'" },
-]
-release = [
-    { name = "cyclonedx-bom" },
-    { name = "nuitka" },
-    { name = "setuptools" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "bleak", specifier = ">=1.1,<2" },
-    { name = "cryptography", marker = "sys_platform == 'win32' and extra == 'onshape'", specifier = ">=41.0" },
-    { name = "cyclonedx-bom", marker = "extra == 'release'", specifier = "==7.3.0" },
-    { name = "jsonschema", extras = ["format"], marker = "extra == 'dev'" },
-    { name = "nuitka", marker = "extra == 'release'" },
-    { name = "pillow", specifier = ">=10.0.0" },
-    { name = "pygame", marker = "extra == 'debug'", specifier = ">=2.5.0" },
-    { name = "pyopengl", marker = "extra == 'debug'", specifier = ">=3.1.7" },
-    { name = "pystray", specifier = ">=0.19.5" },
-    { name = "pytest", marker = "extra == 'dev'" },
-    { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=306" },
-    { name = "setuptools", marker = "extra == 'release'", specifier = "==82.0.1" },
-]
-provides-extras = ["debug", "onshape", "dev", "release"]
 
 [[package]]
 name = "typing-extensions"

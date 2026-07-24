@@ -3,14 +3,41 @@ requires = ["setuptools==82.0.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "trackball-daemon"
+# Distribution name is the product; the import package stays `trackball_daemon`. The two are
+# intentionally different -- renaming an import namespace for branding breaks every existing
+# import and every host add-on path for no user-visible benefit. trackball_daemon/product.py owns
+# both spellings.
+name = "astrolabe-daemon"
 dynamic = ["version"]   # single source: trackball_daemon.__init__.__version__ (shown in the tray)
 license = "Apache-2.0"
 # Explicit rather than left to setuptools' default glob, which finds LICENSE and NOTICE but not the
 # third-party attributions or the texts they point at. LICENSING.md maps every path to its license.
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "LICENSING.md", "LICENSES/**"]
-description = "System-tray daemon for the dual-sensor BLE trackball (mouse + 3D navigation)."
+description = "Astrolabe — Windows daemon for a dual-sensor BLE trackball: pointer input plus focus-routed 3D navigation for CAD and 3D applications."
+readme = "README.md"
+authors = [{ name = "Dylan Lee" }]
+maintainers = [{ name = "Dylan Lee" }]
+keywords = [
+    "trackball", "ble", "bluetooth", "3d-navigation", "cad", "spacemouse",
+    "blender", "freecad", "fusion360", "solidworks", "onshape", "autocad", "windows",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Win32 (MS Windows)",
+    "Intended Audience :: End Users/Desktop",
+    "Intended Audience :: Manufacturing",
+    "Natural Language :: English",
+    "Operating System :: Microsoft :: Windows :: Windows 10",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+    "Topic :: Scientific/Engineering :: Human Machine Interfaces",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+]
 requires-python = ">=3.13"
+
 dependencies = [
     # Ceiling is deliberate, not staleness: bleak 2.0 changed GATT error types and 3.0 changed the
     # scanner/client keyword surface. Moving off 1.x changes the BLE transport and can only be
@@ -21,6 +48,15 @@ dependencies = [
     "pywin32>=306; sys_platform == 'win32'",   # SolidWorks COM automation (win32com)
 ]
 
+# Keep sub-tables below every key of [project]: a table header ends the parent table, so anything
+# after this point would otherwise be parsed into it.
+[project.urls]
+Homepage = "https://github.com/mildlyuseful/Astrolabe"
+Source = "https://github.com/mildlyuseful/Astrolabe"
+Issues = "https://github.com/mildlyuseful/Astrolabe/issues"
+Documentation = "https://github.com/mildlyuseful/Astrolabe/blob/main/README.md"
+Security = "https://github.com/mildlyuseful/Astrolabe/blob/main/SECURITY.md"
+
 [project.optional-dependencies]
 debug = ["pygame>=2.5.0", "PyOpenGL>=3.1.7"]
 # Onshape bridge cert generation; without it the bridge falls back to an `openssl` CLI on PATH.
@@ -30,10 +66,10 @@ release = ["nuitka", "cyclonedx-bom==7.3.0", "setuptools==82.0.1"]
 
 # GUI script -> launched without a console window on Windows.
 [project.gui-scripts]
-trackball-daemon = "trackball_daemon.__main__:main"
+astrolabe = "trackball_daemon.__main__:main"
 
 [project.scripts]
-trackball-validate-bindings = "trackball_daemon.validate_bindings:main"
+astrolabe-validate-bindings = "trackball_daemon.validate_bindings:main"
 
 [tool.setuptools.packages.find]
 include = ["trackball_daemon*"]

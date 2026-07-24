@@ -22,7 +22,7 @@ def test_ci_builds_and_smokes_wheel_outside_checkout():
     assert '$SbomTool environment "$Venv\\Scripts\\python.exe"' in WORKFLOW
     assert "--output-reproducible --output-file $Sbom" in WORKFLOW
     assert "tools/finalize_sbom.py" in WORKFLOW
-    assert "--name \"trackball-daemon\" --version $InstalledVersion" in WORKFLOW
+    assert "--name \"astrolabe-daemon\" --version $InstalledVersion" in WORKFLOW
 
 
 def test_ci_pins_and_compiles_both_validation_firmware_targets():
@@ -42,9 +42,9 @@ def test_windows_release_includes_dynamic_winrt_projection_package():
 
 def test_installed_wheel_notices_are_verified_outside_the_checkout():
     """Declaring license files is not the same as shipping them."""
-    assert "tools/verify_wheel_notices.py" in WORKFLOW
-    assert "$VerifyWheelNotices" in WORKFLOW
-    assert "Installed wheel is missing required notices." in WORKFLOW
+    assert "tools/verify_installed_metadata.py" in WORKFLOW
+    assert "$VerifyInstalledMetadata" in WORKFLOW
+    assert "Installed distribution metadata verification failed." in WORKFLOW
 
 
 def test_bundled_component_notices_are_audited_against_a_real_release_runtime():

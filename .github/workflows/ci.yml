@@ -62,7 +62,7 @@ jobs:
           $Requirements = (Resolve-Path build/ci-python/runtime-requirements.txt).Path
           $SbomTool = (Resolve-Path .venv/Scripts/cyclonedx-py.exe).Path
           $FinalizeSbom = (Resolve-Path tools/finalize_sbom.py).Path
-          $VerifyWheelNotices = (Resolve-Path tools/verify_wheel_notices.py).Path
+          $VerifyInstalledMetadata = (Resolve-Path tools/verify_installed_metadata.py).Path
           $Pyproject = (Resolve-Path pyproject.toml).Path
           $Sbom = (Join-Path (Resolve-Path build/ci-python).Path "runtime.cdx.json")
           $Venv = Join-Path $env:RUNNER_TEMP "astrolabe-wheel-smoke"
@@ -83,15 +83,15 @@ jobs:
               --output-reproducible --output-file $Sbom
             if ($LASTEXITCODE -ne 0) { throw "Installed wheel SBOM generation failed." }
             $InstalledVersion = (& "$Venv\Scripts\python.exe" -c `
-              "from importlib.metadata import version; print(version('trackball-daemon'))").Trim()
+              "from importlib.metadata import version; print(version('astrolabe-daemon'))").Trim()
             if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($InstalledVersion)) {
               throw "Installed wheel version could not be resolved."
             }
             & "$Venv\Scripts\python.exe" $FinalizeSbom --sbom $Sbom `
-              --name "trackball-daemon" --version $InstalledVersion
+              --name "astrolabe-daemon" --version $InstalledVersion
             if ($LASTEXITCODE -ne 0) { throw "Installed wheel SBOM metadata finalization failed." }
-            & "$Venv\Scripts\python.exe" $VerifyWheelNotices
-            if ($LASTEXITCODE -ne 0) { throw "Installed wheel is missing required notices." }
+            & "$Venv\Scripts\python.exe" $VerifyInstalledMetadata
+            if ($LASTEXITCODE -ne 0) { throw "Installed distribution metadata verification failed." }
           }
           finally {
             Pop-Location

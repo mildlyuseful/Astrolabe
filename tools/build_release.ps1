@@ -85,11 +85,18 @@ try {
         throw "Could not resolve the package version for the release archive."
     }
     $ReleaseDirectory = Split-Path -Parent $Executable
-    $Archive = Join-Path $OutputRoot "Astrolabe-$Version-windows-x64.zip"
+    # Artifact naming comes from trackball_daemon/product.py so the build script is not a second
+    # place that decides what the product is called.
+    $ArchiveName = (& $ReleasePython -c `
+        "from trackball_daemon.product import archive_name; print(archive_name('$Version'))").Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($ArchiveName)) {
+        throw "Could not resolve the release archive name from product identity."
+    }
+    $Archive = Join-Path $OutputRoot $ArchiveName
     & $ReleasePython tools/archive_release.py --source $ReleaseDirectory --output $Archive
     if ($LASTEXITCODE -ne 0) { throw "Release archive creation failed with exit code $LASTEXITCODE" }
 
-    $Sbom = Join-Path $OutputRoot "Astrolabe-$Version-windows-x64.cdx.json"
+    $Sbom = Join-Path $OutputRoot ([System.IO.Path]::ChangeExtension($ArchiveName, $null) + "cdx.json")
     $env:UV_PROJECT_ENVIRONMENT = $RuntimeEnvironment
     & $Uv sync --locked --no-editable --extra onshape --python $BuildPython
     if ($LASTEXITCODE -ne 0) { throw "Locked runtime-environment sync failed with exit code $LASTEXITCODE" }
@@ -109,7 +116,7 @@ try {
         --output-reproducible --output-file $Sbom
     if ($LASTEXITCODE -ne 0) { throw "CycloneDX SBOM generation failed with exit code $LASTEXITCODE" }
     & $ReleasePython tools/finalize_sbom.py --sbom $Sbom `
-        --name "trackball-daemon" --version $Version
+        --name "astrolabe-daemon" --version $Version
     if ($LASTEXITCODE -ne 0) { throw "SBOM metadata finalization failed with exit code $LASTEXITCODE" }
 
     Get-FileHash -Algorithm SHA256 -LiteralPath $Executable, $PackagedAutoCAD, $Archive, $Sbom |

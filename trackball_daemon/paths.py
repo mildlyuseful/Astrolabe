@@ -6,7 +6,9 @@ import os
 import sys
 from pathlib import Path
 
-APP_NAME = "TrackballDaemon"
+from .product import LEGACY_CONFIG_DIRECTORY
+
+APP_NAME = LEGACY_CONFIG_DIRECTORY
 
 
 def user_config_dir() -> Path:

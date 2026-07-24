@@ -60,12 +60,12 @@ built onedir tree; `TODO.md` tracks that artifact-level audit separately.
 
 Notice placement is verified in each distributed form rather than assumed from the build
 configuration. The packaged smoke fails when any add-on payload directory lacks the `LICENSE` and
-`NOTICE` that setup would copy into a host application, and `tools/verify_wheel_notices.py` reads
+`NOTICE` that setup would copy into a host application, and `tools/verify_installed_metadata.py` reads
 the installed distribution's own metadata to confirm the declared license files were written, not
 merely declared:
 
 ```powershell
-<wheel-venv>\Scripts\python.exe tools/verify_wheel_notices.py
+<wheel-venv>\Scripts\python.exe tools/verify_installed_metadata.py
 ```
 
 CI also builds and installs the wheel outside the checkout before running its smoke and binding

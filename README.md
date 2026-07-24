@@ -49,6 +49,9 @@ python -m pip install ".[onshape]"
 python -m trackball_daemon
 ```
 
+The installed distribution is named `astrolabe-daemon` and provides an `astrolabe` command. Its
+import package stays `trackball_daemon`, so `python -m trackball_daemon` keeps working.
+
 For normal console-free use:
 
 ```powershell

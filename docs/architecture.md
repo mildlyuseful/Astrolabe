@@ -48,11 +48,26 @@ host-specific signs, scales, pivots, or camera conventions.
 | Device control namespaces and BLE snapshot mappings | `trackball_daemon/devices/descriptor_data/` |
 | Portable contributor data shapes | `trackball_daemon/schemas/`; daemon parsers remain authoritative |
 | Python dependency resolution | `pyproject.toml` plus the checked-in `uv.lock` |
+| Product names, install and configuration paths, and Windows registration identifiers | [`../trackball_daemon/product.py`](../trackball_daemon/product.py) |
+| Per-path license disposition and bundled-component attribution | [`../LICENSING.md`](../LICENSING.md) with `licensing.json`, and [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) with `third_party.json` |
 | Open defects, deferred work, and unclosed verification | [`../TODO.md`](../TODO.md) |
 
 `app_registry.py` is the only code-owned supported-app identity and ordering table. Setup definitions,
 profile data, settings, routing, and UI projections validate against it rather than repeating app IDs
 or capabilities.
+
+`product.py` is the equivalent authority for the product itself. The installer's upgrade identifier,
+AppUserModelID, per-user install path, Start Menu folder, uninstall identity, startup value,
+single-instance mutex, configuration directory, and artifact names all resolve there, and the
+release build asks it for the archive name rather than composing one. Values under its *frozen*
+heading cannot change once a signed installer has written them to a real machine: a different
+upgrade identifier makes the next release install beside the old one instead of replacing it.
+Values under its *legacy* heading are the identity currently written on disk under the project's
+original name; they stay authoritative until a migration carries existing users across.
+
+The distribution name and the import package are deliberately different — `astrolabe-daemon` and
+`trackball_daemon`. Renaming the import namespace for branding would break every existing import
+and every host add-on path for no user-visible benefit.
 
 A setting is exposed for an app only when its capability predicate matches and every advertised value
 has a distinct runtime consumer. Stored shared-shape data does not by itself make a feature

@@ -12,9 +12,15 @@ import threading
 import pystray
 from PIL import Image, ImageDraw
 
+from .product import (
+    DISPLAY_NAME,
+    LEGACY_STARTUP_VALUE_NAME,
+    STARTUP_REGISTRY_KEY,
+)
+
 # --- "Start at login" (Windows HKCU Run key) -------------------------------------------
-_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-_RUN_NAME = "TrackballDaemon"
+_RUN_KEY = STARTUP_REGISTRY_KEY
+_RUN_NAME = LEGACY_STARTUP_VALUE_NAME
 
 
 def _startup_command():
@@ -68,7 +74,7 @@ class TrayController:
     def __init__(self, app):
         self.app = app
         self.icon = pystray.Icon(
-            "TrackballDaemon", _make_icon_image(), "Trackball Daemon",
+            LEGACY_STARTUP_VALUE_NAME, _make_icon_image(), DISPLAY_NAME,
             menu=self._build_menu(),
         )
         self._thread = None

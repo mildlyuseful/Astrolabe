@@ -6,8 +6,10 @@
 import ctypes
 import sys
 
+from .product import LEGACY_SINGLE_INSTANCE_MUTEX
 
-MUTEX_NAME = r"Local\TrackballDaemon.Controller.v1"
+
+MUTEX_NAME = LEGACY_SINGLE_INSTANCE_MUTEX
 ERROR_ALREADY_EXISTS = 183
 
 
