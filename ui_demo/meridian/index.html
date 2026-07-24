@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Astrolabe — Meridian</title>
 <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
-<link rel="stylesheet" href="styles.css?v=3">
+<link rel="stylesheet" href="styles.css?v=5">
 </head>
 <body data-mode="cube">
 <div class="desktop">
@@ -29,10 +29,10 @@
 
     <div class="body">
       <aside class="rail">
-        <div class="mode-seg" id="mode-toggle" role="group" aria-label="Input mode">
-          <span class="mode-thumb" id="mode-thumb"></span>
+        <div class="seg mode-seg" id="mode-toggle" role="group" aria-label="Input mode">
+          <span class="seg-thumb" id="mode-thumb"></span>
           <button type="button" data-mode="cursor" title="Pointer mode">Ptr</button>
-          <button type="button" data-mode="cube" title="3D navigation">3D</button>
+          <button type="button" data-mode="cube" class="on" title="3D navigation">3D</button>
         </div>
 
         <nav class="rail-nav" id="rail-nav" aria-label="Pages">
@@ -71,6 +71,6 @@
 </div>
 
 <dialog class="modal" id="modal"></dialog>
-<script src="app.js?v=3"></script>
+<script src="app.js?v=5"></script>
 </body>
 </html>

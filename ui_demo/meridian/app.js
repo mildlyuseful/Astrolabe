@@ -454,6 +454,53 @@ function toast(msg) {
   toast._t = setTimeout(() => { el.hidden = true; }, 1600);
 }
 
+/* --------------------------------------------- sliding segment thumbs */
+function placeThumb(segEl, animate = false) {
+  const thumb = $('.seg-thumb', segEl);
+  const on = $('button.on', segEl);
+  if (!thumb || !on) return;
+  if (!animate) thumb.style.transition = 'none';
+  thumb.style.width = `${on.offsetWidth}px`;
+  thumb.style.transform = `translateX(${on.offsetLeft}px)`;
+  if (!animate) {
+    void thumb.offsetWidth;
+    thumb.style.transition = '';
+  }
+}
+function initSegThumbs(scope = document) {
+  $$('.seg', scope).forEach(s => placeThumb(s, false));
+}
+function selectSegButton(segEl, btn, animate = true) {
+  if (!segEl || !btn) return;
+  $$(':scope > button', segEl).forEach(b => b.classList.toggle('on', b === btn));
+  placeThumb(segEl, animate);
+}
+
+function installNeedsAttention(key) {
+  if (key === GLOBAL) return false;
+  const a = APPS_BY_KEY[key];
+  if (!a) return false;
+  if (a.status.chip === 'warn' || a.status.chip === 'bad' || a.status.chip === 'off') return true;
+  if (/not set up|update/i.test(a.status.text || '')) return true;
+  if (a.action && /set up|update/i.test(a.action)) return true;
+  return false;
+}
+
+function updateRowLinkState(row, key, id) {
+  if (!row || key === GLOBAL) return;
+  const linked = appLinked(key, id);
+  row.classList.toggle('is-linked', linked);
+  row.classList.toggle('is-override', !linked);
+  const linkBtn = row.querySelector('[data-link]');
+  if (linkBtn) {
+    linkBtn.classList.toggle('is-broken', !linked);
+    linkBtn.title = linked ? 'Linked to Global — click to override' : 'Override — click to relink';
+    linkBtn.innerHTML = linked ? ICO.link : ICO.unlink;
+  }
+  const resetBtn = row.querySelector('[data-reset]');
+  if (resetBtn) resetBtn.disabled = !appDiverged(key, id);
+}
+
 /* -------------------------------------------------------------- controls */
 function ctrlHtml(key, id, val) {
   const m = SETTINGS[id];
@@ -509,22 +556,32 @@ function settingsFor(key, section) {
 function hostListHtml() {
   const gActive = S.host === GLOBAL ? 'is-active' : '';
   let html = `<button type="button" class="host-row is-global ${gActive}" data-host="${GLOBAL}">
-    <span class="host-dot good"></span>
+    <span class="host-dot good" title="Baseline"></span>
     <span class="host-name">Global defaults</span>
     <span class="host-meta">base</span>
   </button>`;
   for (const a of APPS) {
     const st = S.apps[a.key];
     const active = S.host === a.key ? 'is-active' : '';
+    const letter = { orbit: 'O', fly: 'F', walk: 'W' }[st.mode] || 'O';
+    const chip = a.status.chip;
     const badge = st.enabled
-      ? `<span class="host-dot mode ${st.mode === 'fly' ? 'fly' : st.mode === 'walk' ? 'walk' : ''}" title="${esc(st.mode)}">${st.mode === 'orbit' ? 'O' : st.mode === 'fly' ? 'F' : 'W'}</span>`
-      : `<span class="host-dot ${a.status.chip}"></span>`;
+      ? `<span class="host-dot mode ${esc(chip)}" title="${esc(st.mode)} · ${esc(a.status.text)}">${letter}</span>`
+      : `<span class="host-dot ${esc(chip)}" title="${esc(a.status.text)}"></span>`;
     html += `<button type="button" class="host-row ${active}" data-host="${esc(a.key)}">
       ${badge}
       <span class="host-name">${esc(a.name)}</span>
       <span class="host-meta">${esc(a.status.short)}</span>
     </button>`;
   }
+  html += `<div class="host-legend" aria-label="Status key">
+    <div class="leg-row"><span class="host-dot good"></span> Connected</div>
+    <div class="leg-row"><span class="host-dot warn"></span> Update / caution</div>
+    <div class="leg-row"><span class="host-dot bad"></span> Unsupported / error</div>
+    <div class="leg-row"><span class="host-dot idle"></span> Installed · idle</div>
+    <div class="leg-row"><span class="host-dot off"></span> Not set up / off</div>
+    <div class="leg-row"><span class="host-dot mode good">O</span> Letter = enabled (O/F/W)</div>
+  </div>`;
   return html;
 }
 
@@ -533,12 +590,11 @@ function modeSliderHtml(key) {
   const rich = PROFILES[key].rich;
   const modes = rich ? ['off', 'orbit', 'fly', 'walk'] : ['off', 'orbit'];
   const cur = S.apps[key].enabled ? S.apps[key].mode : 'off';
-  const idx = Math.max(0, modes.indexOf(cur));
   const n = modes.length;
   const labels = { off: 'Off', orbit: 'Orbit', fly: 'Fly', walk: 'Walk' };
-  return `<div class="mode-slider" data-n="${n}" data-mode="${esc(cur)}" data-host-mode="${esc(key)}">
-    <span class="ms-thumb" style="width:calc(${100 / n}% - 3px);transform:translateX(${idx * 100}%)"></span>
-    ${modes.map(m => `<button type="button" data-mmode="${m}" class="${m === cur ? 'is-on' : ''}">${labels[m]}</button>`).join('')}
+  return `<div class="seg mode-slider" data-n="${n}" data-mode="${esc(cur)}" data-host-mode="${esc(key)}">
+    <span class="seg-thumb"></span>
+    ${modes.map(m => `<button type="button" data-mmode="${m}" class="${m === cur ? 'on' : ''}">${labels[m]}</button>`).join('')}
   </div>`;
 }
 
@@ -615,6 +671,29 @@ function matrixHtml(key) {
     </tbody></table>`;
 }
 
+function sectionBodyHtml(key) {
+  const feelRows = settingsFor(key, 'feel').map(id => rowHtml(key, id)).join('');
+  const behRows = settingsFor(key, 'behavior').map(id => rowHtml(key, id)).join('');
+  const sec = S.section;
+  if (sec === 'install') return installHtml(key);
+  if (sec === 'feel') {
+    return `<div class="section" id="sec-feel">
+      <div class="section-h"><h3>Feel</h3><span class="hint">Rates, gains, holds</span></div>
+      <div class="rows">${feelRows || '<p class="kb-empty">No feel settings for this host.</p>'}</div>
+    </div>`;
+  }
+  if (sec === 'behavior') {
+    return `<div class="section" id="sec-behavior">
+      <div class="section-h"><h3>Behavior</h3><span class="hint">Orbit, zoom, host extras</span></div>
+      <div class="rows">${behRows || '<p class="kb-empty">No behavior settings for this host.</p>'}</div>
+    </div>`;
+  }
+  return `<div class="section" id="sec-axes">
+    <div class="section-h"><h3>Axes</h3><span class="hint">Source × invert matrix</span></div>
+    <div id="route-matrix">${matrixHtml(key)}</div>
+  </div>`;
+}
+
 function detailHtml() {
   const key = S.host;
   const name = key === GLOBAL ? 'Global defaults' : APPS_BY_KEY[key].name;
@@ -624,41 +703,28 @@ function detailHtml() {
   const chips = ['install', 'feel', 'behavior', 'axes'];
   const chipLabels = { install: 'Install', feel: 'Feel', behavior: 'Behavior', axes: 'Axes' };
   if (key === GLOBAL) chipLabels.install = 'About';
-
-  const feelRows = settingsFor(key, 'feel').map(id => rowHtml(key, id)).join('');
-  const behRows = settingsFor(key, 'behavior').map(id => rowHtml(key, id)).join('');
-  const sec = S.section;
-  let body = '';
-  if (sec === 'install') body = installHtml(key);
-  else if (sec === 'feel') {
-    body = `<div class="section" id="sec-feel">
-      <div class="section-h"><h3>Feel</h3><span class="hint">Rates, gains, holds</span></div>
-      <div class="rows">${feelRows || '<p class="kb-empty">No feel settings for this host.</p>'}</div>
-    </div>`;
-  } else if (sec === 'behavior') {
-    body = `<div class="section" id="sec-behavior">
-      <div class="section-h"><h3>Behavior</h3><span class="hint">Orbit, zoom, host extras</span></div>
-      <div class="rows">${behRows || '<p class="kb-empty">No behavior settings for this host.</p>'}</div>
-    </div>`;
-  } else {
-    body = `<div class="section" id="sec-axes">
-      <div class="section-h"><h3>Axes</h3><span class="hint">Source × invert matrix</span></div>
-      <div id="route-matrix">${matrixHtml(key)}</div>
-    </div>`;
-  }
+  const attn = installNeedsAttention(key);
+  const attnCls = APPS_BY_KEY[key]?.status?.chip === 'bad' ? 'bad' : '';
 
   return `
     <div class="detail-head">
-      <div class="detail-title">${esc(name)}<span class="sub">${esc(sub)}</span></div>
+      <div class="detail-title">${esc(name)}<span class="sub" id="detail-sub">${esc(sub)}</span></div>
       <div class="detail-actions">
         ${modeSliderHtml(key)}
         ${key !== GLOBAL ? `<button type="button" class="icon-btn" id="btn-link-all" title="Relink all to Global">${ICO.link}</button>` : ''}
       </div>
     </div>
-    <div class="sec-chips" id="sec-chips">
-      ${chips.map(c => `<button type="button" data-sec="${c}" class="${sec === c ? 'is-active' : ''}">${chipLabels[c]}</button>`).join('')}
+    <div class="seg sec-chips" id="sec-chips">
+      <span class="seg-thumb"></span>
+      ${chips.map(c => {
+        const mark = (c === 'install' && attn)
+          ? `<span class="chip-attn ${attnCls}" title="Setup action needed"></span>` : '';
+        return `<button type="button" data-sec="${c}" class="${S.section === c ? 'on' : ''}">${chipLabels[c]}${mark}</button>`;
+      }).join('')}
     </div>
-    <div class="detail-scroll" id="detail-scroll">${body}</div>`;
+    <div class="detail-scroll" id="detail-scroll">
+      <div class="pane-fade" id="section-pane">${sectionBodyHtml(key)}</div>
+    </div>`;
 }
 
 function renderHosts() {
@@ -762,10 +828,10 @@ function kbEditorHtml() {
       </div>
     </div>
     <div class="form-lab">Match</div>
-    <div class="seg" id="match-seg" data-n="2">
-      <span class="seg-thumb" style="width:calc(50% - 3px);transform:translateX(${b.match === 'exact' ? '100%' : '0'})"></span>
-      <button type="button" data-match="allow" class="${b.match === 'allow' ? 'is-on' : ''}">Allow extras</button>
-      <button type="button" data-match="exact" class="${b.match === 'exact' ? 'is-on' : ''}">Exact</button>
+    <div class="seg" id="match-seg">
+      <span class="seg-thumb"></span>
+      <button type="button" data-match="allow" class="${b.match === 'allow' ? 'on' : ''}">Allow extras</button>
+      <button type="button" data-match="exact" class="${b.match === 'exact' ? 'on' : ''}">Exact</button>
     </div>
     <div class="form-lab">App</div>
     <select data-kb="apps">
@@ -796,17 +862,16 @@ function healthHtml() {
 
 function renderBindings() {
   const profiles = Object.keys(S.kb);
-  const idx = profiles.indexOf(S.kbProfile);
   return `<div class="page" data-page="bindings">
     <div class="page-head">
       <div class="page-title">Bindings</div>
       <div class="page-sub">Profiles, chords, common actions &amp; setting ops</div>
     </div>
     <div class="kb-toolbar">
-      <div class="seg" id="profile-seg" style="grid-template-columns:repeat(${profiles.length},1fr)">
-        <span class="seg-thumb" style="width:calc(${100 / profiles.length}% - 3px);transform:translateX(${idx * 100}%)"></span>
+      <div class="seg" id="profile-seg">
+        <span class="seg-thumb"></span>
         ${profiles.map(p =>
-          `<button type="button" data-profile="${esc(p)}" class="${p === S.kbProfile ? 'is-on' : ''}">${esc(S.kb[p].label)}</button>`).join('')}
+          `<button type="button" data-profile="${esc(p)}" class="${p === S.kbProfile ? 'on' : ''}">${esc(S.kb[p].label)}</button>`).join('')}
       </div>
       <div class="health">${healthHtml()}</div>
     </div>
@@ -942,8 +1007,9 @@ function renderSystem() {
             <label class="check"><input type="checkbox" data-sys="hud.visible" ${gval('hud.visible') ? 'checked' : ''}> Visible</label>
             <label class="check"><input type="checkbox" data-sys="hud.top" ${gval('hud.top') ? 'checked' : ''}> Always on top</label>
             <label class="check"><input type="checkbox" data-sys="hud.through" ${gval('hud.through') ? 'checked' : ''}> Click-through</label>
-            <div class="slider-row" style="margin-top:4px">
-              <input type="range" min="0.3" max="1" step="0.05" data-sys="hud.opacity" value="${esc(gval('hud.opacity'))}">
+            <div class="row" style="grid-template-columns:72px 1fr auto;margin-top:4px;align-items:center">
+              <div class="row-lab">Opacity</div>
+              <input type="range" min="0.3" max="1" step="0.05" data-sys="hud.opacity" value="${esc(gval('hud.opacity'))}" aria-label="Control panel opacity">
               <span class="mono" id="op-val">${esc(fmt(gval('hud.opacity')))}</span>
             </div>
             <div class="row" style="grid-template-columns:96px 1fr;margin-top:4px">
@@ -991,6 +1057,15 @@ function render() {
   else view.innerHTML = renderSystem();
   updateRail();
   syncHash();
+  // Measure after layout so sliding thumbs land on the active button.
+  requestAnimationFrame(() => {
+    initSegThumbs(document);
+    const modeSeg = $('#mode-toggle');
+    if (modeSeg) {
+      $$(':scope > button', modeSeg).forEach(b => b.classList.toggle('on', b.dataset.mode === S.mode));
+      placeThumb(modeSeg, false);
+    }
+  });
 }
 
 function refreshHostList() {
@@ -999,13 +1074,40 @@ function refreshHostList() {
 }
 function refreshDetail() {
   const el = $('#host-detail');
-  if (el) el.innerHTML = detailHtml();
+  if (el) {
+    el.innerHTML = detailHtml();
+    requestAnimationFrame(() => initSegThumbs(el));
+  }
 }
 function refreshKb() {
   const list = $('#kb-list');
   const ed = $('#kb-editor');
   if (list) list.innerHTML = kbListHtml();
   if (ed) ed.innerHTML = kbEditorHtml();
+  requestAnimationFrame(() => initSegThumbs($('.page') || document));
+}
+
+function swapSection(sec, animate = true) {
+  S.section = sec;
+  const chips = $('#sec-chips');
+  const btn = chips && $(`button[data-sec="${sec}"]`, chips);
+  if (chips && btn) selectSegButton(chips, btn, animate);
+  const pane = $('#section-pane');
+  if (!pane) { refreshDetail(); syncHash(); return; }
+  const apply = () => {
+    pane.innerHTML = sectionBodyHtml(S.host);
+    pane.classList.remove('is-exit');
+    if (animate) {
+      pane.classList.add('is-enter');
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => pane.classList.remove('is-enter'));
+      });
+    }
+    syncHash();
+  };
+  if (!animate) { apply(); return; }
+  pane.classList.add('is-exit');
+  setTimeout(apply, 160);
 }
 
 /* --------------------------------------------------------------- hash */
@@ -1064,6 +1166,7 @@ function bindShell() {
     if (!btn) return;
     S.mode = btn.dataset.mode;
     document.body.dataset.mode = S.mode;
+    selectSegButton($('#mode-toggle'), btn, true);
     toast(S.mode === 'cube' ? '3D navigation' : 'Pointer mode');
   });
   $('#btn-hide').onclick = () => toast('Hidden to tray — daemon keeps running');
@@ -1087,20 +1190,26 @@ function onViewClick(e) {
 
   const sec = t.closest('[data-sec]');
   if (sec) {
-    S.section = sec.dataset.sec;
-    refreshDetail();
-    syncHash();
+    if (sec.dataset.sec !== S.section) swapSection(sec.dataset.sec, true);
     return;
   }
 
   const mm = t.closest('[data-mmode]');
   if (mm) {
-    const key = mm.closest('[data-host-mode]').dataset.hostMode;
+    const slider = mm.closest('[data-host-mode]');
+    const key = slider.dataset.hostMode;
     const m = mm.dataset.mmode;
     if (m === 'off') S.apps[key].enabled = false;
     else { S.apps[key].enabled = true; S.apps[key].mode = m; }
+    slider.dataset.mode = m;
+    selectSegButton(slider, mm, true);
     refreshHostList();
-    refreshDetail();
+    const sub = $('#detail-sub');
+    if (sub) {
+      sub.textContent = S.apps[key].enabled
+        ? `${S.apps[key].mode} · overrides Global when unlinked`
+        : 'Disabled';
+    }
     return;
   }
 
@@ -1161,7 +1270,10 @@ function onViewClick(e) {
   const match = t.closest('[data-match]');
   if (match) {
     const b = currentBinding();
-    if (b) { b.match = match.dataset.match; refreshKb(); }
+    if (b) {
+      b.match = match.dataset.match;
+      selectSegButton(match.closest('.seg'), match, true);
+    }
     return;
   }
   const rmTok = t.closest('[data-rm-token]');
@@ -1272,18 +1384,19 @@ function onViewChange(e) {
     if (t.type === 'checkbox') val = t.checked;
     else if (SETTINGS[id].kind === 'num' || SETTINGS[id].kind === 'rate') val = parseFloat(t.value);
     else val = t.value;
+    // Editing always writes an app override — that breaks the Global link.
     setVal(S.host, id, val);
     const row = t.closest('[data-row]');
     if (row) {
-      const key = S.host;
-      const linked = key === GLOBAL ? true : appLinked(key, id);
-      row.classList.toggle('is-linked', linked && key !== GLOBAL);
-      row.classList.toggle('is-override', !linked && key !== GLOBAL);
-      const resetBtn = row.querySelector('[data-reset]');
-      if (resetBtn) resetBtn.disabled = !(key === GLOBAL ? gDiverged(id) : appDiverged(key, id));
+      updateRowLinkState(row, S.host, id);
       if (SETTINGS[id].kind === 'bool') {
         const lab = t.closest('.check');
-        if (lab) lab.lastChild.textContent = ` ${val ? 'On' : 'Off'}`;
+        if (lab) {
+          const text = lab.querySelector('.check-lab') || lab;
+          // Keep the On/Off label next to the checkbox.
+          const nodes = [...lab.childNodes].filter(n => n.nodeType === 3);
+          nodes.forEach(n => { n.textContent = ` ${val ? 'On' : 'Off'}`; });
+        }
       }
     }
     return;
@@ -1385,7 +1498,7 @@ function boot() {
   view.addEventListener('click', onViewClick);
   view.addEventListener('change', onViewChange);
   view.addEventListener('input', e => {
-    if (e.target.matches('[data-sys="hud.opacity"]')) onViewChange(e);
+    if (e.target.matches('[data-sys="hud.opacity"], [data-set]')) onViewChange(e);
   });
   view.addEventListener('pointerover', onViewOver);
   render();

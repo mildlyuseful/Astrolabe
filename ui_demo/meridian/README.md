@@ -33,7 +33,7 @@ You can also open `index.html` directly in a browser (file://). Hash deep-links 
 
 ### Problem
 
-The live Tkinter UI exposes **four top-level tabs** (3D Apps, Global, Per-App, Keybindings) plus nested category notebooks. Fable v2 already collapsed Global + Per-App into one master-detail, but still used **four rail pages** and **four per-app sub-tabs**. That is too much chrome for a utility that should stay open beside CAD all day.
+The live Tkinter UI exposes **four top-level tabs** (3D Apps, Global, Per-App, Keybindings) plus nested category notebooks. Earlier prototypes collapsed Global + Per-App into one master-detail, but still used **four rail pages** and **four per-app sub-tabs**. That is too much chrome for a utility that should stay open beside CAD all day.
 
 ### Solution: three surfaces
 
@@ -52,11 +52,9 @@ Overview is **not a page**. BLE status, Pointer/3D mode, handshake, and Quit liv
 3. **Axis orientation as a permutation swap** — changing one source swaps with the other axis; invert stays per physical channel.
 4. **Pivot fallbacks as ordered chips** — Up/Down/Add/Remove instead of a CSV string.
 5. **Grouped keybinding actions** — mirrors daemon common actions + setting ops without a flat mega-list.
-6. **Link / reset grammar** (from Fable v2) — chain / broken-chain + ↺ to System; Global has reset only.
+6. **Link / reset grammar** — chain / broken-chain + ↺ to System; Global has reset only.
 
 ### Visual language: Meridian
-
-Deliberately **not** Fable graphite or Gemini marble/gold.
 
 - Light drafting desk: cool ink-slate desktop, warm paper window, single **copper** accent
 - Faint blueprint grid on the desktop (CSS only)
@@ -76,13 +74,8 @@ Deliberately **not** Fable graphite or Gemini marble/gold.
 
 Field visibility follows the spirit of `app_registry.py` / `settings_schema.py` (Godot no-roll/horizon, Fusion twist set, Unity clip/extent, Blender camera lock, Onshape userscript). Keybinding profiles and chords mirror `system_keybinding_profiles.json`. This is a **UX prototype**, not a live projection of `SettingsUIModel` / `BindingUIModel`.
 
-### Relation to other demos
+### Prototype boundary
 
-| Demo | Role |
-|---|---|
-| `fable` | Early instrument shell; outdated IA (no rich keybindings) |
-| `Fable v2` | Dark four-page reference; closest prior parity |
-| `gemini` | Full-viewport aesthetic exploration; incomplete coverage |
-| **`meridian`** | Compact three-surface consolidation + light drafting language |
-
-Older README claims in sibling demos may be stale; treat code + `docs/keybindings.md` + `settings_schema.py` as the product contract.
+Meridian is the current UI design prototype. Treat daemon code, packaged data,
+`docs/keybindings.md`, and `settings_schema.py` as the product contract; this demo is not a runtime
+source.
