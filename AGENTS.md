@@ -25,6 +25,7 @@ here.
 | A specific host integration, installer, camera model, or host API | The matching guide under [`docs/apps/`](docs/apps/) plus its driver/add-on and `trackball_daemon/integrations.py` |
 | Permissions, listeners, COM, Raw Input, certificates, trust, or reversal | [`docs/security.md`](docs/security.md) |
 | Build artifacts, release gates, or manual/live verification claims | [`docs/release_verification.md`](docs/release_verification.md) |
+| Licensing, notices, contribution terms, trademarks, or vulnerability reporting | [`LICENSING.md`](LICENSING.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md), and [`TRADEMARKS.md`](TRADEMARKS.md) |
 | Investigation results, rejected approaches, or retired implementations | [`archive/`](archive/) |
 | UI design prototypes | `ui_demo/`; prototypes are not daemon runtime sources |
 
@@ -41,6 +42,9 @@ here.
   registry. Do not create parallel tables.
 - Put shared invariants in `docs/architecture.md`, host-specific facts in `docs/apps/`, user
   instructions in `README.md`, and unresolved work only in `TODO.md`.
+- `LICENSING.md` is the only per-path license authority. Every tracked path must have exactly one
+  disposition there, and the copied license texts under `LICENSE`, `LICENSES/`, and `DCO` are
+  verbatim published documents that are never edited.
 - Keep evergreen docs free of copied release numbers, test counts, dated execution logs, completed
   phase history, and "next action" ledgers.
 - Treat automated, mocked, headless-host, and live-viewport verification as distinct claims. Never

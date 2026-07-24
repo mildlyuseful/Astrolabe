@@ -5,3 +5,10 @@
 *.dll binary
 *.png binary
 *.ico binary
+
+# Verbatim published license texts. Their trailing whitespace is part of the document as its
+# author published it, so `git diff --check` must not ask anyone to "fix" it.
+LICENSE -whitespace
+DCO -whitespace
+LICENSES/** -whitespace
+trackball_daemon/plugins/**/LICENSE -whitespace

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Behavior contracts that rich-keybinding refactors must change deliberately.
 
 These tests capture current ownership and known limitations at the Phase 0 boundary. They are not

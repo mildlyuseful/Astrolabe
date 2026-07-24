@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Transactional sparse config v9 store with immutable published snapshots."""
 import copy
 from collections.abc import Mapping

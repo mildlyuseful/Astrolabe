@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Dylan Lee
+// SPDX-License-Identifier: Apache-2.0
+
 /*
  * Dual PMW3389 Trackball -> BLE HID Mouse  (Seeed XIAO nRF52840, Adafruit Bluefruit)
  * Board package: "Seeed nRF52 Boards" (non-mbed). Adafruit_TinyUSB.h included for Serial.

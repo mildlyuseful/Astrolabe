@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Single-authority runtime state and immutable snapshot publication.
 
 Persistent configuration answers what the base state should be.  This module owns the live state

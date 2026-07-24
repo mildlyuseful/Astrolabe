@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Unit tests for dual-sensor mount residual calibration."""
 
 from __future__ import annotations

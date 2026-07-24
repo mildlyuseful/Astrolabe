@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Host alignment, legacy v8 defaults, normalization, and historical migration helpers.
 
 The transactional v9 source of truth is :mod:`trackball_daemon.config_store`. The materialized

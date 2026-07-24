@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Optional pygame cube window (--debug only) for verifying rotation 1:1.
 
 Render-only: it reads the OutputEngine's view state and draws it. Keys mirror the old demo

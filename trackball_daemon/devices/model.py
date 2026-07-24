@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Immutable device and BLE-session values with no Bleak dependency."""
 from __future__ import annotations
 

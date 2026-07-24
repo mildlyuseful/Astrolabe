@@ -1,4 +1,7 @@
 #! python3
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Startup entry for Trackball Nav in Rhino 8.
 
 Installed under %%APPDATA%%\\McNeel\\Rhinoceros\\8.0\\scripts\\TrackballNav\\ and invoked by

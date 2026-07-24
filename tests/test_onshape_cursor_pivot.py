@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Headless unit tests for the Onshape bridge's under-cursor orbit pivot.
 
 The bridge drives Onshape in a browser. Exact canvas size comes from a page userscript that

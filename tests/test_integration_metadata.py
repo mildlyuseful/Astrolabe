@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Every 3D Apps card has honest compatibility/setup metadata and actions."""
 from dataclasses import replace
 

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """App._nav_sink routing and the merged connected-apps status.
 
 solidworks frames must go to the in-process COM driver; every other app -- INCLUDING autocad,

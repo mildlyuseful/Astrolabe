@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Headless unit tests for the Unreal add-on's "cursor" orbit pivot / "to_cursor" zoom.
 
 ``trackball_nav`` imports ``unreal`` at module level, so these tests inject a minimal stub into

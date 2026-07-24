@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 [CmdletBinding()]
 param(
     [string]$OutputDirectory = "build/release"
@@ -55,6 +58,11 @@ try {
         --include-package=winrt `
         --include-package-data=trackball_daemon `
         --include-data-files=trackball_daemon/plugins/autocad/TrackballNavAcad.dll=trackball_daemon/plugins/autocad/TrackballNavAcad.dll `
+        --include-data-files=LICENSE=LICENSE `
+        --include-data-files=NOTICE=NOTICE `
+        --include-data-files=THIRD_PARTY_NOTICES.md=THIRD_PARTY_NOTICES.md `
+        --include-data-files=LICENSING.md=LICENSING.md `
+        --include-data-dir=LICENSES=LICENSES `
         --output-dir=$NuitkaArtifacts `
         --output-filename=Astrolabe.exe `
         tools/release_entry.py
@@ -93,6 +101,9 @@ try {
     if (-not (Test-Path -LiteralPath $SbomTool -PathType Leaf)) {
         throw "CycloneDX tool was not installed at expected path: $SbomTool"
     }
+
+    & $ReleasePython tools/audit_notices.py --environment $RuntimePython
+    if ($LASTEXITCODE -ne 0) { throw "Bundled-component notice audit failed with exit code $LASTEXITCODE" }
     & $SbomTool environment $RuntimePython --pyproject (Join-Path $RepoRoot "pyproject.toml") `
         --mc-type application --spec-version 1.6 --output-format JSON `
         --output-reproducible --output-file $Sbom

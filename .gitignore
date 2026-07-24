@@ -6,6 +6,13 @@ build/
 *.egg-info/
 nuitka-crash-report.xml
 
+# Virtual environments. `uv sync` creates .venv at the repository root, and
+# docs/release_verification.md tells contributors to run it.
+.venv/
+venv/
+env/
+.uv-cache/
+
 # .NET build outputs (plugin_src is source; the shipping DLL is bundled under
 # trackball_daemon/plugins/ and IS committed)
 plugin_src/**/bin/

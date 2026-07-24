@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """End-to-end SOCKET probe: run the real NavBroker and the add-on in one headless Blender process
 and prove a frame flows broker -> TCP -> add-on reader -> queue -> _on_timer -> RegionView3D.
 

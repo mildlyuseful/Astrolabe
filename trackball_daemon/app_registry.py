@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Canonical application identity, capabilities, transports, and focus resolution.
 
 Setup implementations and their mutable detection callbacks intentionally remain in

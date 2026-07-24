@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """UI-independent keybinding editor contracts."""
 
 from types import SimpleNamespace

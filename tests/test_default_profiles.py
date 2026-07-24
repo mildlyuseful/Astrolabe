@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Immutable host alignment and resettable shipped navigation profiles."""
 import copy
 from dataclasses import FrozenInstanceError

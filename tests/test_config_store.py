@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Atomic store, immutable snapshot, event, concurrency, and v8 migration contracts."""
 import json
 from pathlib import Path

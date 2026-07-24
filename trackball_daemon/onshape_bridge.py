@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Daemon-side Onshape bridge -- the browser analogue of the SolidWorks COM driver.
 
 Onshape runs in a browser and has NATIVE 3Dconnexion SpaceMouse support: its page ships the

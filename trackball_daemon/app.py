@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Orchestrator: wires config + output engine + BLE thread + tray + settings window +
 the nav transports (broker / SolidWorks / Onshape / AutoCAD loader).
 

@@ -1,4 +1,6 @@
 # frozen_string_literal: true
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
 
 # Interactive SketchUp camera test. In SketchUp Desktop open:
 #   Extensions -> Developer -> Ruby Console

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """FreeCAD integration registry: it IS a bundled add-on (so auto_update manages it), install
 copies the add-on into FreeCAD's user Mod dir and marks it enabled, the user Mod dir resolves
 to the versioned layout (FreeCAD >= 1.0) or the legacy flat one, and detection status.

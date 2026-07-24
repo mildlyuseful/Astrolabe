@@ -33,7 +33,8 @@ end-user builds have not been released yet.
 ## Requirements
 
 - Windows 10 or 11.
-- Python 3.9 or newer for a source install.
+- Python 3.13 or newer for a source install. Packaged builds embed their own runtime and do not
+  need Python installed.
 - The Astrolabe firmware on a compatible BLE trackball. The product controller target is the Seeed
   Studio XIAO nRF52840; the repository also retains XIAO/PMW3389 and SuperMini/PMW3610 validation
   sketches while the final hardware contract is completed.
@@ -215,6 +216,9 @@ sketch rather than being copied into that placeholder.
   hardening.
 - [`docs/release_verification.md`](docs/release_verification.md) — automated and manual release gates
   with explicit skip/release-impact rules.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — inbound licensing, Developer Certificate of Origin sign-off,
+  and the checks to run before opening a pull request.
+- [`SECURITY.md`](SECURITY.md) — how to report a vulnerability privately.
 
 Run the automated checks with:
 
@@ -226,3 +230,14 @@ dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj
 
 Host camera behavior still requires smoke testing inside the corresponding GUI. See `TODO.md` for
 the current verification matrix rather than relying on an old test count or version snapshot.
+
+## License
+
+Astrolabe is open source. Everything in this repository today — the daemon, its host integrations,
+firmware, tooling, tests, and documentation — is licensed under the
+[Apache License 2.0](LICENSE). Hardware design source, once it exists, will be licensed under the
+[CERN Open Hardware Licence Version 2 - Weakly Reciprocal](LICENSES/CERN-OHL-W-v2.txt).
+[`LICENSING.md`](LICENSING.md) maps each path to its license.
+
+Those licenses cover code and design source, not the project's name or logos. See
+[`TRADEMARKS.md`](TRADEMARKS.md) before naming a modified build Astrolabe.

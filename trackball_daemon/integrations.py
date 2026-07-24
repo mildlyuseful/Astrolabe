@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """3D-app integration registry: detect installed apps, install/enable each integration,
 and auto-update the bundled add-ons.
 
@@ -560,6 +563,13 @@ def _copy_acad_plugin() -> tuple[str, str]:
     payloads = [(src, dst)]
     if ver.exists():
         payloads.append((ver, dst_dir / "version.json"))
+    # Every other integration's payload is a directory that already carries these files, so the
+    # copy brings them along. A compiled DLL cannot hold a comment header, and this runtime folder
+    # is outside the application tree, so its notices are copied explicitly.
+    for notice_name in ("LICENSE", "NOTICE"):
+        notice = _bundled_addin("autocad", notice_name)
+        if notice.exists():
+            payloads.append((notice, dst_dir / notice_name))
     try:
         _install_payloads_transactionally(payloads)
     except OSError as exc:

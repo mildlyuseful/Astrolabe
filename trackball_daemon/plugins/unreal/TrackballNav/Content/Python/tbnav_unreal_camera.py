@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Pure-Python camera math for the Unreal Editor Trackball Nav add-on.
 
 NO ``unreal`` import lives here, on purpose: this module is unit-testable headless with a

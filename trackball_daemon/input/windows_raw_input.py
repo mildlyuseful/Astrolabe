@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Lazy Windows Raw Input keyboard provider with fail-safe lifecycle release.
 
 The native window callback only copies a compact keyboard packet into a bounded queue. Control

@@ -51,9 +51,14 @@ launch a supported 3D application. Shared ownership and lifecycle rules are defi
 | Unreal | Copies a Python editor plugin per engine or per project. | Engine path may require elevation; project path does not. Disable/delete `TrackballNav`. |
 | Rhino | Copies Python and may append a current-user startup command. | Remove the script folder and the TrackballNav startup command in Rhino Options. |
 | SOLIDWORKS | Attaches to an already-running instance through COM automation. | No host files, registration, registry writes, listener, or launch. Disable the integration. |
-| AutoCAD | Uses COM only to attach, scope `TRUSTEDPATHS`, and NETLOAD a per-user DLL; the host-loaded plugin is the sole camera transport. | Remove the exact trusted path, delete the APPDATA plugin after closing AutoCAD, and disable the integration. |
+| AutoCAD | Uses COM only to attach, scope `TRUSTEDPATHS`, and NETLOAD a per-user DLL; the host-loaded plugin is the sole camera transport. | Remove the exact trusted path, delete the APPDATA `acad_plugin` folder after closing AutoCAD, and disable the integration. |
 | Onshape | Creates a per-user TLS key/certificate, listens on fixed loopback TLS, and optionally supplies an Onshape-only pointer userscript. | Delete the PEM files; remove the `127.51.68.120` certificate from the current-user trust store; remove the userscript. |
 | Host detection | Reads common install folders, process command lines, recent-project files, and Rhino's install registry key. | Detection is read-only. Hidden PowerShell/WMIC calls do not modify the system. |
+
+Every copied payload carries a verbatim `LICENSE` and `NOTICE`, so an add-on sitting in a host's
+folders states what it is and under what terms without reference to this project. They are part of
+the payload, so they are staged, validated, and removed with it; deleting the payload directory
+listed above still reverses the installation completely.
 
 Copied host payloads are staged and byte-validated next to their destination before replacement.
 Existing copies move to fixed-name sibling backups only for the swap, grouped payloads roll back

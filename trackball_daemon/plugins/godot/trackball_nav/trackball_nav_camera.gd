@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 # Pure camera math for Trackball Nav (no EditorInterface). Godot 4 is RIGHT-HANDED, Y-up.
 # Free-fly eye + orthonormal basis; orbit/pan/dolly/fly/walk synthesised like Unreal.
 #

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Dylan Lee
+// SPDX-License-Identifier: Apache-2.0
+
 // Offline unit tests for NavMath.Apply's "cursor" pivot path (orbitPivot / zoomPivot), feeding a
 // SYNTHETIC pivot point -- the pure-math half of what TBNAVPTRTEST verifies in-process. Exit 0 on
 // pass, 1 on failure (run by tests/test_autocad_navmath_cursor.py).

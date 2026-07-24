@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Headless unit tests for the Unreal add-on's PURE camera math (tbnav_unreal_camera).
 
 That module has NO `unreal` import, so this runs under plain pytest (a step better than the

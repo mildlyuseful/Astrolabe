@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """TrackballNav -- FreeCAD GUI bootstrap (thin shim).
 
 FreeCAD runs this file at GUI startup for every Mod/<name>/ folder. IMPORTANT: FreeCAD execs

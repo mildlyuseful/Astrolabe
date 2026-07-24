@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Headless unit tests for the Fusion add-in's "cursor" pivot (pixel -> ray -> pivot).
 
 Fusion has NO external automation, so the add-in normally can't be exercised outside the GUI at

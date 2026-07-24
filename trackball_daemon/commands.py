@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Typed runtime commands and the sole serialized dispatch path."""
 from __future__ import annotations
 

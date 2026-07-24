@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Headless unit tests for Rhino add-on pure camera math (tbnav_camera).
 
 Loaded via importlib from the Rhino plugin dir so it does not collide with FreeCAD's

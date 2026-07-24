@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Target-isolated loopback navigation broker for socket-host add-ons.
 
 The on-wire protocol remains newline-delimited JSON:

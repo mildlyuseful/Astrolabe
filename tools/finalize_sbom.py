@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Add authoritative dynamic project metadata to a generated CycloneDX SBOM."""
 
 from __future__ import annotations
@@ -34,11 +37,9 @@ def finalize_sbom(path: Path, *, name: str, version: str) -> None:
     os.close(fd)
     temporary = Path(temporary_name)
     try:
-        temporary.write_text(
-            json.dumps(data, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
+        # Explicit LF keeps the SBOM byte-identical across platforms.
+        with temporary.open("w", encoding="utf-8", newline="\n") as handle:
+            handle.write(json.dumps(data, indent=2, sort_keys=True) + "\n")
         os.replace(temporary, path)
     finally:
         if temporary.exists():

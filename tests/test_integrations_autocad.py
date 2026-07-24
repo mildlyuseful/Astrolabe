@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """AutoCAD integration registry and bundled NETLOAD-plugin installation behavior.
 
 The daemon's COM loader delivers the in-process plugin; navigation itself uses the broker. Only an

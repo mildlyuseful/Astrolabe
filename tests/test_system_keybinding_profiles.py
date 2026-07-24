@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Packaged system input profiles and profile-scoped sparse override contracts."""
 
 import copy

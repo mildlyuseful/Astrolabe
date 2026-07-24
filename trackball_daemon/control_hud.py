@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Passive, text-only control-state HUD.
 
 Runtime and config callbacks may arrive on worker threads.  They only publish immutable snapshots

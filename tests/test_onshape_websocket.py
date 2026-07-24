@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Protocol and resource-boundary tests for the local Onshape WebSocket server."""
 import base64
 import json

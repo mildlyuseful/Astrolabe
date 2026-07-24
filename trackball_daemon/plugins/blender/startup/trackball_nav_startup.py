@@ -1,4 +1,7 @@
-"""Trackball Nav -- auto-enable shim (installed by the Trackball Daemon).
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+r"""Trackball Nav -- auto-enable shim (installed by the Trackball Daemon).
 
 Blender does NOT auto-enable an add-on just because its files were copied into
 scripts/addons/. This startup script -- the analogue of Fusion's "Run on Startup" -- enables

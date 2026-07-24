@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """File-based logging. Safe when there is no console (pythonw / packaged GUI exe)."""
 import logging
 import sys

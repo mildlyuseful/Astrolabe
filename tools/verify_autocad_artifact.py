@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Fail when the bundled AutoCAD DLL is stale or lacks attributable build inputs."""
 
 from pathlib import Path, PureWindowsPath

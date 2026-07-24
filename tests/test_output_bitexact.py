@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Lock the cube/cursor output math: it must stay bit-identical at default config.
 
 The SolidWorks work is purely additive (a new nav-delta consumer + wiring), so

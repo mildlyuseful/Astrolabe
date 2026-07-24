@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Dylan Lee
+// SPDX-License-Identifier: Apache-2.0
+
 // TrackballNav — Unity Editor Scene view add-on.
 // Background socket thread reads the Trackball Daemon nav broker; EditorApplication.update
 // drains frames on the main thread and drives SceneView (orbit / fly / walk).

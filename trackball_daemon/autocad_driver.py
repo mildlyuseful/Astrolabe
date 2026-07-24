@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Daemon-side AutoCAD plugin loader -- COM staging/trust/NETLOAD only.
 
 The compiled in-host plugin is the sole AutoCAD camera transport and connects to NavBroker.

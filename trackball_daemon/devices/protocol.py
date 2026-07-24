@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Versioned BLE input-state snapshot decoding and RFC1982-style serial ordering."""
 
 from dataclasses import dataclass

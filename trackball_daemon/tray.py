@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """System-tray icon + menu (pystray). Owns nothing but the icon; lifecycle calls go to App.
 
 Runs the icon on its own thread so the Tk mainloop can own the main thread. Menu actions

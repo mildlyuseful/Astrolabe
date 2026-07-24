@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Exhaustive stable setting and allowlisted command registry contracts."""
 import copy
 import json

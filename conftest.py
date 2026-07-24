@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Pytest bootstrap for the trackball_daemon tests.
 
 Having this file at the repo root puts the project root on sys.path (so `import

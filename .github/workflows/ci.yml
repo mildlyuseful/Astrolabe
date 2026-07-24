@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 name: CI
 
 on:
@@ -20,7 +23,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.9"
+          python-version: "3.13"
 
       - name: Set up pinned uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -34,7 +37,7 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Synchronize locked Python environment
-        run: uv sync --locked --all-extras --python 3.9
+        run: uv sync --locked --all-extras --python 3.13
 
       - name: Compile Python sources
         run: uv run --locked --all-extras python -m compileall -q trackball_daemon tests
@@ -59,6 +62,7 @@ jobs:
           $Requirements = (Resolve-Path build/ci-python/runtime-requirements.txt).Path
           $SbomTool = (Resolve-Path .venv/Scripts/cyclonedx-py.exe).Path
           $FinalizeSbom = (Resolve-Path tools/finalize_sbom.py).Path
+          $VerifyWheelNotices = (Resolve-Path tools/verify_wheel_notices.py).Path
           $Pyproject = (Resolve-Path pyproject.toml).Path
           $Sbom = (Join-Path (Resolve-Path build/ci-python).Path "runtime.cdx.json")
           $Venv = Join-Path $env:RUNNER_TEMP "astrolabe-wheel-smoke"
@@ -86,10 +90,23 @@ jobs:
             & "$Venv\Scripts\python.exe" $FinalizeSbom --sbom $Sbom `
               --name "trackball-daemon" --version $InstalledVersion
             if ($LASTEXITCODE -ne 0) { throw "Installed wheel SBOM metadata finalization failed." }
+            & "$Venv\Scripts\python.exe" $VerifyWheelNotices
+            if ($LASTEXITCODE -ne 0) { throw "Installed wheel is missing required notices." }
           }
           finally {
             Pop-Location
           }
+
+      - name: Audit bundled-component notices against the release runtime
+        shell: pwsh
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/astrolabe-release-runtime
+        run: |
+          uv sync --locked --no-editable --extra onshape --python 3.13
+          if ($LASTEXITCODE -ne 0) { throw "Release runtime sync failed." }
+          $RuntimePython = Join-Path $env:UV_PROJECT_ENVIRONMENT "Scripts/python.exe"
+          python tools/audit_notices.py --environment $RuntimePython
+          if ($LASTEXITCODE -ne 0) { throw "Bundled-component notice audit failed." }
 
   firmware:
     runs-on: ubuntu-latest

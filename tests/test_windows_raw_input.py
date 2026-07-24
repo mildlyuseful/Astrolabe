@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Pure normalization, provider lifecycle, and native Raw Input registration tests."""
 
 import sys

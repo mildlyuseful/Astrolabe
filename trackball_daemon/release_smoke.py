@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Side-effect-free packaged-resource smoke used by release verification."""
 
 import importlib
@@ -29,6 +32,21 @@ _EXAMPLES = (
     "declarative-actions.example.json",
     "device-descriptor.example.json",
 )
+# Every payload that setup copies outside the application tree. Each carries its own licence and
+# notice so an add-on sitting in a host's folders, detached from this distribution, still says what
+# it is and under what terms.
+_PAYLOAD_DIRECTORIES = (
+    ("autocad",),
+    ("blender", "trackball_nav"),
+    ("freecad", "TrackballNav"),
+    ("fusion360", "TrackballNav"),
+    ("godot", "trackball_nav"),
+    ("rhino", "TrackballNav"),
+    ("sketchup", "trackball_nav"),
+    ("unity", "com.astrolabe.trackball-nav"),
+    ("unreal", "TrackballNav"),
+)
+_PAYLOAD_NOTICES = ("LICENSE", "NOTICE")
 
 
 def _read_json(resource):
@@ -55,6 +73,16 @@ def run_release_smoke():
     for name in _EXAMPLES:
         _read_json(root.joinpath("examples", name))
 
+    payload_notices = 0
+    for parts in _PAYLOAD_DIRECTORIES:
+        for name in _PAYLOAD_NOTICES:
+            resource = root.joinpath("plugins", *parts, name)
+            if not resource.is_file() or not resource.read_text(encoding="utf-8").strip():
+                raise ValueError(
+                    f"payload {'/'.join(parts)} is missing its {name}; setup would copy it into a "
+                    "host application without one")
+            payload_notices += 1
+
     autocad = validate_bundled_autocad_artifact(root)
     catalog = load_system_binding_profiles()
     compiled = {
@@ -69,6 +97,7 @@ def run_release_smoke():
         "schemas": list(_SCHEMAS),
         "examples": list(_EXAMPLES),
         "runtime_imports": runtime_imports,
+        "payload_notices": payload_notices,
         "autocad_plugin": {
             "version": autocad["version"],
             "sha256": autocad["dll_sha256"],

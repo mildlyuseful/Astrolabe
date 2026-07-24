@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """TrackballNav -- Unreal Engine editor add-on (the Unreal-coupled half).
 
 Connects to the Trackball Daemon's local nav broker (127.0.0.1) and drives the active level

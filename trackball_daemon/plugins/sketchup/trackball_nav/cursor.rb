@@ -1,4 +1,6 @@
 # frozen_string_literal: true
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
 
 # Live mouse-cursor tracker for the under-mouse 'cursor' orbit pivot (Half A).
 #

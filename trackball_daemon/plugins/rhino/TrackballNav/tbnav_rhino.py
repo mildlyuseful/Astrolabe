@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """TrackballNav — Rhino 8 add-on (default suite: orbit / pan / zoom).
 
 Background socket thread reads the Trackball Daemon nav broker; RhinoApp.Idle drains

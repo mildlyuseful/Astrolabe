@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Frozen v8 inputs and effective behavior at the Phase 2 migration boundary."""
 import json
 from pathlib import Path

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Canonical app identity, capability, transport, and focus registry contracts."""
 from dataclasses import FrozenInstanceError
 

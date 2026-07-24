@@ -27,8 +27,35 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 
 - Exercise the exact release wheel and onedir GUI on a clean Windows account without Python or a
   source checkout.
-- Add the project license, bundled-component notices, complete package metadata, vulnerability
-  reporting instructions, and release notes before publishing an alpha.
+- Add complete package metadata and release notes before publishing an alpha.
+- Rename the onedir tree the release ZIP contains. Nuitka names it after the entry script, so
+  `Astrolabe-<version>-windows-x64.zip` currently unpacks to a folder called `release_entry.dist`.
+  The archive, the executable, and the installer are already named for the product; this last
+  user-visible path is not.
+- Pin the interpreter that `build_release.ps1` embeds. It resolves `$BuildPython` from whatever
+  `python` is first on the operator's PATH, so the embedded runtime version — which the release
+  manifest is meant to record — is a property of the build machine. An interpreter below the
+  declared floor now fails the locked sync outright rather than resolving a different dependency
+  set, so this is no longer a silent-divergence risk, but the exact embedded version is still
+  unpinned.
+- Move to bleak 3.x. The dependency is deliberately capped at `<2` because bleak 2.0 changed GATT
+  error types and 3.0 changed the scanner/client keyword surface. The transport's usage is narrow
+  (`find_device_by_filter`, `BleakClient`, `start_notify`/`stop_notify`) and no documented breaking
+  change appears to touch the WinRT path, but scan, connect, notify, reconnect, and
+  disconnect-while-held can only be qualified against real trackball hardware. Lift the cap in one
+  delivery with that hardware evidence.
+- Enumerate the native libraries inside a built onedir tree and give each one an attribution.
+  `tools/audit_notices.py` resolves every Python distribution in the release runtime, and
+  `THIRD_PARTY_NOTICES.md` records CPython, Tcl/Tk, and the Nuitka runtime from the build
+  configuration, but nothing yet walks the produced tree to confirm which native libraries the
+  embedded runtime actually carries.
+- Enable GitHub private vulnerability reporting at the moment the repository becomes public.
+  `SECURITY.md` advertises `security/advisories/new` as the only reporting channel, and that feature
+  cannot be enabled while the repository is private, so the advertised link does not resolve until
+  it is turned on.
+- Replace the placeholder contact promises once the Mildly Useful domain exists. `SECURITY.md` says
+  a security mailbox will be added and `TRADEMARKS.md` says a permission contact will be listed;
+  both must become real addresses or stop promising one.
 - Authenticode-sign the daemon, eventual installer/updater, and bundled AutoCAD DLL with one
   timestamped publisher identity. Publish the source revision and whole-artifact checksum.
 - Verify SmartScreen, Defender and third-party antivirus, Windows Firewall, UAC, host trust prompts,
@@ -150,6 +177,13 @@ open epic and acceptance gates only.
 - Add walk gravity/teleport only when a reliable host-side physics step exists.
 - Replace SolidWorks out-of-process COM only if measured large-assembly throughput demonstrates a
   practical user-facing limit.
+- Add inline SPDX headers to `plugin_src/autocad/TrackballNavAcad/` the next time the bundled DLL is
+  rebuilt for a real change. Editing those sources marks the shipped DLL stale against its
+  provenance manifest, so `licensing.json` carries their Apache-2.0 disposition instead; remove that
+  exemption once the headers land.
+- Enforce Developer Certificate of Origin sign-off in CI. `CONTRIBUTING.md` requires a
+  `Signed-off-by` trailer on new commits, nothing checks it, and the history that predates the
+  policy carries no trailers, so the gate needs a start-point rule.
 
 ## Accepted limitations and non-goals
 

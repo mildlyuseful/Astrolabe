@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """TrackballNav -- Unreal Editor startup shim.
 
 Unreal auto-runs ``init_unreal.py`` from every enabled plugin's ``Content/Python`` directory at

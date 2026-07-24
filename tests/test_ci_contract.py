@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 from pathlib import Path
 
 
@@ -8,7 +11,7 @@ RELEASE_BUILD = Path("tools/build_release.ps1").read_text(encoding="utf-8")
 def test_ci_builds_and_smokes_wheel_outside_checkout():
     assert "astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b" in WORKFLOW
     assert 'version: "0.11.28"' in WORKFLOW
-    assert "uv sync --locked --all-extras --python 3.9" in WORKFLOW
+    assert "uv sync --locked --all-extras --python 3.13" in WORKFLOW
     assert "uv build --out-dir build/ci-python" in WORKFLOW
     assert "uv export --locked --no-dev --extra onshape --no-emit-project" in WORKFLOW
     assert 'Join-Path $env:RUNNER_TEMP "astrolabe-wheel-smoke"' in WORKFLOW
@@ -35,3 +38,18 @@ def test_ci_pins_and_compiles_both_validation_firmware_targets():
 
 def test_windows_release_includes_dynamic_winrt_projection_package():
     assert "--include-package=winrt" in RELEASE_BUILD
+
+
+def test_installed_wheel_notices_are_verified_outside_the_checkout():
+    """Declaring license files is not the same as shipping them."""
+    assert "tools/verify_wheel_notices.py" in WORKFLOW
+    assert "$VerifyWheelNotices" in WORKFLOW
+    assert "Installed wheel is missing required notices." in WORKFLOW
+
+
+def test_bundled_component_notices_are_audited_against_a_real_release_runtime():
+    """The gate must run against a synced runtime environment, not the all-extras build env."""
+    assert "uv sync --locked --no-editable --extra onshape" in WORKFLOW
+    assert "tools/audit_notices.py --environment" in WORKFLOW
+    assert "Bundled-component notice audit failed." in WORKFLOW
+    assert "tools/audit_notices.py --environment $RuntimePython" in RELEASE_BUILD

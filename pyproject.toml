@@ -5,10 +5,17 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "trackball-daemon"
 dynamic = ["version"]   # single source: trackball_daemon.__init__.__version__ (shown in the tray)
+license = "Apache-2.0"
+# Explicit rather than left to setuptools' default glob, which finds LICENSE and NOTICE but not the
+# third-party attributions or the texts they point at. LICENSING.md maps every path to its license.
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md", "LICENSING.md", "LICENSES/**"]
 description = "System-tray daemon for the dual-sensor BLE trackball (mouse + 3D navigation)."
-requires-python = ">=3.9"
+requires-python = ">=3.13"
 dependencies = [
-    "bleak>=0.21.0",
+    # Ceiling is deliberate, not staleness: bleak 2.0 changed GATT error types and 3.0 changed the
+    # scanner/client keyword surface. Moving off 1.x changes the BLE transport and can only be
+    # qualified against real trackball hardware, so it is tracked as its own task in TODO.md.
+    "bleak>=1.1,<2",
     "pystray>=0.19.5",
     "Pillow>=10.0.0",
     "pywin32>=306; sys_platform == 'win32'",   # SolidWorks COM automation (win32com)

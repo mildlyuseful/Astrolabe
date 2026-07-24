@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Trackball Daemon — system-tray app + settings UI around the BLE trackball.
 
 Module layout (kept deliberately separate so it bundles cleanly with Nuitka onedir

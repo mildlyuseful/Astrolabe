@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Pure System -> Global -> app setting resolution for config v9."""
 import copy
 from dataclasses import dataclass

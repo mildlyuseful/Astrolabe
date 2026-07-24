@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Tkinter settings window.
 
 Lives as a Toplevel under a hidden Tk root. Closing the window HIDES it (withdraw) so the

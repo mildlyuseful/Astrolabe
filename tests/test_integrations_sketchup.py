@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """SketchUp Desktop integration: annual-version detection, multi-version install, registry,
 version-gated auto-update, config defaults, and status reporting.
 

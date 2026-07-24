@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Immutable normalized input records with no configuration-path knowledge."""
 from __future__ import annotations
 

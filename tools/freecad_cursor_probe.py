@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Live FreeCAD GUI probe for the "cursor" orbit pivot's half A (the live cursor pixel).
 
 Run (it opens the real FreeCAD GUI briefly, then self-closes):

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Unity integration registry: bundled UPM package, install into project Packages/, auto_update."""
 import json
 import os

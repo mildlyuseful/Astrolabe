@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Headless unit tests for the Blender add-on's PURE view math.
 
 The brief: "unit-test the PURE math (mathutils quaternion orbit/turntable/roll, pan, zoom/dolly,

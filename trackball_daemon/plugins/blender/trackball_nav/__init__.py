@@ -1,4 +1,7 @@
-"""Trackball Nav -- Blender add-on.
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+r"""Trackball Nav -- Blender add-on.
 
 Connects to the Trackball Daemon's local nav broker (127.0.0.1) and drives the active 3D
 viewport (`RegionView3D`) with the orbit/pan/zoom deltas it streams. A background socket

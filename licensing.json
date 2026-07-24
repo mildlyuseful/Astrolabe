@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "project": "Astrolabe",
+  "source": "https://github.com/mildlyuseful/Astrolabe",
+  "copyright": "2026 Dylan Lee",
+  "documentation": "LICENSING.md",
+
+  "_comment_matching": [
+    "Rules are ordered and the first match wins, so every tracked path has exactly one",
+    "disposition. A pattern ending in /** matches that directory and everything under it, '**'",
+    "matches every path, and any other pattern is matched with fnmatch against the repository-",
+    "relative POSIX path.",
+    "headers: 'auto' requires the inline SPDX header on every file whose suffix appears in",
+    "comment_prefixes; 'mapped' takes the disposition from this file instead; 'never' marks text",
+    "that must not be altered at all. Any rule that is not 'auto' must say why in its note."
+  ],
+
+  "comment_prefixes": {
+    ".py": "#",
+    ".rb": "#",
+    ".ps1": "#",
+    ".gd": "#",
+    ".yml": "#",
+    ".cs": "//",
+    ".ino": "//"
+  },
+
+  "_comment_prologue": [
+    "Lines that the language requires to come first. The SPDX header is inserted after them so a",
+    "shebang, a Python encoding declaration, a Ruby magic comment, or Godot's @tool annotation",
+    "keeps its required position."
+  ],
+  "prologue_prefixes": [
+    "#!",
+    "# -*- coding",
+    "# coding",
+    "# frozen_string_literal",
+    "# encoding",
+    "# warn_indent",
+    "@tool"
+  ],
+
+  "rules": [
+    {
+      "match": ["LICENSE", "DCO", "LICENSES/**"],
+      "license": "external-verbatim",
+      "headers": "never",
+      "note": "Verbatim copies of documents published by the Apache Software Foundation, CERN, and the Linux Foundation. They carry their own terms and must not be edited; see LICENSING.md."
+    },
+    {
+      "match": ["plugin_src/autocad/TrackballNavAcad/**"],
+      "license": "Apache-2.0",
+      "headers": "mapped",
+      "note": "The bundled AutoCAD DLL's provenance manifest pins this directory's Git tree hash, so editing these files marks the shipped DLL stale until it is rebuilt against AutoCAD reference assemblies. Their disposition is recorded here instead, and inline headers are added the next time the DLL is legitimately rebuilt."
+    },
+    {
+      "match": ["ui_demo/**"],
+      "license": "Apache-2.0",
+      "headers": "mapped",
+      "note": "Non-shipping UI design prototypes and their assets. They are not daemon runtime sources and are not distributed, so their markup, styling, and image files take one directory-level disposition."
+    },
+    {
+      "match": ["**"],
+      "license": "Apache-2.0",
+      "headers": "auto"
+    }
+  ]
+}

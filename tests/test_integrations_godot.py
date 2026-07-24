@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Godot integration registry: EditorPlugin into project addons/, enable in project.godot."""
 import json
 import os

@@ -1,0 +1,158 @@
+{
+  "schema": 1,
+  "_comment": [
+    "Every component that ships inside a release artifact, with a resolved license disposition.",
+    "tools/audit_notices.py compares this against the distributions actually installed into the",
+    "release runtime environment, so a new bundled dependency fails the build until it is given a",
+    "disposition here and an attribution in THIRD_PARTY_NOTICES.md.",
+    "Licenses are taken from each distribution's own published metadata and license files, not from",
+    "a summary. 'license' is the SPDX identifier for what is relied on; where a project offers a",
+    "choice, 'license_choice_note' records which arm was taken."
+  ],
+
+  "python_distributions": [
+    {
+      "name": "bleak",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2020, Henrik Blidh",
+      "source": "https://github.com/hbldh/bleak"
+    },
+    {
+      "name": "cffi",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2012-2018, Armin Rigo, Maciej Fijalkowski",
+      "source": "https://github.com/python-cffi/cffi"
+    },
+    {
+      "name": "cryptography",
+      "license": "Apache-2.0",
+      "license_choice_note": "Offered as 'Apache-2.0 OR BSD-3-Clause'; Apache-2.0 is taken so it matches this project's own license.",
+      "copyright": "Copyright (c) Individual contributors to the cryptography project",
+      "source": "https://github.com/pyca/cryptography",
+      "embeds": [
+        {
+          "name": "OpenSSL",
+          "license": "Apache-2.0",
+          "note": "The cryptography Windows wheel statically links OpenSSL 3.x, which is Apache-2.0."
+        }
+      ]
+    },
+    {
+      "name": "pillow",
+      "license": "MIT-CMU",
+      "copyright": "Copyright (c) 1997-2011 by Secret Labs AB, Copyright (c) 1995-2011 by Fredrik Lundh and contributors; Pillow is Copyright (c) 2010-2025 by Jeffrey A. Clark and contributors",
+      "source": "https://github.com/python-pillow/Pillow"
+    },
+    {
+      "name": "pycparser",
+      "license": "BSD-3-Clause",
+      "copyright": "Copyright (c) 2008-2022, Eli Bendersky",
+      "source": "https://github.com/eliben/pycparser"
+    },
+    {
+      "name": "pystray",
+      "license": "LGPL-3.0-or-later",
+      "copyright": "Copyright (C) 2016-2022 Moses Palmer",
+      "source": "https://github.com/moses-palmer/pystray",
+      "notice_required": true,
+      "note": "The only copyleft component in a release artifact. Its source headers grant version 3 of the LGPL 'or, at your option, any later version', so the identifier is -or-later rather than the bare 'LGPLv3' in its wheel metadata. Its wheel declares COPYING and COPYING.LGPL as license files but ships neither, so the text is carried in LICENSES/ instead. See THIRD_PARTY_NOTICES.md for the obligations this creates."
+    },
+    {
+      "name": "pywin32",
+      "license": "BSD-3-Clause",
+      "license_choice_note": "The wheel's classifier says 'Python Software Foundation License', but the license text it actually ships (win32/License.txt) is a three-clause BSD form naming Mark Hammond. The shipped text is what is reproduced and relied on.",
+      "copyright": "Copyright (c) 1994-2008, Mark Hammond",
+      "source": "https://github.com/mhammond/pywin32"
+    },
+    {
+      "name": "six",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2010-2024 Benjamin Peterson",
+      "source": "https://github.com/benjaminp/six"
+    },
+    {
+      "name": "typing_extensions",
+      "license": "PSF-2.0",
+      "copyright": "Copyright (c) 2001-2025 Python Software Foundation",
+      "source": "https://github.com/python/typing_extensions"
+    },
+    {
+      "name": "winrt-runtime",
+      "license": "MIT",
+      "copyright": "Copyright (c) Microsoft Corporation. Copyright (c) 2021-2025 David Lechner",
+      "source": "https://github.com/pywinrt/pywinrt",
+      "note": "Wheel ships no license file; text taken from the pywinrt repository."
+    },
+    {
+      "name": "winrt-Windows.Devices.Bluetooth",
+      "license": "MIT",
+      "copyright": "Copyright (c) Microsoft Corporation. Copyright (c) 2021-2025 David Lechner",
+      "source": "https://github.com/pywinrt/pywinrt"
+    },
+    {
+      "name": "winrt-Windows.Devices.Bluetooth.Advertisement",
+      "license": "MIT",
+      "copyright": "Copyright (c) Microsoft Corporation. Copyright (c) 2021-2025 David Lechner",
+      "source": "https://github.com/pywinrt/pywinrt"
+    },
+    {
+      "name": "winrt-Windows.Devices.Bluetooth.GenericAttributeProfile",
+      "license": "MIT",
+      "copyright": "Copyright (c) Microsoft Corporation. Copyright (c) 2021-2025 David Lechner",
+      "source": "https://github.com/pywinrt/pywinrt"
+    },
+    {
+      "name": "winrt-Windows.Devices.Enumeration",
+      "license": "MIT",
+      "copyright": "Copyright (c) Microsoft Corporation. Copyright (c) 2021-2025 David Lechner",
+      "source": "https://github.com/pywinrt/pywinrt"
+    },
+    {
+      "name": "winrt-Windows.Foundation",
+      "license": "MIT",
+      "copyright": "Copyright (c) Microsoft Corporation. Copyright (c) 2021-2025 David Lechner",
+      "source": "https://github.com/pywinrt/pywinrt"
+    },
+    {
+      "name": "winrt-Windows.Foundation.Collections",
+      "license": "MIT",
+      "copyright": "Copyright (c) Microsoft Corporation. Copyright (c) 2021-2025 David Lechner",
+      "source": "https://github.com/pywinrt/pywinrt"
+    },
+    {
+      "name": "winrt-Windows.Storage.Streams",
+      "license": "MIT",
+      "copyright": "Copyright (c) Microsoft Corporation. Copyright (c) 2021-2025 David Lechner",
+      "source": "https://github.com/pywinrt/pywinrt"
+    }
+  ],
+
+  "_comment_runtime": [
+    "Components the Nuitka onedir build embeds that are not Python distributions and therefore",
+    "cannot be enumerated from the lock. These are reviewed against a real onedir tree rather than",
+    "assumed; see TODO.md for the artifact-level audit that closes the remaining native libraries."
+  ],
+  "bundled_runtime": [
+    {
+      "name": "CPython",
+      "license": "PSF-2.0",
+      "copyright": "Copyright (c) 2001-2025 Python Software Foundation. All rights reserved.",
+      "source": "https://github.com/python/cpython",
+      "note": "The interpreter, standard library, and its own bundled components are embedded in the onedir tree."
+    },
+    {
+      "name": "Tcl/Tk",
+      "license": "TCL",
+      "copyright": "Copyright (c) 1991-1994 The Regents of the University of California; Copyright (c) 1994-1998 Sun Microsystems, Inc.; Copyright (c) 1998-2000 Scriptics Corporation; and other parties",
+      "source": "https://www.tcl-lang.org/",
+      "note": "Embedded by the tk-inter plugin because the settings window and control panel are Tkinter."
+    },
+    {
+      "name": "Nuitka",
+      "license": "Apache-2.0",
+      "copyright": "Copyright Kay Hayen",
+      "source": "https://github.com/Nuitka/Nuitka",
+      "note": "Nuitka itself is a build tool, but its runtime support code is compiled into the produced executable."
+    }
+  ]
+}
