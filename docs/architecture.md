@@ -18,10 +18,12 @@ Astrolabe has three responsibility layers:
 - Host integrations translate the shared navigation contract into a host camera/view API. They do
   not own device bindings, foreground policy, user configuration, or global navigation state.
 
-The active firmware fuses two optical sensors into three-axis ball rotation. The custom motion value
-contains three little-endian `float32` rotation deltas in radians. Input-capable devices add sequenced
-full-state control snapshots; exact UUIDs, packet layouts, descriptor rules, and sequence handling
-are defined in [`ble_device_adapters.md`](ble_device_adapters.md).
+The current validation firmware fuses two optical sensors into three-axis ball rotation; the product
+controller target is the Seeed Studio XIAO nRF52840, with remaining hardware choices tracked in
+[`../TODO.md`](../TODO.md). The custom motion value contains three little-endian `float32` rotation
+deltas in radians. Input-capable devices add sequenced full-state control snapshots; exact UUIDs,
+packet layouts, descriptor rules, and sequence handling are defined in
+[`ble_device_adapters.md`](ble_device_adapters.md).
 
 Subscribing to the rotation stream transfers pointer ownership to the daemon: firmware suppresses
 its HID pointer/button output so the same physical action is not delivered twice. Unsubscribe or
@@ -45,6 +47,7 @@ host-specific signs, scales, pivots, or camera conventions.
 | Legacy migration compatibility | `config.py` and frozen `default_profiles.json`; new defaults do not belong there |
 | Device control namespaces and BLE snapshot mappings | `trackball_daemon/devices/descriptor_data/` |
 | Portable contributor data shapes | `trackball_daemon/schemas/`; daemon parsers remain authoritative |
+| Python dependency resolution | `pyproject.toml` plus the checked-in `uv.lock` |
 | Open defects, deferred work, and unclosed verification | [`../TODO.md`](../TODO.md) |
 
 `app_registry.py` is the only code-owned supported-app identity and ordering table. Setup definitions,
@@ -200,9 +203,11 @@ See [`default_profiles.md`](default_profiles.md) for default ownership and host-
 
 ## Focus, routing, and transport isolation
 
-Foreground app identity is resolved through `app_registry.py`. Integrations may add a downstream
-viewport-focus gate, but transport connection alone must not broadcast motion or make another app a
-delivery target.
+Foreground app identity is resolved through `app_registry.py`. Desktop executable basenames are
+normalized and matched exactly; narrowly scoped full-name families are allowed only when the host
+embeds a version in the executable name. Transport connection alone must not broadcast motion or make
+another app a delivery target. Browser-hosted integrations must include their best available active-
+tab/viewport ownership signal in runtime context selection as well as camera delivery.
 
 `NavigationEnvelope` is immutable and carries one registered target app, finite orbit/pan/zoom
 deltas, and the runtime-state revision under which those deltas were produced.
@@ -226,19 +231,34 @@ Socket integrations use loopback newline-delimited JSON. A client hello identifi
 code version, host information where available, and process. A daemon frame contains `o`, `p`, `z`,
 `op`, `os`, and `zm`, with an optional additive `adv` object. Clients ignore unknown additive keys and
 use safe defaults when keys are absent. There is no separate broker protocol-version field; target
-isolation uses the existing hello app identity.
+isolation uses the existing hello app identity. The broker accepts a client only after a bounded
+UTF-8 JSON hello declares `type=hello`, a canonical broker-owned app ID, a non-empty version, and a
+non-negative integer process ID. Malformed and unsupported handshakes are closed before they enter
+the client set and become a visible degraded-health detail.
 
 `adv` is the complete additive profile for the frame target. The daemon runtime is authoritative for
 the delivered navigation mode; host-local mode state must not compete with it.
 
 Transport, setup, reload, and host-thread details belong in the matching [`apps/`](apps/) guide.
 
+Host add-in payload installation is an exact, recoverable replacement rather than an overlay copy.
+Every file or directory in one logical destination group is staged beside its destination and
+byte-validated before any installed copy moves. The group then swaps under one process lock; a
+failure rolls every changed destination back. Fixed sibling backup and staging names let the next
+setup run recover an interrupted swap, and exact directory replacement removes files retired from
+the bundled payload. Installers continue across independent host versions or projects and report
+each destination that could not be updated.
+
 ### Direct transports
 
 - SolidWorks uses a direct out-of-process COM driver attached to an existing application instance.
 - Onshape uses the fixed loopback TLS/WAMP endpoint `127.51.68.120:8181`; configuration cannot widen
-  that listener. Browser foreground plus bridge connection selects the coarse context, and the
-  bridge's own focus signal is the final camera-delivery gate.
+  that listener. Onshape becomes runtime context only while a supported browser is foreground, the
+  bridge has an active subscribed controller, and that controller explicitly owns viewport focus.
+  Focus and subscription are independent WAMP state and may arrive in either order; neither browser
+  process identity nor subscription alone implies viewport focus. A physical transport close clears
+  connection, focus, queued input, and gesture state immediately. A replacement controller takes
+  ownership explicitly, and the worker checks that same controller focus before applying motion.
 - AutoCAD navigation uses only the in-process GraphicsSystem plugin. Daemon-side AutoCAD COM code
   stages, trusts, and `NETLOAD`s the plugin; it is not a concurrent camera transport. The retired COM
   navigation implementation remains under `archive/autocad_com_transport/` as historical evidence.
@@ -295,7 +315,20 @@ supported host as a side effect.
 
 Shutdown and failure paths release binding-owned state, provider-held controls, and pointer-button
 ownership before transports disappear. Reloading a profile or replacing an owner follows the same
-release-first rule.
+release-first rule. Startup owns its partial-failure cleanup: any exception at a UI, tray,
+discovery-file, broker, direct-driver, add-in-update, BLE, or mainloop boundary runs the same
+idempotent release-first shutdown, and one cleanup failure cannot prevent later owners from stopping.
+Publishing the add-on discovery file is a required startup step rather than a swallowed best-effort
+write. BLE connection state is visible in the main status row and tray; normalized input-provider
+health is visible with its binding source.
+
+Long-lived navigation services publish one immutable health value with a current detail. The shared
+states are `disabled` for a gated or stopped owner, `waiting` for a running owner awaiting its host
+or client, `healthy` for an operational connection, `degraded` for a recoverable transport or
+protocol fault, and `failed` when the owner cannot provide its service without a retry or corrective
+action. The navigation broker has a global row; SolidWorks, AutoCAD, and Onshape report through
+their 3D Apps rows. The tray summarizes the highest-severity non-disabled state. A fault detail
+remains visible until a later meaningful lifecycle or connection transition replaces it.
 
 One host operation failure should be logged and skip that operation without blanking a view,
 terminating the BLE stream, or disconnecting unrelated integrations. Document/view/pivot/cursor

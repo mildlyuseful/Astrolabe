@@ -38,13 +38,15 @@ def test_one_immutable_registry_owns_the_supported_app_suite():
 
 def test_process_selectors_and_transports_match_existing_routing_contract():
     expected = {
-        "fusion360": ("fusion",), "blender": ("blender",), "freecad": ("freecad",),
-        "sketchup": ("sketchup",), "unreal": ("unrealeditor", "ue4editor"),
-        "unity": ("unity",), "godot": ("godot",), "rhino": ("rhino",),
-        "solidworks": ("sldworks",), "autocad": ("acad",),
-        "onshape": ("chrome", "msedge", "firefox", "brave", "opera", "vivaldi"),
+        "fusion360": ("fusion360.exe",), "blender": ("blender.exe",),
+        "freecad": ("freecad.exe",), "sketchup": ("sketchup.exe",),
+        "unreal": ("unrealeditor.exe", "ue4editor.exe"), "unity": ("unity.exe",),
+        "godot": ("godot.exe",), "rhino": ("rhino.exe",),
+        "solidworks": ("sldworks.exe",), "autocad": ("acad.exe",),
+        "onshape": ("chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe",
+                    "vivaldi.exe"),
     }
-    assert {spec.app_id: tuple(selector.contains for selector in spec.process_selectors)
+    assert {spec.app_id: tuple(selector.executable for selector in spec.process_selectors)
             for spec in APP_SPECS} == expected
     assert APP_SPECS_BY_ID["solidworks"].transport is TransportKind.SOLIDWORKS_COM
     assert APP_SPECS_BY_ID["onshape"].transport is TransportKind.ONSHAPE_BRIDGE
@@ -61,6 +63,27 @@ def test_desktop_process_resolution_is_case_and_path_insensitive():
     assert context.onshape_state is OnshapeFocusState.DISCONNECTED
 
 
+@pytest.mark.parametrize("process_name", [
+    "Unity Hub.exe",
+    "UnityCrashHandler64.exe",
+    "FusionLauncher.exe",
+    "Fusion360Launcher.exe",
+    "acadlt.exe",
+    "my-acad.exe",
+    "UnrealEditor-Cmd.exe",
+    "freecadcmd.exe",
+    "blender-launcher.exe",
+    "not-really-sldworks.exe",
+])
+def test_similarly_named_desktop_processes_do_not_route(process_name):
+    assert resolve_foreground_context(process_name).app_id is None
+
+
+def test_portable_godot_editor_family_is_explicit_and_console_is_excluded():
+    assert resolve_foreground_context("Godot_v4.3-stable_win64.exe").app_id == "godot"
+    assert resolve_foreground_context("Godot_v4.3-stable_win64_console.exe").app_id is None
+
+
 def test_onshape_connection_and_foreground_are_explicit_independent_states():
     disconnected = resolve_foreground_context("chrome.exe", onshape_connected=False)
     assert disconnected.app_id is None
@@ -70,14 +93,26 @@ def test_onshape_connection_and_foreground_are_explicit_independent_states():
     assert background.app_id is None
     assert background.onshape_state is OnshapeFocusState.CONNECTED_BACKGROUND
 
-    foreground = resolve_foreground_context("msedge.exe", onshape_connected=True)
+    unfocused_browser = resolve_foreground_context(
+        "msedge.exe", onshape_connected=True, onshape_viewport_focused=False)
+    assert unfocused_browser.app_id is None
+    assert unfocused_browser.onshape_state is OnshapeFocusState.CONNECTED_BACKGROUND
+
+    foreground = resolve_foreground_context(
+        "msedge.exe", onshape_connected=True, onshape_viewport_focused=True)
     assert foreground.app_id == "onshape"
     assert foreground.focus_kind is FocusKind.ONSHAPE_BROWSER
     assert foreground.onshape_state is OnshapeFocusState.CONNECTED_FOREGROUND
 
-    other_host = resolve_foreground_context("sldworks.exe", onshape_connected=True)
+    other_host = resolve_foreground_context(
+        "sldworks.exe", onshape_connected=True, onshape_viewport_focused=True)
     assert other_host.app_id == "solidworks"
     assert other_host.onshape_state is OnshapeFocusState.CONNECTED_BACKGROUND
+
+    similarly_named_browser_helper = resolve_foreground_context(
+        "chrome_proxy.exe", onshape_connected=True, onshape_viewport_focused=True)
+    assert similarly_named_browser_helper.app_id is None
+    assert similarly_named_browser_helper.onshape_state is OnshapeFocusState.CONNECTED_BACKGROUND
 
 
 def test_supported_navigation_modes_are_capability_owned():

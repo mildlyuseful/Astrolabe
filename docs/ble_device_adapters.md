@@ -88,6 +88,18 @@ execution of files found on disk. Third-party Python adapter loading is intentio
 A device with a different wire protocol requires reviewed code; a device using this snapshot wire
 format requires only reviewed descriptor data.
 
+## Discovery identity
+
+A configured BLE address is authoritative and bypasses name discovery. Without an address,
+`BleTransport` compares the configured name case-insensitively with both the current advertisement's
+local name and the operating system's cached device name. Some peripherals put the name in a
+separate scan response, so either source may be the only one available during a scan.
+
+Seeing a descriptor-compatible service UUID without the configured name is diagnostic evidence, not
+permission to connect. Built-in devices may share the same service and motion characteristic while
+publishing different input layouts, so the transport reports the observed address/name and asks for
+an explicit Device name or address instead of guessing a descriptor.
+
 ## Built-in mappings
 
 - `astrolabe_5way` / `ble.astrolabe`: bit 0 Up, bit 1 Down, bit 2 Left, bit 3 Right,
@@ -95,11 +107,12 @@ format requires only reviewed descriptor data.
 - `xiao3389_3button` / `ble.xiao3389`: bit 0 Left, bit 1 Right, bit 2 Middle; advertised name
   `Trackball BLE`. This is the dual-PMW3389 three-button test bench, not the five-way board.
 
-The working five-way publisher is
+The validated five-way prototype publisher is
 [`firmware/PMW3610/PMW3610.ino`](../firmware/PMW3610/PMW3610.ino): SuperMini nRF52840, dual
-PMW3610 sensors, interrupt-driven reads, and the production five-way bit map under the `Astrolabe`
-advertised name. Standalone HID maps Down/Right/Center to left/right/middle mouse buttons; Up and
-Left are protocol-only. Physical pins, 2.0 in ball diameter, and mount angles live in that sketch.
+PMW3610 sensors, interrupt-driven reads, and the five-way protocol bit map under the `Astrolabe`
+advertised name. Standalone HID maps Down/Right/Center to left/right/middle mouse buttons; Up and Left
+are protocol-only. Its completed validation does not qualify the final Seeed Studio XIAO nRF52840
+product hardware. Prototype pins, 2.0 in ball diameter, and mount angles live only in that sketch.
 
 The five-way switch is active-low with internal pull-ups, with debounce owned by firmware. Its
 mechanism ordinarily permits only one direction at a time. That is descriptive hardware metadata,

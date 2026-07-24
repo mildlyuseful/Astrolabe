@@ -60,17 +60,61 @@ class BleTransport:
             self.status_callback(f"connecting to {config.address}...")
             return config.address, config.name
         self.status_callback(f'scanning for "{config.name}"...')
+        expected_name = config.name.casefold()
+        expected_services = {
+            item.casefold() for item in
+            self.adapter_registry.discovery_service_uuids(config)
+        }
+        service_candidates = {}
+        matched_names = {}
+
+        def match(device, advertisement):
+            address = str(getattr(device, "address", "") or "")
+            names = tuple(
+                value for value in (
+                    getattr(advertisement, "local_name", None),
+                    getattr(device, "name", None),
+                )
+                if isinstance(value, str) and value
+            )
+            if any(value.casefold() == expected_name for value in names):
+                matched_names[address] = next(
+                    value for value in names if value.casefold() == expected_name)
+                return True
+            advertised_services = {
+                str(value).casefold() for value in
+                (getattr(advertisement, "service_uuids", ()) or ())
+            }
+            if expected_services & advertised_services:
+                service_candidates[address] = (
+                    device,
+                    names[0] if names else None,
+                )
+            return False
+
         try:
-            device = await self.scanner.find_device_by_name(config.name, timeout=10.0)
+            device = await self.scanner.find_device_by_filter(match, timeout=10.0)
         except Exception as exc:
             self.status_callback(f"scan error: {exc}")
             await self.sleep(2.0)
             return None, None
         if device is None:
-            self.status_callback("device not found, retrying...")
+            if len(service_candidates) == 1:
+                address, (_candidate, observed_name) = next(iter(service_candidates.items()))
+                identity = f' as "{observed_name}"' if observed_name else " without a name"
+                self.status_callback(
+                    f"compatible BLE service seen at {address}{identity}, but not as "
+                    f'"{config.name}"; set the Device name or address')
+            elif service_candidates:
+                self.status_callback(
+                    f"{len(service_candidates)} compatible BLE services found without a unique "
+                    "name match; set the Device address")
+            else:
+                self.status_callback("device not found, retrying...")
             await self.sleep(1.0)
             return None, None
-        return device, getattr(device, "name", None) or config.name
+        address = str(getattr(device, "address", "") or "")
+        return device, matched_names.get(address) or getattr(device, "name", None) or config.name
 
     async def _connect_once(self, config, target, scanned_name):
         adapter = None

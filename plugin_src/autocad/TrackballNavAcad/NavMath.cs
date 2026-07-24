@@ -23,6 +23,11 @@ namespace TrackballNav
     {
         public static readonly Vector3d WorldUp = Vector3d.ZAxis;   // AutoCAD is Z-up
 
+        // TILEMODE alone does not identify Paper space. AutoCAD exposes the active floating
+        // Model-space viewport on a layout as CVPORT=2; any other layout value is Paper space.
+        // Keep this host-state classifier pure so the production gate is tested.
+        public static bool IsModelView(bool tileMode, int cvport) => tileMode || cvport == 2;
+
         public static CamState Read(GsView v) => new CamState
         {
             Pos = v.Position,

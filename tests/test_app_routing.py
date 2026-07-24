@@ -389,6 +389,7 @@ def _status_app():
     app._broker_apps = []
     app._sw_apps = []
     app._onshape_apps = []
+    app._onshape_connection_version = None
     app.connected_apps = []
     app.observed_addin_versions = {}
     return app
@@ -412,6 +413,27 @@ def test_sw_version_fallback_label():
     app = _status_app()
     app._on_sw_connection_changed(True, "")                 # driver reports no version string
     assert ("solidworks", "COM", 0) in app.connected_apps
+
+
+def test_onshape_subscription_is_not_an_active_app_until_foreground_focus():
+    app = _status_app()
+    app.foreground_monitor = SimpleNamespace(refreshes=0, refresh=lambda: setattr(
+        app.foreground_monitor, "refreshes", app.foreground_monitor.refreshes + 1))
+
+    app._on_onshape_connection_changed(True, "1.4.8")
+    assert app._onshape_connection_version == "1.4.8"
+    assert app.connected_apps == []
+    assert app.foreground_monitor.refreshes == 1
+
+    app._sync_onshape_active_row(True)
+    assert app.connected_apps == [("onshape", "1.4.8", 0)]
+
+    app._sync_onshape_active_row(False)
+    assert app.connected_apps == []
+    assert app._onshape_connection_version == "1.4.8"
+
+    app._on_onshape_connection_changed(False, "")
+    assert app._onshape_connection_version is None
 
 
 def test_connection_merge_includes_autocad_as_broker_client():

@@ -4,64 +4,29 @@ This is the sole ledger for unresolved engineering, verification, parity, and re
 Current cross-component contracts live in [`docs/architecture.md`](docs/architecture.md); completed
 plans, dated evidence, and implementation history belong under [`archive/`](archive/).
 
-## P0 — Current correctness and state-safety defects
-
-- Replace substring desktop-process routing with normalized exact executable identities or explicit
-  aliases. Add negative coverage for Unity Hub, launchers, AutoCAD LT, and similarly named processes.
-- Prevent Onshape-scoped bindings and HUD/runtime context from activating merely because the bridge is
-  connected while an unrelated browser tab or window is foreground. Route the bridge's viewport-focus
-  state into the context decision or add an equivalent fine-grained gate.
-- Make AutoCAD paper-space/GraphicsSystem fallback capability loss explicit. Preserve cursor-pivot and
-  Dolly semantics, dynamically suppress unavailable choices, or surface a clear degraded-state
-  diagnostic instead of silently substituting view-center orbit or a no-op.
-- Invalidate or qualify FreeCAD's cached Under Cursor target when the pointer leaves the 3D viewport;
-  until then, retain a prominent warning and live-test the stale-last-pixel fallback.
-- Treat newly reproduced stuck-input, stale-target, cross-app routing, and duplicate-action regressions
-  as P0 until resolved.
-
 ## P1 — Production and release blockers
 
 ### Production hardware
 
-- Freeze the complete production hardware contract before replacing the honest
-  `firmware/Astrolabe` placeholder. `firmware/PMW3610` currently publishes the SuperMini
-  dual-PMW3610 + five-way board (pins, 2.0 in ball, L/R angles, interrupt-driven reads, active-low
-  five-way) under advertised name `Astrolabe`; treat that sketch as the candidate contract to freeze
-  or diverge from, not as a finished production claim:
+- Complete the production hardware contract around the fixed Seeed Studio XIAO nRF52840 controller
+  before replacing the honest `firmware/Astrolabe` placeholder. `firmware/PMW3610` is the completed
+  SuperMini dual-PMW3610 + five-way validation prototype, not the product controller or a finished
+  production claim. Freeze or deliberately change its remaining candidate choices against the final
+  XIAO assembly:
   - confirm sensor model/count, mounting geometry, buses, chip selects, interrupt/power pins, and
     two-versus-three-sensor fusion expectations against the final assembly;
   - confirm Up/Down/Left/Right/Center pins, polarity, debounce timing, and simultaneous-input behavior;
   - battery/power design, USB/BLE expectations, host-profile behavior, and an always-reachable
     mode/recovery control.
-- Repeat the physical switch, sensor, reconnect, held-input, sleep/wake, and mode-transition matrix on
-  final hardware. The XIAO three-button bench validates the software boundary; PMW3610 is the current
-  five-way hardware path pending that freeze.
-
-### Build and artifact integrity
-
-- Compile `firmware/PMW3610/PMW3610.ino` and `firmware/XIAO3389/XIAO3389.ino` in CI with pinned
-  board-core and library versions; report artifact size. Add a pinned `west` build when the ZMK
-  module begins.
-- Make `tools/build_autocad_plugin.ps1` the sole publisher of the bundled AutoCAD DLL and provenance
-  manifest. A bare Release build currently overwrites them with an intentionally fail-closed minimal
-  manifest; gate or remove that project target in the next attributed plugin-source commit.
-- Build the sdist and wheel in CI, install the wheel outside the checkout, and run binding validation
-  and release smoke against the installed package.
-- Produce a deterministic archive of the complete Nuitka onedir output and publish its checksum. The
-  executable hash alone does not authenticate bundled DLLs, schemas, defaults, or host add-ins.
-- Make host add-in install/update transactional: stage and validate payloads, swap with a recoverable
-  backup, remove obsolete files, report per-destination results, and test interrupted updates.
-- Add a whole-application startup/shutdown smoke with deterministic transport, UI, tray, filesystem,
-  and host-driver fakes. Verify cleanup after every startup-stage failure and while controls are held.
-- Surface broker, discovery-file, BLE, Raw Input, SolidWorks, AutoCAD, Onshape, and add-on protocol
-  health instead of allowing silent startup or connection failures.
+- Port the frozen contract to the final XIAO nRF52840 assembly and repeat the physical switch, sensor,
+  reconnect, held-input, sleep/wake, and mode-transition matrix there. The XIAO three-button bench
+  validates the protocol boundary and the completed SuperMini PMW3610 loop validates the five-way
+  prototype; neither qualifies the final product hardware.
 
 ### Release qualification
 
 - Exercise the exact release wheel and onedir GUI on a clean Windows account without Python or a
   source checkout.
-- Establish a dependency lock and generate a CycloneDX or SPDX SBOM from the actual release
-  environment. Reconcile `requirements.txt` with package extras.
 - Add the project license, bundled-component notices, complete package metadata, vulnerability
   reporting instructions, and release notes before publishing an alpha.
 - Authenticode-sign the daemon, eventual installer/updater, and bundled AutoCAD DLL with one
@@ -114,8 +79,7 @@ For every applicable host:
 - **Fusion 360:** occurrence/assembly bodies with `findBRepUsingRay`; confirm whether root-component
   queries miss occurrence-only geometry.
 - **SolidWorks:** COM throughput on representative large assemblies and multi-monitor DPI behavior.
-- **FreeCAD:** perspective-camera behavior, nested/placed world-space bounds, and cursor-leave
-  invalidation.
+- **FreeCAD:** perspective-camera behavior and nested/placed world-space bounds.
 - **Rhino:** startup-registration fallback and live Under Cursor/Object Center behavior.
 
 ## P3 — Advertised host feature parity

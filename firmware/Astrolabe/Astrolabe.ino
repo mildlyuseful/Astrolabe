@@ -1,9 +1,11 @@
 /*
  * Astrolabe — production trackball firmware (PLACEHOLDER, not started).
  *
- * Final production freeze remains an open hardware gate in ../../TODO.md. This placeholder does not
- * invent a second pin map. The current SuperMini dual-PMW3610 + five-way board contract lives in
- * ../PMW3610/PMW3610.ino (also the older dual-PMW3389 three-button bench in ../XIAO3389/XIAO3389.ino).
+ * The product controller is fixed as a Seeed Studio XIAO nRF52840. The remaining sensor, switch,
+ * power, and recovery-control freeze remains an open hardware gate in ../../TODO.md, so this
+ * placeholder does not invent a final pin map. The completed SuperMini dual-PMW3610 + five-way
+ * validation prototype lives in ../PMW3610/PMW3610.ino; the older XIAO dual-PMW3389 three-button
+ * protocol bench lives in ../XIAO3389/XIAO3389.ino. Neither sketch is the product assembly.
  *
  * The compatibility-frozen BLE rotation and full input-state contracts are documented in
  * ../../docs/ble_device_adapters.md. Production firmware must preserve those wire formats,

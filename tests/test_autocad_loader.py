@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from trackball_daemon import autocad_driver
+from trackball_daemon import autocad_driver, integrations
 from trackball_daemon.autocad_driver import AutoCADPluginLoader
 
 
@@ -141,14 +141,14 @@ def test_locked_dll_still_netloads_existing_copy(plugin_dirs, monkeypatch):
     runtime.mkdir()
     (runtime / autocad_driver._PLUGIN_DLL).write_bytes(b"old locked dll")
     (runtime / "version.json").write_text('{"version": "1.0.0"}', encoding="utf-8")
-    real_copy2 = autocad_driver.shutil.copy2
+    real_copy2 = integrations.shutil.copy2
 
     def deny_dll(src, dst, **kw):
         if str(src).endswith(".dll"):
             raise OSError("locked")
         return real_copy2(src, dst, **kw)
 
-    monkeypatch.setattr(autocad_driver.shutil, "copy2", deny_dll)
+    monkeypatch.setattr(integrations.shutil, "copy2", deny_dll)
     doc = FakeDoc()
     _attached_loader(monkeypatch, FakeAcad(doc))._tick()
     assert len(doc.commands) == 1 and "NETLOAD" in doc.commands[0]

@@ -1,7 +1,9 @@
 """Side-effect-free packaged-resource smoke used by release verification."""
 
+import importlib
 import importlib.resources
 import json
+import sys
 
 from .autocad_artifact import validate_bundled_autocad_artifact
 from .devices import builtin_device_descriptors
@@ -35,6 +37,14 @@ def _read_json(resource):
 
 def run_release_smoke():
     """Load every release contract without starting transports or writing user state."""
+    runtime_imports = []
+    if sys.platform == "win32":
+        # PyWinRT materializes projected collection types through a dynamic import when the first
+        # BLE advertisement arrives. Static freezer analysis cannot see that edge.
+        module = "winrt.windows.foundation.collections"
+        importlib.import_module(module)
+        runtime_imports.append(module)
+
     root = importlib.resources.files("trackball_daemon")
     for name in _ROOT_JSON:
         _read_json(root.joinpath(name))
@@ -58,6 +68,7 @@ def run_release_smoke():
         "devices": devices,
         "schemas": list(_SCHEMAS),
         "examples": list(_EXAMPLES),
+        "runtime_imports": runtime_imports,
         "autocad_plugin": {
             "version": autocad["version"],
             "sha256": autocad["dll_sha256"],

@@ -30,6 +30,10 @@ here.
 
 ## Working rules
 
+- Build toward an open-source-quality foundation before release. Fix defects at the layer that owns
+  the broken invariant, remove compensating workarounds once the root cause is understood, and do not
+  accept avoidable lifecycle, latency, or maintenance debt merely because a patch passes the current
+  test.
 - Code and packaged data are authoritative. Documentation explains current contracts and earned
   behavior that code alone cannot establish.
 - `trackball_daemon/app_registry.py` is the only supported-app identity, order, transport, and

@@ -3,11 +3,11 @@
        SMOOTH, regen-free orbit via AutoCAD's GraphicsSystem (GsView) - the API native 3DORBIT uses,
        which external COM automation cannot reach. See docs/apps/autocad.md, "Keep one camera writer."
 
-       Build (needs the .NET 8 SDK; VS not required):
+       Local compile (needs the .NET 8 SDK; VS not required):
            dotnet build -c Release plugin_src/autocad/TrackballNavAcad
-       The Release build auto-copies TrackballNavAcad.dll into trackball_daemon/plugins/autocad/
-       (the bundled payload the daemon NETLOADs). References resolve against the INSTALLED AutoCAD
-       (no ObjectARX SDK needed); AutoCAD 2025-2027 share the .NET 8 binary-compatible family. -->
+       Publish the bundled DLL and its provenance manifest only through
+       tools/build_autocad_plugin.ps1. References resolve against the INSTALLED AutoCAD (no ObjectARX
+       SDK needed); AutoCAD 2025-2027 share the .NET 8 binary-compatible family. -->
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Platforms>x64</Platforms>
@@ -18,7 +18,7 @@
     <AssemblyName>TrackballNavAcad</AssemblyName>
     <!-- Keep in sync with Plugin.PluginVersion; version.json for the daemon's update check is
          generated from this on Release build. -->
-    <Version>0.3.16</Version>
+    <Version>0.3.20</Version>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <DebugType>none</DebugType>
@@ -38,14 +38,4 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
-  <!-- drop the built DLL into the daemon's bundled-plugins dir + write the version manifest the
-       daemon's add-in update check reads (integrations._ADDINS["autocad"]) -->
-  <Target Name="CopyToPlugins" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <Copy SourceFiles="$(TargetPath)"
-          DestinationFolder="$(MSBuildProjectDirectory)\..\..\..\trackball_daemon\plugins\autocad\" />
-    <WriteLinesToFile
-        File="$(MSBuildProjectDirectory)\..\..\..\trackball_daemon\plugins\autocad\version.json"
-        Lines="{&quot;version&quot;: &quot;$(Version)&quot;}"
-        Overwrite="true" />
-  </Target>
 </Project>

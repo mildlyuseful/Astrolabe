@@ -112,6 +112,8 @@ def test_production_placeholder_records_version_without_fabricating_hardware():
     assert "#define ASTROLABE_INPUT_PROTOCOL_VERSION 1" in PLACEHOLDER
     assert "#define ASTROLABE_FIRMWARE_PROTOCOL_REV   1" in PLACEHOLDER
     assert "active-low inputs with internal pull-ups and firmware debounce" in PLACEHOLDER
+    assert "Seeed Studio XIAO nRF52840" in PLACEHOLDER
     assert "PMW3610/PMW3610.ino" in PLACEHOLDER
+    assert "Neither sketch is the product assembly" in PLACEHOLDER
     assert "publish the full" in PLACEHOLDER
     assert "observed bitset if simultaneous inputs occur" in PLACEHOLDER

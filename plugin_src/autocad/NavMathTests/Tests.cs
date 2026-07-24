@@ -121,6 +121,13 @@ static class Tests
 
     static void Main()
     {
+        // --- AutoCAD space classification: TILEMODE=0 can still be Model space ---------------
+        Check(NavMath.IsModelView(true, 1), "space: tiled Model layout");
+        Check(NavMath.IsModelView(true, 7), "space: tiled Model viewport");
+        Check(NavMath.IsModelView(false, 2), "space: floating layout viewport is Model space");
+        Check(!NavMath.IsModelView(false, 1), "space: layout canvas is Paper space");
+        Check(!NavMath.IsModelView(false, 3), "space: non-model layout CVPORT is Paper space");
+
         BrokerPortDiscovery();
 
         // --- level-horizon is a one-shot transition operation, not an ordinary frame rule ------

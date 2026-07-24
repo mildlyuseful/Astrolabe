@@ -136,9 +136,10 @@ view.redraw()                               # force a repaint (needed when drive
   `orbit_hold_sec`); `cursor` → the surface under the **live MOUSE CURSOR**:
   a passive `SoLocation2Event` observer on the active view caches the last viewport pixel
   (`_cursor_event_cb`, re-bound to the current view every 0.5 s by the pump via
-  `_ensure_cursor_hook`), and `_cursor_pivot` feeds that pixel to the SAME `getObjectInfo` pick,
-  bbox validation, and per-gesture hold as `screen_center`. Unavailable methods continue through the
-  configured global chain. (`screen_center`/`cursor` is FreeCAD's
+  `_ensure_cursor_hook`). A passive Qt event filter on each Quarter viewport receiver clears that
+  pixel and both cursor-derived holds on `Leave`; `_cursor_pivot` feeds a currently owned pixel to the
+  SAME `getObjectInfo` pick, bbox validation, and per-gesture hold as `screen_center`. Unavailable
+  methods continue through the configured global chain. (`screen_center`/`cursor` is FreeCAD's
   *easiest* raycast of the apps — `getObjectInfo` does the pick and hands back world coords; no ray
   construction needed.) `selection_overrides_pivot` lets a non-empty selection replace the
   designated orbit/to-cursor pivot; disabling it restores the requested pivot. Project aggregation
@@ -243,9 +244,10 @@ with plain `python` — **no FreeCAD needed at all** (a step better than Blender
     Gui.ActiveDocument.ActiveView` → True across reads), so `_ensure_cursor_hook` detects a view
     change with a plain `is` and re-binds the observer (dropping the cached pixel — the old view's
     coordinates are meaningless in the new one).
-14. **The cursor cache has no "mouse left the viewport" signal.** `SoLocation2Event` fires only over
-    the 3D view, so leaving the viewport retains the last in-view pixel. Bbox validation and the pivot
-    fallback chain bound stale samples; a stationary cursor may legitimately miss after camera motion.
+14. **Coin motion and Qt ownership are complementary.** `SoLocation2Event` supplies bottom-left Coin
+    pixels only inside the 3D view; Qt `Leave` on the Quarter viewport receiver invalidates the cached
+    pixel plus orbit/zoom cursor holds. Keep the filter passive (`eventFilter` returns `False`) and
+    attach it to `viewport()`, not just the surrounding `QGraphicsView`.
 
 ---
 
@@ -297,9 +299,9 @@ FreeCAD's eye-and-target camera uses a neutral full-angle orbit scale. Do not co
   arrived — distinguishes a daemon/Shift issue from an add-on issue), `screen-center-pivot: surface hit|…
   fallback`, `applied` (the camera actually changed). The tray's `Apps: freecad v…` confirms the
   hello handshake.
-- **Under Cursor stale-pixel warning:** FreeCAD exposes no reliable "mouse left the viewport" signal.
-  The add-on can retain the last in-viewport pixel, bounded by hit/bbox validation. Keep this warning
-  until the invalidation work in [`TODO.md`](../../TODO.md) is complete.
+- **Cursor invalidation:** `cursor: invalidated (viewport_leave)` confirms that leaving a Quarter 3D
+  viewport cleared the cached pixel and both cursor-derived gesture targets. Under Cursor then follows
+  the configured fallback chain until an in-view Coin movement supplies a fresh pixel.
 - **`camera` (turn-in-place) is unsupported** — the add-on's
   resolver skips it like `cursor_3d` and the configured chain continues (a `camera` primary keeps
   its selection-override exemption). FreeCAD's Coin camera is an eye+orientation model, so a real

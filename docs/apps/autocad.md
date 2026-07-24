@@ -47,9 +47,20 @@ The socket thread never touches AutoCAD APIs. It parses target-isolated broker f
 motion. A WinForms timer created on AutoCAD's UI thread drains that state, applies the resolved
 profile, and owns the complete GraphicsSystem gesture lifecycle.
 
-`NavigationRouter` is the only daemon delivery boundary. `app_registry.py` currently selects AutoCAD
-with normalized substring matching on `acad`; exact executable-identity matching remains tracked in
-[`TODO.md`](../../TODO.md).
+`NavigationRouter` is the only daemon delivery boundary. `app_registry.py` selects AutoCAD only for
+the normalized exact executable identity `acad.exe`; AutoCAD LT and similarly named processes do not
+inherit its runtime context.
+
+AutoCAD space selection uses both `TILEMODE` and `CVPORT`. On a layout, `CVPORT=2` identifies Model
+space inside the active floating viewport and remains eligible for the full GraphicsSystem path;
+other layout values identify Paper space. `TILEMODE=0` alone does not imply Paper space. Actual Paper
+space pauses model-camera navigation; genuine GraphicsSystem loss uses the `SetCurrentView` fallback.
+
+`CVPORT=2` identifies the active floating slot, not a durable viewport owner. The current viewport
+object ID owns the gesture and distinguishes layout `Viewport` entities when the user changes the
+active floating viewport. This object-ID rule is layout-only: on the Model tab,
+`Editor.CurrentViewportObjectId` may be null while the numbered GraphicsSystem/VPORT path is valid,
+so Model-tab navigation must remain keyed by `CVPORT`.
 
 ## Setup, update, and reload
 
@@ -64,13 +75,15 @@ A locked installed DLL is staged and applied on a later AutoCAD start. Plugin so
 new build and an AutoCAD restart; daemon loader changes require a daemon restart. Keep the project
 version, `Plugin.PluginVersion`, bundled DLL, and manifest synchronized.
 
-Build a shippable DLL with `tools/build_autocad_plugin.ps1`, not a bare Release build. The controlled
-build refuses modified or untracked plugin sources, injects an existing full source revision into the
-assembly informational version, and records the plugin source-tree ID, DLL hash, target framework,
-.NET SDK, and exact AutoCAD managed-reference versions and hashes in `version.json`. The artifact
-commit can follow the recorded source revision; requiring a binary to name the commit that contains
-that same binary would be circular. `tools/verify_autocad_artifact.py`, the Python suite, and release
-smoke fail when the committed plugin source tree or bundled DLL no longer matches the manifest.
+Build a shippable DLL with `tools/build_autocad_plugin.ps1`. A bare Release build compiles only to the
+project output and cannot modify the bundled DLL or manifest. The controlled build refuses modified
+or untracked plugin sources, injects an existing full source revision into the assembly informational
+version, and records the plugin source-tree ID, DLL hash, target framework, .NET SDK, and exact
+AutoCAD managed-reference versions and hashes in `version.json`. The artifact commit can follow the
+recorded source revision; requiring a binary to name the commit that contains that same binary would
+be circular. `tools/verify_autocad_artifact.py` and the source-checkout Python suite fail when current
+plugin source no longer matches the manifest. Packaged release smoke has no Git checkout to compare;
+it validates the DLL bytes and the manifest's intrinsic provenance instead.
 
 The production build targets the managed API references for the supported AutoCAD generation. A
 successful compile alone does not establish runtime compatibility with another binary era. The known
@@ -95,8 +108,11 @@ Supported behavior:
   change magnification in a parallel projection.
 - **Gesture state:** Orbit-pivot and To-Cursor zoom holds are independent. Pan/zoom invalidate orbit
   state as defined by the shared architecture; scheme changes clear both.
-- **Stationary pointer:** the plugin reprojects its cached cursor-plane sample after camera motion so
-  a pan followed by orbit can recast without requiring a mouse jog.
+- **Pointer freshness:** each PointMonitor world sample is owned by the simultaneous Win32 screen
+  pixel. Gesture capture rejects it if the physical cursor has since moved, preventing an old ray
+  from producing a plausible stale hit. When the cursor is stationary, the plugin reprojects the
+  cached cursor-plane sample after camera motion so a pan followed by orbit can recast without a
+  mouse jog.
 
 Screen Center and Under Cursor accept a real entity/AABB/curve hit only. Empty space makes the pivot
 candidate unavailable and continues the configured fallback chain. To Cursor zoom may synthesize a
@@ -112,14 +128,18 @@ multipliers are neutral. Do not compensate in both the host profile and `NavMath
 The 3D visual-style path can commit without a per-frame regeneration. AutoCAD's 2D Wireframe
 presentation uses a separate view-dependent cache, so gesture end must perform this sequence:
 
-1. write the shadow camera into the existing active VPORT record;
-2. immediately call `UpdateTiledViewportsFromDatabase()`;
-3. queue one `_.REGEN` through the plugin's quiescent-state interlock; and
-4. block new GraphicsSystem driving while that regeneration is in flight.
+1. identify the exact current viewport object captured with the gesture;
+2. for a Model-tab viewport, write the shadow camera into its existing VPORT record and immediately
+   call `UpdateTiledViewportsFromDatabase()`;
+3. for a floating layout viewport, write the shadow camera into its `Viewport` entity and update that
+   entity's display without calling either tiled-viewport update method;
+4. queue one `_.REGEN` through the plugin's quiescent-state interlock; and
+5. block new GraphicsSystem driving while that regeneration is in flight.
 
-Do not reorder or split the record write and database reapply. Earlier experiments that recreated the
-VPORT record, left a write unapplied, or overlapped REGEN with an active GS view produced native
-access violations that managed exception handling cannot catch.
+Do not reorder or split a tiled record write and database reapply, and never use a tiled-viewport
+update method for a floating layout viewport. Earlier experiments that recreated the VPORT record,
+left a write unapplied, or overlapped REGEN with an active GS view produced native access violations
+that managed exception handling cannot catch.
 
 ### Keep one camera writer
 
@@ -137,6 +157,15 @@ math.
   AutoCAD's command/quiescent state.
 - Motion in 3D styles but not 2D Wireframe: inspect the VPORT commit and regeneration interlock before
   changing camera math.
+
+### The fallback is deliberately explicit and limited
+
+When GraphicsSystem is unavailable in Model space, the `SetCurrentView` fallback supports view-center
+orbit, pan, and centered Zoom. It cannot preserve configured or selection pivots, To Cursor/Object
+anchoring, or Dolly. The Paper-space canvas has no active model camera, so navigation pauses there
+instead of calling `SetCurrentView`. On each transition, the plugin writes one message to the AutoCAD
+command line and log; `TBNAV` reports the current cause and limitations. Do not silently promote the
+fallback to full capability or infer Paper space from `TILEMODE` alone.
 
 ### Do not probe against production modules or user drawings
 

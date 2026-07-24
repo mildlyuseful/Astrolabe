@@ -41,7 +41,7 @@ namespace TrackballNav
 {
     public class Plugin : IExtensionApplication
     {
-        public const string PluginVersion = "0.3.16";  // keep in sync with bundled version metadata
+        public const string PluginVersion = "0.3.20";  // keep in sync with bundled version metadata
         const string BrokerHost = "127.0.0.1";
 
         // Host baseline moved to daemon config v6; plugin camera math is deliberately neutral.
@@ -76,13 +76,16 @@ namespace TrackballNav
         // --- GS gesture state (UI thread only) --------------------------------------------------
         GsView _gsView;
         int _gsVpn = -1;
+        ObjectId _gsViewportId = ObjectId.Null; // floating layout owner only; Model uses stable vpn
         Document _gsDoc;
         bool _gsActive;
         bool _gsIs2D;                      // viewport is in the "2D Wireframe" visual style: the 2D
                                            // pipeline PRESENTS (our driven 3D view is only the
                                            // interaction view, like native 3DORBIT's), so the
-                                           // commit must go through the classic SetCurrentView to
-                                           // rebuild the 2D display list -- one regen per gesture.
+                                           // persistent owner must receive the shadow camera before
+                                           // rebuilding the display list -- one regen per gesture.
+        bool _gsIsTiled;                   // true for a Model-tab VPORT record; false for a layout
+                                           // Viewport entity (both need different persistence APIs)
         CamState _cam;                     // the SHADOW camera: single source of truth per gesture.
                                            // Never re-read from the view mid-gesture -- if AutoCAD
                                            // externally resets the GS view (mouse input etc.), the
@@ -99,6 +102,20 @@ namespace TrackballNav
         DateTime _regenFiredAt;
         Document _regenWatchDoc;
         static volatile bool s_gsBroken;   // any GS failure -> legacy transport for the session
+        enum FallbackReason
+        {
+            None,
+            PaperSpace,
+            GraphicsSystemUnavailable,
+            GraphicsSystemFailed,
+        }
+        enum GsApplyResult
+        {
+            Applied,
+            Deferred,
+            Fallback,
+        }
+        FallbackReason _fallbackReason;
         static Plugin s_instance;          // the one IExtensionApplication (for diagnostics)
 
         // --- the live cursor cache (half A of the "cursor" pivot; UI thread only ----------------
@@ -115,6 +132,8 @@ namespace TrackballNav
         bool _ptrOnEntity;
         Point3d _ptrPoint;
         DateTime _ptrAt;
+        CursorPoint _ptrScreen;
+        bool _ptrScreenValid;               // physical screen pixel that owns _ptrPoint
 
         // "cursor"/"to_cursor" per-gesture holds: captured at the first orbit/zoom frame of a
         // gesture from the pointer cache. A missing surface target makes orbit continue through
@@ -125,7 +144,11 @@ namespace TrackballNav
         Point3d? _heldOrbitPivot; bool _heldOrbitSet;
         Point3d? _heldZoomPivot;  bool _heldZoomSet;
 
+        [StructLayout(LayoutKind.Sequential)]
+        struct CursorPoint { public int X; public int Y; }
+
         [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern bool GetCursorPos(out CursorPoint point);
 
         // --- lifecycle -------------------------------------------------------------------------
         public void Initialize()
@@ -162,9 +185,10 @@ namespace TrackballNav
                 ptr = $"({inst._ptrPoint.X:0.##},{inst._ptrPoint.Y:0.##},{inst._ptrPoint.Z:0.##}) " +
                       $"{(DateTime.UtcNow - inst._ptrAt).TotalSeconds:0.0}s ago";
             var doc = AcadApp.DocumentManager.MdiActiveDocument;
+            string transport = inst?.TransportStatus(doc) ?? "not initialized";
             doc?.Editor.WriteMessage(
                 $"\nTrackballNav v{PluginVersion}: broker={(s_instanceConnected ? "connected" : "not connected")}, " +
-                $"transport={(s_gsBroken ? "legacy SetCurrentView (GS failed)" : "GS '3D Drawing' kernel (regen-free)")}, " +
+                $"transport={transport}, " +
                 $"frames applied={Interlocked.Read(ref _framesApplied)}, " +
                 $"gestures committed={Interlocked.Read(ref _gesturesCommitted)}, " +
                 $"pointer={ptr}, log={_log}\n");
@@ -226,6 +250,7 @@ namespace TrackballNav
             inst._ptrPoint = P;
             inst._ptrValid = true;
             inst._ptrOnEntity = true;              // synthetic point is already at scene depth
+            inst._ptrScreenValid = false;           // self-test is intentionally mouse-independent
             inst._ptrAt = DateTime.UtcNow;
             inst._ptrTestPivot = P;
             inst._ptrTestSeeded = false;
@@ -493,9 +518,7 @@ namespace TrackballNav
                     FireDeferredRegen();               // typical: fires on the first held tick
                 if (_regenPending || _regenInFlight)
                 {
-                    lock (_lock)
-                        for (int i = 0; i < 6; i++)
-                            _acc[i] += delta[i];
+                    RequeueFrame(delta, levelOnEntry);
                     return;
                 }
             }
@@ -519,9 +542,17 @@ namespace TrackballNav
                 double idleMs = _gsActive
                     ? (DateTime.UtcNow - _lastFrameAt).TotalMilliseconds
                     : double.PositiveInfinity;
-                if (s_gsBroken || !TryApplyGs(doc, delta, style, opv, zmv, zoomStyle, selectionOverrides,
-                                              pivotCandidates, idleMs, pivotHoldMs, zoomHoldMs,
-                                              levelOnEntry))
+                GsApplyResult result = GsApplyResult.Fallback;
+                if (s_gsBroken)
+                    EnterFallback(FallbackReason.GraphicsSystemFailed, doc);
+                else
+                    result = TryApplyGs(doc, delta, style, opv, zmv, zoomStyle,
+                                        selectionOverrides, pivotCandidates, idleMs,
+                                        pivotHoldMs, zoomHoldMs, levelOnEntry);
+                if (result == GsApplyResult.Deferred)
+                    return;
+                if (result == GsApplyResult.Fallback &&
+                    _fallbackReason != FallbackReason.PaperSpace)
                     Apply(doc, delta, style, levelOnEntry, zoomStyle); // legacy fallback (regens per frame;
                                                        // no pointer pivot -- view-centre orbit)
                 _lastFrameAt = DateTime.UtcNow;
@@ -530,6 +561,16 @@ namespace TrackballNav
             catch (System.Exception ex)
             {
                 LogOnce("apply", ex);
+            }
+        }
+
+        void RequeueFrame(double[] delta, bool levelOnEntry)
+        {
+            lock (_lock)
+            {
+                for (int i = 0; i < 6; i++)
+                    _acc[i] += delta[i];
+                _levelPending |= levelOnEntry;
             }
         }
 
@@ -550,6 +591,80 @@ namespace TrackballNav
             Log(msg);
         }
 
+        const string FallbackCapabilities =
+            "view-centre orbit, pan, and centred Zoom remain available; configured/selection pivots, " +
+            "To Cursor/Object anchoring, and Dolly are unavailable";
+        const string PaperSpaceCapabilities =
+            "model-camera navigation is paused; enter a Model-space viewport to resume";
+
+        static string FallbackCause(FallbackReason reason)
+        {
+            return reason switch
+            {
+                FallbackReason.PaperSpace => "actual paper space is active",
+                FallbackReason.GraphicsSystemUnavailable =>
+                    "no live 3D GraphicsSystem view is available",
+                FallbackReason.GraphicsSystemFailed =>
+                    "GraphicsSystem failed for this AutoCAD session",
+                _ => "the full GraphicsSystem path is available",
+            };
+        }
+
+        string TransportStatus(Document doc)
+        {
+            if (s_gsBroken)
+                return $"limited SetCurrentView ({FallbackCause(FallbackReason.GraphicsSystemFailed)}; " +
+                       $"{FallbackCapabilities})";
+            if (doc == null)
+                return "no active document";
+            try
+            {
+                int vpn = Convert.ToInt32(AcadApp.GetSystemVariable("CVPORT"));
+                if (!NavMath.IsModelView(doc.Database.TileMode, vpn))
+                    return $"paused ({FallbackCause(FallbackReason.PaperSpace)}; " +
+                           $"{PaperSpaceCapabilities})";
+                if (vpn < 2 || _fallbackReason == FallbackReason.GraphicsSystemUnavailable)
+                    return $"limited SetCurrentView (" +
+                           $"{FallbackCause(FallbackReason.GraphicsSystemUnavailable)}; " +
+                           $"{FallbackCapabilities})";
+            }
+            catch (System.Exception ex)
+            {
+                LogOnce("transport-status", ex);
+                return "unknown (status query failed)";
+            }
+            return "GS '3D Drawing' kernel (full navigation)";
+        }
+
+        void EnterFallback(FallbackReason reason, Document doc)
+        {
+            if (_fallbackReason == reason)
+                return;
+
+            var previous = _fallbackReason;
+            if (reason != FallbackReason.None && _gsActive)
+                EndGesture(commit: true);
+            _fallbackReason = reason;
+
+            string message;
+            if (reason == FallbackReason.None)
+            {
+                if (previous == FallbackReason.None)
+                    return;
+                message = "TrackballNav: full GraphicsSystem navigation restored.";
+            }
+            else
+            {
+                message = reason == FallbackReason.PaperSpace
+                    ? $"TrackballNav: navigation paused because {FallbackCause(reason)}; " +
+                      $"{PaperSpaceCapabilities}."
+                    : $"TrackballNav: limited fallback because {FallbackCause(reason)}; " +
+                      $"{FallbackCapabilities}.";
+            }
+            try { doc?.Editor.WriteMessage($"\n{message}\n"); } catch { }
+            Log(message);
+        }
+
         // --- half A of the "cursor" pivot: the live cursor point via Editor.PointMonitor --------
         // A passive per-document subscription (the AutoCAD analogue of FreeCAD's SoLocation2Event
         // observer): the handler only reads the input context and caches one point. Kept bound to
@@ -564,6 +679,7 @@ namespace TrackballNav
                 _pmDoc = null;
                 _ptrValid = false;                 // the old doc's point is meaningless here
                 _ptrOnEntity = false;
+                _ptrScreenValid = false;
             }
             if (doc == null)
                 return;
@@ -614,12 +730,23 @@ namespace TrackballNav
                         }
                     }
                 }
+                // A PointMonitor world point is useful only when it has a simultaneous physical
+                // screen-pixel owner. Without that owner a later gesture cannot distinguish a
+                // current ray from a silent stale cache, so fail closed and wait for a fresh event.
+                if (!GetCursorPos(out _ptrScreen))
+                {
+                    _ptrValid = false;
+                    _ptrOnEntity = false;
+                    _ptrScreenValid = false;
+                    return;
+                }
                 if (!_ptrValid)
                     Log($"pointer: first cursor point cached ({pt.X:0.###},{pt.Y:0.###},{pt.Z:0.###})"
                         + (onEntity ? " (entity)" : " (plane)"));
                 _ptrPoint = pt;
                 _ptrOnEntity = onEntity;
                 _ptrValid = true;
+                _ptrScreenValid = true;
                 _ptrAt = DateTime.UtcNow;
             }
             catch (System.Exception ex) { LogOnce("pm-handler", ex); }
@@ -785,6 +912,23 @@ namespace TrackballNav
                 LogRL("ptr-none", "pointer pivot: no cursor point cached yet -> next candidate");
                 return null;
             }
+            if (_ptrScreenValid
+                    && (!GetCursorPos(out var currentScreen)
+                        || currentScreen.X != _ptrScreen.X || currentScreen.Y != _ptrScreen.Y))
+            {
+                // PointMonitor can remain silent across an idle physical cursor move. Its WCS
+                // point then still describes the OLD screen ray; expanding that ray makes a
+                // convincing but stale surface hit. A cached sample owns exactly the Win32 pixel
+                // observed with it. Stationary-pointer camera reprojection remains valid because
+                // the physical pixel is unchanged.
+                _ptrValid = false;
+                _ptrOnEntity = false;
+                _ptrScreenValid = false;
+                LogRL("ptr-stale-pixel",
+                      "pointer pivot: cached sample no longer owns the current cursor pixel"
+                      + " -> next candidate");
+                return null;
+            }
             var p = _ptrPoint;
             try
             {
@@ -864,21 +1008,47 @@ namespace TrackballNav
         }
 
         // --- primary GS transport: live kernel view, gesture-end commit -------------------------
-        bool TryApplyGs(Document doc, double[] d, string style, string opv, string zmv,
-                        string zoomStyle,
-                        bool selectionOverrides, List<string> pivotCandidates,
-                        double idleMs, int orbitHoldMs, int zoomHoldMs,
-                        bool levelOnEntry = false)
+        GsApplyResult TryApplyGs(Document doc, double[] d, string style, string opv, string zmv,
+                                 string zoomStyle,
+                                 bool selectionOverrides, List<string> pivotCandidates,
+                                 double idleMs, int orbitHoldMs, int zoomHoldMs,
+                                 bool levelOnEntry = false)
         {
             try
             {
-                if (!doc.Database.TileMode)
-                    return false;                      // paper space -> legacy path
                 int vpn = Convert.ToInt32(AcadApp.GetSystemVariable("CVPORT"));
+                if (!NavMath.IsModelView(doc.Database.TileMode, vpn))
+                {
+                    EnterFallback(FallbackReason.PaperSpace, doc);
+                    return GsApplyResult.Fallback;
+                }
                 if (vpn < 2)
-                    return false;
-                if (_gsActive && (!ReferenceEquals(_gsDoc, doc) || _gsVpn != vpn))
+                {
+                    EnterFallback(FallbackReason.GraphicsSystemUnavailable, doc);
+                    return GsApplyResult.Fallback;
+                }
+                bool isTiled = doc.Database.TileMode;
+                ObjectId viewportId = ObjectId.Null;
+                if (!isTiled)
+                {
+                    viewportId = doc.Editor.CurrentViewportObjectId;
+                    if (viewportId.IsNull)
+                    {
+                        EnterFallback(FallbackReason.GraphicsSystemUnavailable, doc);
+                        return GsApplyResult.Fallback;
+                    }
+                }
+                if (_gsActive && (!ReferenceEquals(_gsDoc, doc) || _gsVpn != vpn ||
+                                  _gsIsTiled != isTiled ||
+                                  (!isTiled && _gsViewportId != viewportId)))
+                {
                     EndGesture(commit: true);          // doc/viewport switched mid-stream
+                    if (_regenPending || _regenInFlight)
+                    {
+                        RequeueFrame(d, levelOnEntry);
+                        return GsApplyResult.Deferred;
+                    }
+                }
                 if (!_gsActive)
                 {
                     var gm = doc.GraphicsManager;
@@ -886,11 +1056,18 @@ namespace TrackballNav
                     desc.addRequirement(AcUnique.Intern("3D Drawing"));
                     var v = gm.ObtainAcGsView(vpn, desc);
                     if (v == null)
-                        return false;                  // no live kernel view -> legacy
+                    {
+                        EnterFallback(FallbackReason.GraphicsSystemUnavailable, doc);
+                        return GsApplyResult.Fallback; // no live kernel view -> legacy
+                    }
                     gm.SetViewFromViewport(v, vpn);    // seed with the on-screen camera
                     try { v.BeginInteractivity(60.0); } catch { }
-                    _gsView = v; _gsVpn = vpn; _gsDoc = doc; _gsActive = true;
-                    _gsIs2D = Is2DWireframe(doc, vpn);
+                    _gsView = v; _gsVpn = vpn; _gsViewportId = viewportId;
+                    _gsDoc = doc; _gsActive = true;
+                    _gsIsTiled = isTiled;
+                    _gsIs2D = isTiled
+                        ? IsTiled2DWireframe(doc, vpn)
+                        : IsFloating2DWireframe(doc, viewportId);
                     _cam = NavMath.Read(v);            // seed the shadow ONCE per gesture
                     _heldOrbitSet = _heldZoomSet = false;   // fresh gesture -> fresh pivots
                     _heldOrbitPivot = _heldZoomPivot = null;
@@ -910,6 +1087,7 @@ namespace TrackballNav
                         LogOnce("gs-clobber",
                                 new System.Exception("GS view externally reset mid-gesture (self-healed from shadow)"));
                 }
+                EnterFallback(FallbackReason.None, doc);
                 // Resolve held orbit/zoom pivots once per gesture (capture once, then hold).
                 bool hasOrbit = d[0] != 0 || d[1] != 0 || d[2] != 0;
                 bool hasPan = d[3] != 0 || d[4] != 0;
@@ -936,7 +1114,7 @@ namespace TrackballNav
                 if (hasOrbit && !orbitPivot.HasValue)
                 {
                     if (!levelOnEntry)
-                        return true;                   // configured chain exhausted: no hidden target
+                        return GsApplyResult.Applied;  // configured chain exhausted: no hidden target
                     d = (double[])d.Clone();           // still deliver the one-time level write
                     d[0] = d[1] = d[2] = 0.0;
                     hasOrbit = false;
@@ -978,14 +1156,15 @@ namespace TrackballNav
                     _heldZoomSet = false;
                     _heldZoomPivot = null;
                 }
-                return true;
+                return GsApplyResult.Applied;
             }
             catch (System.Exception ex)
             {
                 LogOnce("gs-apply", ex);
                 s_gsBroken = true;
                 EndGesture(commit: false);
-                return false;
+                EnterFallback(FallbackReason.GraphicsSystemFailed, doc);
+                return GsApplyResult.Fallback;
             }
         }
 
@@ -1081,7 +1260,9 @@ namespace TrackballNav
         // and the next repaint re-presents the OLD view -- the user-reported snap-back.
         // (GetCurrent3dAcGsView is NOT a usable discriminator: it goes non-null permanently once
         // anyone -- including us -- has obtained the 3D view. Read the style type instead.)
-        static bool Is2DWireframe(Document doc, int vpn)
+        // The Model-tab path deliberately retains the v0.3.18 VPORT-number lookup. On that surface,
+        // Editor.CurrentViewportObjectId can be null even while ObtainAcGsView(vpn) is valid.
+        static bool IsTiled2DWireframe(Document doc, int vpn)
         {
             try
             {
@@ -1095,19 +1276,88 @@ namespace TrackballNav
                         if (r.Number != vpn)
                             continue;
                         var vs = (DBVisualStyle)tr.GetObject(r.VisualStyleId, OpenMode.ForRead);
-                        return vs.Type == Autodesk.AutoCAD.GraphicsInterface.VisualStyleType.Wireframe2D;
+                        return vs.Type ==
+                            Autodesk.AutoCAD.GraphicsInterface.VisualStyleType.Wireframe2D;
                     }
                 }
             }
-            catch (System.Exception ex) { LogOnce("style-detect", ex); }
+            catch (System.Exception ex) { LogOnce("tiled-style-detect", ex); }
             return false;                              // unknown -> assume 3D (regen-free commit)
+        }
+
+        static bool IsFloating2DWireframe(Document doc, ObjectId viewportId)
+        {
+            try
+            {
+                using (var tr = doc.Database.TransactionManager.StartOpenCloseTransaction())
+                {
+                    var floating = tr.GetObject(viewportId, OpenMode.ForRead) as Viewport;
+                    if (floating == null)
+                        return false;
+                    var vs = (DBVisualStyle)tr.GetObject(floating.VisualStyleId, OpenMode.ForRead);
+                    return vs.Type ==
+                        Autodesk.AutoCAD.GraphicsInterface.VisualStyleType.Wireframe2D;
+                }
+            }
+            catch (System.Exception ex) { LogOnce("floating-style-detect", ex); }
+            return false;
+        }
+
+        static void WriteShadowCamera(Viewport floating, CamState cam)
+        {
+            floating.ViewDirection = cam.Pos - cam.Tgt;
+            floating.ViewTarget = cam.Tgt;
+            floating.ViewCenter = new Point2d(0.0, 0.0); // target IS the centre
+            floating.ViewHeight = cam.Fh;
+            floating.TwistAngle = NavMath.TwistOf(cam);
+            floating.PerspectiveOn = cam.Persp;
+            floating.UpdateDisplay();
+        }
+
+        static void PersistTiled2DShadowCamera(Document doc, int vpn, CamState cam)
+        {
+            // Keep the crash-tested v0.3.18 sequence intact for Model-tab VPORT records.
+            var db = doc.Database;
+            using (var tr = db.TransactionManager.StartTransaction())
+            {
+                var vt = (ViewportTable)tr.GetObject(db.ViewportTableId, OpenMode.ForRead);
+                foreach (ObjectId rid in vt)
+                {
+                    var r = (ViewportTableRecord)tr.GetObject(rid, OpenMode.ForRead);
+                    if (r.Number != vpn)
+                        continue;
+                    r.UpgradeOpen();
+                    r.ViewDirection = cam.Pos - cam.Tgt;
+                    r.Target = cam.Tgt;
+                    r.CenterPoint = new Point2d(0.0, 0.0);
+                    r.Height = cam.Fh;
+                    r.Width = cam.Fw;
+                    r.ViewTwist = NavMath.TwistOf(cam);
+                }
+                tr.Commit();
+            }
+            doc.Editor.UpdateTiledViewportsFromDatabase();
+        }
+
+        static void PersistFloating2DShadowCamera(Document doc, ObjectId viewportId, CamState cam)
+        {
+            var db = doc.Database;
+            using (var tr = db.TransactionManager.StartTransaction())
+            {
+                var floating = tr.GetObject(viewportId, OpenMode.ForWrite) as Viewport;
+                if (floating == null)
+                    throw new InvalidOperationException(
+                        "The floating viewport owner changed during the navigation gesture.");
+                WriteShadowCamera(floating, cam);
+                tr.Commit();
+            }
         }
 
         // Commit, two flavours:
         //  - 3D visual styles: re-impose the shadow camera, SetViewportFromView without regeneration,
         //    then read back through SetCurrentView and update tiled viewports in the database.
-        //  - 2D Wireframe: build a ViewTableRecord from the shadow and use the crash-sensitive commit
-        //    order documented in docs/apps/autocad.md before the queued regeneration.
+        //  - 2D Wireframe: write the shadow into the exact persistent viewport object (a Model-tab
+        //    VPORT record or a layout Viewport entity) before the queued regeneration.
         // A single commit failure can be transient (for example, the document closed mid-gesture).
         // The next gesture re-seeds from the database; only repeated failure demotes to the fallback.
         int _commitFailures;
@@ -1116,8 +1366,10 @@ namespace TrackballNav
             if (!_gsActive)
                 return;
             var v = _gsView; var doc = _gsDoc; int vpn = _gsVpn; var cam = _cam;
-            bool is2D = _gsIs2D;
+            ObjectId viewportId = _gsViewportId;
+            bool is2D = _gsIs2D, isTiled = _gsIsTiled;
             _gsActive = false; _gsView = null; _gsDoc = null; _gsVpn = -1;
+            _gsViewportId = ObjectId.Null;
             _heldOrbitSet = _heldZoomSet = false;      // pointer pivots are per-gesture
             _heldOrbitPivot = _heldZoomPivot = null;
             if (s_ptrTestArm && _ptrTestSeeded)
@@ -1136,37 +1388,16 @@ namespace TrackballNav
                 {
                     if (is2D)
                     {
-                        // THE ONE SAFE ORDER (crash-tested: 16 gesture cycles + interleaved
-                        // native wheel zooms in a throwaway instance): write the shadow camera
-                        // into the EXISTING *Active VPORT record(s), then IMMEDIATELY re-apply
-                        // them with UpdateTiledViewportsFromDatabase. The pairing matters:
-                        //  - UpdateTiledViewportsInDatabase ERASES+RECREATES the records ->
-                        //    dangling kernel view -> AV next gesture;
-                        //  - field writes left UN-applied -> the same AV;
-                        //  - write + FromDatabase: the record is the SOURCE, so the record, the
-                        //    editor view, and the display all agree -- and native wheel zoom
-                        //    (which consults the record; the cause of the wireframe snap-back)
-                        //    finally reads the right camera.
-                        var db2 = doc.Database;
-                        using (var tr = db2.TransactionManager.StartTransaction())
-                        {
-                            var vt = (ViewportTable)tr.GetObject(db2.ViewportTableId, OpenMode.ForRead);
-                            foreach (ObjectId rid in vt)
-                            {
-                                var r = (ViewportTableRecord)tr.GetObject(rid, OpenMode.ForRead);
-                                if (r.Number != vpn)
-                                    continue;
-                                r.UpgradeOpen();
-                                r.ViewDirection = cam.Pos - cam.Tgt;
-                                r.Target = cam.Tgt;
-                                r.CenterPoint = new Point2d(0.0, 0.0);   // target IS the centre
-                                r.Height = cam.Fh;
-                                r.Width = cam.Fw;
-                                r.ViewTwist = NavMath.TwistOf(cam);
-                            }
-                            tr.Commit();
-                        }
-                        ed.UpdateTiledViewportsFromDatabase();
+                        // The Model tab and a layout model viewport do not share persistence:
+                        // UpdateTiledViewportsFromDatabase is valid only for the former. The latter
+                        // owns an AcDbViewport entity and updates its display when that entity closes.
+                        if (isTiled)
+                            PersistTiled2DShadowCamera(doc, vpn, cam);
+                        else
+                            PersistFloating2DShadowCamera(doc, viewportId, cam);
+                        LogRL(isTiled ? "2d-commit-tiled" : "2d-commit-floating",
+                              $"2D Wireframe commit: persisted the " +
+                              $"{(isTiled ? "Model-tab VPORT record" : "floating Viewport entity")}");
                         // Belt-and-braces: one visible REGEN through the command pipeline (the
                         // projected display list is rebuilt for certain; HUD/ViewCube repaint),
                         // via the crash-safe interlock. The watch stays as final insurance.
@@ -1180,7 +1411,8 @@ namespace TrackballNav
                         doc.GraphicsManager.SetViewportFromView(vpn, v, false, false, true);
                         using (var vtr = ed.GetCurrentView())
                             ed.SetCurrentView(vtr);    // editor-level commit (WD=0, same camera)
-                        ed.UpdateTiledViewportsInDatabase();
+                        if (isTiled)
+                            ed.UpdateTiledViewportsInDatabase();
                     }
                 }
                 Interlocked.Increment(ref _gesturesCommitted);

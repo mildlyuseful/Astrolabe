@@ -10,12 +10,14 @@ bundled version is newer than the installed one (see `docs/architecture.md`), pr
 enabled state.
 """
 import glob
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -24,6 +26,161 @@ from types import MappingProxyType
 from typing import Callable, Optional
 
 from .app_registry import APP_SPECS_BY_ID, AppSpec
+
+
+_PAYLOAD_INSTALL_LOCK = threading.RLock()
+
+
+@dataclass(frozen=True)
+class PayloadInstallReport:
+    destination: Path
+    replaced_existing: bool
+    obsolete_files_removed: tuple
+    retained_backup: Optional[Path] = None
+
+
+def _remove_payload(path: Path) -> None:
+    if not path.exists():
+        return
+    if path.is_dir():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
+
+
+def _payload_signature(path: Path):
+    def file_signature(file_path):
+        digest = hashlib.sha256()
+        with file_path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        return file_path.stat().st_size, digest.hexdigest()
+
+    if path.is_file():
+        return "file", file_signature(path)
+    if path.is_dir():
+        files = []
+        for child in sorted(
+                (item for item in path.rglob("*") if item.is_file()),
+                key=lambda item: item.relative_to(path).as_posix()):
+            files.append((child.relative_to(path).as_posix(),) + file_signature(child))
+        return "directory", tuple(files)
+    raise OSError(f"payload does not exist: {path}")
+
+
+def _recover_interrupted_payload(destination: Path) -> None:
+    """Restore a fixed-name backup left by a process interruption, then discard stale staging."""
+    stage = destination.with_name(f".{destination.name}.astrolabe-stage")
+    backup = destination.with_name(f".{destination.name}.astrolabe-backup")
+    if backup.exists() and not destination.exists():
+        os.replace(backup, destination)
+    elif backup.exists():
+        _remove_payload(backup)
+    if stage.exists():
+        _remove_payload(stage)
+
+
+def _install_payloads_transactionally(payloads) -> tuple:
+    """Stage, byte-validate, swap, and rollback one or more file/directory payloads.
+
+    Fixed sibling stage/backup names make an interrupted swap recoverable on the next setup run.
+    Every destination is staged and validated before any installed copy is touched.
+    """
+    specs = tuple((Path(source), Path(destination)) for source, destination in payloads)
+    if not specs:
+        raise ValueError("at least one payload is required")
+    destinations = [destination.resolve() for _source, destination in specs]
+    if len(set(destinations)) != len(destinations):
+        raise ValueError("payload destinations must be unique")
+    for source, _destination in specs:
+        if not source.exists():
+            raise OSError(f"payload does not exist: {source}")
+
+    with _PAYLOAD_INSTALL_LOCK:
+        records = []
+        for source, destination in specs:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            _recover_interrupted_payload(destination)
+            stage = destination.with_name(f".{destination.name}.astrolabe-stage")
+            backup = destination.with_name(f".{destination.name}.astrolabe-backup")
+            source_signature = _payload_signature(source)
+            old_signature = _payload_signature(destination) if destination.exists() else None
+            old_files = (
+                {item[0] for item in old_signature[1]}
+                if old_signature and old_signature[0] == "directory" else set()
+            )
+            new_files = (
+                {item[0] for item in source_signature[1]}
+                if source_signature[0] == "directory" else set()
+            )
+            try:
+                if source.is_dir():
+                    shutil.copytree(source, stage)
+                else:
+                    shutil.copy2(source, stage)
+                if _payload_signature(stage) != source_signature:
+                    raise OSError(f"staged payload validation failed for {destination}")
+            except BaseException:
+                _remove_payload(stage)
+                for prior in records:
+                    _remove_payload(prior["stage"])
+                raise
+            records.append({
+                "source": source,
+                "destination": destination,
+                "stage": stage,
+                "backup": backup,
+                "source_signature": source_signature,
+                "replaced": destination.exists(),
+                "obsolete": tuple(sorted(old_files - new_files)),
+                "installed": False,
+            })
+
+        try:
+            for record in records:
+                if record["replaced"]:
+                    os.replace(record["destination"], record["backup"])
+            for record in records:
+                os.replace(record["stage"], record["destination"])
+                record["installed"] = True
+            for record in records:
+                if _payload_signature(record["destination"]) != record["source_signature"]:
+                    raise OSError(
+                        f"installed payload validation failed for {record['destination']}")
+        except BaseException as install_error:
+            rollback_errors = []
+            for record in reversed(records):
+                try:
+                    if record["installed"] and record["destination"].exists():
+                        _remove_payload(record["destination"])
+                    if record["backup"].exists():
+                        os.replace(record["backup"], record["destination"])
+                except OSError as rollback_error:
+                    rollback_errors.append(
+                        f"{record['destination']}: {rollback_error}")
+            for record in records:
+                _remove_payload(record["stage"])
+            if rollback_errors:
+                raise OSError(
+                    f"{install_error}; rollback also failed: {'; '.join(rollback_errors)}"
+                ) from install_error
+            raise
+
+        reports = []
+        for record in records:
+            retained = None
+            if record["backup"].exists():
+                try:
+                    _remove_payload(record["backup"])
+                except OSError:
+                    retained = record["backup"]
+            reports.append(PayloadInstallReport(
+                destination=record["destination"],
+                replaced_existing=record["replaced"],
+                obsolete_files_removed=record["obsolete"],
+                retained_backup=retained,
+            ))
+        return tuple(reports)
 
 
 def _operational_state(cfg, app_id):
@@ -336,8 +493,7 @@ def install_fusion(appdef: AppDef, cfg) -> tuple[bool, str]:
     a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(src, dest, dirs_exist_ok=True)   # overwrite == update
+        _install_payloads_transactionally(((src, dest),))
     except OSError as exc:
         return False, f"Could not copy the add-in: {exc}"
     a["installed"] = True
@@ -400,20 +556,17 @@ def _copy_acad_plugin() -> tuple[str, str]:
         return "error", "Bundled AutoCAD plugin is missing from this build."
     dst_dir = _acad_runtime_plugin_dir()
     dst = dst_dir / src.name
+    ver = _bundled_addin("autocad", "version.json")
+    payloads = [(src, dst)]
+    if ver.exists():
+        payloads.append((ver, dst_dir / "version.json"))
     try:
-        dst_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
+        _install_payloads_transactionally(payloads)
     except OSError as exc:
         if dst.exists() and _is_locked_acad_plugin(exc):
             return "staged", ("The existing runtime plugin could not be replaced while AutoCAD "
                               f"may be using it ({exc}).")
         return "error", f"Could not copy the AutoCAD plugin into {dst_dir}: {exc}"
-    ver = _bundled_addin("autocad", "version.json")
-    if ver.exists():
-        try:
-            shutil.copy2(ver, dst_dir / "version.json")
-        except OSError as exc:
-            return "copied", f"Plugin copied, but its version manifest could not be updated: {exc}"
     return "copied", ""
 
 
@@ -571,22 +724,27 @@ def install_blender(appdef: "AppDef", cfg, install_startup=None) -> tuple[bool, 
         return False, "Could not determine Blender's user scripts folder."
     a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
-    installed_to, started_to = [], []
+    installed_to, started_to, failed = [], [], []
     for scripts in scripts_dirs:
         ver = scripts.parent.name
         try:
             addon_dest = scripts / "addons" / "trackball_nav"
-            addon_dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(src, addon_dest, dirs_exist_ok=True)        # overwrite == update
-            installed_to.append(ver)
             shim_dest = scripts / "startup" / "trackball_nav_startup.py"
             want_shim = install_startup is True or (install_startup is None and shim_dest.exists())
+            payloads = [(src, addon_dest)]
             if want_shim and shim.exists():
-                shim_dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(shim, shim_dest)
+                payloads.append((shim, shim_dest))
+            _install_payloads_transactionally(payloads)
+            installed_to.append(ver)
+            if want_shim and shim.exists():
                 started_to.append(ver)
         except OSError as exc:
-            return False, f"Could not copy the Blender add-on (version {ver}): {exc}"
+            failed.append((ver, exc))
+    if not installed_to:
+        detail = "; ".join(f"{version}: {error}" for version, error in failed)
+        return False, (
+            "Could not copy the Blender add-on to any detected version"
+            + (f": {detail}" if detail else "."))
     a["installed"] = True
     if not was_installed:                                # don't re-enable on an update
         a["enabled"] = True
@@ -600,6 +758,9 @@ def install_blender(appdef: "AppDef", cfg, install_startup=None) -> tuple[bool, 
     else:
         tail = ("Enable it once in Blender: Preferences → Add-ons → search \"Trackball\" → tick it.\n"
                 "(Re-run Set up and choose auto-start to enable it on every launch.)")
+    if failed:
+        tail += "\nSkipped versions: " + "; ".join(
+            f"{version}: {error}" for version, error in failed)
     return True, (f"Blender add-on {verb} (v{a['addin_version']}) for Blender {vers}.\n\n{tail}\n\n"
                   "Then open a 3D viewport, switch the daemon to 3D mode, and focus Blender — the "
                   "row flips to \"connected\" once the add-on attaches.")
@@ -648,8 +809,7 @@ def install_freecad(appdef: "AppDef", cfg) -> tuple[bool, str]:
     a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(src, dest, dirs_exist_ok=True)   # overwrite == update
+        _install_payloads_transactionally(((src, dest),))
     except OSError as exc:
         return False, f"Could not copy the FreeCAD add-on: {exc}"
     a["installed"] = True
@@ -726,16 +886,22 @@ def install_sketchup(appdef: "AppDef", cfg) -> tuple[bool, str]:
 
     a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
-    installed_to = []
+    installed_to, failed = [], []
     for plugins in plugin_dirs:
         year = plugins.parents[1].name.replace("SketchUp ", "")
         try:
-            plugins.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_loader, plugins / "trackball_nav_loader.rb")
-            shutil.copytree(src_addon, plugins / "trackball_nav", dirs_exist_ok=True)
+            _install_payloads_transactionally((
+                (src_loader, plugins / "trackball_nav_loader.rb"),
+                (src_addon, plugins / "trackball_nav"),
+            ))
             installed_to.append(year)
         except OSError as exc:
-            return False, f"Could not copy the SketchUp extension (version {year}): {exc}"
+            failed.append((year, exc))
+    if not installed_to:
+        detail = "; ".join(f"{year}: {error}" for year, error in failed)
+        return False, (
+            "Could not copy the SketchUp extension to any detected version"
+            + (f": {detail}" if detail else "."))
 
     a["installed"] = True
     if not was_installed:
@@ -744,11 +910,15 @@ def install_sketchup(appdef: "AppDef", cfg) -> tuple[bool, str]:
     _save_operational(cfg, appdef.key, a)
     verb = "updated" if was_installed else "installed"
     years = ", ".join(installed_to) or "--"
+    failed_note = (
+        "\n\nSkipped versions: "
+        + "; ".join(f"{year}: {error}" for year, error in failed)
+        if failed else "")
     return True, (
         f"SketchUp extension {verb} (v{a['addin_version']}) for SketchUp {years}.\n\n"
         "It registers in Extension Manager and auto-loads on SketchUp's next launch. Restart "
         "SketchUp, open a model, switch the daemon to 3D mode, and focus SketchUp -- the row "
-        "flips to \"connected\" once the Ruby extension attaches."
+        "flips to \"connected\" once the Ruby extension attaches." + failed_note
     )
 
 
@@ -802,13 +972,14 @@ def install_unreal(appdef: "AppDef", cfg) -> tuple[bool, str]:
         dest = _unreal_plugin_dest(exe)
         label = _unreal_engine_label(exe)
         try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(src, dest, dirs_exist_ok=True)   # overwrite == update
+            _install_payloads_transactionally(((src, dest),))
             copied.append(label)
-        except OSError:
-            failed.append((label, dest))
+        except OSError as exc:
+            failed.append((label, dest, exc))
     if not copied:                                       # almost always: Program Files needs admin
-        steps = "\n".join("    %s  ->  %s" % (lbl, dst) for lbl, dst in failed)
+        steps = "\n".join(
+            f"    {label}  ->  {destination}: {error}"
+            for label, destination, error in failed)
         return False, (
             "Couldn't write the Trackball plugin into the engine's Plugins folder (writing under "
             "Program Files needs administrator rights):\n" + steps + "\n\n"
@@ -827,7 +998,7 @@ def install_unreal(appdef: "AppDef", cfg) -> tuple[bool, str]:
     _save_operational(cfg, appdef.key, a)
     verb = "updated" if was_installed else "installed"
     tail = ("\n\nNote: some engines need admin to write and were skipped: "
-            + ", ".join(lbl for lbl, _ in failed)) if failed else ""
+            + ", ".join(label for label, _destination, _error in failed)) if failed else ""
     return True, (
         f"Trackball plugin {verb} (v{a['addin_version']}) for {', '.join(copied)}.\n\n"
         "Enable it ONCE per project: Edit -> Plugins -> search \"Trackball\" -> tick \"Trackball "
@@ -978,8 +1149,7 @@ def install_unity(appdef: "AppDef", cfg) -> tuple[bool, str]:
         # Fallback: stage under APPDATA and ask the user to open a project + Set up again.
         dest = Path(os.environ.get("APPDATA", "")) / "TrackballDaemon" / "unity" / "com.astrolabe.trackball-nav"
         try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(src, dest, dirs_exist_ok=True)
+            _install_payloads_transactionally(((src, dest),))
         except OSError as e:
             return False, f"Couldn't stage the Unity package: {e}"
         a["installed"] = False
@@ -990,28 +1160,34 @@ def install_unity(appdef: "AppDef", cfg) -> tuple[bool, str]:
             "  <YourProject>\\Packages\\com.astrolabe.trackball-nav\\\n"
             "A staged copy is at:\n  " + str(dest)
         ), [("Copy staged package folder", str(dest))]
-    copied = []
+    copied, failed = [], []
     for proj in projects:
         dest = Path(proj) / "Packages" / "com.astrolabe.trackball-nav"
         try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(src, dest, dirs_exist_ok=True)
+            _install_payloads_transactionally(((src, dest),))
             copied.append(proj)
-        except OSError:
-            continue
+        except OSError as exc:
+            failed.append((proj, exc))
     if not copied:
-        return False, "Couldn't write the Unity package into any project Packages/ folder."
+        detail = "; ".join(f"{project}: {error}" for project, error in failed)
+        return False, (
+            "Couldn't write the Unity package into any project Packages/ folder"
+            + (f": {detail}" if detail else "."))
     a["installed"] = True
     if not was_installed:
         a["enabled"] = True
     a["addin_version"] = bundled_addin_version(appdef.key) or ""
     _save_operational(cfg, appdef.key, a)
     verb = "updated" if was_installed else "installed"
+    failed_note = (
+        "\nSkipped projects: "
+        + "; ".join(f"{project}: {error}" for project, error in failed)
+        if failed else "")
     return True, (
         f"Trackball Nav package {verb} (v{a['addin_version']}) into {len(copied)} project(s).\n\n"
         "Unity will import the UPM package on the next domain reload (or restart the Editor).\n"
         "Switch the daemon to 3D mode and focus Unity — the row flips to \"connected\" once the "
-        "Editor script handshakes. Scene view only (not Play mode)."
+        "Editor script handshakes. Scene view only (not Play mode)." + failed_note
     )
 
 
@@ -1174,8 +1350,7 @@ def install_godot(appdef: "AppDef", cfg) -> tuple[bool, str]:
     if not projects:
         dest = Path(os.environ.get("APPDATA", "")) / "TrackballDaemon" / "godot" / "trackball_nav"
         try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(src, dest, dirs_exist_ok=True)
+            _install_payloads_transactionally(((src, dest),))
         except OSError as e:
             return False, f"Couldn't stage the Godot add-on: {e}"
         a["installed"] = False
@@ -1203,28 +1378,35 @@ def install_godot(appdef: "AppDef", cfg) -> tuple[bool, str]:
             ("Copy staged add-on folder", str(dest)),
             ("Copy plugin.cfg path", "res://addons/trackball_nav/plugin.cfg"),
         ]
-    copied = []
+    copied, failed = [], []
     for proj in projects:
         dest = Path(proj) / "addons" / "trackball_nav"
         try:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(src, dest, dirs_exist_ok=True)
+            _install_payloads_transactionally(((src, dest),))
             _godot_enable_plugin(Path(proj) / "project.godot")
             copied.append(proj)
-        except OSError:
-            continue
+        except OSError as exc:
+            failed.append((proj, exc))
     if not copied:
-        return False, "Couldn't write the Godot add-on into any project addons/ folder."
+        detail = "; ".join(f"{project}: {error}" for project, error in failed)
+        return False, (
+            "Couldn't write the Godot add-on into any project addons/ folder"
+            + (f": {detail}" if detail else "."))
     a["installed"] = True
     if not was_installed:
         a["enabled"] = True
     a["addin_version"] = bundled_addin_version(appdef.key) or ""
     _save_operational(cfg, appdef.key, a)
     verb = "updated" if was_installed else "installed"
+    failed_note = (
+        "\nSkipped projects: "
+        + "; ".join(f"{project}: {error}" for project, error in failed)
+        if failed else "")
     return True, (
         f"Trackball Nav {verb} (v{a['addin_version']}) into {len(copied)} Godot project(s).\n\n"
         "The plugin is enabled in project.godot. Reload the project or restart Godot, switch the "
         "daemon to 3D mode, and focus the editor — the row flips to \"connected\" on handshake."
+        + failed_note
     )
 
 
@@ -1288,8 +1470,7 @@ def install_rhino(appdef: "AppDef", cfg) -> tuple[bool, str]:
     a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     try:
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(src, dest, dirs_exist_ok=True)
+        _install_payloads_transactionally(((src, dest),))
     except OSError as e:
         return False, f"Couldn't write the Rhino add-on: {e}"
     start_py = dest / "start.py"

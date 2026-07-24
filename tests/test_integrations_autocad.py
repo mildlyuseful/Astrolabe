@@ -165,8 +165,34 @@ def test_autocad_plugin_consumes_advanced_settings_and_all_generic_pivots():
     assert 'case "object":' in source and "CaptureDrawingCenter()" in source
     assert "NavMath.ReprojectScreenSample(_ptrPoint, camBefore, _cam)" in source
     assert "_ptrOnEntity = false;" in source
+    assert "if (!GetCursorPos(out _ptrScreen))" in source
+    assert "_ptrScreenValid = true;" in source
+    assert "!GetCursorPos(out var currentScreen)" in source
+    assert "currentScreen.X != _ptrScreen.X || currentScreen.Y != _ptrScreen.Y" in source
+    assert "cached sample no longer owns the current cursor pixel" in source
     assert "if (hasPan || (hasOrbit && idleMs > orbitHoldMs))" in source
     assert "if (hasOrbit)                                  // next cursor zoom re-captures" in source
+    assert "NavMath.IsModelView(doc.Database.TileMode, vpn)" in source
+    assert "EnterFallback(FallbackReason.PaperSpace, doc)" in source
+    assert "doc.Editor.CurrentViewportObjectId" in source
+    assert "_gsViewportId != viewportId" in source
+    assert "return GsApplyResult.Deferred" in source
+    assert "_levelPending |= levelOnEntry" in source
+    owner_gate = source[source.index("bool isTiled = doc.Database.TileMode"):
+                        source.index("if (_gsActive &&", source.index(
+                            "bool isTiled = doc.Database.TileMode"))]
+    assert "if (!isTiled)" in owner_gate
+    assert "CurrentViewportObjectId" in owner_gate
+    assert "IsTiled2DWireframe(doc, vpn)" in source
+    assert "PersistTiled2DShadowCamera(doc, vpn, cam)" in source
+    assert "PersistFloating2DShadowCamera(doc, viewportId, cam)" in source
+    assert "floating.UpdateDisplay()" in source
+    assert "if (isTiled)" in source
+    assert "_fallbackReason != FallbackReason.PaperSpace" in source
+    assert "model-camera navigation is paused" in source
+    assert "configured/selection pivots" in source
+    assert "To Cursor/Object anchoring" in source
+    assert "Dolly are unavailable" in source
     frame_parser = source[source.index("void HandleFrame"):source.index("// --- UI-thread timer")]
     assert "_horizonFixed = fixedHorizon" in frame_parser
     assert "_levelPending = true" in frame_parser

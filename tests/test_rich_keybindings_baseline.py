@@ -125,7 +125,8 @@ def test_malformed_json_falls_back_without_overwriting_source(isolated_config):
 
 def test_foreground_identity_does_not_fall_back_to_selected_settings_app(monkeypatch):
     app = App.__new__(App)
-    app.onshape_bridge = SimpleNamespace(is_connected=lambda: False)
+    app.onshape_bridge = SimpleNamespace(
+        is_connected=lambda: False, is_viewport_focused=lambda: False)
     app.config = SimpleNamespace(data={
         "active_app": "blender",
         "apps": {"blender": {"enabled": True}},
@@ -139,11 +140,15 @@ def test_foreground_identity_does_not_fall_back_to_selected_settings_app(monkeyp
 def test_onshape_foreground_identity_requires_browser_and_connected_bridge(monkeypatch):
     app = App.__new__(App)
     connected = [False]
-    app.onshape_bridge = SimpleNamespace(is_connected=lambda: connected[0])
-    monkeypatch.setattr(app_mod, "foreground_process_name", lambda: "chrome")
+    focused = [False]
+    app.onshape_bridge = SimpleNamespace(
+        is_connected=lambda: connected[0], is_viewport_focused=lambda: focused[0])
+    monkeypatch.setattr(app_mod, "foreground_process_name", lambda: "chrome.exe")
 
     assert app._foreground_app_key() is None
     connected[0] = True
+    assert app._foreground_app_key() is None
+    focused[0] = True
     assert app._foreground_app_key() == "onshape"
 
 

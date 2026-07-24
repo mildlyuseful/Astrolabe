@@ -6,8 +6,15 @@ settings capabilities, and setup cards cannot invent separate app identities.
 """
 from dataclasses import dataclass
 from enum import Enum
+import re
 from types import MappingProxyType
 from typing import Optional
+
+
+def _normalize_process_name(process_name):
+    if not process_name:
+        return None
+    return str(process_name).replace("/", "\\").rsplit("\\", 1)[-1].lower()
 
 
 class TransportKind(str, Enum):
@@ -35,17 +42,32 @@ class OnshapeFocusState(str, Enum):
 
 @dataclass(frozen=True)
 class ProcessSelector:
-    """Case-insensitive executable-name substring retained from the current router contract."""
+    """One normalized executable identity, optionally with a tightly scoped name family.
 
-    contains: str
+    Desktop routing is deliberately basename-exact. ``family_pattern`` exists only for hosts such
+    as portable Godot builds that put a version in the executable basename; it is matched with
+    :func:`re.fullmatch`, never as a substring.
+    """
+
+    executable: str
+    family_pattern: Optional[str] = None
 
     def __post_init__(self):
-        normalized = self.contains.strip().lower()
-        if not normalized or normalized != self.contains:
-            raise ValueError("process selector must be a non-empty normalized lowercase string")
+        normalized = _normalize_process_name(self.executable)
+        if (not normalized or normalized != self.executable or
+                not normalized.endswith(".exe")):
+            raise ValueError("process selector must be a normalized lowercase executable basename")
+        if self.family_pattern is not None:
+            if not self.family_pattern or self.family_pattern != self.family_pattern.lower():
+                raise ValueError("process family pattern must be a normalized lowercase regex")
+            re.compile(self.family_pattern)
 
     def matches(self, process_name: Optional[str]) -> bool:
-        return bool(process_name and self.contains in _normalize_process_name(process_name))
+        normalized = _normalize_process_name(process_name)
+        return bool(normalized and (
+            normalized == self.executable or
+            (self.family_pattern is not None and
+             re.fullmatch(self.family_pattern, normalized) is not None)))
 
 
 @dataclass(frozen=True)
@@ -127,11 +149,13 @@ _RICH_FEATURES = frozenset({"nav_mode", "fly_speed", "walk_speed", "lock_horizon
 
 PIVOTS_DEFAULT = ("screen_center", "cursor", "selection", "object", "origin")
 PIVOTS_CAMERA = ("camera",) + PIVOTS_DEFAULT
-_BROWSER_PROCESS_NAMES = ("chrome", "msedge", "firefox", "brave", "opera", "vivaldi")
+_BROWSER_PROCESS_NAMES = (
+    "chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe")
 
 
 def _selectors(*values):
-    return tuple(ProcessSelector(value) for value in values)
+    return tuple(value if isinstance(value, ProcessSelector) else ProcessSelector(value)
+                 for value in values)
 
 
 def _profile(app_id, title, *, features=(), pivots=PIVOTS_DEFAULT, orbit_styles=None,
@@ -173,37 +197,41 @@ def _spec(app_id, display_name, process_names, title, *, transport=TransportKind
 # This tuple is the only code-owned supported-app identity/order table. Packaged profile files are
 # validated against it by config.py; integration setup records below reference these exact objects.
 APP_SPECS = (
-    _spec("blender", "Blender", ("blender",), "Blender viewport navigation", rich=True,
+    _spec("blender", "Blender", ("blender.exe",), "Blender viewport navigation", rich=True,
           pivots=("camera", "screen_center", "cursor", "selection", "cursor_3d", "object", "origin"),
           twist_actions=("roll", "zoom", "dolly", "none"),
           zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior", "camera_lock")),
-    _spec("freecad", "FreeCAD", ("freecad",), "FreeCAD navigation"),
-    _spec("sketchup", "SketchUp", ("sketchup",), "SketchUp model navigation", rich=True,
+    _spec("freecad", "FreeCAD", ("freecad.exe",), "FreeCAD navigation"),
+    _spec("sketchup", "SketchUp", ("sketchup.exe",), "SketchUp model navigation", rich=True,
           pivots=PIVOTS_CAMERA, twist_actions=("roll", "zoom", "dolly", "none"),
           zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
-    _spec("unreal", "Unreal Engine", ("unrealeditor", "ue4editor"),
+    _spec("unreal", "Unreal Engine", ("unrealeditor.exe", "ue4editor.exe"),
           "Unreal Editor viewport navigation", rich=True, pivots=PIVOTS_CAMERA,
           twist_actions=("roll", "zoom", "dolly", "none"),
           zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
-    _spec("unity", "Unity", ("unity",), "Unity Scene view navigation", rich=True,
+    _spec("unity", "Unity", ("unity.exe",), "Unity Scene view navigation", rich=True,
           pivots=PIVOTS_CAMERA, twist_actions=("roll", "zoom", "dolly", "none"),
           zoom_behaviors=("zoom", "dolly"),
           features=("zoom_behavior", "dynamic_clip", "pivot_extent")),
-    _spec("godot", "Godot", ("godot",), "Godot editor viewport navigation", rich=True,
+    _spec("godot", "Godot", (
+              ProcessSelector(
+                  "godot.exe",
+                  r"godot_v[0-9][a-z0-9_.-]*(?<!_console)\.exe"),),
+          "Godot editor viewport navigation", rich=True,
           no_roll=True, pivots=PIVOTS_CAMERA, orbit_styles=("turntable",),
           features=("zoom_behavior",), twist_actions=("zoom", "dolly", "none"),
           zoom_behaviors=("zoom", "dolly"), exclude=("lock_horizon", "level_horizon")),
-    _spec("rhino", "Rhino", ("rhino",), "Rhino navigation", pivots=PIVOTS_CAMERA,
+    _spec("rhino", "Rhino", ("rhino.exe",), "Rhino navigation", pivots=PIVOTS_CAMERA,
           zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
-    _spec("fusion360", "Fusion 360", ("fusion",), "Fusion 360 navigation",
+    _spec("fusion360", "Fusion 360", ("fusion360.exe",), "Fusion 360 navigation",
           twist_actions=("roll", "zoom", "none"), zoom_behaviors=("zoom", "dolly"),
           features=("zoom_behavior",)),
-    _spec("solidworks", "SolidWorks", ("sldworks",), "SOLIDWORKS navigation",
+    _spec("solidworks", "SolidWorks", ("sldworks.exe",), "SOLIDWORKS navigation",
           transport=TransportKind.SOLIDWORKS_COM),
     _spec("onshape", "Onshape", _BROWSER_PROCESS_NAMES, "Onshape navigation",
           transport=TransportKind.ONSHAPE_BRIDGE, focus_kind=FocusKind.ONSHAPE_BROWSER,
           features=("onshape_userscript",)),
-    _spec("autocad", "AutoCAD", ("acad",), "AutoCAD navigation", pivots=PIVOTS_CAMERA,
+    _spec("autocad", "AutoCAD", ("acad.exe",), "AutoCAD navigation", pivots=PIVOTS_CAMERA,
           zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
 )
 
@@ -223,18 +251,14 @@ def binding_profile(app_id):
     return APP_SPECS_BY_ID[app_id].binding_profile
 
 
-def _normalize_process_name(process_name):
-    if not process_name:
-        return None
-    return str(process_name).replace("/", "\\").rsplit("\\", 1)[-1].lower()
-
-
-def resolve_foreground_context(process_name, *, onshape_connected=False):
+def resolve_foreground_context(process_name, *, onshape_connected=False,
+                               onshape_viewport_focused=False):
     """Resolve one process snapshot without conflating Onshape connection with foreground.
 
     A connected bridge in a background browser remains ``CONNECTED_BACKGROUND``. Only the
-    combination of a foreground browser selector and a connected bridge resolves to Onshape.
-    The bridge's own viewport-focus signal remains the downstream fine gate.
+    combination of a foreground browser selector, a connected subscribed controller, and that
+    controller's explicit viewport-focus signal resolves to Onshape. Connection alone is never
+    application context.
     """
     process_name = _normalize_process_name(process_name)
     onshape_state = (OnshapeFocusState.CONNECTED_BACKGROUND if onshape_connected
@@ -247,7 +271,8 @@ def resolve_foreground_context(process_name, *, onshape_connected=False):
             return ForegroundContext(process_name, spec.app_id, spec.focus_kind, onshape_state)
 
     onshape = APP_SPECS_BY_ID["onshape"]
-    if onshape.matches_process(process_name) and onshape_connected:
+    if (onshape.matches_process(process_name) and onshape_connected and
+            onshape_viewport_focused):
         return ForegroundContext(process_name, "onshape", FocusKind.ONSHAPE_BROWSER,
                                  OnshapeFocusState.CONNECTED_FOREGROUND)
     return ForegroundContext(process_name, None, None, onshape_state)

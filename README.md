@@ -34,8 +34,9 @@ end-user builds have not been released yet.
 
 - Windows 10 or 11.
 - Python 3.9 or newer for a source install.
-- The Astrolabe firmware on a compatible BLE trackball. The current test-bench firmware targets the
-  Seeed XIAO nRF52840 and two PMW3389 sensors.
+- The Astrolabe firmware on a compatible BLE trackball. The product controller target is the Seeed
+  Studio XIAO nRF52840; the repository also retains XIAO/PMW3389 and SuperMini/PMW3610 validation
+  sketches while the final hardware contract is completed.
 - A supported 3D application only if you want its navigation integration.
 
 ## Install and run
@@ -43,7 +44,7 @@ end-user builds have not been released yet.
 From a PowerShell prompt in the repository:
 
 ```powershell
-python -m pip install -r requirements.txt
+python -m pip install ".[onshape]"
 python -m trackball_daemon
 ```
 
@@ -82,9 +83,15 @@ rotation service. With the daemon closed, the firmware's ordinary HID mouse path
    its Global links; **Link all to Global** removes app overrides. Neither action disables the
    integration or forgets its installed add-on version.
 
-The status row and tray list the versions of add-ons that are actually connected. Bundled add-ons
-are versioned and copied again when a newer daemon bundle is available; host restart/reload is
-usually required before new code is active.
+The status row and tray list the versions of add-ons that are actually connected. The tray also
+summarizes runtime health, while **3D Apps** shows the navigation broker and gated SolidWorks,
+AutoCAD, and Onshape owners as disabled, waiting, healthy, degraded, or failed with the current
+actionable detail. Bundled add-ons are versioned and copied again when a newer daemon bundle is
+available; host restart/reload is usually required before new code is active.
+
+Add-in setup stages and verifies complete payloads before replacing an installed copy. Independent
+host versions or projects are updated separately, and the result identifies any destination that
+could not be changed while leaving its previous copy intact.
 
 The 3D Apps panel uses the version reported by the currently or most recently connected host copy
 when deciding whether to show **Update**. This exposes a stale project/document-local copy even when
@@ -165,8 +172,9 @@ restore three-axis orbit without overwriting the user's choice.
 - Confirm the tray says the BLE device is connected and the control panel reports **3D** mode.
 - Confirm the intended host is foreground, its integration is enabled, and the 3D viewport has
   focus where the host requires it.
-- Open **3D Apps** and run the listed health check. A connected row shows the loaded integration
-  version.
+- Open **3D Apps** and inspect the runtime-health detail before running the listed host health
+  check. A connected row shows the loaded integration version; degraded and failed rows retain the
+  transport or protocol error that needs attention.
 - Check `%APPDATA%\TrackballDaemon\daemon.log`; host-specific log paths are listed in each app's
   Instructions panel and maintainer guide.
 - Lower the app's **Viewport refresh rate** if navigation queues or stutters.
@@ -177,18 +185,20 @@ restore three-axis orbit without overwriting the user's choice.
 
 ## Firmware
 
-The active five-way firmware is
+The working five-way validation firmware is
 [`firmware/PMW3610/PMW3610.ino`](firmware/PMW3610/PMW3610.ino) (SuperMini nRF52840, dual PMW3610,
 advertised name `Astrolabe`). It fuses the two sensors, exposes BLE HID, publishes the custom
-rotation characteristic, and publishes the production five-way input-state snapshot used by the
-daemon. The older
+rotation characteristic, and publishes the five-way input-state snapshot used by the daemon. Its
+validation loop is complete, but its SuperMini controller and board are not the product hardware. The
+older
 [`firmware/XIAO3389/XIAO3389.ino`](firmware/XIAO3389/XIAO3389.ino) dual-PMW3389 three-button bench
 remains supported under advertised name `Trackball BLE`. Legacy rotation-only firmware also remains
 supported. See [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) for the packet and
 descriptor contract.
 [`firmware/Astrolabe/Astrolabe.ino`](firmware/Astrolabe/Astrolabe.ino) is still the production-
-hardware placeholder pending a final freeze; current SuperMini dual-PMW3610 pins and geometry live
-in the PMW3610 sketch rather than in that placeholder.
+hardware placeholder for the Seeed Studio XIAO nRF52840 target pending the remaining sensor, switch,
+power, and recovery-control freeze. Prototype-only SuperMini pins and geometry remain in the PMW3610
+sketch rather than being copied into that placeholder.
 
 ## Development and project documentation
 

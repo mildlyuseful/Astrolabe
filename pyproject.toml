@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools==82.0.1"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -19,7 +19,7 @@ debug = ["pygame>=2.5.0", "PyOpenGL>=3.1.7"]
 # Onshape bridge cert generation; without it the bridge falls back to an `openssl` CLI on PATH.
 onshape = ["cryptography>=41.0; sys_platform == 'win32'"]
 dev = ["pytest", "jsonschema[format]"]
-release = ["build", "nuitka"]
+release = ["nuitka", "cyclonedx-bom==7.3.0", "setuptools==82.0.1"]
 
 # GUI script -> launched without a console window on Windows.
 [project.gui-scripts]
@@ -46,3 +46,7 @@ trackball_daemon = ["**/__pycache__/*", "**/*.pyc", "**/*.pyc.*", "**/*.pyo"]
 # import the standalone cube_test.py demo (pulls in pygame, slow, side-effects).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv]
+required-version = "==0.11.28"
+build-constraint-dependencies = ["setuptools==82.0.1"]

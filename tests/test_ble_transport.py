@@ -112,10 +112,11 @@ class _FakeDevice:
 
 class _FakeScanner:
     @staticmethod
-    async def find_device_by_name(name, timeout):
-        assert name == "Trackball BLE"
+    async def find_device_by_filter(filterfunc, timeout):
         assert timeout == 10.0
-        return _FakeDevice()
+        device = _FakeDevice()
+        advertisement = SimpleNamespace(local_name=None, service_uuids=(SERVICE,))
+        return device if filterfunc(device, advertisement) else None
 
 
 class _FakeClient:
@@ -178,7 +179,7 @@ def test_transport_discovers_and_subscribes_all_adapter_characteristics_then_dis
 def test_transport_reports_scan_failure_without_constructing_a_client():
     class BrokenScanner:
         @staticmethod
-        async def find_device_by_name(_name, timeout):
+        async def find_device_by_filter(_filterfunc, timeout):
             raise OSError(f"adapter unavailable after {timeout}")
 
     registry, _providers, _aggregator = _registry()
@@ -194,3 +195,44 @@ def test_transport_reports_scan_failure_without_constructing_a_client():
         scanner=BrokenScanner, client_factory=lambda _target: None, sleep=sleep)
     asyncio.run(transport.run())
     assert any(text.startswith("scan error:") for text in statuses)
+
+
+def test_transport_reports_compatible_service_when_name_is_missing():
+    class UnnamedDevice:
+        name = None
+        address = "CC:DD"
+
+    class ServiceOnlyScanner:
+        @staticmethod
+        async def find_device_by_filter(filterfunc, timeout):
+            assert timeout == 10.0
+            filterfunc(
+                UnnamedDevice(),
+                SimpleNamespace(local_name=None, service_uuids=(SERVICE,)),
+            )
+            return None
+
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    statuses = []
+
+    async def sleep(_delay):
+        stop.set()
+
+    transport = BleTransport(
+        lambda: ("Astrolabe", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        statuses.append,
+        stop,
+        scanner=ServiceOnlyScanner,
+        client_factory=lambda _target: None,
+        sleep=sleep,
+    )
+    asyncio.run(transport.run())
+
+    assert any(
+        "compatible BLE service seen at CC:DD without a name" in text
+        and "set the Device name or address" in text
+        for text in statuses
+    )
