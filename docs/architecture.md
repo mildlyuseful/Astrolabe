@@ -56,6 +56,16 @@ host-specific signs, scales, pivots, or camera conventions.
 profile data, settings, routing, and UI projections validate against it rather than repeating app IDs
 or capabilities.
 
+It also owns each integration's `SupportTier`, which is a release commitment, not a compatibility
+result. `SupportTier` says what this project promises about an integration as a whole; the separate
+`integrations.Compatibility` classifies one detected host version against what has been verified.
+The two are independent in both directions, so no surface may merge them: UI grouping, card text, the
+copyable instructions, the README tables, and the release-smoke output all derive the tier from
+`AppSpec`, and the host-version range stays in `integrations.py` under a field deliberately not named
+for support. A host version classified `unsupported` is refused by `integrations.install` unless the
+caller passes an explicit override, which the UI only does after showing the user the exact warning
+naming the detected version.
+
 `product.py` is the equivalent authority for the product itself. The installer's upgrade identifier,
 AppUserModelID, per-user install path, Start Menu folder, uninstall identity, startup value,
 single-instance mutex, configuration directory, and artifact names all resolve there, and the

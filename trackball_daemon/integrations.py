@@ -220,7 +220,10 @@ class AppDef:
     install_model: str = ""
     setup_required: bool = True
     first_run_action: Optional[str] = "Set up"
-    supported_versions: str = ""
+    #: Host versions this integration has actually been verified against. Deliberately not named for
+    #: "support": the release commitment is `spec.support_tier`, and conflating the two is how an
+    #: experimental integration ends up reading as supported because its host version is verified.
+    verified_versions: str = ""
     setup_instructions: str = ""
     manual_install: str = ""
     health_check: str = ""
@@ -234,6 +237,18 @@ class AppDef:
     @property
     def name(self):
         return self.spec.display_name
+
+    @property
+    def support_tier(self):
+        return self.spec.support_tier
+
+    @property
+    def support_label(self):
+        return self.spec.support_label
+
+    @property
+    def support_summary(self):
+        return self.spec.support_summary
 
 
 @dataclass(frozen=True)
@@ -470,8 +485,15 @@ def compatibility(appdef: AppDef, detected=None) -> Compatibility:
 
 
 def integration_instructions(appdef: AppDef) -> str:
-    """Complete, copyable instructions used by every expandable app card."""
+    """Complete, copyable instructions used by every expandable app card.
+
+    The release commitment and the verified host versions lead, and they are two separate lines on
+    purpose: they answer different questions, and a reader who conflates them will assume an
+    experimental integration is maintained because the host version in front of them is verified.
+    """
     return (
+        f"Release support\n{appdef.support_label}. {appdef.support_summary}\n\n"
+        f"Verified host versions\n{appdef.verified_versions}\n\n"
         f"Install model\n{appdef.install_model}\n\n"
         f"Automatic setup\n{appdef.setup_instructions}\n\n"
         f"Manual setup / restricted permissions\n{appdef.manual_install}\n\n"
@@ -1606,7 +1628,7 @@ def auto_update(cfg) -> list:
 _APP_UX = {
     "blender": dict(
         install_model="User add-on copied into each detected Blender version; optional startup shim.",
-        supported_versions="Blender 4.2 through 5.1 (tested on 5.1.1)",
+        verified_versions="Blender 4.2 through 5.1 (tested on 5.1.1)",
         setup_instructions=("Set up copies Trackball Nav to every detected user scripts/addons "
                             "folder and asks whether to add the auto-enable startup shim."),
         manual_install=("Copy trackball_daemon\\plugins\\blender\\trackball_nav to "
@@ -1621,7 +1643,7 @@ _APP_UX = {
     ),
     "freecad": dict(
         install_model="User Mod add-on; files are copied only under the current Windows profile.",
-        supported_versions="FreeCAD 1.0 through 1.1 (tested on 1.1.1)",
+        verified_versions="FreeCAD 1.0 through 1.1 (tested on 1.1.1)",
         setup_instructions="Set up copies TrackballNav into FreeCAD's version-aware user Mod folder.",
         manual_install=("Copy trackball_daemon\\plugins\\freecad\\TrackballNav to "
                         "%APPDATA%\\FreeCAD\\v<major>-<minor>\\Mod\\TrackballNav (FreeCAD 1.x), "
@@ -1633,7 +1655,7 @@ _APP_UX = {
     ),
     "sketchup": dict(
         install_model="Per-version Ruby extension in SketchUp's user Plugins folder.",
-        supported_versions="SketchUp Desktop 2025 through 2026 (tested on 2026.2.243)",
+        verified_versions="SketchUp Desktop 2025 through 2026 (tested on 2026.2.243)",
         setup_instructions="Set up copies the loader and extension into every detected annual release.",
         manual_install=("Copy trackball_daemon\\plugins\\sketchup\\trackball_nav_loader.rb and the "
                         "trackball_nav folder to %APPDATA%\\SketchUp\\SketchUp <year>\\SketchUp\\"
@@ -1645,7 +1667,7 @@ _APP_UX = {
     ),
     "unreal": dict(
         install_model="Unreal Editor plugin, installed per engine or per project.",
-        supported_versions="Unreal Engine 5.8 (tested on 5.8.0)",
+        verified_versions="Unreal Engine 5.8 (tested on 5.8.0)",
         setup_instructions=("Set up copies TrackballNav to each detected Engine/Plugins folder. "
                             "Engine-level writes may require administrator permission."),
         manual_install=("Without administrator access, copy trackball_daemon\\plugins\\unreal\\"
@@ -1663,7 +1685,7 @@ _APP_UX = {
     ),
     "unity": dict(
         install_model="UPM Editor package copied into each detected Unity project.",
-        supported_versions="Unity 6 / 6000.x (implemented against 6000.5.3f1)",
+        verified_versions="Unity 6 / 6000.x (implemented against 6000.5.3f1)",
         setup_instructions=("Set up finds running/recent projects and copies the package into each "
                             "project's Packages folder; Unity recompiles it automatically."),
         manual_install=("Copy trackball_daemon\\plugins\\unity\\com.astrolabe.trackball-nav to "
@@ -1677,7 +1699,7 @@ _APP_UX = {
     ),
     "godot": dict(
         install_model="Godot EditorPlugin copied and enabled per project.",
-        supported_versions="Godot 4.4 through 4.7",
+        verified_versions="Godot 4.4 through 4.7",
         setup_instructions=("Set up finds running/recent projects, copies addons/trackball_nav, and "
                             "enables res://addons/trackball_nav/plugin.cfg."),
         manual_install=("Copy trackball_daemon\\plugins\\godot\\trackball_nav to "
@@ -1695,7 +1717,7 @@ _APP_UX = {
     ),
     "rhino": dict(
         install_model="Rhino 8 user Python scripts plus a per-user startup command.",
-        supported_versions="Rhino 8",
+        verified_versions="Rhino 8",
         setup_instructions=("Set up copies TrackballNav into Rhino's user scripts folder and "
                             "best-effort registers its startup command."),
         manual_install=("Copy trackball_daemon\\plugins\\rhino\\TrackballNav to "
@@ -1713,7 +1735,7 @@ _APP_UX = {
     ),
     "fusion360": dict(
         install_model="Fusion user add-in copied to Autodesk's per-user AddIns folder.",
-        supported_versions="Current Fusion production release (rolling Autodesk release)",
+        verified_versions="Current Fusion production release (rolling Autodesk release)",
         setup_instructions=("Set up copies TrackballNav. In Fusion, open Utilities > Add-Ins, run "
                             "TrackballNav once, and enable Run on Startup."),
         manual_install=("Copy trackball_daemon\\plugins\\fusion360\\TrackballNav to "
@@ -1729,7 +1751,7 @@ _APP_UX = {
         install_model="Direct COM automation; no SolidWorks add-in or host files are installed.",
         setup_required=False,
         first_run_action="Enable",
-        supported_versions="SOLIDWORKS 2025 (tested on 2025)",
+        verified_versions="SOLIDWORKS 2025 (tested on 2025)",
         setup_instructions=("Enable performs a one-time prerequisite check for SOLIDWORKS and "
                             "pywin32. After that, the Enabled checkbox is the only control needed."),
         manual_install=("There is nothing to copy. If the prerequisite check fails, install "
@@ -1742,7 +1764,7 @@ _APP_UX = {
     ),
     "onshape": dict(
         install_model="Browser bridge; no Onshape add-in is installed.",
-        supported_versions="Current Onshape web release (rolling release)",
+        verified_versions="Current Onshape web release (rolling release)",
         setup_instructions=("Set up creates the bridge's per-user local TLS certificate. Trust it "
                             "once and enable SpaceMouse/3Dconnexion in Onshape preferences."),
         manual_install=("No application files need copying. Generate/trust the certificate using "
@@ -1761,7 +1783,7 @@ _APP_UX = {
     ),
     "autocad": dict(
         install_model="Per-user .NET plugin staged by the daemon and NETLOADed automatically.",
-        supported_versions="AutoCAD 2025 through 2027 (.NET 8 family; tested on 2026)",
+        verified_versions="AutoCAD 2025 through 2027 (.NET 8 family; tested on 2026)",
         setup_instructions=("Set up stages TrackballNavAcad.dll under the daemon's APPDATA folder. "
                             "The daemon adds that folder to TRUSTEDPATHS and NETLOADs it on attach."),
         manual_install=("Copy trackball_daemon\\plugins\\autocad\\TrackballNavAcad.dll and "
@@ -1846,11 +1868,40 @@ def status_line(appdef: AppDef) -> str:
     return f"detected{version}: {found}"
 
 
-def install(appdef: AppDef, cfg):
+def unsupported_host_warning(appdef: AppDef, detected=None) -> Optional[str]:
+    """The exact refusal text for a host version known not to work, or None to proceed.
+
+    Only the ``unsupported`` classification blocks. ``unverified`` means untested, not broken --
+    refusing it would make every newly released host version impossible to set up until somebody
+    verified it, which is the opposite of the conservative claim the classification exists to make.
+    """
+    result = compatibility(appdef, detected)
+    if result.status != "unsupported":
+        return None
+    return (f"{appdef.name} {result.version} is a known-incompatible host version for this "
+            f"integration.\n\nVerified host versions: {appdef.verified_versions}.\n\n"
+            "Setting up against it is expected to fail or to misbehave in the viewport. "
+            "Nothing has been changed.")
+
+
+def install(appdef: AppDef, cfg, *, allow_unsupported_host=False, **setup_kwargs):
     """Set up the integration. Returns ``(ok, message)`` or ``(ok, message, copyables)``
-    where ``copyables`` is a list of ``(button_label, text_to_copy)`` for the UI dialog."""
+    where ``copyables`` is a list of ``(button_label, text_to_copy)`` for the UI dialog.
+
+    This is the single gated entry point: a host version the compatibility model classifies as
+    unsupported is refused with the exact reason unless the caller has explicitly overridden it,
+    which the UI only does after showing the user that same text.
+
+    ``auto_update`` deliberately does not go through this gate. It maintains an add-on already
+    installed in a host, and leaving older code in a host that has since moved to an unsupported
+    version is not safer than updating it -- the gate is about establishing an integration on a host
+    known not to work, not about abandoning one that already exists.
+    """
+    blocked = None if allow_unsupported_host else unsupported_host_warning(appdef)
+    if blocked is not None:
+        return False, blocked
     if appdef.setup is not None:                 # app with a real installer (e.g. Fusion)
-        return appdef.setup(appdef, cfg)
+        return appdef.setup(appdef, cfg, **setup_kwargs)
     found = appdef.detect()
     if appdef.needs_plugin and not found:
         return False, f"{appdef.name} was not found on this machine — install it first."

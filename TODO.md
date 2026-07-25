@@ -201,6 +201,12 @@ open epic and acceptance gates only.
   `acad_plugin.log`, so it is the only add-on that cannot probe both roots. Give it the same
   current-then-previous probe the source payloads use; that is what allows the mirror in
   `paths.bridge_publication_paths` to be dropped.
+- Stop the Tk tests from skipping themselves on a Tk-capable machine. `tests/test_settings_ui_tk.py`
+  and `tests/test_support_tiers.py` skip when `tk.Tk()` raises, which is right for headless CI but
+  also swallows a real failure: creating and destroying several Tk roots in one pytest session
+  intermittently fails with "Can't find a usable tk.tcl". Sharing one module-scoped window made it
+  stop reproducing locally, but the cause was never isolated, so a Windows CI run can still turn
+  UI coverage off without failing. Distinguish "no display" from "Tk broke" and let the second fail.
 - Enforce Developer Certificate of Origin sign-off in CI. `CONTRIBUTING.md` requires a
   `Signed-off-by` trailer on new commits, nothing checks it, and the history that predates the
   policy carries no trailers, so the gate needs a start-point rule.

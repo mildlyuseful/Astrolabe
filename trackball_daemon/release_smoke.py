@@ -8,6 +8,7 @@ import importlib.resources
 import json
 import sys
 
+from .app_registry import APP_IDS_BY_TIER
 from .autocad_artifact import validate_bundled_autocad_artifact
 from .devices import builtin_device_descriptors
 from .input.bindings import (
@@ -97,6 +98,9 @@ def run_release_smoke():
         "schemas": list(_SCHEMAS),
         "examples": list(_EXAMPLES),
         "runtime_imports": runtime_imports,
+        # What this build commits to per integration, from the registry rather than a release note.
+        # The machine-readable release manifest will project the same mapping.
+        "support_tiers": {tier.value: list(app_ids) for tier, app_ids in APP_IDS_BY_TIER.items()},
         "payload_notices": payload_notices,
         "autocad_plugin": {
             "version": autocad["version"],

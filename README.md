@@ -104,26 +104,54 @@ for that integration.
 
 ## Integration summary
 
-Detailed and current setup instructions are built into the **3D Apps** panel. The linked documents
-are maintainer guides for the corresponding driver or add-on.
+Every integration starts disabled and is enabled explicitly. Detailed and current setup instructions
+are built into the **3D Apps** panel; the linked documents are maintainer guides for the corresponding
+driver or add-on.
+
+Two independent things are said about each integration, and they answer different questions.
+
+**Release support** is what this project promises about the integration as a whole. **Host-version
+compatibility** is whether the particular copy on your machine has been verified. Every combination
+occurs — an experimental integration commonly runs a verified host version, and a supported one can
+meet a host version known not to work — so they are never merged into one badge.
+
+### Supported integrations
+
+A supported integration gates the public V1 release, is advertised only for its verified host-version
+range, treats an ordinary-navigation regression as release-blocking, receives active compatibility
+maintenance, and includes its setup, update, reversal, and runtime-health behaviour in that claim.
 
 | Application | Integration and one special setup step | Maintainer guide |
 |---|---|---|
-| Fusion 360 | Per-user Python add-in; run it once and enable **Run on Startup** in Fusion. | [Fusion 360](docs/apps/fusion360.md) |
-| SolidWorks | Direct COM control of an already-running instance; no host add-in is installed. | [SolidWorks](docs/apps/solidworks.md) |
-| AutoCAD | Bundled .NET plugin, staged per user and automatically `NETLOAD`ed after explicit setup. | [AutoCAD](docs/apps/autocad.md) |
-| Onshape | Loopback TLS bridge; explicitly trust/accept its certificate and install the supplied pointer userscript for accurate under-cursor targeting. | [Onshape](docs/apps/onshape.md) |
 | Blender | Per-user Python add-on; setup can optionally install an auto-enable startup shim. | [Blender](docs/apps/blender.md) |
 | FreeCAD | Per-user `Mod/TrackballNav` Python add-on; restart FreeCAD. | [FreeCAD](docs/apps/freecad.md) |
+| Fusion 360 | Per-user Python add-in; run it once and enable **Run on Startup** in Fusion. | [Fusion 360](docs/apps/fusion360.md) |
+| SolidWorks | Direct COM control of an already-running instance; no host add-in is installed. | [SolidWorks](docs/apps/solidworks.md) |
+| Onshape | Loopback TLS bridge; explicitly trust/accept its certificate and install the supplied pointer userscript for accurate under-cursor targeting. | [Onshape](docs/apps/onshape.md) |
+
+### Experimental integrations
+
+An experimental integration is opt-in and clearly labelled, may ship with documented host
+limitations, and carries no promise for every host update. An isolated functional regression in one
+of these does not block a release. A shared security, data-loss, configuration-corruption, or
+lifecycle defect still does.
+
+| Application | Integration and one special setup step | Maintainer guide |
+|---|---|---|
 | SketchUp Desktop | Ruby extension copied into detected annual Plugins folders; restart SketchUp. | [SketchUp](docs/apps/sketchup.md) |
 | Unreal Engine | Editor Python plugin; enable it once. A project-local install avoids administrator rights. | [Unreal Engine](docs/apps/unreal.md) |
 | Unity | Editor package copied into a selected project's `Packages` folder. | [Unity](docs/apps/unity.md) |
 | Godot | EditorPlugin copied into a selected project and enabled in `project.godot`. | [Godot](docs/apps/godot.md) |
 | Rhino 8 | Per-user Python scripts plus a startup command; restart Rhino. | [Rhino](docs/apps/rhino.md) |
+| AutoCAD | Bundled .NET plugin, staged per user and automatically `NETLOAD`ed after explicit setup. | [AutoCAD](docs/apps/autocad.md) |
 
-The **3D Apps** panel displays the current host-support classification sourced from the integration
-registry. Maintainers should update `trackball_daemon/integrations.py`; an unverified version is not
-necessarily incompatible, while a known-unsupported version is called out separately.
+### Host versions
+
+The **3D Apps** panel states each integration's verified host versions beside its release tier, and
+flags the detected copy separately. An *unverified* version may work but has not earned a claim; a
+*known-unsupported* version is refused by setup unless you explicitly override the warning naming it.
+Tiers live in `trackball_daemon/app_registry.py` and version ranges in
+`trackball_daemon/integrations.py`; tests fail if these tables and the registry disagree.
 
 ## Controls and configuration
 

@@ -35,6 +35,39 @@ class FocusKind(str, Enum):
     ONSHAPE_BROWSER = "onshape_browser"
 
 
+class SupportTier(str, Enum):
+    """What this project promises about an integration, which is not whether a host version works.
+
+    The two are independent and must stay that way. A tier is a maintenance and release-gating
+    commitment covering the integration as a whole; :class:`integrations.Compatibility` classifies one
+    detected host version against what has actually been verified. Every combination is meaningful --
+    an experimental integration can be running a verified host version, and a supported one can meet a
+    host version known not to work -- so the UI states them as two separate facts.
+    """
+
+    SUPPORTED = "supported"
+    EXPERIMENTAL = "experimental"
+
+
+#: Short label for one integration's tier. The UI and generated documentation both read these rather
+#: than spelling a tier out, so a renamed tier cannot leave stale user-facing text behind.
+SUPPORT_TIER_LABELS = MappingProxyType({
+    SupportTier.SUPPORTED: "Supported integration",
+    SupportTier.EXPERIMENTAL: "Experimental integration",
+})
+
+#: What each tier commits to, in one sentence a user reads before enabling anything.
+SUPPORT_TIER_SUMMARIES = MappingProxyType({
+    SupportTier.SUPPORTED: (
+        "Gates the release, is advertised only for its verified host versions, and treats an "
+        "ordinary-navigation regression as release-blocking."),
+    SupportTier.EXPERIMENTAL: (
+        "Opt-in, may ship with documented host limitations, and carries no promise for every host "
+        "update. An isolated functional regression does not block a release; a security, data-loss, "
+        "configuration-corruption, or lifecycle defect still does."),
+})
+
+
 class OnshapeFocusState(str, Enum):
     """Connection and foreground state kept distinct for browser-hosted Onshape."""
 
@@ -108,10 +141,15 @@ class AppSpec:
     transport: TransportKind
     focus_kind: FocusKind
     binding_profile: AppBindingProfile
+    support_tier: SupportTier
 
     def __post_init__(self):
         if not self.app_id or self.app_id != self.app_id.strip().lower():
             raise ValueError("app_id must be a non-empty normalized lowercase string")
+        if not isinstance(self.support_tier, SupportTier):
+            # Deliberately required rather than defaulted: a new integration's release commitment is
+            # a decision, and a default would quietly make it whichever one is cheaper to forget.
+            raise ValueError(f"{self.app_id} must declare a SupportTier")
         if self.binding_profile.key != self.app_id:
             raise ValueError("binding profile identity must match app identity")
         if not self.process_selectors:
@@ -128,6 +166,14 @@ class AppSpec:
     def name(self):
         """Compatibility spelling used by existing setup-card consumers."""
         return self.display_name
+
+    @property
+    def support_label(self):
+        return SUPPORT_TIER_LABELS[self.support_tier]
+
+    @property
+    def support_summary(self):
+        return SUPPORT_TIER_SUMMARIES[self.support_tier]
 
     def matches_process(self, process_name: Optional[str]) -> bool:
         return any(selector.matches(process_name) for selector in self.process_selectors)
@@ -178,7 +224,7 @@ def _profile(app_id, title, *, features=(), pivots=PIVOTS_DEFAULT, orbit_styles=
     )
 
 
-def _spec(app_id, display_name, process_names, title, *, transport=TransportKind.BROKER,
+def _spec(app_id, display_name, process_names, title, *, tier, transport=TransportKind.BROKER,
           focus_kind=FocusKind.DESKTOP_PROCESS, rich=False, no_roll=False, **profile_kwargs):
     profile = _profile(app_id, title, rich=rich, no_roll=no_roll, **profile_kwargs)
     capabilities = set(profile.features)
@@ -194,6 +240,7 @@ def _spec(app_id, display_name, process_names, title, *, transport=TransportKind
         transport=transport,
         focus_kind=focus_kind,
         binding_profile=profile,
+        support_tier=tier,
     )
 
 
@@ -201,18 +248,23 @@ def _spec(app_id, display_name, process_names, title, *, transport=TransportKind
 # validated against it by config.py; integration setup records below reference these exact objects.
 APP_SPECS = (
     _spec("blender", "Blender", ("blender.exe",), "Blender viewport navigation", rich=True,
+          tier=SupportTier.SUPPORTED,
           pivots=("camera", "screen_center", "cursor", "selection", "cursor_3d", "object", "origin"),
           twist_actions=("roll", "zoom", "dolly", "none"),
           zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior", "camera_lock")),
-    _spec("freecad", "FreeCAD", ("freecad.exe",), "FreeCAD navigation"),
+    _spec("freecad", "FreeCAD", ("freecad.exe",), "FreeCAD navigation",
+          tier=SupportTier.SUPPORTED),
     _spec("sketchup", "SketchUp", ("sketchup.exe",), "SketchUp model navigation", rich=True,
+          tier=SupportTier.EXPERIMENTAL,
           pivots=PIVOTS_CAMERA, twist_actions=("roll", "zoom", "dolly", "none"),
           zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
     _spec("unreal", "Unreal Engine", ("unrealeditor.exe", "ue4editor.exe"),
-          "Unreal Editor viewport navigation", rich=True, pivots=PIVOTS_CAMERA,
+          "Unreal Editor viewport navigation", rich=True, tier=SupportTier.EXPERIMENTAL,
+          pivots=PIVOTS_CAMERA,
           twist_actions=("roll", "zoom", "dolly", "none"),
           zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
     _spec("unity", "Unity", ("unity.exe",), "Unity Scene view navigation", rich=True,
+          tier=SupportTier.EXPERIMENTAL,
           pivots=PIVOTS_CAMERA, twist_actions=("roll", "zoom", "dolly", "none"),
           zoom_behaviors=("zoom", "dolly"),
           features=("zoom_behavior", "dynamic_clip", "pivot_extent")),
@@ -220,26 +272,39 @@ APP_SPECS = (
               ProcessSelector(
                   "godot.exe",
                   r"godot_v[0-9][a-z0-9_.-]*(?<!_console)\.exe"),),
-          "Godot editor viewport navigation", rich=True,
+          "Godot editor viewport navigation", rich=True, tier=SupportTier.EXPERIMENTAL,
           no_roll=True, pivots=PIVOTS_CAMERA, orbit_styles=("turntable",),
           features=("zoom_behavior",), twist_actions=("zoom", "dolly", "none"),
           zoom_behaviors=("zoom", "dolly"), exclude=("lock_horizon", "level_horizon")),
-    _spec("rhino", "Rhino", ("rhino.exe",), "Rhino navigation", pivots=PIVOTS_CAMERA,
+    _spec("rhino", "Rhino", ("rhino.exe",), "Rhino navigation",
+          tier=SupportTier.EXPERIMENTAL, pivots=PIVOTS_CAMERA,
           zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
     _spec("fusion360", "Fusion 360", ("fusion360.exe",), "Fusion 360 navigation",
+          tier=SupportTier.SUPPORTED,
           twist_actions=("roll", "zoom", "none"), zoom_behaviors=("zoom", "dolly"),
           features=("zoom_behavior",)),
     _spec("solidworks", "SolidWorks", ("sldworks.exe",), "SOLIDWORKS navigation",
-          transport=TransportKind.SOLIDWORKS_COM),
+          tier=SupportTier.SUPPORTED, transport=TransportKind.SOLIDWORKS_COM),
     _spec("onshape", "Onshape", _BROWSER_PROCESS_NAMES, "Onshape navigation",
+          tier=SupportTier.SUPPORTED,
           transport=TransportKind.ONSHAPE_BRIDGE, focus_kind=FocusKind.ONSHAPE_BROWSER,
           features=("onshape_userscript",)),
-    _spec("autocad", "AutoCAD", ("acad.exe",), "AutoCAD navigation", pivots=PIVOTS_CAMERA,
+    _spec("autocad", "AutoCAD", ("acad.exe",), "AutoCAD navigation",
+          tier=SupportTier.EXPERIMENTAL, pivots=PIVOTS_CAMERA,
           zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
 )
 
 APP_SPECS_BY_ID = MappingProxyType({spec.app_id: spec for spec in APP_SPECS})
 APP_IDS = tuple(spec.app_id for spec in APP_SPECS)
+
+# Registry order is preserved inside each tier, so UI grouping and generated documentation agree on
+# ordering without either of them sorting.
+APP_IDS_BY_TIER = MappingProxyType({
+    tier: tuple(spec.app_id for spec in APP_SPECS if spec.support_tier is tier)
+    for tier in SupportTier
+})
+SUPPORTED_APP_IDS = APP_IDS_BY_TIER[SupportTier.SUPPORTED]
+EXPERIMENTAL_APP_IDS = APP_IDS_BY_TIER[SupportTier.EXPERIMENTAL]
 
 # Generated compatibility view for existing UI/host tests. The data remains owned by APP_SPECS.
 APP_BINDING_PROFILES = MappingProxyType(
