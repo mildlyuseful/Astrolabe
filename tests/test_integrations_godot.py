@@ -25,7 +25,7 @@ def _patch_godot(monkeypatch, project):
 
 def test_godot_is_a_bundled_addin():
     assert "godot" in integrations.ADDIN_KEYS
-    assert integrations.bundled_addin_version("godot") == "0.1.13"
+    assert integrations.bundled_addin_version("godot") == "0.1.14"
     assert integrations.APPS_BY_KEY["godot"].setup is integrations.install_godot
 
 
@@ -37,7 +37,7 @@ def test_install_copies_addon_enables_and_marks(isolated_config, tmp_path, monke
     assert ok is True
     g = cfg.snapshot().app_operational["godot"]
     assert g["installed"] is True and g["enabled"] is True
-    assert g["addin_version"] == "0.1.13"
+    assert g["addin_version"] == "0.1.14"
     dest = proj / "addons" / "trackball_nav"
     assert (dest / "plugin.cfg").exists()
     assert (dest / "version.json").exists()

@@ -4,7 +4,7 @@
 
 extends EditorPlugin
 
-const ADDIN_VERSION := "0.1.13"
+const ADDIN_VERSION := "0.1.14"
 const DEFAULT_PORT := 47900
 const PIVOT_HOLD_IDLE := 0.5
 const OBJ_CACHE_SEC := 0.5
@@ -389,9 +389,11 @@ func _cursor_depth_point(camera: Camera3D, cam: TrackballNavCamera.Cam):
 	var mouse := vp.get_mouse_position()
 	var origin := camera.project_ray_origin(mouse)
 	var direction := camera.project_ray_normal(mouse).normalized()
-	var reference = _scene_center()
-	if reference == null:
-		reference = _forward_point(cam)
+	# `_scene_center` returns null when there is no edited scene, so bind the fallback into a typed
+	# local. Leaving `reference` a Variant makes every expression derived from it a Variant too, and
+	# `distance` below cannot then be inferred -- which is a parse error, not a warning.
+	var center = _scene_center()
+	var reference: Vector3 = center if center != null else _forward_point(cam)
 	var denom := direction.dot(cam.forward)
 	if absf(denom) < 1e-9:
 		return null

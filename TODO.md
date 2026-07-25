@@ -113,7 +113,11 @@ For every applicable host:
 - **Unreal:** focused-viewport cursor ray, live signs/scales, Play-In-Editor no-op behavior, and
   project-local versus engine-wide installation.
 - **Unity:** Dynamic Clipping restoration, pivot-extent cap, domain reload, and project detection.
-- **Godot:** parser/compile smoke in an installed editor and project enable/reload.
+- **Godot:** project enable/reload in an installed editor. The parse smoke is now a command --
+  `python tools/godot_parse_check.py --godot <editor exe>` -- because the add-on shipped for several
+  versions with a GDScript type-inference error that made the whole script fail to load, and nothing
+  in this repository could see it. Run it whenever the payload changes; a Godot release can turn a
+  previously inferable expression into a parse error.
 - **Fusion 360:** occurrence/assembly bodies with `findBRepUsingRay`; confirm whether root-component
   queries miss occurrence-only geometry.
 - **SolidWorks:** COM throughput on representative large assemblies and multi-monitor DPI behavior.
