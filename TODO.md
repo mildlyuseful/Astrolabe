@@ -32,9 +32,12 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
   observation fields, and what does not count as evidence are in
   [`docs/release.md`](docs/release.md); executed-artifact evidence belongs under
   `archive/release-evidence/`. Nothing about this build has been observed outside a source run yet.
-- Build the internal alpha from a clean revision. `build_release.ps1 -RequireCleanRevision` enforces
-  it, and without that switch the manifest honestly records the tree as dirty and its revision as not
-  describing the artifact — but no artifact built so far has been produced from a clean tree.
+- Establish whether the release executable can be made reproducible, or state that it cannot. Two
+  builds of the identical clean tree produced different `Astrolabe.exe` bytes and therefore different
+  archive hashes, while the SBOM stayed byte-identical — so the non-determinism is in Nuitka's output,
+  not the dependency set. The deterministic-ZIP guarantee covers archive layout only, which means a
+  recipient cannot currently rebuild and compare. Evidence:
+  `archive/release-evidence/internal-alpha-0.2.0a1-build-2026-07-25.md`.
 - Verify the on-disk identity migration on a machine that really ran an earlier build. Automated
   tests cover the copy, the verification, the rollback guarantees, the Run-value carry-over, and the
   add-on probe order, but not a real upgrade: confirm that settings, profiles, and an
