@@ -113,15 +113,26 @@ them; a second copy of a gate list is a list that goes stale.
 
 ## The two workflows
 
-| Workflow | Trigger | Produces | Credentials |
+| Workflow / job | Trigger | Produces | Credentials |
 |---|---|---|---|
-| `ci.yml` | every pull request and push to `main` | wheel, sdist, **unsigned onedir**, SBOM, manifest | none, and it references no secrets |
+| `ci.yml` · `checks`, `firmware` | every pull request and push to `main` | wheel, sdist, installed-wheel smoke, SBOM, firmware | none |
+| `ci.yml` · `onedir` | push to `main`, or a manual run | **unsigned onedir**, SBOM, manifest | none |
 | `release.yml` | a `v*` tag, or a manual run naming an exact revision | the same artifacts plus a **draft** GitHub release | signing secrets, scoped to the `release` environment |
 
-Ordinary CI builds the onedir on purpose. That artifact is what a user runs, and its build path —
-Nuitka, data-file inclusion, the packaged smoke, the SBOM, the manifest — is exercised nowhere else,
-so a break in it would otherwise stay invisible until the next hand-run build. CI also asserts that
-the manifest it produced does **not** claim to be signed, because it has no certificate to sign with.
+`ci.yml` references no secrets and declares no environment, and tests enforce both.
+
+The onedir build is deliberately not on pull requests. It is what a user actually runs, and its build
+path — Nuitka, data-file inclusion, the packaged smoke, the SBOM, the manifest — is exercised nowhere
+else, so it does need to run somewhere: on the way into `main`, before anything can be released from
+it. Per proposal it is a ten-plus-minute Windows job billed at twice the Linux rate, which spends the
+monthly budget faster than it finds anything. Use the `workflow_dispatch` trigger to run it against a
+branch when the packaging path is what changed.
+
+Superseded runs are cancelled, so a branch pushed several times in a row does not keep every
+intermediate run alive to completion.
+
+CI also asserts that the manifest it produced does **not** claim to be signed, because it has no
+certificate to sign with.
 
 `release.yml` runs every gate before producing a single artifact — a suite failure found after signing
 has already spent the certificate on bad bytes — then builds with `-RequireCleanRevision`, re-verifies

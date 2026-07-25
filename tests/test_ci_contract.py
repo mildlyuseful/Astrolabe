@@ -72,6 +72,18 @@ def test_ordinary_ci_builds_and_verifies_the_unsigned_onedir():
     assert "claiming to be signed" in WORKFLOW
 
 
+def test_the_onedir_build_is_kept_off_pull_requests_but_stays_reachable():
+    """A ten-minute Windows job per proposal costs more than it finds; it gates entry to main instead."""
+    assert "if: github.event_name != 'pull_request'" in WORKFLOW
+    assert "workflow_dispatch:" in WORKFLOW, "it must still be runnable against a branch on demand"
+
+
+def test_superseded_runs_are_cancelled():
+    """Otherwise a rapid series of pushes keeps every intermediate run alive to completion."""
+    assert "cancel-in-progress: true" in WORKFLOW
+    assert "group: ci-${{ github.workflow }}-${{ github.ref }}" in WORKFLOW
+
+
 @pytest.mark.parametrize("workflow, name", [(WORKFLOW, "ci.yml")])
 def test_ordinary_ci_never_receives_signing_credentials(workflow, name):
     """The cheapest way to leak a certificate is to add one secret to the workflow everyone edits."""

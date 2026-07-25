@@ -3,8 +3,9 @@
 
 name: CI
 
-# Ordinary branch and pull-request CI. It builds every artifact a release builds, unsigned, so a break
-# in the packaging path is visible here rather than the next time someone runs it by hand.
+# Ordinary branch and pull-request CI, split by cost. Every pull request gets the fast checks; the
+# packaging path -- which needs a Windows runner for ten-plus minutes, billed at twice the Linux rate --
+# runs when something is about to become releasable rather than on every proposal.
 #
 # This workflow never receives signing credentials. It references no secrets, and signing lives in
 # release.yml behind an approval environment. `tests/test_ci_contract.py` enforces both, because the
@@ -14,6 +15,14 @@ on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+
+# Supersede a run whose commit is no longer the tip. Without this, a branch pushed several times in a
+# row keeps every intermediate run alive to completion, and on Windows minutes that is most of the
+# monthly budget spent on results nobody will read.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -117,11 +126,18 @@ jobs:
 
   onedir:
     # The packaged onedir is what a user actually runs, and it is the only artifact whose build path
-    # (Nuitka, data-file inclusion, packaged smoke, SBOM, manifest) is exercised nowhere else. Its own
-    # job so a slow compile does not delay the test feedback above, and unsigned by construction:
-    # nothing here has access to a certificate.
+    # (Nuitka, data-file inclusion, packaged smoke, SBOM, manifest) is exercised nowhere else. Unsigned
+    # by construction: nothing here has access to a certificate.
+    #
+    # Not on pull requests. It is a ten-plus-minute Windows job billed at twice the Linux rate, and
+    # running it per proposal spends the monthly budget faster than it finds anything -- a packaging
+    # break is caught here on the way into main, before any release can be cut from it. Run it against a
+    # branch on demand with the workflow_dispatch trigger.
+    if: github.event_name != 'pull_request'
     name: Unsigned onedir artifact
     runs-on: windows-latest
+    # A kill switch, not an estimate: the local build takes about five minutes and a hosted runner is
+    # slower. Tighten it once a few real runs have established the actual spread.
     timeout-minutes: 45
 
     steps:
