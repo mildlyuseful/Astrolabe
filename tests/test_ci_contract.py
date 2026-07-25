@@ -150,10 +150,14 @@ def test_only_the_drafting_job_can_write_to_the_repository():
 
 # --- workflow validity ----------------------------------------------------------------------------
 
-# A workflow whose expressions reference a context that is not available at that level is rejected by
-# GitHub before any job starts, so there is no job to carry the failure and nothing in the run to read.
-# That is how this repository's CI stopped running for two days without anyone noticing. `runner` is the
-# easy one to get wrong: it exists for a step's `env` but not for a job's.
+# GitHub documents which contexts each position may use, and an expression outside that set can make a
+# run fail with no job created at all -- no step, no log, nothing but "likely a workflow file issue".
+# This repository spent two days with every push-event run in that state. `runner` is the easy one to
+# get wrong: it exists for a step's `env` but not for a job's.
+#
+# Whether that specific construct caused those runs was never established, since `pull_request` runs on
+# the same file were fine (TODO.md). The check is worth keeping either way: the restriction is real, and
+# the failure mode it guards against is the one that leaves nothing to read.
 JOB_LEVEL_FORBIDDEN_CONTEXTS = ("runner", "steps", "job", "env", "hashFiles")
 
 

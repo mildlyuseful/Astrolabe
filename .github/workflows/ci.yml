@@ -218,10 +218,11 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      # `runner` is not an available context for a job-level `env`, and referencing it there makes
-      # GitHub reject the entire workflow file before any job starts -- so the whole of CI silently
-      # stops running, with no job to show a failure against. Exported from a step instead, where the
-      # context does exist.
+      # `runner` is not an available context for a job-level `env` -- only for a step's -- so it is
+      # exported here instead. This was changed while investigating push-event runs that produced zero
+      # jobs; that correlation is unproven, since the same construct resolved fine under
+      # `pull_request`. The restriction is documented regardless, so this is the correct shape either
+      # way. See TODO.md.
       - name: Use an isolated Arduino sketchbook
         run: echo "ARDUINO_DIRECTORIES_USER=$RUNNER_TEMP/astrolabe-arduino-sketchbook" >> "$GITHUB_ENV"
 
