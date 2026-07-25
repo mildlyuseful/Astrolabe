@@ -28,6 +28,13 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 - Exercise the exact release wheel and onedir GUI on a clean Windows account without Python or a
   source checkout.
 - Write release notes before publishing an alpha.
+- Daily-drive the packaged `0.2.0a1` artifact and record what it finds. The process, the per
+  observation fields, and what does not count as evidence are in
+  [`docs/release.md`](docs/release.md); executed-artifact evidence belongs under
+  `archive/release-evidence/`. Nothing about this build has been observed outside a source run yet.
+- Build the internal alpha from a clean revision. `build_release.ps1 -RequireCleanRevision` enforces
+  it, and without that switch the manifest honestly records the tree as dirty and its revision as not
+  describing the artifact — but no artifact built so far has been produced from a clean tree.
 - Verify the on-disk identity migration on a machine that really ran an earlier build. Automated
   tests cover the copy, the verification, the rollback guarantees, the Run-value carry-over, and the
   add-on probe order, but not a real upgrade: confirm that settings, profiles, and an
@@ -44,11 +51,11 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
   The archive, the executable, and the installer are already named for the product; this last
   user-visible path is not.
 - Pin the interpreter that `build_release.ps1` embeds. It resolves `$BuildPython` from whatever
-  `python` is first on the operator's PATH, so the embedded runtime version — which the release
-  manifest is meant to record — is a property of the build machine. An interpreter below the
-  declared floor now fails the locked sync outright rather than resolving a different dependency
-  set, so this is no longer a silent-divergence risk, but the exact embedded version is still
-  unpinned.
+  `python` is first on the operator's PATH, so the embedded runtime version is a property of the
+  build machine. An interpreter below the declared floor now fails the locked sync outright rather
+  than resolving a different dependency set, and the release manifest now records the exact embedded
+  version, so a divergence is at least visible after the fact — but it is still chosen by the
+  operator's PATH rather than declared.
 - Move to bleak 3.x. The dependency is deliberately capped at `<2` because bleak 2.0 changed GATT
   error types and 3.0 changed the scanner/client keyword surface. The transport's usage is narrow
   (`find_device_by_filter`, `BleakClient`, `start_notify`/`stop_notify`) and no documented breaking

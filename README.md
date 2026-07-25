@@ -250,6 +250,8 @@ sketch rather than being copied into that placeholder.
 - [`docs/feature_parity.md`](docs/feature_parity.md) — the currently enforced capability contract.
 - [`docs/security.md`](docs/security.md) — local listeners, permissions, reversal steps, and release
   hardening.
+- [`docs/release.md`](docs/release.md) — release channel and versioning rules, what the release
+  manifest records, and the daily-driver observation contract for the internal alpha.
 - [`docs/release_verification.md`](docs/release_verification.md) — automated and manual release gates
   with explicit skip/release-impact rules.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — inbound licensing, Developer Certificate of Origin sign-off,

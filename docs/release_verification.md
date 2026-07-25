@@ -44,6 +44,13 @@ packages actually selected for that environment; the release step then stamps th
 with the version resolved from the package's authoritative dynamic version source. The script
 prints SHA-256 values for the executable, packaged DLL, archive, and SBOM.
 
+Finally it writes the machine-readable release manifest beside the archive — last, because the
+manifest records the SBOM's hash and the finalization step above rewrites that file in place. What the
+manifest records, and the channel and versioning rules behind it, are described in
+[`release.md`](release.md). Pass `-RequireCleanRevision` to refuse a build from a working tree with
+uncommitted changes; without it the build proceeds and the manifest records the tree as dirty and its
+revision as not describing the artifact.
+
 `build_release.ps1` also audits bundled-component notices against the release runtime environment it
 just synchronized. That gate is `tools/audit_notices.py`, which compares the distributions actually
 installed for the release against `third_party.json` and `THIRD_PARTY_NOTICES.md` and fails when a

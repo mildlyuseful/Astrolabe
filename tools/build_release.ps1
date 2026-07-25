@@ -3,7 +3,10 @@
 
 [CmdletBinding()]
 param(
-    [string]$OutputDirectory = "build/release"
+    [string]$OutputDirectory = "build/release",
+    # A release pipeline must not produce an artifact whose recorded revision does not describe it.
+    # Local builds deliberately allow it and the manifest records the tree as dirty instead.
+    [switch]$RequireCleanRevision
 )
 
 $ErrorActionPreference = "Stop"
@@ -119,10 +122,27 @@ try {
         --name "astrolabe-daemon" --version $Version
     if ($LASTEXITCODE -ne 0) { throw "SBOM metadata finalization failed with exit code $LASTEXITCODE" }
 
+    # Last, because it records the hash of every artifact above -- including the SBOM, which
+    # finalize_sbom has just rewritten. Run by the release interpreter so the embedded Python version
+    # it reports is the one Nuitka actually bundled.
+    $Manifest = Join-Path $OutputRoot (
+        [System.IO.Path]::ChangeExtension($ArchiveName, $null) + "manifest.json")
+    $ManifestArguments = @(
+        "tools/build_release_manifest.py",
+        "--output", $Manifest,
+        "--executable", $Executable,
+        "--autocad-plugin", $PackagedAutoCAD,
+        "--archive", $Archive,
+        "--sbom", $Sbom)
+    if ($RequireCleanRevision) { $ManifestArguments += "--require-clean" }
+    & $ReleasePython @ManifestArguments
+    if ($LASTEXITCODE -ne 0) { throw "Release manifest generation failed with exit code $LASTEXITCODE" }
+
     Get-FileHash -Algorithm SHA256 -LiteralPath $Executable, $PackagedAutoCAD, $Archive, $Sbom |
         Select-Object Algorithm, Hash, Path |
         Format-List
     Write-Host "Archive checksum file: $Archive.sha256"
+    Write-Host "Release manifest: $Manifest"
 }
 finally {
     Pop-Location

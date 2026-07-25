@@ -14,12 +14,17 @@ Start Menu entry to a real machine, changing it makes the next release install a
 one instead of upgrading it. They are chosen now, before any installer ships, so they never need to
 change.
 
+A third group at the bottom derives release identity from the version, so a build cannot describe
+itself as something its version number contradicts.
+
 *Legacy* values are the identity this project wrote on disk under its original name. They are no
 longer where anything is written, but a machine that ran an earlier build still holds them, and so
 does every host add-on copy an earlier build installed. They stay here because the frozen identity
 is only reachable by carrying that state across, and because a build that stopped recognizing them
 would strand it.
 """
+
+import re
 
 # --- Frozen identity ---------------------------------------------------------------------------
 
@@ -92,6 +97,63 @@ LEGACY_SINGLE_INSTANCE_MUTEX = r"Local\TrackballDaemon.Controller.v1"
 
 #: The same legacy root as a user would see it written, for prose that has to name it.
 LEGACY_CONFIG_DIRECTORY_DISPLAY = "%APPDATA%\\" + LEGACY_CONFIG_DIRECTORY
+
+
+# --- release channel ------------------------------------------------------------------------------
+
+#: The channel a pre-release build belongs to: a private artifact for daily driving, not a product.
+INTERNAL_ALPHA_CHANNEL = "internal-alpha"
+
+#: The channel a final release belongs to.
+PUBLIC_CHANNEL = "public"
+
+#: The first version allowed to claim the public channel. Reserving it means no 0.x build can ever
+#: be mistaken for V1, however it was labelled downstream.
+FIRST_PUBLIC_VERSION = (1, 0, 0)
+
+#: PEP 440, narrowed to the shapes this project actually publishes: `0.2.0a1`, `1.0.0rc2`, `1.0.0`.
+_VERSION = re.compile(r"(?P<release>\d+\.\d+\.\d+)(?:(?P<phase>a|b|rc)(?P<serial>\d+))?$")
+
+#: Windows build target recorded in the release manifest. One value because there is one target.
+BUILD_TARGET = "windows-x64"
+
+
+def parse_version(version):
+    """Split a version into ``((major, minor, patch), phase, serial)``; phase is None when final."""
+    match = _VERSION.fullmatch(str(version).strip())
+    if match is None:
+        raise ValueError(f"not a version this project publishes: {version!r}")
+    release = tuple(int(part) for part in match.group("release").split("."))
+    phase = match.group("phase")
+    return release, phase, (int(match.group("serial")) if phase else None)
+
+
+def release_channel(version):
+    """Which channel `version` belongs to, derived rather than declared.
+
+    The pre-release segment already states whether a build is private, so reading the channel from it
+    removes the possibility of a manifest that says "public" over a version that says otherwise.
+
+    Two version shapes raise rather than resolve, because both mean a policy question is unanswered
+    and a provenance record must not guess at it:
+
+    * a final release below `FIRST_PUBLIC_VERSION` means the reserved-for-V1 rule was broken;
+    * a beta or release candidate belongs to a channel this project has not defined. Labelling one
+      "internal-alpha" would understate it and "public" would overstate it, so the channel has to be
+      decided before such a version can be built.
+    """
+    release, phase, _serial = parse_version(version)
+    if phase == "a":
+        return INTERNAL_ALPHA_CHANNEL
+    if phase is not None:
+        raise ValueError(
+            f"{version} is a {phase!r} pre-release, and no channel is defined for one; define it "
+            "here before building, rather than letting a manifest record a channel by accident")
+    if release < FIRST_PUBLIC_VERSION:
+        raise ValueError(
+            f"{version} is a final release below {'.'.join(map(str, FIRST_PUBLIC_VERSION))}, which "
+            "is reserved for public V1; use a pre-release segment such as 0.2.0a1")
+    return PUBLIC_CHANNEL
 
 
 def archive_name(version):

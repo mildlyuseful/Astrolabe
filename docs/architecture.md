@@ -50,6 +50,7 @@ host-specific signs, scales, pivots, or camera conventions.
 | Python dependency resolution | `pyproject.toml` plus the checked-in `uv.lock` |
 | Product names, install and configuration paths, and Windows registration identifiers | [`../trackball_daemon/product.py`](../trackball_daemon/product.py) |
 | Per-path license disposition and bundled-component attribution | [`../LICENSING.md`](../LICENSING.md) with `licensing.json`, and [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) with `third_party.json` |
+| Release channel, version sequence, and what a release manifest records | [`release.md`](release.md) |
 | Open defects, deferred work, and unclosed verification | [`../TODO.md`](../TODO.md) |
 
 `app_registry.py` is the only code-owned supported-app identity and ordering table. Setup definitions,
