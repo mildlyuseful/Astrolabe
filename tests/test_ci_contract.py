@@ -134,3 +134,48 @@ def test_the_workflow_only_ever_creates_a_draft():
 def test_only_the_drafting_job_can_write_to_the_repository():
     assert RELEASE_WORKFLOW.count("contents: write") == 1
     assert "permissions:\n  contents: read" in RELEASE_WORKFLOW
+
+
+# --- workflow validity ----------------------------------------------------------------------------
+
+# A workflow whose expressions reference a context that is not available at that level is rejected by
+# GitHub before any job starts, so there is no job to carry the failure and nothing in the run to read.
+# That is how this repository's CI stopped running for two days without anyone noticing. `runner` is the
+# easy one to get wrong: it exists for a step's `env` but not for a job's.
+JOB_LEVEL_FORBIDDEN_CONTEXTS = ("runner", "steps", "job", "env", "hashFiles")
+
+
+def _job_level_env_blocks(workflow):
+    """Yield each job-level ``env:`` block's body, which is indented four spaces under the job."""
+    lines = workflow.splitlines()
+    for index, line in enumerate(lines):
+        if line != "    env:":
+            continue
+        body = []
+        for candidate in lines[index + 1:]:
+            if candidate.strip() and not candidate.startswith("      "):
+                break
+            body.append(candidate)
+        yield "\n".join(body)
+
+
+@pytest.mark.parametrize("workflow, name", [(WORKFLOW, "ci.yml"), (RELEASE_WORKFLOW, "release.yml")])
+def test_job_level_env_uses_no_unavailable_context(workflow, name):
+    for block in _job_level_env_blocks(workflow):
+        for context in JOB_LEVEL_FORBIDDEN_CONTEXTS:
+            assert f"{context}." not in block, (
+                f"{name}: a job-level env cannot reference {context!r}; GitHub rejects the whole "
+                f"workflow file and no job runs at all:\n{block}")
+
+
+@pytest.mark.parametrize("workflow, name", [(WORKFLOW, "ci.yml"), (RELEASE_WORKFLOW, "release.yml")])
+def test_workflows_parse_as_yaml_with_the_expected_jobs(workflow, name):
+    """Unparseable YAML fails the same silent way an unavailable context does: no job, no message."""
+    import yaml
+
+    parsed = yaml.safe_load(workflow)
+
+    assert parsed["jobs"], name
+    for job_name, job in parsed["jobs"].items():
+        assert job.get("runs-on"), f"{name}: {job_name} has no runner"
+        assert job.get("steps"), f"{name}: {job_name} has no steps"

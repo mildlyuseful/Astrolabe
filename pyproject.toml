@@ -61,7 +61,10 @@ Security = "https://github.com/mildlyuseful/Astrolabe/blob/main/SECURITY.md"
 debug = ["pygame>=2.5.0", "PyOpenGL>=3.1.7"]
 # Onshape bridge cert generation; without it the bridge falls back to an `openssl` CLI on PATH.
 onshape = ["cryptography>=41.0; sys_platform == 'win32'"]
-dev = ["pytest", "jsonschema[format]"]
+# PyYAML is here so the workflow-structure tests actually run. A workflow GitHub cannot parse is
+# rejected before any job starts, which produces no job and no readable error, so that check has to
+# happen locally or not at all.
+dev = ["pytest", "jsonschema[format]", "PyYAML"]
 release = ["nuitka", "cyclonedx-bom==7.3.0", "setuptools==82.0.1"]
 
 # GUI script -> launched without a console window on Windows.

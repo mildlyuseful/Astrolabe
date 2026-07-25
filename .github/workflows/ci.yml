@@ -197,12 +197,17 @@ jobs:
   firmware:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    env:
-      ARDUINO_DIRECTORIES_USER: ${{ runner.temp }}/astrolabe-arduino-sketchbook
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      # `runner` is not an available context for a job-level `env`, and referencing it there makes
+      # GitHub reject the entire workflow file before any job starts -- so the whole of CI silently
+      # stops running, with no job to show a failure against. Exported from a step instead, where the
+      # context does exist.
+      - name: Use an isolated Arduino sketchbook
+        run: echo "ARDUINO_DIRECTORIES_USER=$RUNNER_TEMP/astrolabe-arduino-sketchbook" >> "$GITHUB_ENV"
 
       - name: Install pinned Arduino CLI
         uses: arduino/setup-arduino-cli@v2
