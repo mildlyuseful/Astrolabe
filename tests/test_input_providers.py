@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Normalized provider model and pressed-set lifecycle contracts."""
 
 from dataclasses import FrozenInstanceError

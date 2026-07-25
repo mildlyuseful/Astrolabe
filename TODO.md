@@ -27,10 +27,69 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 
 - Exercise the exact release wheel and onedir GUI on a clean Windows account without Python or a
   source checkout.
-- Add the project license, bundled-component notices, complete package metadata, vulnerability
-  reporting instructions, and release notes before publishing an alpha.
+- Write release notes before publishing an alpha.
+- Daily-drive the packaged `0.2.0a1` artifact and record what it finds. The process, the per
+  observation fields, and what does not count as evidence are in
+  [`docs/release.md`](docs/release.md); executed-artifact evidence belongs under
+  `archive/release-evidence/`. Nothing about this build has been observed outside a source run yet.
+- Establish whether the release executable can be made reproducible, or state that it cannot. Two
+  builds of the identical clean tree produced different `Astrolabe.exe` bytes and therefore different
+  archive hashes, while the SBOM stayed byte-identical — so the non-determinism is in Nuitka's output,
+  not the dependency set. The deterministic-ZIP guarantee covers archive layout only, which means a
+  recipient cannot currently rebuild and compare. Evidence:
+  `archive/release-evidence/internal-alpha-0.2.0a1-build-2026-07-25.md`.
+- Verify the on-disk identity migration on a machine that really ran an earlier build. Automated
+  tests cover the copy, the verification, the rollback guarantees, the Run-value carry-over, and the
+  add-on probe order, but not a real upgrade: confirm that settings, profiles, and an
+  already-trusted Onshape certificate survive, that `%APPDATA%\TrackballDaemon` is left untouched,
+  that Start at login still fires exactly once, and that each host add-on installed by the earlier
+  build still connects.
+- Retire the legacy configuration root once no supported upgrade path starts from it. Until then
+  `paths.bridge_publication_paths` mirrors `bridge.json` there, the shipped add-on payloads probe
+  it, and the preserved directory is the documented rollback copy. Removing it means dropping the
+  mirror, the payload fallbacks, and the migration itself — and it cannot happen before the bundled
+  AutoCAD DLL is rebuilt, since that plugin can read nowhere else.
+- Rename the onedir tree the release ZIP contains. Nuitka names it after the entry script, so
+  `Astrolabe-<version>-windows-x64.zip` currently unpacks to a folder called `release_entry.dist`.
+  The archive, the executable, and the installer are already named for the product; this last
+  user-visible path is not.
+- Pin the interpreter that `build_release.ps1` embeds. It resolves `$BuildPython` from whatever
+  `python` is first on the operator's PATH, so the embedded runtime version is a property of the
+  build machine. An interpreter below the declared floor now fails the locked sync outright rather
+  than resolving a different dependency set, and the release manifest now records the exact embedded
+  version, so a divergence is at least visible after the fact — but it is still chosen by the
+  operator's PATH rather than declared.
+- Move to bleak 3.x. The dependency is deliberately capped at `<2` because bleak 2.0 changed GATT
+  error types and 3.0 changed the scanner/client keyword surface. The transport's usage is narrow
+  (`find_device_by_filter`, `BleakClient`, `start_notify`/`stop_notify`) and no documented breaking
+  change appears to touch the WinRT path, but scan, connect, notify, reconnect, and
+  disconnect-while-held can only be qualified against real trackball hardware. Lift the cap in one
+  delivery with that hardware evidence.
+- Enumerate the native libraries inside a built onedir tree and give each one an attribution.
+  `tools/audit_notices.py` resolves every Python distribution in the release runtime, and
+  `THIRD_PARTY_NOTICES.md` records CPython, Tcl/Tk, and the Nuitka runtime from the build
+  configuration, but nothing yet walks the produced tree to confirm which native libraries the
+  embedded runtime actually carries.
+- Enable GitHub private vulnerability reporting at the moment the repository becomes public.
+  `SECURITY.md` advertises `security/advisories/new` as the only reporting channel, and that feature
+  cannot be enabled while the repository is private, so the advertised link does not resolve until
+  it is turned on.
+- Replace the placeholder contact promises once the Mildly Useful domain exists. `SECURITY.md` says
+  a security mailbox will be added and `TRADEMARKS.md` says a permission contact will be listed;
+  both must become real addresses or stop promising one.
 - Authenticode-sign the daemon, eventual installer/updater, and bundled AutoCAD DLL with one
-  timestamped publisher identity. Publish the source revision and whole-artifact checksum.
+  timestamped publisher identity. Publish the source revision and whole-artifact checksum. The
+  manifest contract for this already exists and is tested — a signature report carrying subject,
+  issuer, thumbprint, timestamp authority, and verification verdict per artifact, with the signed hash
+  recorded separately from the development one — so what is missing is the certificate itself plus the
+  two items below. `.github/workflows/release.yml` fails closed on a final version until then.
+- Give `build_release.ps1` a signing stage. It runs compile → archive → manifest, so there is no point
+  between compiling and archiving at which signed bytes could exist; the plan's release order requires
+  the archive to be created from the signed staged tree. Sign the staged AutoCAD DLL, never the
+  checked-in one, or `verify_autocad_artifact.py` will correctly reject it.
+- Configure required reviewers on the `release` GitHub environment before any signed release. A
+  GitHub environment with no reviewers grants no approval — the job just proceeds — so the workflow
+  currently relies on only ever creating a draft, and publishing being a manual action, for that gate.
 - Verify SmartScreen, Defender and third-party antivirus, Windows Firewall, UAC, host trust prompts,
   and Onshape certificate behavior against the exact signed artifact.
 - Test every uninstall/reversal path listed in `docs/security.md`.
@@ -75,7 +134,11 @@ For every applicable host:
 - **Unreal:** focused-viewport cursor ray, live signs/scales, Play-In-Editor no-op behavior, and
   project-local versus engine-wide installation.
 - **Unity:** Dynamic Clipping restoration, pivot-extent cap, domain reload, and project detection.
-- **Godot:** parser/compile smoke in an installed editor and project enable/reload.
+- **Godot:** project enable/reload in an installed editor. The parse smoke is now a command --
+  `python tools/godot_parse_check.py --godot <editor exe>` -- because the add-on shipped for several
+  versions with a GDScript type-inference error that made the whole script fail to load, and nothing
+  in this repository could see it. Run it whenever the payload changes; a Godot release can turn a
+  previously inferable expression into a parse error.
 - **Fusion 360:** occurrence/assembly bodies with `findBRepUsingRay`; confirm whether root-component
   queries miss occurrence-only geometry.
 - **SolidWorks:** COM throughput on representative large assemblies and multi-monitor DPI behavior.
@@ -150,6 +213,33 @@ open epic and acceptance gates only.
 - Add walk gravity/teleport only when a reliable host-side physics step exists.
 - Replace SolidWorks out-of-process COM only if measured large-assembly throughput demonstrates a
   practical user-facing limit.
+- Add inline SPDX headers to `plugin_src/autocad/TrackballNavAcad/` the next time the bundled DLL is
+  rebuilt for a real change. Editing those sources marks the shipped DLL stale against its
+  provenance manifest, so `licensing.json` carries their Apache-2.0 disposition instead; remove that
+  exemption once the headers land.
+- Re-point the bundled AutoCAD plugin at the current configuration root in that same rebuild.
+  `BrokerConfig.cs` and `Plugin.cs` compile `%APPDATA%\TrackballDaemon` in for `bridge.json` and
+  `acad_plugin.log`, so it is the only add-on that cannot probe both roots. Give it the same
+  current-then-previous probe the source payloads use; that is what allows the mirror in
+  `paths.bridge_publication_paths` to be dropped.
+- Make the `firmware` CI job compile. It was added with the P0 merge and has never once executed —
+  the workflow file was invalid until 2026-07-25, so twelve runs were rejected before any job started.
+  On its first real run the SuperMini target failed inside the *board core*, not our sketch:
+  `nRFMicro-like-Boards:nrf52@1.0.0`'s bundled `Bluefruit52Lib/src/bluefruit.cpp` references
+  `LED_BLUE`, which that core's `supermini` variant does not define. `firmware/PMW3610` itself only
+  ever uses `LED_BUILTIN`. Deliberately not worked around here: defining a pin the core omits means
+  inventing a value, and changing the pinned core or index commit changes what the bench-validated
+  firmware was compiled against, which is a hardware decision rather than a CI fix. The XIAO target's
+  result is unknown — the job stops at the SuperMini step.
+- Stop the Tk tests from skipping themselves on a Tk-capable machine. `tests/test_settings_ui_tk.py`
+  and `tests/test_support_tiers.py` skip when `tk.Tk()` raises, which is right for headless CI but
+  also swallows a real failure: creating and destroying several Tk roots in one pytest session
+  intermittently fails with "Can't find a usable tk.tcl". Sharing one module-scoped window made it
+  stop reproducing locally, but the cause was never isolated, so a Windows CI run can still turn
+  UI coverage off without failing. Distinguish "no display" from "Tk broke" and let the second fail.
+- Enforce Developer Certificate of Origin sign-off in CI. `CONTRIBUTING.md` requires a
+  `Signed-off-by` trailer on new commits, nothing checks it, and the history that predates the
+  policy carries no trailers, so the gate needs a start-point rule.
 
 ## Accepted limitations and non-goals
 

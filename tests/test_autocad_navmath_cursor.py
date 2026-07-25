@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Offline unit test for the AutoCAD plugin's NavMath "cursor" pivot path.
 
 The plugin's camera math (plugin_src/autocad/TrackballNavAcad/NavMath.cs) is pure but written

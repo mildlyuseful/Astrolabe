@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Pure-Python eye+target camera math for the Rhino Trackball Nav add-on.
 
 NO Rhino imports — unit-testable headless. Rhino is right-handed, Z-up (like FreeCAD /

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Stable setting and command registry for config, bindings, and generated settings UI.
 
 Public setting IDs and capability predicates remain stable while persistence uses sparse

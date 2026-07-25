@@ -1,4 +1,7 @@
-"""Trackball Nav -- Blender add-on.
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+r"""Trackball Nav -- Blender add-on.
 
 Connects to the Trackball Daemon's local nav broker (127.0.0.1) and drives the active 3D
 viewport (`RegionView3D`) with the orbit/pan/zoom deltas it streams. A background socket
@@ -24,8 +27,8 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 """
 bl_info = {
     "name": "Trackball Nav",
-    "author": "Trackball Daemon",
-    "version": (0, 1, 23),                # keep in sync with version.json + ADDIN_VERSION
+    "author": "Mildly Useful",
+    "version": (0, 1, 24),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
@@ -43,7 +46,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.23"                   # keep in sync with bl_info and version.json
+ADDIN_VERSION = "0.1.24"                   # keep in sync with bl_info and version.json
 
 # Host correction arrives in ``adv.host_baseline`` from the daemon's immutable profile registry.
 # Camera math stays neutral so corrections cannot be double-applied here and in the daemon.
@@ -93,10 +96,30 @@ _host = "?"                     # Blender version string, captured on the main t
 # ======================================================================================
 # Logging (file-based; rate-limited so we never spam every frame) -- mirrors the Fusion add-in
 # ======================================================================================
+# The daemon's configuration root, then the root earlier daemon builds wrote. Probing both is what
+# lets this add-on and the daemon be updated independently: whichever of the two is older, they
+# still meet at the same discovery file. Keep in step with trackball_daemon/product.py.
+_CONFIG_ROOTS = (("Mildly Useful", "Astrolabe"), ("TrackballDaemon",))
+
+
+def _config_file(name):
+    """Path to `name` under the daemon's configuration root.
+
+    Prefers a file that already exists, then the first root that exists, then the current root.
+    """
+    roots = [os.path.join(os.environ.get("APPDATA", ""), *parts) for parts in _CONFIG_ROOTS]
+    for root in roots:
+        if os.path.isfile(os.path.join(root, name)):
+            return os.path.join(root, name)
+    for root in roots:
+        if os.path.isdir(root):
+            return os.path.join(root, name)
+    return os.path.join(roots[0], name)
+
+
 def _log(msg):
     try:
-        path = os.path.join(os.environ.get("APPDATA", ""), "TrackballDaemon", "blender_addin.log")
-        with open(path, "a", encoding="utf-8") as f:
+        with open(_config_file("blender_addin.log"), "a", encoding="utf-8") as f:
             f.write(time.strftime("%H:%M:%S ") + msg + "\n")
     except Exception:
         pass
@@ -124,8 +147,7 @@ def _log_rl(key, msg, period=2.0):
 
 def _bridge_port():
     try:
-        appdata = os.environ.get("APPDATA", "")
-        with open(os.path.join(appdata, "TrackballDaemon", "bridge.json"), "r") as f:
+        with open(_config_file("bridge.json"), "r") as f:
             return int(json.load(f).get("port", _DEFAULT_PORT))
     except Exception:
         return _DEFAULT_PORT

@@ -1,11 +1,14 @@
 # frozen_string_literal: true
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
 
 require 'sketchup.rb'
+require 'fileutils'
 require 'socket'
 require 'json'
 
 module TrackballNav
-  ADDIN_VERSION = '0.2.13' unless const_defined?(:ADDIN_VERSION, false)
+  ADDIN_VERSION = '0.2.14' unless const_defined?(:ADDIN_VERSION, false)
   DEFAULT_PORT = 47_900 unless const_defined?(:DEFAULT_PORT, false)
   TIMER_INTERVAL = 0.02 unless const_defined?(:TIMER_INTERVAL, false)
   RETRY_INTERVAL = 1.5 unless const_defined?(:RETRY_INTERVAL, false)
@@ -61,11 +64,24 @@ module TrackballNav
       log_error('pump', error)
     end
 
-    def log(message)
+    # The daemon's configuration root, then the root earlier daemon builds wrote. Probing both is
+    # what lets this extension and the daemon be updated independently: whichever of the two is
+    # older, they still meet at the same discovery file. Prefers a file that already exists, then
+    # the first root that exists, then the current root. Keep in step with
+    # trackball_daemon/product.py.
+    def config_file(name)
       appdata = ENV.fetch('APPDATA', '')
-      directory = File.join(appdata, 'TrackballDaemon')
-      Dir.mkdir(directory) unless Dir.exist?(directory)
-      File.open(File.join(directory, 'sketchup_addin.log'), 'a:utf-8') do |file|
+      roots = [File.join(appdata, 'Mildly Useful', 'Astrolabe'),
+               File.join(appdata, 'TrackballDaemon')]
+      root = roots.find { |candidate| File.file?(File.join(candidate, name)) } ||
+             roots.find { |candidate| Dir.exist?(candidate) } || roots.first
+      File.join(root, name)
+    end
+
+    def log(message)
+      path = config_file('sketchup_addin.log')
+      FileUtils.mkdir_p(File.dirname(path))
+      File.open(path, 'a:utf-8') do |file|
         file.puts("#{Time.now.strftime('%H:%M:%S')} #{message}")
       end
     rescue StandardError
@@ -178,8 +194,7 @@ module TrackballNav
     end
 
     def bridge_port
-      path = File.join(ENV.fetch('APPDATA', ''), 'TrackballDaemon', 'bridge.json')
-      data = JSON.parse(File.read(path, encoding: 'UTF-8'))
+      data = JSON.parse(File.read(config_file('bridge.json'), encoding: 'UTF-8'))
       Integer(data.fetch('port', DEFAULT_PORT))
     rescue StandardError
       DEFAULT_PORT

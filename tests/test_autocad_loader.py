@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """AutoCADPluginLoader -- the COM delivery worker that NETLOADs the bundled plugin.
 
 The COM nav *transport* is archived (archive/autocad_com_transport/); the loader's whole

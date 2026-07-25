@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Dylan Lee
+// SPDX-License-Identifier: Apache-2.0
+
 /*
  * Dual PMW3610 Trackball -> BLE HID Mouse + Astrolabe rotation/input
  * Board: SuperMini nRF52840 via "nRFMicro-like Boards" (Tools → SuperMini nRF52840).

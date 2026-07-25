@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Tkinter settings window.
 
 Lives as a Toplevel under a hidden Tk root. Closing the window HIDES it (withdraw) so the
@@ -10,7 +13,9 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from . import integrations
-from .app_registry import APP_SPECS, APP_SPECS_BY_ID, binding_profile
+from .app_registry import (APP_IDS_BY_TIER, APP_SPECS, APP_SPECS_BY_ID,
+                           SUPPORT_TIER_LABELS, SUPPORT_TIER_SUMMARIES, SupportTier,
+                           binding_profile)
 from .binding_ui_model import BindingUIModel
 from .settings_schema import BINDING_SECTIONS
 from .settings_schema import SettingScope, ValueKind
@@ -1303,8 +1308,11 @@ class SettingsWindow:
     # --- tab a: 3D app integrations -----------------------------------------------
     def _build_apps_tab(self, nb):
         outer = ttk.Frame(nb)
-        ttk.Label(outer, text="Supported 3D apps — enable integrations, check host compatibility, "
-                              "and expand honest setup/manual-install instructions.",
+        # Not "Supported 3D apps": the list contains both release tiers, and calling the whole of it
+        # supported is the claim this panel exists to stop making.
+        ttk.Label(outer, text="3D app integrations — every one starts disabled. Enable the ones you "
+                              "use, check their verified host versions, and expand for honest "
+                              "setup/manual-install instructions.",
                   wraplength=600, foreground="#555").pack(anchor="w", padx=10, pady=(10, 6))
         self._broker_health_label = ttk.Label(
             outer,
@@ -1317,10 +1325,51 @@ class SettingsWindow:
         holder = ttk.Frame(outer)
         holder.pack(fill="both", expand=True)
         body = self._scrollable(holder)
-        for appdef in integrations.APPS:
-            self._app_row(body, appdef)
+        for tier in SupportTier:
+            self._app_tier_section(body, tier)
         self.update_service_health(self.app.runtime_health_snapshot())
         return outer
+
+    def _app_tier_section(self, parent, tier):
+        """One release tier's integrations, grouped and ordered by the registry.
+
+        Supported integrations stay open because they are what the release stands behind.
+        Experimental ones start collapsed: they are opt-in, and an eleven-card list that gives every
+        integration equal weight is itself a support claim.
+        """
+        appdefs = [integrations.APPS_BY_KEY[app_id] for app_id in APP_IDS_BY_TIER[tier]]
+        if not appdefs:
+            return
+        label = SUPPORT_TIER_LABELS[tier]
+        rows = ttk.Frame(parent)
+
+        if tier is SupportTier.EXPERIMENTAL:
+            shown = tk.BooleanVar(value=False)
+            button = ttk.Button(parent)
+
+            def button_text():
+                return (("Hide " if shown.get() else "Show ")
+                        + f"{len(appdefs)} experimental integrations")
+
+            def toggle():
+                shown.set(not shown.get())
+                if shown.get():
+                    rows.pack(fill="x")
+                else:
+                    rows.pack_forget()
+                button.config(text=button_text())
+
+            button.config(text=button_text(), command=toggle)
+            button.pack(anchor="w", padx=10, pady=(12, 2))
+        else:
+            ttk.Label(parent, text=f"{label}s", font=("", 9, "bold")).pack(
+                anchor="w", padx=10, pady=(8, 0))
+            rows.pack(fill="x")
+
+        ttk.Label(rows, text=SUPPORT_TIER_SUMMARIES[tier], foreground="#555",
+                  wraplength=590, justify="left").pack(anchor="w", padx=10, pady=(0, 2))
+        for appdef in appdefs:
+            self._app_row(rows, appdef)
 
     def _app_status_text(self, appdef):
         base = integrations.status_line(appdef)
@@ -1344,8 +1393,13 @@ class SettingsWindow:
 
     @staticmethod
     def _compatibility_text(appdef):
+        """The host-version claim only. The release tier is a separate line, deliberately.
+
+        Colour here signals a problem with the detected host version, so folding the tier in would
+        paint "Experimental integration" red and say something this project does not mean.
+        """
         result = integrations.compatibility(appdef)
-        text = f"Supported versions: {appdef.supported_versions}"
+        text = f"Verified host versions: {appdef.verified_versions}"
         if result.status == "unsupported":
             return text + f"\nWARNING: detected {result.message}.", "#b42318"
         if result.status == "unverified":
@@ -1360,6 +1414,12 @@ class SettingsWindow:
         status = ttk.Label(card, text=self._app_status_text(appdef), foreground="#666")
         status.pack(anchor="w", padx=8, pady=(4, 0))
         self._app_status_labels[appdef.key] = status
+
+        # Stated on the card as well as in the group heading, so a card read on its own -- in a
+        # screenshot, or in a support conversation -- still carries its release commitment.
+        ttk.Label(card, text=appdef.support_label,
+                  foreground=("#1a7f37" if appdef.support_tier is SupportTier.SUPPORTED
+                              else "#7a4e00")).pack(anchor="w", padx=8, pady=(3, 0))
 
         compat_text, compat_color = self._compatibility_text(appdef)
         ttk.Label(card, text=compat_text, foreground=compat_color, wraplength=590,
@@ -1490,17 +1550,30 @@ class SettingsWindow:
         dlg.wait_window()
 
     def _do_install(self, appdef, enabled_var, status_label, holder):
+        parent = self.win if self.win is not None else self.root
+        # A known-incompatible host version needs an explicit override, and the user has to be shown
+        # the exact reason first. `integrations.install` refuses without the override, so declining
+        # here and passing nothing lead to the same place.
+        blocked = integrations.unsupported_host_warning(appdef)
+        override = False
+        if blocked is not None:
+            override = bool(messagebox.askokcancel(
+                f"{appdef.name} — unsupported host version",
+                blocked + "\n\nSet up against it anyway?",
+                icon=messagebox.WARNING, default=messagebox.CANCEL, parent=parent))
+            if not override:
+                return
         if appdef.security_confirmation:
             proceed = messagebox.askokcancel(
                 f"{appdef.name} — before setup",
                 appdef.security_confirmation + "\n\nContinue?",
-                parent=self.win if self.win is not None else self.root)
+                parent=parent)
             if not proceed:
                 return
         if appdef.key == "blender":
-            result = self._install_blender_interactive()
+            result = self._install_blender_interactive(allow_unsupported_host=override)
         else:
-            result = integrations.install(appdef, self.cfg)
+            result = integrations.install(appdef, self.cfg, allow_unsupported_host=override)
         ok, msg, copyables = integrations.normalize_install_result(result)
         if ok:
             enabled_var.set(bool(self.cfg.snapshot().app_operational[appdef.key]["enabled"]))
@@ -1525,7 +1598,7 @@ class SettingsWindow:
         else:
             self._show_integration_dialog("Integration", msg, copyables, warning=True)
 
-    def _install_blender_interactive(self):
+    def _install_blender_interactive(self, *, allow_unsupported_host=False):
         """Blender setup, asking before writing the auto-start shim (it makes our code run on every
         Blender launch). Yes = install + auto-enable; No = install only; Cancel = abort."""
         appdef = integrations.APPS_BY_KEY["blender"]
@@ -1542,7 +1615,10 @@ class SettingsWindow:
             parent=self.win)
         if want is None:
             return False, "Blender setup cancelled."
-        return integrations.install_blender(appdef, self.cfg, install_startup=bool(want))
+        # Through `install` rather than `install_blender`, so this path passes the same host gate as
+        # every other integration instead of being the one that skips it.
+        return integrations.install(appdef, self.cfg, allow_unsupported_host=allow_unsupported_host,
+                                    install_startup=bool(want))
 
     # --- tab b: per-app bindings --------------------------------------------------
     def _build_bindings_tab(self, nb):

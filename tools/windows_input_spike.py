@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Phase 0 diagnostic comparing Windows Raw Input with WH_KEYBOARD_LL.
 
 This is deliberately not daemon runtime code. It validates registration/message-loop plumbing and

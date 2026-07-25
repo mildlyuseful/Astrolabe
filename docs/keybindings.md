@@ -15,7 +15,7 @@ codes, or scancodes. Shared input, state, and lifecycle ownership is defined in
 
 Fresh installs select `astrolabe_5way`; `keyboard_only` is an explicit user choice. Selecting a
 profile does not copy or rewrite it. User edits are sparse patches stored under that profile ID in
-`%APPDATA%\TrackballDaemon\config.json`. Switching profiles preserves each profile's own patches.
+`%APPDATA%\Mildly Useful\Astrolabe\config.json`. Switching profiles preserves each profile's own patches.
 The daemon never changes profiles merely because BLE hardware appears or disappears.
 
 The ordinary Keybindings editor exposes the control chord, one app context, plain-language action
@@ -102,7 +102,7 @@ Validate the shipped profiles and an optional config without starting the daemon
 
 ```powershell
 python -m trackball_daemon.validate_bindings
-python -m trackball_daemon.validate_bindings --config "$env:APPDATA\TrackballDaemon\config.json"
+python -m trackball_daemon.validate_bindings --config "$env:APPDATA\Mildly Useful\Astrolabe\config.json"
 ```
 
 See [`ble_device_adapters.md`](ble_device_adapters.md) for the data-only BLE descriptor and snapshot

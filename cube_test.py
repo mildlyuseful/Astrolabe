@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """
 cube_test.py -- BLE trackball test/visualizer + software mouse injector (Windows).
 

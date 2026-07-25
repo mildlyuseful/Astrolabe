@@ -1,8 +1,11 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Pytest bootstrap for the trackball_daemon tests.
 
 Having this file at the repo root puts the project root on sys.path (so `import
 trackball_daemon` works) and isolates the per-user config dir + log file into temp
-directories so tests never read or write the real %APPDATA%\\TrackballDaemon.
+directories so tests never read or write the real per-user configuration root.
 """
 import os
 
@@ -42,3 +45,18 @@ def isolated_config(tmp_path, monkeypatch):
     monkeypatch.setenv("APPDATA", str(tmp_path))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     return tmp_path
+
+
+@pytest.fixture
+def config_dir(isolated_config):
+    """The directory the daemon will actually read and write inside an isolated config root.
+
+    Tests that seed a config file want it where the code looks, not where an earlier build looked;
+    going through the path authority also keeps them out of the legacy-directory migration, which
+    has its own tests.
+    """
+    from trackball_daemon.paths import canonical_config_dir
+
+    directory = canonical_config_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory

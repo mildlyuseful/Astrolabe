@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Adapter for the compatibility-frozen rotation-only Astrolabe protocol."""
 
 from .model import MotionSample, NotificationSubscription

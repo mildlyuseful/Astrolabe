@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Thread-safe pressed-set ownership and atomic provider lifecycle release."""
 
 import logging

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """UI capability declarations must match behavior already present in each host integration."""
 from pathlib import Path
 

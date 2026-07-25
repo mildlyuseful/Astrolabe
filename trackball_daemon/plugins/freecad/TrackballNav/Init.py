@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """TrackballNav -- console-mode init (intentionally a no-op).
 
 This file exists ONLY so FreeCAD recognises the Mod folder: FreeCAD skips any Mod/<name>/

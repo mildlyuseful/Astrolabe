@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """UI-independent acceptance tests for Global and per-app settings semantics."""
 
 from trackball_daemon.config_store import ConfigStore

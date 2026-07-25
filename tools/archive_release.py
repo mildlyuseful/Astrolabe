@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Create a reproducible ZIP and checksum for a complete release directory."""
 
 from __future__ import annotations
@@ -84,7 +87,9 @@ def build_archive(source: Path, output: Path) -> str:
 
     checksum = _sha256(output)
     checksum_path = output.with_name(output.name + ".sha256")
-    checksum_path.write_text(f"{checksum}  {output.name}\n", encoding="ascii", newline="\n")
+    # Explicit LF keeps the checksum file byte-identical across platforms.
+    with checksum_path.open("w", encoding="ascii", newline="\n") as handle:
+        handle.write(f"{checksum}  {output.name}\n")
     return checksum
 
 

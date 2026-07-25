@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Output / injection layer.
 
 The SendInput primitive and quaternion helpers originate in cube_test.py. A validated global

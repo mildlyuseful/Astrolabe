@@ -58,7 +58,7 @@ Misses and per-hit debug lines go to `rhino_addin.log`.
 
 ## Logs
 
-`%APPDATA%\TrackballDaemon\rhino_addin.log`
+`%APPDATA%\Mildly Useful\Astrolabe\rhino_addin.log`
 
 ## Tests
 

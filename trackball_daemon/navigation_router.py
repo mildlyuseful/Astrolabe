@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """One target-aware boundary for socket, SolidWorks, and Onshape navigation delivery."""
 from dataclasses import dataclass
 from collections.abc import Mapping

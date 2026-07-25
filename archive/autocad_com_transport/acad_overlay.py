@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Tiny always-on-top rotating-cube overlay -- the AutoCAD deferred-orbit "gap closer".
 
 WHY: over COM, changing AutoCAD's 3D view direction regenerates the drawing every time (see

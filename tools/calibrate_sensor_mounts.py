@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Enumerate dual-sensor mount/flip (and optional 90-degree pose) configs by residual.
 
 The firmware least-squares fusion is over-determined (4 measurements, 3 rotation DOF).

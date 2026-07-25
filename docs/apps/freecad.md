@@ -28,9 +28,9 @@ then restart the daemon for `auto_update` or use **Settings → 3D Apps → Free
 **Restart FreeCAD** to reload it (FreeCAD has no add-on reload). See §8/§10 for the restart rules.
 
 Live end-to-end without hardware: run a `NavBroker`, call `broker.activate_target("freecad")`,
-write `%APPDATA%\TrackballDaemon\bridge.json`, launch FreeCAD with the add-on installed, and submit
+write `%APPDATA%\Mildly Useful\Astrolabe\bridge.json`, launch FreeCAD with the add-on installed, and submit
 with `broker.submit("freecad", ..., state_revision=...)`. Watch
-`%APPDATA%\TrackballDaemon\freecad_addin.log` for `boot`, `rx orbit`, `screen-center-pivot`, and
+`%APPDATA%\Mildly Useful\Astrolabe\freecad_addin.log` for `boot`, `rx orbit`, `screen-center-pivot`, and
 `applied`; the daemon's BLE path is not required for this probe.
 
 ---
@@ -286,7 +286,7 @@ FreeCAD's eye-and-target camera uses a neutral full-angle orbit scale. Do not co
   suite; do not copy a passing count into this guide.
 - **Live boundary:** install via the daemon's **Set up**, run the daemon,
   open a FreeCAD 3D view, switch to 3D mode, focus FreeCAD, and use the trackball. Lean on
-  `%APPDATA%\TrackballDaemon\freecad_addin.log` (`scheme:` / `rx orbit|pan|zoom` / `screen-center-pivot` /
+  `%APPDATA%\Mildly Useful\Astrolabe\freecad_addin.log` (`scheme:` / `rx orbit|pan|zoom` / `screen-center-pivot` /
   `applied`). Suite alignment lives in `host_profiles.json`; use neutral user settings during a
   live sign/scale pass and transfer host corrections there, never into camera-math constants.
 
@@ -294,7 +294,7 @@ FreeCAD's eye-and-target camera uses a neutral full-angle orbit scale. Do not co
 
 ## 11. Diagnostics & known limitations
 
-- **Log:** `%APPDATA%\TrackballDaemon\freecad_addin.log` (rate-limited). Key lines: `boot:` (loaded +
+- **Log:** `%APPDATA%\Mildly Useful\Astrolabe\freecad_addin.log` (rate-limited). Key lines: `boot:` (loaded +
   PySide flavour + FreeCAD version), `scheme:` (op/os/zm received), `rx orbit|pan|zoom` (which channel
   arrived — distinguishes a daemon/Shift issue from an add-on issue), `screen-center-pivot: surface hit|…
   fallback`, `applied` (the camera actually changed). The tray's `Apps: freecad v…` confirms the

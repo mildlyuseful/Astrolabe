@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Dylan Lee
+// SPDX-License-Identifier: Apache-2.0
+
 // Pure Scene-view camera math for Trackball Nav (no UnityEngine SceneView I/O here beyond
  // Vector3/Quaternion). Mirrors Unreal's tbnav_unreal_camera free-fly model: eye + orthonormal
  // basis; orbit/pan/dolly/fly/walk synthesised. Unity is LEFT-HANDED, Y-up, metres.

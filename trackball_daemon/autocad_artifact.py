@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Validation for the bundled AutoCAD plugin and its build-provenance manifest."""
 
 import hashlib

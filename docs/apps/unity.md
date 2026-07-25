@@ -26,7 +26,7 @@ trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/
 
 UPM loads it automatically; `[InitializeOnLoad]` starts the broker client after domain reload.
 
-If no project is found, Set up stages under `%APPDATA%\TrackballDaemon\unity\` and asks
+If no project is found, Set up stages under `%APPDATA%\Mildly Useful\Astrolabe\unity\` and asks
 you to open a project and Set up again. Manual: copy the staged folder into
 `<YourProject>\Packages\com.astrolabe.trackball-nav\`.
 
@@ -75,7 +75,7 @@ Keep `TrackballNavCamera.cs` neutral and tune suite alignment in `host_profiles.
 
 ## Logs
 
-`%APPDATA%\TrackballDaemon\unity_addin.log`
+`%APPDATA%\Mildly Useful\Astrolabe\unity_addin.log`
 
 ## Reload
 

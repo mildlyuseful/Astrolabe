@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Headless unit tests for the FreeCAD add-on's PURE camera math (tbnav_camera).
 
 tbnav_camera has NO FreeCAD/pivy/PySide imports, so unlike the Blender add-on (which needs

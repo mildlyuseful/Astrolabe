@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """SolidWorks integration registry: no-file COM setup and the fact that
 it is deliberately NOT an add-in (so auto_update never touches it)."""
 

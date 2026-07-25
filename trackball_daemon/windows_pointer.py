@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Bounded Windows pointer output primitives used by motion and button bindings."""
 
 import ctypes

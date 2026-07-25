@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Foreground publication is independent of BLE motion and remains lifecycle-safe."""
 
 import time

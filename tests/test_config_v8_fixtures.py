@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Frozen v8 inputs and effective behavior at the Phase 2 migration boundary."""
 import json
 from pathlib import Path
@@ -12,9 +15,8 @@ from trackball_daemon.config import (LegacyConfig as Config, CONFIG_VERSION, DEF
 FIXTURES = Path(__file__).with_name("fixtures")
 
 
-def _load_fixture(isolated_config, name):
-    directory = isolated_config / "TrackballDaemon"
-    directory.mkdir(parents=True, exist_ok=True)
+def _load_fixture(config_dir, name):
+    directory = config_dir
     source = FIXTURES / name
     target = directory / "config.json"
     shutil.copyfile(source, target)
@@ -22,8 +24,8 @@ def _load_fixture(isolated_config, name):
 
 
 def test_materialized_v8_fixture_freezes_every_inheritance_form_and_operational_state(
-        isolated_config):
-    cfg, _source, _target = _load_fixture(isolated_config, "config_v8_migration.json")
+        config_dir):
+    cfg, _source, _target = _load_fixture(config_dir, "config_v8_migration.json")
 
     assert CONFIG_VERSION == cfg.data["version"] == 8
     assert cfg.data["general"]["default_mode"] == "cube"
@@ -49,15 +51,15 @@ def test_materialized_v8_fixture_freezes_every_inheritance_form_and_operational_
         "enabled": False, "installed": True, "addin_version": "7.4.2"}
 
 
-def test_v8_cursor_alias_and_selected_app_are_frozen(isolated_config):
-    cfg, _source, _target = _load_fixture(isolated_config, "config_v8_cursor.json")
+def test_v8_cursor_alias_and_selected_app_are_frozen(config_dir):
+    cfg, _source, _target = _load_fixture(config_dir, "config_v8_cursor.json")
     assert cfg.data["general"]["default_mode"] == "cursor"
     assert cfg.data["active_app"] == "rhino"
 
 
 @pytest.mark.parametrize("fixture", ["config_v8_malformed.json", "config_v8_invalid_shape.json"])
-def test_bad_v8_fixture_falls_back_without_overwriting_source(isolated_config, fixture):
-    cfg, source, target = _load_fixture(isolated_config, fixture)
+def test_bad_v8_fixture_falls_back_without_overwriting_source(config_dir, fixture):
+    cfg, source, target = _load_fixture(config_dir, fixture)
     original = source.read_bytes()
     assert cfg.data == DEFAULTS
     assert target.read_bytes() == original

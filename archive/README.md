@@ -14,3 +14,8 @@ Current authority:
 
 Do not update historical test counts, versions, commands, or workspace observations to look current.
 Add a dated evidence record instead when a new run needs to be retained.
+
+`release-evidence/` holds results from an **executed artifact**. A record there must identify the
+build revision and manifest version it came from, and must not describe a source-tree run: the fields
+each record carries, and what does not count as evidence, are in
+[`../docs/release.md`](../docs/release.md).

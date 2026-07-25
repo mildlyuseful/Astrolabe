@@ -19,6 +19,7 @@ uv run --locked --all-extras python -m pytest -q
 uv run --locked --all-extras python -m compileall -q trackball_daemon tests tools
 uv run --locked --all-extras python -m trackball_daemon.validate_bindings
 uv run --locked --all-extras python tools/verify_autocad_artifact.py
+uv run --locked --all-extras python tools/apply_license_headers.py --check
 uv run --locked --all-extras python -m trackball_daemon --release-smoke
 dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj --configuration Release
 & ".\tools\build_release.ps1"
@@ -43,8 +44,40 @@ packages actually selected for that environment; the release step then stamps th
 with the version resolved from the package's authoritative dynamic version source. The script
 prints SHA-256 values for the executable, packaged DLL, archive, and SBOM.
 
+Finally it writes the machine-readable release manifest beside the archive — last, because the
+manifest records the SBOM's hash and the finalization step above rewrites that file in place. What the
+manifest records, and the channel and versioning rules behind it, are described in
+[`release.md`](release.md). Pass `-RequireCleanRevision` to refuse a build from a working tree with
+uncommitted changes; without it the build proceeds and the manifest records the tree as dirty and its
+revision as not describing the artifact.
+
+`build_release.ps1` also audits bundled-component notices against the release runtime environment it
+just synchronized. That gate is `tools/audit_notices.py`, which compares the distributions actually
+installed for the release against `third_party.json` and `THIRD_PARTY_NOTICES.md` and fails when a
+component starts or stops shipping without its attribution being updated. It can be run directly
+against any release runtime environment:
+
+```powershell
+uv run --locked --all-extras python tools/audit_notices.py --environment <runtime-venv>\Scripts\python.exe
+```
+
+The audit reads installed distribution metadata, so it establishes that every *Python* component in
+the release runtime has a resolved disposition. It does not enumerate native libraries inside a
+built onedir tree; `TODO.md` tracks that artifact-level audit separately.
+
+Notice placement is verified in each distributed form rather than assumed from the build
+configuration. The packaged smoke fails when any add-on payload directory lacks the `LICENSE` and
+`NOTICE` that setup would copy into a host application, and `tools/verify_installed_metadata.py` reads
+the installed distribution's own metadata to confirm the declared license files were written, not
+merely declared:
+
+```powershell
+<wheel-venv>\Scripts\python.exe tools/verify_installed_metadata.py
+```
+
 CI also builds and installs the wheel outside the checkout before running its smoke and binding
-validation. A separate job compiles both retained validation-firmware sketches with pinned Arduino
+validation, runs that notice verification against the installed wheel, and runs the bundled
+component audit against a separately synchronized release runtime. A separate job compiles both retained validation-firmware sketches with pinned Arduino
 CLI and board-core inputs, reports binary sizes, and retains the firmware artifacts. These checks
 establish reproducible buildability; they do not qualify the final product hardware.
 

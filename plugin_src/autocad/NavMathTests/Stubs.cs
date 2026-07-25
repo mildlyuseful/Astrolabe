@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: 2026 Dylan Lee
+// SPDX-License-Identifier: Apache-2.0
+
 // Minimal stand-ins for the Autodesk types NavMath.cs touches, so it compiles verbatim outside
 // acad.exe. Semantics match AutoCAD's managed geometry API: right-handed, column-vector rotation
 // matrices (v' = M*v), A*B applies B first, TransformBy(M) = M*v, radians everywhere.

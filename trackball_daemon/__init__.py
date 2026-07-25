@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Trackball Daemon — system-tray app + settings UI around the BLE trackball.
 
 Module layout (kept deliberately separate so it bundles cleanly with Nuitka onedir
@@ -24,4 +27,7 @@ or installs from GitHub without source changes):
   app          - orchestrator that wires the above together
 """
 
-__version__ = "0.1.75"
+# PEP 440. A pre-release segment is what marks a build as an internal alpha -- see
+# `product.release_channel`, which derives the channel from this rather than storing it separately.
+# 1.0.0 is reserved for public V1.
+__version__ = "0.2.0a1"

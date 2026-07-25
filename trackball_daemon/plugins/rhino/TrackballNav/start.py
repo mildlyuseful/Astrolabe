@@ -1,4 +1,7 @@
 #! python3
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Startup entry for Trackball Nav in Rhino 8.
 
 Installed under %%APPDATA%%\\McNeel\\Rhinoceros\\8.0\\scripts\\TrackballNav\\ and invoked by
@@ -21,7 +24,12 @@ try:
 except Exception as exc:
     try:
         import traceback
-        path = os.path.join(os.environ.get("APPDATA", ""), "TrackballDaemon", "rhino_addin.log")
+        # The current configuration root, falling back to an older daemon build's. tbnav_rhino
+        # could not be imported, so this shim resolves it without help.
+        roots = [os.path.join(os.environ.get("APPDATA", ""), *parts)
+                 for parts in (("Mildly Useful", "Astrolabe"), ("TrackballDaemon",))]
+        path = os.path.join(next((r for r in roots if os.path.isdir(r)), roots[0]),
+                            "rhino_addin.log")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             f.write("start.py FAILED: %s\n%s\n" % (exc, traceback.format_exc()))

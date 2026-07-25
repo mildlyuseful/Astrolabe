@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Blender/SketchUp/Unreal nav wiring: additive broker "adv" pass-through, config `advanced`
 blocks, and App._apply_schemes attaching the FOCUSED broker app's advanced.
 

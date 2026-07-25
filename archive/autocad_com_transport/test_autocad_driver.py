@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Unit tests for the AutoCAD COM driver -- everything except the live COM boundary.
 
 The COM layer is mocked: _flush() runs against a fake AutoCAD.Application / Document / Viewport, and

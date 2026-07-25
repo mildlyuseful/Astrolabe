@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """TrackballNav — Rhino 8 add-on (default suite: orbit / pan / zoom).
 
 Background socket thread reads the Trackball Daemon nav broker; RhinoApp.Idle drains
@@ -20,7 +23,7 @@ from System.Windows.Forms import Cursor
 
 import tbnav_camera as cammath
 
-ADDIN_VERSION = "0.1.18"          # keep in sync with version.json
+ADDIN_VERSION = "0.1.19"          # keep in sync with version.json
 _DEFAULT_PORT = 47900
 PIVOT_HOLD_IDLE = 0.5
 OBJ_CACHE_SEC = 0.5
@@ -44,9 +47,30 @@ _last_err = {"t": 0.0, "s": ""}
 _rl = {}
 
 
+# The daemon's configuration root, then the root earlier daemon builds wrote. Probing both is what
+# lets this add-on and the daemon be updated independently: whichever of the two is older, they
+# still meet at the same discovery file. Keep in step with trackball_daemon/product.py.
+_CONFIG_ROOTS = (("Mildly Useful", "Astrolabe"), ("TrackballDaemon",))
+
+
+def _config_file(name):
+    """Path to `name` under the daemon's configuration root.
+
+    Prefers a file that already exists, then the first root that exists, then the current root.
+    """
+    roots = [os.path.join(os.environ.get("APPDATA", ""), *parts) for parts in _CONFIG_ROOTS]
+    for root in roots:
+        if os.path.isfile(os.path.join(root, name)):
+            return os.path.join(root, name)
+    for root in roots:
+        if os.path.isdir(root):
+            return os.path.join(root, name)
+    return os.path.join(roots[0], name)
+
+
 def _log(msg):
     try:
-        path = os.path.join(os.environ.get("APPDATA", ""), "TrackballDaemon", "rhino_addin.log")
+        path = _config_file("rhino_addin.log")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             f.write(time.strftime("%H:%M:%S ") + msg + "\n")
@@ -70,8 +94,7 @@ def _log_apply_error(tb):
 
 def _bridge_port():
     try:
-        appdata = os.environ.get("APPDATA", "")
-        with open(os.path.join(appdata, "TrackballDaemon", "bridge.json"), "r") as f:
+        with open(_config_file("bridge.json"), "r") as f:
             return int(json.load(f).get("port", _DEFAULT_PORT))
     except Exception:
         return _DEFAULT_PORT

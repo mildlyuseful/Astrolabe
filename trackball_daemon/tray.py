@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """System-tray icon + menu (pystray). Owns nothing but the icon; lifecycle calls go to App.
 
 Runs the icon on its own thread so the Tk mainloop can own the main thread. Menu actions
@@ -9,9 +12,22 @@ import threading
 import pystray
 from PIL import Image, ImageDraw
 
+from .product import (
+    DISPLAY_NAME,
+    LEGACY_STARTUP_VALUE_NAME,
+    PRODUCT_NAME,
+    STARTUP_REGISTRY_KEY,
+    STARTUP_VALUE_NAME,
+)
+
 # --- "Start at login" (Windows HKCU Run key) -------------------------------------------
-_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
-_RUN_NAME = "TrackballDaemon"
+# Two value names, one setting. The daemon writes only the current name, but a machine that ran an
+# earlier build has the registration under the legacy one, so reads accept either and both writes
+# clear the legacy name. Leaving both registered would launch two copies at login, and the second
+# would greet the user with an "already running" dialog.
+_RUN_KEY = STARTUP_REGISTRY_KEY
+_RUN_NAME = STARTUP_VALUE_NAME
+_LEGACY_RUN_NAME = LEGACY_STARTUP_VALUE_NAME
 
 
 def _startup_command():
@@ -27,30 +43,76 @@ def _startup_command():
     return f'"{exe}" -m trackball_daemon'
 
 
-def is_startup_enabled():
+def _read_startup_value(key, name):
+    import winreg
+    try:
+        value, _kind = winreg.QueryValueEx(key, name)
+        return value
+    except OSError:
+        return None
+
+
+def _delete_startup_value(key, name):
+    import winreg
+    try:
+        winreg.DeleteValue(key, name)
+    except OSError:
+        pass
+
+
+# The three functions below take the subkey as an argument for the same reason SingleInstanceGuard
+# takes its mutex calls: the registry is the behaviour under test, and tests must be able to exercise
+# it somewhere other than the key that governs the user's actual login.
+def is_startup_enabled(run_key=_RUN_KEY):
     if sys.platform != "win32":
         return False
     import winreg
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as k:
-            winreg.QueryValueEx(k, _RUN_NAME)
-            return True
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_key) as k:
+            return any(_read_startup_value(k, name) is not None
+                       for name in (_RUN_NAME, _LEGACY_RUN_NAME))
     except OSError:
         return False
 
 
-def set_startup_enabled(enable):
+def set_startup_enabled(enable, run_key=_RUN_KEY):
     if sys.platform != "win32":
         return
     import winreg
-    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, _RUN_KEY) as k:
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, run_key) as k:
         if enable:
             winreg.SetValueEx(k, _RUN_NAME, 0, winreg.REG_SZ, _startup_command())
         else:
-            try:
-                winreg.DeleteValue(k, _RUN_NAME)
-            except OSError:
-                pass
+            _delete_startup_value(k, _RUN_NAME)
+        _delete_startup_value(k, _LEGACY_RUN_NAME)
+
+
+def migrate_startup_entry(run_key=_RUN_KEY):
+    """Move an earlier build's Start at login registration onto the current value name.
+
+    The legacy value's command is copied verbatim rather than regenerated. It records which copy of
+    the daemon the user registered, and a source-tree run must not quietly repoint an installed
+    build's login entry at itself. The new name is written before the old one is removed, so an
+    interruption leaves a duplicate that the next start cleans up, never a lost setting -- and never
+    two registrations that would both fire at login.
+
+    Returns the command carried across, or None when there was nothing to carry.
+    """
+    if sys.platform != "win32":
+        return None
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, run_key, 0,
+                            winreg.KEY_READ | winreg.KEY_SET_VALUE) as k:
+            command = _read_startup_value(k, _LEGACY_RUN_NAME)
+            if command is None:
+                return None
+            if _read_startup_value(k, _RUN_NAME) is None:
+                winreg.SetValueEx(k, _RUN_NAME, 0, winreg.REG_SZ, command)
+            _delete_startup_value(k, _LEGACY_RUN_NAME)
+            return command
+    except OSError:
+        return None
 
 
 def _make_icon_image():
@@ -65,7 +127,7 @@ class TrayController:
     def __init__(self, app):
         self.app = app
         self.icon = pystray.Icon(
-            "TrackballDaemon", _make_icon_image(), "Trackball Daemon",
+            PRODUCT_NAME, _make_icon_image(), DISPLAY_NAME,
             menu=self._build_menu(),
         )
         self._thread = None

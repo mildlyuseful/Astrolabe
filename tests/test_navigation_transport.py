@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Frozen Phase 4 broker hello/frame contracts and target-isolation acceptance tests."""
 import json
 from types import SimpleNamespace

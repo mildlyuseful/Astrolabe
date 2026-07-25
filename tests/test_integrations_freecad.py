@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """FreeCAD integration registry: it IS a bundled add-on (so auto_update manages it), install
 copies the add-on into FreeCAD's user Mod dir and marks it enabled, the user Mod dir resolves
 to the versioned layout (FreeCAD >= 1.0) or the legacy flat one, and detection status.
@@ -17,7 +20,7 @@ _FAKE_021 = r"C:\Program Files\FreeCAD 0.21\bin\FreeCAD.exe"
 
 def test_freecad_is_a_bundled_addin():
     assert "freecad" in integrations.ADDIN_KEYS
-    assert integrations.bundled_addin_version("freecad") == "0.1.14"
+    assert integrations.bundled_addin_version("freecad") == "0.1.15"
     assert integrations.APPS_BY_KEY["freecad"].setup is integrations.install_freecad
 
 
@@ -44,13 +47,13 @@ def test_install_copies_addon_and_enables(isolated_config, monkeypatch):
     assert ok is True
     fc = cfg.snapshot().app_operational["freecad"]
     assert fc["installed"] is True and fc["enabled"] is True
-    assert fc["addin_version"] == "0.1.14"
+    assert fc["addin_version"] == "0.1.15"
     dest = integrations.freecad_user_mod_dir()
     # the whole add-on must be copied -- both Init files (FreeCAD needs Init.py to load the Mod),
     # the logic module, the pure-math module, and the version manifest.
     for name in ("Init.py", "InitGui.py", "tbnav_freecad.py", "tbnav_camera.py", "version.json"):
         assert (dest / name).exists(), f"missing {name}"
-    assert integrations.installed_addin_version("freecad") == "0.1.14"
+    assert integrations.installed_addin_version("freecad") == "0.1.15"
 
 
 def test_install_fails_when_freecad_absent(isolated_config, monkeypatch):

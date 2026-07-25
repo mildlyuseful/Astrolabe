@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Small Tk smoke tests; semantic behavior remains covered by UI-independent models."""
 
 from types import SimpleNamespace
@@ -43,6 +46,7 @@ def test_generated_tabs_and_linked_value_refresh_after_global_edit(tmp_path):
         binding_catalog=load_system_binding_profiles(),
         input_aggregator=InputAggregator(),
         status_text=lambda: "stopped",
+        runtime_health_snapshot=lambda: {},
     )
     ui = SettingsWindow(root, app)
     try:

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Headless unit tests for the FreeCAD add-on's "cursor" orbit pivot / "to_cursor" zoom.
 
 tbnav_freecad imports only stdlib + tbnav_camera at module level (FreeCAD/pivy/PySide imports all

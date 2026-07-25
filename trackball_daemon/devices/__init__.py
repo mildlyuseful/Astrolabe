@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """BLE device descriptors, protocol adapters, and transport boundaries."""
 
 from .model import (

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Orchestrator: wires config + output engine + BLE thread + tray + settings window +
 the nav transports (broker / SolidWorks / Onshape / AutoCAD loader).
 
@@ -13,7 +16,6 @@ Threading model (Windows):
 The process stays alive on the Tk mainloop and exits only when tray -> Quit tears it down.
 """
 import copy
-import json
 import threading
 import tkinter as tk
 
@@ -44,12 +46,12 @@ from .navbroker import NavBroker
 from .navigation_router import NavigationEnvelope, NavigationRouter
 from .onshape_bridge import OnshapeBridge
 from .output import OutputEngine
-from .paths import user_config_dir
+from .paths import publish_bridge_port
 from .solidworks_driver import SolidWorksDriver
 from .runtime_state import ConfigRuntimeBaseResolver, FocusedContext, RuntimeStore
 from .service_health import ServiceHealth, ServiceHealthState
 from .settings_schema import SETTING_SPECS
-from .tray import TrayController
+from .tray import TrayController, migrate_startup_entry
 from .ui import SettingsWindow
 from .util import get_logger
 from .winfocus import ForegroundMonitor, foreground_process_name
@@ -607,9 +609,15 @@ class App:
             self.tray = TrayController(self)
             self.tray.start()
 
+            # Carry an earlier build's login registration onto the current value name. Done after
+            # the guard has already admitted this process, so it can never race a running copy.
+            carried = migrate_startup_entry()
+            if carried is not None:
+                self.log.info(f"start at login: carried the previous registration ({carried})")
+
             # Publish the bridge port for the add-ons, then start the broker.
-            with open(user_config_dir() / "bridge.json", "w", encoding="utf-8") as f:
-                json.dump({"port": self.config.snapshot().bridge_port}, f)
+            for published in publish_bridge_port(self.config.snapshot().bridge_port):
+                self.log.info(f"published the bridge port to {published}")
             self.broker.start()
             # Workers may exist while disabled, but their gates prevent COM enumeration,
             # certificate creation, socket binding, TRUSTEDPATHS edits, and NETLOAD until setup

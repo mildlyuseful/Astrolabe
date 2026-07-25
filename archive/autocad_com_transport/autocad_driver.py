@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """In-process AutoCAD COM driver -- the AutoCAD analogue of SolidWorksDriver.
 
 Like SolidWorks (and unlike the Fusion/Blender/FreeCAD socket add-ons), AutoCAD is driven by

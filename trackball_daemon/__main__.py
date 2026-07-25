@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Entry point:  python -m trackball_daemon   (use pythonw for no console).
 
 The tray app replaces the old pygame loop as `main`. --debug additionally opens the cube

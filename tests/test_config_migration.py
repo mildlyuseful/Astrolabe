@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Config migrations for canonical, unambiguous orbit-pivot identifiers.
 
 pointer -> cursor, to_pointer -> to_cursor, old cursor -> selection (Blender: cursor_3d),
@@ -16,9 +19,8 @@ from trackball_daemon.config import (LegacyConfig as Config, CONFIG_VERSION, DEF
                                      swap_axis_source)
 
 
-def _write_v2(tmp_path, general_scheme, app_schemes):
-    d = tmp_path / "TrackballDaemon"
-    d.mkdir(parents=True, exist_ok=True)
+def _write_v2(config_dir, general_scheme, app_schemes):
+    d = config_dir
     data = {
         "version": 2,
         "general": {"scheme": general_scheme},
@@ -35,10 +37,8 @@ def _write_v2(tmp_path, general_scheme, app_schemes):
     {"version": CONFIG_VERSION, "general": []},
 ])
 def test_valid_json_with_invalid_config_shape_falls_back_without_overwriting(
-        isolated_config, payload):
-    directory = isolated_config / "TrackballDaemon"
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / "config.json"
+        config_dir, payload):
+    path = config_dir / "config.json"
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     cfg = Config().load()
@@ -47,9 +47,9 @@ def test_valid_json_with_invalid_config_shape_falls_back_without_overwriting(
     assert json.loads(path.read_text(encoding="utf-8")) == payload
 
 
-def test_historical_scheme_values_reach_current_names(isolated_config):
+def test_historical_scheme_values_reach_current_names(config_dir):
     _write_v2(
-        isolated_config,
+        config_dir,
         {"orbit_pivot": "pointer", "orbit_style": "free", "zoom_mode": "to_pointer"},
         {
             "fusion360": {"orbit_pivot": "cursor", "orbit_style": "default", "zoom_mode": "to_cursor"},
@@ -74,19 +74,18 @@ def test_historical_scheme_values_reach_current_names(isolated_config):
                   "zoom_mode": "to_object"}
 
 
-def test_v3_migration_persists(isolated_config):
-    _write_v2(isolated_config,
+def test_v3_migration_persists(config_dir):
+    _write_v2(config_dir,
               {"orbit_pivot": "pointer", "orbit_style": "free", "zoom_mode": "to_cursor"}, {})
     Config().load()
-    disk = json.loads((isolated_config / "TrackballDaemon" / "config.json").read_text(encoding="utf-8"))
+    disk = json.loads((config_dir / "config.json").read_text(encoding="utf-8"))
     assert disk["version"] == CONFIG_VERSION
     assert disk["general"]["scheme"]["orbit_pivot"] == "cursor"
     assert disk["general"]["scheme"]["zoom_mode"] == "to_center"   # legacy alias retired
 
 
-def test_current_version_config_untouched(isolated_config):
-    d = isolated_config / "TrackballDaemon"
-    d.mkdir(parents=True, exist_ok=True)
+def test_current_version_config_untouched(config_dir):
+    d = config_dir
     (d / "config.json").write_text(json.dumps({
         "version": CONFIG_VERSION,
         "general": {"scheme": {"orbit_pivot": "cursor", "orbit_style": "free",
@@ -98,9 +97,8 @@ def test_current_version_config_untouched(isolated_config):
     assert cfg.data["general"]["scheme"]["zoom_mode"] == "to_cursor"
 
 
-def test_removed_per_app_startup_placeholder_is_cleaned_from_current_config(isolated_config):
-    d = isolated_config / "TrackballDaemon"
-    d.mkdir(parents=True, exist_ok=True)
+def test_removed_per_app_startup_placeholder_is_cleaned_from_current_config(config_dir):
+    d = config_dir
     path = d / "config.json"
     path.write_text(json.dumps({
         "version": CONFIG_VERSION,
@@ -111,9 +109,8 @@ def test_removed_per_app_startup_placeholder_is_cleaned_from_current_config(isol
     assert "start_automatically" not in json.loads(path.read_text(encoding="utf-8"))["apps"]["blender"]
 
 
-def test_blender_zoom_to_mouse_is_replaced_by_shared_zoom_mode(isolated_config):
-    d = isolated_config / "TrackballDaemon"
-    d.mkdir(parents=True, exist_ok=True)
+def test_blender_zoom_to_mouse_is_replaced_by_shared_zoom_mode(config_dir):
+    d = config_dir
     path = d / "config.json"
     path.write_text(json.dumps({
         "version": CONFIG_VERSION,
@@ -124,16 +121,15 @@ def test_blender_zoom_to_mouse_is_replaced_by_shared_zoom_mode(isolated_config):
     assert cfg.data["apps"]["blender"]["bindings"]["scheme"]["zoom_mode"] == "default"
 
 
-def test_fallback_chain_is_added_to_existing_config(isolated_config):
-    _write_v2(isolated_config,
+def test_fallback_chain_is_added_to_existing_config(config_dir):
+    _write_v2(config_dir,
               {"orbit_pivot": "view", "orbit_style": "free", "zoom_mode": "to_center"}, {})
     cfg = Config().load()
     assert cfg.data["general"]["orbit_pivot_fallbacks"] == list(DEFAULT_ORBIT_PIVOT_FALLBACKS)
 
 
-def test_v4_disambiguates_pivots_in_schemes_fallbacks_and_advanced(isolated_config):
-    d = isolated_config / "TrackballDaemon"
-    d.mkdir(parents=True, exist_ok=True)
+def test_v4_disambiguates_pivots_in_schemes_fallbacks_and_advanced(config_dir):
+    d = config_dir
     (d / "config.json").write_text(json.dumps({
         "version": 3,
         "general": {
@@ -179,9 +175,8 @@ def test_legacy_pivot_names_are_normalized_at_runtime_boundaries():
         "screen_center", "camera", "origin"]
 
 
-def test_v5_adds_identity_global_and_action_axis_routing(isolated_config):
-    d = isolated_config / "TrackballDaemon"
-    d.mkdir(parents=True, exist_ok=True)
+def test_v5_adds_identity_global_and_action_axis_routing(config_dir):
+    d = config_dir
     (d / "config.json").write_text(json.dumps({
         "version": 4,
         "general": {"axis_orientation": {"source": [0, 0, 7], "invert": [True]}},
@@ -216,9 +211,8 @@ def test_axis_normalizers_validate_global_permutation_but_allow_action_duplicate
     assert set(routed) == set(DEFAULT_ACTION_AXIS_SOURCE)
 
 
-def test_v8_renames_old_pivot_hold_and_adds_independent_zoom_hold(isolated_config):
-    d = isolated_config / "TrackballDaemon"
-    d.mkdir(parents=True, exist_ok=True)
+def test_v8_renames_old_pivot_hold_and_adds_independent_zoom_hold(config_dir):
+    d = config_dir
     (d / "config.json").write_text(json.dumps({
         "version": 7,
         "apps": {

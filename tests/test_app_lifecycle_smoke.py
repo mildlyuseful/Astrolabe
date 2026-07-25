@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 import json
 import threading
 from types import SimpleNamespace
@@ -114,7 +117,9 @@ def _lifecycle_app(monkeypatch, tmp_path, *, fail_at=None):
         "TrayController",
         lambda *_args: _Boundary("tray", events, fail_at),
     )
-    monkeypatch.setattr(app_module, "user_config_dir", lambda: tmp_path)
+    monkeypatch.setattr(app_module, "publish_bridge_port",
+                        lambda port: events.append(("publish", port)) or ())
+    monkeypatch.setattr(app_module, "migrate_startup_entry", lambda: None)
 
     def auto_update(_config):
         events.append(("start", "auto_update"))
@@ -137,9 +142,9 @@ def test_whole_application_startup_and_shutdown_smoke_uses_every_boundary(
     app, events = _lifecycle_app(monkeypatch, tmp_path)
 
     app.start()
-    assert json.loads((tmp_path / "bridge.json").read_text(encoding="utf-8")) == {
-        "port": 47900
-    }
+    # The add-ons cannot find a broker they were never told the port of, so publication has to
+    # happen, and it has to happen before the broker starts accepting connections.
+    assert events.index(("publish", 47900)) < events.index(("start", "broker"))
     app.quit()
 
     assert [event for event in events if event[0] == "release"] == [

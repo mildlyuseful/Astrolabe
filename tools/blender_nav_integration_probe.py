@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """End-to-end probe of the add-on pipeline against a REAL RegionView3D, run headless.
 
 Unlike the pure-math test, this exercises the actual integration: _resolve_target() finding the

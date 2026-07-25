@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Validation primitives for the allowlisted declarative binding action language."""
 from __future__ import annotations
 

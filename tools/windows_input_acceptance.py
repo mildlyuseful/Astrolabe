@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Exercise the production Raw Input provider without starting the daemon UI.
 
 Automated mode uses the Phase 0 diagnostic's otherwise-unused F24 SendInput vector. Interactive

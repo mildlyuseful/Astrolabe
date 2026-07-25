@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Developer-owned System Defaults are complete, concrete, and package-safe."""
 import copy
 import json

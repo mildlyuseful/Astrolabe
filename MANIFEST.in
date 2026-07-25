@@ -1,3 +1,9 @@
+# Licensing and attribution travel with the source distribution. The wheel gets these from the
+# license-files declaration in pyproject.toml; a source distribution needs them named here too.
+include LICENSE NOTICE THIRD_PARTY_NOTICES.md LICENSING.md TRADEMARKS.md CONTRIBUTING.md SECURITY.md DCO
+include licensing.json third_party.json
+recursive-include LICENSES *
+
 global-exclude __pycache__
 global-exclude *.py[cod]
 global-exclude *.py[cod].*

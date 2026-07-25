@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """UI-independent projections and typed settings actions for the barebones settings UI."""
 
 from dataclasses import dataclass

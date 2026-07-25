@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Declarative per-app binding superstructure and presentation conventions."""
 
 from trackball_daemon import integrations

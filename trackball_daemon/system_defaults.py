@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Validated developer-owned defaults for the sparse v9 configuration model."""
 from dataclasses import dataclass
 import copy

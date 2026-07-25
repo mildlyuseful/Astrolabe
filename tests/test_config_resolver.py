@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Exhaustive contracts for sparse System -> Global -> app resolution."""
 import pytest
 

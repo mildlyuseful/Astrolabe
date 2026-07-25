@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Adapter for Astrolabe rotation plus versioned input-state snapshots."""
 
 from .astrolabe_legacy import AstrolabeLegacyAdapter

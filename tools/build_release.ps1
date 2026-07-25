@@ -1,6 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 [CmdletBinding()]
 param(
-    [string]$OutputDirectory = "build/release"
+    [string]$OutputDirectory = "build/release",
+    # A release pipeline must not produce an artifact whose recorded revision does not describe it.
+    # Local builds deliberately allow it and the manifest records the tree as dirty instead.
+    [switch]$RequireCleanRevision
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,6 +61,11 @@ try {
         --include-package=winrt `
         --include-package-data=trackball_daemon `
         --include-data-files=trackball_daemon/plugins/autocad/TrackballNavAcad.dll=trackball_daemon/plugins/autocad/TrackballNavAcad.dll `
+        --include-data-files=LICENSE=LICENSE `
+        --include-data-files=NOTICE=NOTICE `
+        --include-data-files=THIRD_PARTY_NOTICES.md=THIRD_PARTY_NOTICES.md `
+        --include-data-files=LICENSING.md=LICENSING.md `
+        --include-data-dir=LICENSES=LICENSES `
         --output-dir=$NuitkaArtifacts `
         --output-filename=Astrolabe.exe `
         tools/release_entry.py
@@ -77,11 +88,18 @@ try {
         throw "Could not resolve the package version for the release archive."
     }
     $ReleaseDirectory = Split-Path -Parent $Executable
-    $Archive = Join-Path $OutputRoot "Astrolabe-$Version-windows-x64.zip"
+    # Artifact naming comes from trackball_daemon/product.py so the build script is not a second
+    # place that decides what the product is called.
+    $ArchiveName = (& $ReleasePython -c `
+        "from trackball_daemon.product import archive_name; print(archive_name('$Version'))").Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($ArchiveName)) {
+        throw "Could not resolve the release archive name from product identity."
+    }
+    $Archive = Join-Path $OutputRoot $ArchiveName
     & $ReleasePython tools/archive_release.py --source $ReleaseDirectory --output $Archive
     if ($LASTEXITCODE -ne 0) { throw "Release archive creation failed with exit code $LASTEXITCODE" }
 
-    $Sbom = Join-Path $OutputRoot "Astrolabe-$Version-windows-x64.cdx.json"
+    $Sbom = Join-Path $OutputRoot ([System.IO.Path]::ChangeExtension($ArchiveName, $null) + "cdx.json")
     $env:UV_PROJECT_ENVIRONMENT = $RuntimeEnvironment
     & $Uv sync --locked --no-editable --extra onshape --python $BuildPython
     if ($LASTEXITCODE -ne 0) { throw "Locked runtime-environment sync failed with exit code $LASTEXITCODE" }
@@ -93,18 +111,44 @@ try {
     if (-not (Test-Path -LiteralPath $SbomTool -PathType Leaf)) {
         throw "CycloneDX tool was not installed at expected path: $SbomTool"
     }
+
+    & $ReleasePython tools/audit_notices.py --environment $RuntimePython
+    if ($LASTEXITCODE -ne 0) { throw "Bundled-component notice audit failed with exit code $LASTEXITCODE" }
     & $SbomTool environment $RuntimePython --pyproject (Join-Path $RepoRoot "pyproject.toml") `
         --mc-type application --spec-version 1.6 --output-format JSON `
         --output-reproducible --output-file $Sbom
     if ($LASTEXITCODE -ne 0) { throw "CycloneDX SBOM generation failed with exit code $LASTEXITCODE" }
     & $ReleasePython tools/finalize_sbom.py --sbom $Sbom `
-        --name "trackball-daemon" --version $Version
+        --name "astrolabe-daemon" --version $Version
     if ($LASTEXITCODE -ne 0) { throw "SBOM metadata finalization failed with exit code $LASTEXITCODE" }
+
+    # Last, because it records the hash of every artifact above -- including the SBOM, which
+    # finalize_sbom has just rewritten. Run by the release interpreter so the embedded Python version
+    # it reports is the one Nuitka actually bundled.
+    $Manifest = Join-Path $OutputRoot (
+        [System.IO.Path]::ChangeExtension($ArchiveName, $null) + "manifest.json")
+    $ManifestArguments = @(
+        "tools/build_release_manifest.py",
+        "--output", $Manifest,
+        "--root", $OutputRoot,
+        "--executable", $Executable,
+        "--autocad-plugin", $PackagedAutoCAD,
+        "--archive", $Archive,
+        "--sbom", $Sbom)
+    if ($RequireCleanRevision) { $ManifestArguments += "--require-clean" }
+    & $ReleasePython @ManifestArguments
+    if ($LASTEXITCODE -ne 0) { throw "Release manifest generation failed with exit code $LASTEXITCODE" }
+
+    # Re-derive every hash the manifest just claimed. A build that cannot pass its own verifier has
+    # produced a record of something other than what is on disk.
+    & $ReleasePython tools/verify_release_manifest.py --manifest $Manifest --directory $OutputRoot
+    if ($LASTEXITCODE -ne 0) { throw "Release manifest verification failed with exit code $LASTEXITCODE" }
 
     Get-FileHash -Algorithm SHA256 -LiteralPath $Executable, $PackagedAutoCAD, $Archive, $Sbom |
         Select-Object Algorithm, Hash, Path |
         Format-List
     Write-Host "Archive checksum file: $Archive.sha256"
+    Write-Host "Release manifest: $Manifest"
 }
 finally {
     Pop-Location

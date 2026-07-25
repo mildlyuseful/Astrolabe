@@ -42,7 +42,7 @@ Open the project in the editor, then click **Set up** again so detection can see
 ### Manual install (when detection finds nothing)
 
 Set up still stages a copy at
-`%APPDATA%\TrackballDaemon\godot\trackball_nav\` and shows **Copy** buttons.
+`%APPDATA%\Mildly Useful\Astrolabe\godot\trackball_nav\` and shows **Copy** buttons.
 
 1. Copy that `trackball_nav` folder to `<YourProject>\addons\trackball_nav\`.
 2. Enable the plugin: **Project → Project Settings → Plugins → Trackball Nav**, or add
@@ -72,11 +72,27 @@ Intrinsic signs/scales arrive in `adv.host_baseline`; camera math stays neutral.
 
 ## Logs
 
-`%APPDATA%\TrackballDaemon\godot_addin.log`
+`%APPDATA%\Mildly Useful\Astrolabe\godot_addin.log`
 
 ## Reload
 
 Disable/enable the plugin or restart Godot. Bump `plugin.cfg` version + `version.json` +
 `ADDIN_VERSION` in `trackball_nav.gd`.
 
-The current parser/GUI/live checks are tracked in [`TODO.md`](../../TODO.md).
+## Parse check
+
+Run this after any change to the add-on, before touching a real project:
+
+```text
+python tools/godot_parse_check.py --godot <Godot editor exe>
+```
+
+GDScript resolves types while parsing, so a value the parser cannot type is a parse error and the
+*entire* script fails to load — the add-on simply never runs, with no partial behaviour to notice.
+Nothing else in this repository can detect that: the daemon-side tests only confirm the payload files
+and versions. The check stages the add-on in a throwaway project and runs one editor import pass
+first, because global `class_name` types come from the project's script-class cache and skipping that
+step reports every cross-file type as undeclared. A new Godot release can also turn a previously
+inferable expression into a parse error, so this is worth re-running against a new editor version.
+
+The current GUI and live-viewport checks are tracked in [`TODO.md`](../../TODO.md).

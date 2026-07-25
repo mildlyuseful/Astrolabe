@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Binary-level checks for the bundled AutoCAD plugin and its provenance manifest."""
 
 import json

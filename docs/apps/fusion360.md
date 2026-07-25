@@ -20,7 +20,7 @@ Primary code: [`trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py`
 ## 1. What it is, in one paragraph
 
 A background socket thread reads broker frames from `127.0.0.1` using the port in
-`%APPDATA%\TrackballDaemon\bridge.json` (`47900` fallback) and fires a Fusion **CustomEvent**; the event handler applies the camera change on Fusion's **main thread**
+`%APPDATA%\Mildly Useful\Astrolabe\bridge.json` (`47900` fallback) and fires a Fusion **CustomEvent**; the event handler applies the camera change on Fusion's **main thread**
 (the Fusion API is main-thread-only — same marshalling problem every socket add-on solves, each
 with its host's mechanism: Blender uses a timer, FreeCAD a `QTimer`, Unreal a Slate post-tick,
 SketchUp `UI.start_timer`). The camera model is the classic **eye + target + up**: orbit rotates
@@ -45,7 +45,7 @@ applied by the daemon before the frame reaches this lean add-in; the add-in came
 
 1. **Fusion has NO external automation API.** You cannot drive or probe Fusion from outside the
    process — no COM, no CLI, no headless mode that loads add-ins usefully. The ONLY way to see
-   inside the add-in is its log: `%APPDATA%\TrackballDaemon\fusion_addin.log`. Lean on it; add
+   inside the add-in is its log: `%APPDATA%\Mildly Useful\Astrolabe\fusion_addin.log`. Lean on it; add
    log lines before asking a user to reproduce anything.
 2. **`adsk.core.Point3DList` does not exist in the Python API** (despite documentation
    suggesting it). `findBRepUsingRay`'s hit-points argument takes an

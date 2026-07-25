@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Every 3D Apps card has honest compatibility/setup metadata and actions."""
 from dataclasses import replace
 
@@ -12,7 +15,7 @@ def test_every_app_has_complete_copyable_setup_metadata():
     for app in integrations.APPS:
         assert app.spec is APP_SPECS_BY_ID[app.key]
         assert app.install_model, app.key
-        assert app.supported_versions, app.key
+        assert app.verified_versions, app.key
         assert app.setup_instructions, app.key
         assert app.manual_install, app.key
         assert app.health_check, app.key
@@ -30,7 +33,7 @@ def test_sensitive_setups_have_explicit_preflight_confirmations():
     assert sensitive <= {app.key for app in integrations.APPS if app.security_confirmation}
 
 
-def test_known_supported_unverified_and_unsupported_versions_are_distinct():
+def test_known_supported_unverified_and_unverified_versions_are_distinct():
     blender = integrations.APPS_BY_KEY["blender"]
     assert integrations.compatibility(
         blender, r"C:\Program Files\Blender Foundation\Blender 5.1\blender.exe").status == "supported"

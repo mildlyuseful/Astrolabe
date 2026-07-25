@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Pure-math tests for the AutoCAD deferred-orbit overlay's cube projection.
 
 Only project_cube (platform-independent) is tested -- no window is ever created here; the Win32

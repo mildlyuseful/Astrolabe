@@ -1,0 +1,267 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+name: Release
+
+# Builds a release from an exact revision and leaves a DRAFT GitHub release behind. It never
+# publishes: publishing a draft is a human action in the GitHub UI, which is what makes "require human
+# approval before publishing" true regardless of how this repository's environments are configured.
+#
+# That distinction matters. An `environment:` naming a target with no required reviewers provides no
+# approval at all -- GitHub creates it implicitly and the job proceeds -- so relying on one for the
+# publish gate would be a protection that silently is not there.
+#
+# The channel comes from the version, exactly as it does for a local build. A pre-release version
+# produces an unsigned internal-alpha artifact, which is the whole of what this project can currently
+# produce. A final version requires signing, and this workflow fails closed rather than emit an
+# unsigned artifact under a released name. See docs/release.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: "Exact revision (tag, branch, or SHA) to release from"
+        required: true
+        type: string
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  gates:
+    name: Verify revision and run release gates
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      channel: ${{ steps.identity.outputs.channel }}
+
+    steps:
+      # Step 1: an exact revision. A tag push releases the tagged commit; a manual run releases
+      # whatever revision the operator named, never "whatever main happens to be".
+      - name: Check out the exact revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.revision || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up pinned uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.28"
+          enable-cache: true
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Synchronize locked Python environment
+        run: uv sync --locked --all-extras --python 3.13
+
+      # Step 2: versions must agree before anything is built. A tag that disagrees with the package
+      # version would produce an artifact whose own manifest contradicts the release it appears under.
+      # Host add-on versions are checked by the suite below (tests/test_addon_version_agreement.py),
+      # and the AutoCAD plugin against its provenance manifest.
+      - name: Resolve identity and check the tag against the package version
+        id: identity
+        shell: pwsh
+        run: |
+          $Version = (uv run --locked --all-extras python -c `
+            "from trackball_daemon import __version__; print(__version__)").Trim()
+          $Channel = (uv run --locked --all-extras python -c `
+            "from trackball_daemon import __version__; from trackball_daemon.product import release_channel; print(release_channel(__version__))").Trim()
+          if (-not $Version -or -not $Channel) { throw "Could not resolve the release identity." }
+          if ($env:GITHUB_REF -like "refs/tags/*") {
+            $Tag = $env:GITHUB_REF -replace "^refs/tags/", ""
+            if ($Tag -ne "v$Version") {
+              throw "Tag $Tag does not match package version $Version (expected v$Version)."
+            }
+          }
+          "version=$Version" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          "channel=$Channel" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          Write-Host "Releasing $Version on the $Channel channel"
+
+      # Step 3: every automated gate, before a single artifact is produced.
+      - name: Compile Python sources
+        run: uv run --locked --all-extras python -m compileall -q trackball_daemon tests tools
+
+      - name: Run Python suite
+        run: uv run --locked --all-extras python -m pytest -q
+
+      - name: Run AutoCAD NavMath console suite
+        run: dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj --configuration Release
+
+      - name: Validate bindings
+        run: uv run --locked --all-extras python -m trackball_daemon.validate_bindings
+
+      - name: Verify the bundled AutoCAD artifact against its provenance
+        run: uv run --locked --all-extras python tools/verify_autocad_artifact.py
+
+      - name: Check SPDX headers
+        run: uv run --locked --all-extras python tools/apply_license_headers.py --check
+
+  stage:
+    name: Build, sign, and record
+    needs: gates
+    runs-on: windows-latest
+    timeout-minutes: 60
+    # Signing credentials belong to this environment and to no other workflow. Configure required
+    # reviewers on it before a public release; until signing exists the job cannot use them anyway.
+    environment: release
+    outputs:
+      manifest: ${{ steps.record.outputs.manifest }}
+
+    steps:
+      - name: Check out the exact revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.revision || github.ref }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Set up pinned uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.28"
+          enable-cache: true
+
+      # Steps 4, 5, 11, 14: the staging tree, licences and notices, the deterministic archive, the
+      # SBOM, and the pre-signing manifest. -RequireCleanRevision refuses a build whose recorded
+      # revision would not describe it.
+      - name: Build the release staging tree
+        shell: pwsh
+        run: |
+          .\tools\build_release.ps1 -RequireCleanRevision
+          if ($LASTEXITCODE -ne 0) { throw "Release build failed." }
+
+      # Steps 6 to 10, 12, 13: sign and timestamp the staged AutoCAD DLL, the executable, and the
+      # installer, then verify every expected signature.
+      #
+      # Not implemented, and deliberately not stubbed. No code-signing certificate exists, and the
+      # current build orders compile -> archive -> manifest with no staging point between compiling and
+      # archiving for signed bytes to be produced -- so signing needs that restructuring as well as a
+      # certificate. TODO.md carries both. A pre-release build is legitimately unsigned and continues;
+      # a final version stops here rather than emit an unsigned artifact under a released name.
+      - name: Sign and timestamp the staged binaries
+        shell: pwsh
+        env:
+          CHANNEL: ${{ needs.gates.outputs.channel }}
+        run: |
+          if ($env:CHANNEL -ne "public") {
+            Write-Host "$env:CHANNEL is an unsigned channel; skipping signing."
+            exit 0
+          }
+          throw @"
+          Authenticode signing is not implemented, so a public release cannot be produced here.
+          Required before this step can run:
+            * a code-signing certificate available to the 'release' environment;
+            * a staging point in build_release.ps1 between Nuitka and archiving, so the archive is
+              created from signed bytes (step 11 of the plan's release order);
+            * a signature report written for tools/build_release_manifest.py --signature-report,
+              recording subject, issuer, thumbprint, timestamp authority, and the verification verdict
+              per artifact.
+          Release a pre-release version instead, or complete the above.
+          "@
+
+      # Step 14: the manifest is the last thing written, and immediately re-verified. For an unsigned
+      # channel build_release.ps1 has already produced and verified it; this re-checks it after every
+      # step above, which is what makes "reject the release if an artifact changed after its final hash
+      # was recorded" enforceable rather than a policy sentence.
+      - name: Confirm the manifest still describes the artifacts
+        id: record
+        shell: pwsh
+        env:
+          CHANNEL: ${{ needs.gates.outputs.channel }}
+        run: |
+          $Manifest = (Get-ChildItem build/release/*.manifest.json | Select-Object -First 1).FullName
+          if (-not $Manifest) { throw "No release manifest was produced." }
+          python tools/verify_release_manifest.py --manifest $Manifest --directory build/release
+          if ($LASTEXITCODE -ne 0) { throw "Release manifest verification failed." }
+          $Record = Get-Content $Manifest -Raw | ConvertFrom-Json
+          if ($Record.channel -ne $env:CHANNEL) {
+            throw "Manifest channel $($Record.channel) disagrees with the resolved channel $env:CHANNEL."
+          }
+          if ($env:CHANNEL -eq "public" -and -not $Record.signatures.signed) {
+            throw "A public release manifest must record signatures."
+          }
+          if (-not $Record.source.revision_describes_artifact) {
+            throw "The manifest's revision does not describe the artifact."
+          }
+          "manifest=$(Split-Path -Leaf $Manifest)" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+
+      - name: Retain the release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ needs.gates.outputs.version }}
+          retention-days: 30
+          if-no-files-found: error
+          path: |
+            build/release/*.zip
+            build/release/*.zip.sha256
+            build/release/*.cdx.json
+            build/release/*.manifest.json
+            build/release/python/*
+
+  draft:
+    name: Create a draft release
+    needs: [gates, stage]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download the release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ needs.gates.outputs.version }}
+          path: artifacts
+
+      # Step 15: a draft, never a publish. Step 16 is a person reading this draft, checking the
+      # manifest, and pressing Publish. Nothing here can do that for them.
+      - name: Create the draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.gates.outputs.version }}
+          CHANNEL: ${{ needs.gates.outputs.channel }}
+        run: |
+          set -euo pipefail
+          MANIFEST="artifacts/${{ needs.stage.outputs.manifest }}"
+          test -f "$MANIFEST" || { echo "manifest missing from artifacts" >&2; exit 1; }
+          {
+            echo "Channel: \`$CHANNEL\`"
+            echo
+            if [ "$CHANNEL" != "public" ]; then
+              echo "**Unsigned private artifact.** Not a released product, and not for distribution."
+              echo
+            fi
+            echo "Release notes have not been written; see TODO.md."
+            echo
+            echo '<details><summary>Release manifest</summary>'
+            echo
+            echo '```json'
+            cat "$MANIFEST"
+            echo '```'
+            echo
+            echo '</details>'
+          } > notes.md
+          gh release create "v$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Astrolabe $VERSION" \
+            --notes-file notes.md \
+            --draft \
+            --prerelease \
+            $(find artifacts -type f ! -name '*.manifest.json' -print) "$MANIFEST"
+          echo "Draft created. Publishing is a separate, human action." >> "$GITHUB_STEP_SUMMARY"

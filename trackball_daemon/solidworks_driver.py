@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Daemon-side SolidWorks COM driver -- the direct-transport analogue of NavBroker.
 
 Unlike the Fusion path (a socket add-in that connects to the nav broker), SolidWorks is

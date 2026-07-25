@@ -48,11 +48,54 @@ host-specific signs, scales, pivots, or camera conventions.
 | Device control namespaces and BLE snapshot mappings | `trackball_daemon/devices/descriptor_data/` |
 | Portable contributor data shapes | `trackball_daemon/schemas/`; daemon parsers remain authoritative |
 | Python dependency resolution | `pyproject.toml` plus the checked-in `uv.lock` |
+| Product names, install and configuration paths, and Windows registration identifiers | [`../trackball_daemon/product.py`](../trackball_daemon/product.py) |
+| Per-path license disposition and bundled-component attribution | [`../LICENSING.md`](../LICENSING.md) with `licensing.json`, and [`../THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md) with `third_party.json` |
+| Release channel, version sequence, and what a release manifest records | [`release.md`](release.md) |
 | Open defects, deferred work, and unclosed verification | [`../TODO.md`](../TODO.md) |
 
 `app_registry.py` is the only code-owned supported-app identity and ordering table. Setup definitions,
 profile data, settings, routing, and UI projections validate against it rather than repeating app IDs
 or capabilities.
+
+It also owns each integration's `SupportTier`, which is a release commitment, not a compatibility
+result. `SupportTier` says what this project promises about an integration as a whole; the separate
+`integrations.Compatibility` classifies one detected host version against what has been verified.
+The two are independent in both directions, so no surface may merge them: UI grouping, card text, the
+copyable instructions, the README tables, and the release-smoke output all derive the tier from
+`AppSpec`, and the host-version range stays in `integrations.py` under a field deliberately not named
+for support. A host version classified `unsupported` is refused by `integrations.install` unless the
+caller passes an explicit override, which the UI only does after showing the user the exact warning
+naming the detected version.
+
+`product.py` is the equivalent authority for the product itself. The installer's upgrade identifier,
+AppUserModelID, per-user install path, Start Menu folder, uninstall identity, startup value,
+single-instance mutex, configuration directory, and artifact names all resolve there, and the
+release build asks it for the archive name rather than composing one. Values under its *frozen*
+heading cannot change once a signed installer has written them to a real machine: a different
+upgrade identifier makes the next release install beside the old one instead of replacing it.
+Values under its *legacy* heading are the identity earlier builds wrote under the project's original
+name. Nothing is written there now, but a machine that ran an earlier build still holds it, so those
+values remain recognized rather than removed.
+
+[`../trackball_daemon/paths.py`](../trackball_daemon/paths.py) resolves the configuration root from
+that authority and owns the one-time move off the legacy directory. Its rules follow from the
+directory possibly being the only copy of a user's bindings and of the Onshape certificate they have
+already trusted: an existing new root always wins and is never re-derived, a copy is verified in a
+staging directory and moved into place with a single rename so the new root cannot exist in a partial
+state, the legacy directory is only ever read and is left in place as the rollback copy, and any
+failure keeps using the legacy directory rather than overwriting either location. Rotating logs stay
+behind; they are the only files another process may append to mid-copy, and the preserved directory
+keeps them readable.
+
+Two consumers cannot follow that move. The bundled AutoCAD plugin compiles the legacy discovery path
+into a DLL whose provenance manifest pins the shipped binary, and any host add-on an earlier build
+installed knows only the legacy root. The daemon therefore keeps publishing `bridge.json` to the
+legacy root whenever either could be present, and every add-on payload this project ships as source
+probes the current root and then the legacy one.
+
+The distribution name and the import package are deliberately different — `astrolabe-daemon` and
+`trackball_daemon`. Renaming the import namespace for branding would break every existing import
+and every host add-on path for no user-visible benefit.
 
 A setting is exposed for an app only when its capability predicate matches and every advertised value
 has a distinct runtime consumer. Stored shared-shape data does not by itself make a feature

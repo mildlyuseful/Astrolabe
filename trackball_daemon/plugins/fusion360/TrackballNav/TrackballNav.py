@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """TrackballNav -- Autodesk Fusion 360 add-in.
 
 Connects to the Trackball Daemon's local nav broker (127.0.0.1) and drives the active
@@ -37,16 +40,36 @@ PAN_SCALE = 1.0
 ZOOM_SCALE = 1.0
 ZOOM_SIGN = 1.0
 
-ADDIN_VERSION = "0.1.24"         # keep in sync with TrackballNav.manifest
+ADDIN_VERSION = "0.1.25"         # keep in sync with TrackballNav.manifest
 
 _last_err = {"t": 0.0, "s": ""}
 _last_scheme = {"v": None}
 
 
+# The daemon's configuration root, then the root earlier daemon builds wrote. Probing both is what
+# lets this add-in and the daemon be updated independently: whichever of the two is older, they
+# still meet at the same discovery file. Keep in step with trackball_daemon/product.py.
+_CONFIG_ROOTS = (("Mildly Useful", "Astrolabe"), ("TrackballDaemon",))
+
+
+def _config_file(name):
+    """Path to `name` under the daemon's configuration root.
+
+    Prefers a file that already exists, then the first root that exists, then the current root.
+    """
+    roots = [os.path.join(os.environ.get("APPDATA", ""), *parts) for parts in _CONFIG_ROOTS]
+    for root in roots:
+        if os.path.isfile(os.path.join(root, name)):
+            return os.path.join(root, name)
+    for root in roots:
+        if os.path.isdir(root):
+            return os.path.join(root, name)
+    return os.path.join(roots[0], name)
+
+
 def _log(msg):
     try:
-        path = os.path.join(os.environ.get("APPDATA", ""), "TrackballDaemon", "fusion_addin.log")
-        with open(path, "a", encoding="utf-8") as f:
+        with open(_config_file("fusion_addin.log"), "a", encoding="utf-8") as f:
             f.write(time.strftime("%H:%M:%S ") + msg + "\n")
     except Exception:
         pass
@@ -71,8 +94,7 @@ def _log_rl(key, msg, period=2.0):
 
 def _bridge_port():
     try:
-        appdata = os.environ.get("APPDATA", "")
-        with open(os.path.join(appdata, "TrackballDaemon", "bridge.json"), "r") as f:
+        with open(_config_file("bridge.json"), "r") as f:
             return int(json.load(f).get("port", 47900))
     except Exception:
         return 47900

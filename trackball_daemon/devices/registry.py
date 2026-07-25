@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Select built-in protocol adapters from discovered GATT and data descriptors."""
 
 from .astrolabe_fiveway import AstrolabeFiveWayAdapter

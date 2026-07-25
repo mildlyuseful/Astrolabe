@@ -1,10 +1,12 @@
 # frozen_string_literal: true
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
 
 require 'sketchup.rb'
 require 'extensions.rb'
 
 module TrackballNav
-  ADDIN_VERSION = '0.2.13' unless const_defined?(:ADDIN_VERSION, false)
+  ADDIN_VERSION = '0.2.14' unless const_defined?(:ADDIN_VERSION, false)
 
   unless file_loaded?(__FILE__)
     extension = SketchupExtension.new('Trackball Nav', 'trackball_nav/main')

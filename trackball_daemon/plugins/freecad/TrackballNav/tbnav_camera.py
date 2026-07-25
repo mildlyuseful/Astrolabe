@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Pure-Python camera math for the FreeCAD Trackball Nav add-on.
 
 NO FreeCAD / pivy / PySide imports live here, on purpose: this module is unit-testable

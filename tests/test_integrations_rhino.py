@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
 """Rhino integration registry: scripts dir install + version-gated auto_update."""
 import json
 
@@ -18,7 +21,7 @@ def _patch_rhino(monkeypatch, tmp_path):
 
 def test_rhino_is_a_bundled_addin():
     assert "rhino" in integrations.ADDIN_KEYS
-    assert integrations.bundled_addin_version("rhino") == "0.1.18"
+    assert integrations.bundled_addin_version("rhino") == "0.1.19"
     assert integrations.APPS_BY_KEY["rhino"].setup is integrations.install_rhino
 
 
@@ -30,12 +33,12 @@ def test_install_copies_scripts_and_enables(isolated_config, tmp_path, monkeypat
     assert ok is True
     r = cfg.snapshot().app_operational["rhino"]
     assert r["installed"] is True and r["enabled"] is True
-    assert r["addin_version"] == "0.1.18"
+    assert r["addin_version"] == "0.1.19"
     assert (scripts / "version.json").exists()
     assert (scripts / "tbnav_rhino.py").exists()
     assert (scripts / "tbnav_camera.py").exists()
     assert (scripts / "start.py").exists()
-    assert integrations.installed_addin_version("rhino") == "0.1.18"
+    assert integrations.installed_addin_version("rhino") == "0.1.19"
     assert "startup" in msg.lower() or "restart" in msg.lower()
     # auto-register mocked True -> no copy button needed
     assert copies == []
@@ -90,4 +93,4 @@ def test_auto_update_recopies_on_version_bump(isolated_config, tmp_path, monkeyp
     assert integrations.update_available("rhino") is True
     updated = integrations.auto_update(cfg)
     assert any(key == "rhino" for key, _o, _n in updated)
-    assert integrations.installed_addin_version("rhino") == "0.1.18"
+    assert integrations.installed_addin_version("rhino") == "0.1.19"

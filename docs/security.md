@@ -24,7 +24,7 @@ launch a supported 3D application. Shared ownership and lifecycle rules are defi
   Some endpoint-security products still notify whenever a process listens, even on loopback. Do not
   add a public/private-network firewall rule; the software does not need one.
 - AutoCAD may object to an unsigned managed DLL. After explicit setup, the loader adds only
-  `%APPDATA%\TrackballDaemon\acad_plugin` to AutoCAD `TRUSTEDPATHS`, then issues `NETLOAD`. It does
+  `%APPDATA%\Mildly Useful\Astrolabe\acad_plugin` to AutoCAD `TRUSTEDPATHS`, then issues `NETLOAD`. It does
   not lower `SECURELOAD`, trust a parent directory, write `Program Files`, or launch AutoCAD.
 - SketchUp installations with a restrictive extension-loading policy may warn about or block the
   unsigned Ruby extension. Prefer signing/distributing through SketchUp's supported extension
@@ -40,7 +40,8 @@ launch a supported 3D application. Shared ownership and lifecycle rules are defi
 |---|---|---|
 | BLE input | Connects to the configured Trackball BLE device. | No driver or service installed. Remove/forget the device normally. |
 | Keyboard bindings | Lazily registers the standard Windows keyboard device class through Raw Input only while an enabled compiled binding references keyboard controls. | No driver, hook, service, key suppression, or startup registration. Disable all keyboard bindings or stop the daemon to unregister it and synthesize releases. |
-| Start at login | When explicitly toggled in the tray, writes `TrackballDaemon` under the current user's Windows `Run` key. | No service or scheduled task. Toggle it off or delete the HKCU value. |
+| Start at login | When explicitly toggled in the tray, writes `Astrolabe` under the current user's Windows `Run` key. An earlier build's `TrackballDaemon` value is carried onto that name at startup and then removed, so only one registration ever fires at login. | No service or scheduled task. Toggle it off or delete the HKCU value. |
+| Configuration directory | Per-user state under `%APPDATA%\Mildly Useful\Astrolabe`. An earlier build's `%APPDATA%\TrackballDaemon` is copied there once, verified, and then left in place unmodified as the rollback copy. | Delete either directory. Deleting the new one reverts to the preserved copy. |
 | Navigation broker | TCP JSON listener on `127.0.0.1:<configured port>`. | Loopback only; stops with the daemon. No firewall rule created. |
 | Blender | Copies Python add-on and, only after a separate confirmation, an auto-enable startup shim. | Current-user Blender scripts. Delete `trackball_nav` and `trackball_nav_startup.py`. |
 | FreeCAD | Copies a Python Mod add-on. | Current-user FreeCAD Mod folder; delete `TrackballNav`. |
@@ -51,9 +52,14 @@ launch a supported 3D application. Shared ownership and lifecycle rules are defi
 | Unreal | Copies a Python editor plugin per engine or per project. | Engine path may require elevation; project path does not. Disable/delete `TrackballNav`. |
 | Rhino | Copies Python and may append a current-user startup command. | Remove the script folder and the TrackballNav startup command in Rhino Options. |
 | SOLIDWORKS | Attaches to an already-running instance through COM automation. | No host files, registration, registry writes, listener, or launch. Disable the integration. |
-| AutoCAD | Uses COM only to attach, scope `TRUSTEDPATHS`, and NETLOAD a per-user DLL; the host-loaded plugin is the sole camera transport. | Remove the exact trusted path, delete the APPDATA plugin after closing AutoCAD, and disable the integration. |
+| AutoCAD | Uses COM only to attach, scope `TRUSTEDPATHS`, and NETLOAD a per-user DLL; the host-loaded plugin is the sole camera transport. | Remove the exact trusted path, delete the APPDATA `acad_plugin` folder after closing AutoCAD, and disable the integration. |
 | Onshape | Creates a per-user TLS key/certificate, listens on fixed loopback TLS, and optionally supplies an Onshape-only pointer userscript. | Delete the PEM files; remove the `127.51.68.120` certificate from the current-user trust store; remove the userscript. |
 | Host detection | Reads common install folders, process command lines, recent-project files, and Rhino's install registry key. | Detection is read-only. Hidden PowerShell/WMIC calls do not modify the system. |
+
+Every copied payload carries a verbatim `LICENSE` and `NOTICE`, so an add-on sitting in a host's
+folders states what it is and under what terms without reference to this project. They are part of
+the payload, so they are staged, validated, and removed with it; deleting the payload directory
+listed above still reverses the installation completely.
 
 Copied host payloads are staged and byte-validated next to their destination before replacement.
 Existing copies move to fixed-name sibling backups only for the swap, grouped payloads roll back
