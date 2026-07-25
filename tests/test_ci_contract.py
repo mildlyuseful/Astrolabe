@@ -3,8 +3,11 @@
 
 from pathlib import Path
 
+import pytest
+
 
 WORKFLOW = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+RELEASE_WORKFLOW = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
 RELEASE_BUILD = Path("tools/build_release.ps1").read_text(encoding="utf-8")
 
 
@@ -53,3 +56,81 @@ def test_bundled_component_notices_are_audited_against_a_real_release_runtime():
     assert "tools/audit_notices.py --environment" in WORKFLOW
     assert "Bundled-component notice audit failed." in WORKFLOW
     assert "tools/audit_notices.py --environment $RuntimePython" in RELEASE_BUILD
+
+
+def test_ordinary_ci_compiles_the_tools_it_also_runs():
+    """A syntax error in tools/ would otherwise only surface when someone ran a release build."""
+    assert "compileall -q trackball_daemon tests tools" in WORKFLOW
+
+
+def test_ordinary_ci_builds_and_verifies_the_unsigned_onedir():
+    """The packaged artifact is what users run, and its build path runs nowhere else."""
+    assert ".\\tools\\build_release.ps1" in WORKFLOW
+    assert "tools/verify_release_manifest.py" in WORKFLOW
+    assert "actions/upload-artifact@v4" in WORKFLOW
+    assert "name: unsigned-onedir" in WORKFLOW
+    assert "claiming to be signed" in WORKFLOW
+
+
+@pytest.mark.parametrize("workflow, name", [(WORKFLOW, "ci.yml")])
+def test_ordinary_ci_never_receives_signing_credentials(workflow, name):
+    """The cheapest way to leak a certificate is to add one secret to the workflow everyone edits."""
+    assert "secrets." not in workflow, name
+    assert "environment:" not in workflow, name
+
+
+# --- the protected release workflow --------------------------------------------------------------
+
+def test_the_release_workflow_starts_from_an_exact_revision():
+    assert "workflow_dispatch:" in RELEASE_WORKFLOW
+    assert 'tags: ["v*"]' in RELEASE_WORKFLOW
+    assert "ref: ${{ inputs.revision || github.ref }}" in RELEASE_WORKFLOW
+
+
+def test_the_release_workflow_refuses_a_tag_that_disagrees_with_the_package():
+    assert "does not match package version" in RELEASE_WORKFLOW
+
+
+def test_every_gate_runs_before_any_artifact_is_produced():
+    """A suite failure discovered after signing has already spent the certificate on bad bytes."""
+    assert RELEASE_WORKFLOW.index("python -m pytest -q") < RELEASE_WORKFLOW.index(
+        "build_release.ps1")
+    assert "needs: gates" in RELEASE_WORKFLOW
+
+
+def test_the_release_build_requires_a_clean_revision():
+    assert "build_release.ps1 -RequireCleanRevision" in RELEASE_WORKFLOW
+
+
+def test_signing_credentials_are_scoped_to_one_environment():
+    assert "environment: release" in RELEASE_WORKFLOW
+
+
+def test_a_public_release_cannot_be_produced_without_signing():
+    """Failing closed is the difference between "not signed yet" and "shipped unsigned"."""
+    assert "Authenticode signing is not implemented" in RELEASE_WORKFLOW
+    assert 'if ($env:CHANNEL -ne "public")' in RELEASE_WORKFLOW
+    assert "A public release manifest must record signatures." in RELEASE_WORKFLOW
+
+
+def test_the_channel_is_resolved_from_the_version_not_from_an_input():
+    assert "release_channel(__version__)" in RELEASE_WORKFLOW
+    assert "Manifest channel" in RELEASE_WORKFLOW      # and cross-checked against the manifest
+
+
+def test_the_manifest_is_verified_again_after_every_build_step():
+    assert "tools/verify_release_manifest.py" in RELEASE_WORKFLOW
+    assert "revision_describes_artifact" in RELEASE_WORKFLOW
+
+
+def test_the_workflow_only_ever_creates_a_draft():
+    """An environment with no required reviewers grants no approval, so publishing stays manual."""
+    assert "--draft" in RELEASE_WORKFLOW
+    assert "gh release edit" not in RELEASE_WORKFLOW
+    assert "--draft=false" not in RELEASE_WORKFLOW
+    assert "publish" in RELEASE_WORKFLOW.lower()
+
+
+def test_only_the_drafting_job_can_write_to_the_repository():
+    assert RELEASE_WORKFLOW.count("contents: write") == 1
+    assert "permissions:\n  contents: read" in RELEASE_WORKFLOW

@@ -130,6 +130,7 @@ try {
     $ManifestArguments = @(
         "tools/build_release_manifest.py",
         "--output", $Manifest,
+        "--root", $OutputRoot,
         "--executable", $Executable,
         "--autocad-plugin", $PackagedAutoCAD,
         "--archive", $Archive,
@@ -137,6 +138,11 @@ try {
     if ($RequireCleanRevision) { $ManifestArguments += "--require-clean" }
     & $ReleasePython @ManifestArguments
     if ($LASTEXITCODE -ne 0) { throw "Release manifest generation failed with exit code $LASTEXITCODE" }
+
+    # Re-derive every hash the manifest just claimed. A build that cannot pass its own verifier has
+    # produced a record of something other than what is on disk.
+    & $ReleasePython tools/verify_release_manifest.py --manifest $Manifest --directory $OutputRoot
+    if ($LASTEXITCODE -ne 0) { throw "Release manifest verification failed with exit code $LASTEXITCODE" }
 
     Get-FileHash -Algorithm SHA256 -LiteralPath $Executable, $PackagedAutoCAD, $Archive, $Sbom |
         Select-Object Algorithm, Hash, Path |

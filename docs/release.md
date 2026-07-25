@@ -111,5 +111,55 @@ The commands a build must pass, and the skip/release-impact rules for each, live
 [`release_verification.md`](release_verification.md). This document deliberately does not restate
 them; a second copy of a gate list is a list that goes stale.
 
-The protected tag/manual pipeline, signing, and the installer are not built yet;
-[`TODO.md`](../TODO.md) carries them.
+## The two workflows
+
+| Workflow | Trigger | Produces | Credentials |
+|---|---|---|---|
+| `ci.yml` | every pull request and push to `main` | wheel, sdist, **unsigned onedir**, SBOM, manifest | none, and it references no secrets |
+| `release.yml` | a `v*` tag, or a manual run naming an exact revision | the same artifacts plus a **draft** GitHub release | signing secrets, scoped to the `release` environment |
+
+Ordinary CI builds the onedir on purpose. That artifact is what a user runs, and its build path —
+Nuitka, data-file inclusion, the packaged smoke, the SBOM, the manifest — is exercised nowhere else,
+so a break in it would otherwise stay invisible until the next hand-run build. CI also asserts that
+the manifest it produced does **not** claim to be signed, because it has no certificate to sign with.
+
+`release.yml` runs every gate before producing a single artifact — a suite failure found after signing
+has already spent the certificate on bad bytes — then builds with `-RequireCleanRevision`, re-verifies
+the manifest, and leaves a **draft**.
+
+**Publishing is always a human action.** The workflow never publishes, and that is not merely a
+default: a GitHub `environment:` naming a target with no required reviewers grants no approval at all —
+GitHub creates it implicitly and the job proceeds. An approval gate that depends on repository settings
+being right is a protection that can silently not be there, so the last step is a person opening the
+draft, reading the embedded manifest, and pressing Publish.
+
+Configure required reviewers on the `release` environment before any signed release. Until signing
+exists the job cannot use credentials anyway, so the setting is currently belt-and-braces.
+
+## Signing
+
+Nothing is signed yet, and the manifest says so rather than staying quiet about it. The contract a
+signing step has to satisfy already exists and is tested:
+
+- sign the **staged** AutoCAD DLL, never the checked-in one. Signing changes bytes, and the
+  checked-in DLL must keep matching the source provenance manifest that `verify_autocad_artifact.py`
+  enforces;
+- record the signed hash as its own fact. `components.autocad_plugin.sha256` is the development hash
+  and `artifacts.autocad_plugin.sha256` is what shipped; they are equal only while unsigned;
+- write a signature report — subject, issuer, thumbprint, timestamp authority, and the verification
+  verdict per artifact — and pass it to `build_release_manifest.py --signature-report`. A report whose
+  own verdict is negative, one that omits a signable artifact, or one naming something that is not an
+  Authenticode target is refused;
+- expect `verify_release_manifest.py` to fail if an artifact was signed *after* its hash was recorded.
+  That is intended: signing is a modification, and the signed bytes must be hashed as their own fact.
+
+Three things block it, and `release.yml` fails closed on a final version rather than work around any
+of them:
+
+1. **No code-signing certificate.** Nothing else can proceed without one.
+2. **The build has no signing stage.** `build_release.ps1` runs compile → archive → manifest, with no
+   point between compiling and archiving at which signed bytes could be produced. A signed release
+   needs that restructuring so the archive is built from signed binaries.
+3. **No installer exists**, so the installer signing and verification steps have nothing to act on.
+
+[`TODO.md`](../TODO.md) carries all three.

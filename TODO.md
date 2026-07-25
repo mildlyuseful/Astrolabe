@@ -78,7 +78,18 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
   a security mailbox will be added and `TRADEMARKS.md` says a permission contact will be listed;
   both must become real addresses or stop promising one.
 - Authenticode-sign the daemon, eventual installer/updater, and bundled AutoCAD DLL with one
-  timestamped publisher identity. Publish the source revision and whole-artifact checksum.
+  timestamped publisher identity. Publish the source revision and whole-artifact checksum. The
+  manifest contract for this already exists and is tested — a signature report carrying subject,
+  issuer, thumbprint, timestamp authority, and verification verdict per artifact, with the signed hash
+  recorded separately from the development one — so what is missing is the certificate itself plus the
+  two items below. `.github/workflows/release.yml` fails closed on a final version until then.
+- Give `build_release.ps1` a signing stage. It runs compile → archive → manifest, so there is no point
+  between compiling and archiving at which signed bytes could exist; the plan's release order requires
+  the archive to be created from the signed staged tree. Sign the staged AutoCAD DLL, never the
+  checked-in one, or `verify_autocad_artifact.py` will correctly reject it.
+- Configure required reviewers on the `release` GitHub environment before any signed release. A
+  GitHub environment with no reviewers grants no approval — the job just proceeds — so the workflow
+  currently relies on only ever creating a draft, and publishing being a manual action, for that gate.
 - Verify SmartScreen, Defender and third-party antivirus, Windows Firewall, UAC, host trust prompts,
   and Onshape certificate behavior against the exact signed artifact.
 - Test every uninstall/reversal path listed in `docs/security.md`.
