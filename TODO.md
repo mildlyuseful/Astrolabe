@@ -222,9 +222,17 @@ open epic and acceptance gates only.
   `acad_plugin.log`, so it is the only add-on that cannot probe both roots. Give it the same
   current-then-previous probe the source payloads use; that is what allows the mirror in
   `paths.bridge_publication_paths` to be dropped.
-- Make the `firmware` CI job compile. It was added with the P0 merge and has never once executed —
-  the workflow file was invalid until 2026-07-25, so twelve runs were rejected before any job started.
-  On its first real run the SuperMini target failed inside the *board core*, not our sketch:
+- Establish why `push`-event workflow runs produced zero jobs between the P0 merge and 2026-07-25, or
+  confirm it is fixed. Every push run in that window failed in 0s having created no job, including two
+  pushes to `main`, so the gates genuinely stopped running there. `pull_request` runs on the *identical*
+  workflow file executed all three jobs normally, which is why the cause is not established: moving the
+  firmware job's `${{ runner.temp }}` out of a job-level `env` correlates with push runs working again,
+  but that construct demonstrably resolved fine in a pre-fix pull_request run, so it may not have been
+  the cause. The job-level restriction is real in GitHub's documented context availability, so the
+  change stands either way — but the mechanism is unproven and the first post-fix push to `main` is the
+  only evidence. Watch the next few pushes to `main` before treating this as closed.
+- Make the `firmware` CI job compile. Added with the P0 merge, it first executed on 2026-07-25.
+  The SuperMini target failed inside the *board core*, not our sketch:
   `nRFMicro-like-Boards:nrf52@1.0.0`'s bundled `Bluefruit52Lib/src/bluefruit.cpp` references
   `LED_BLUE`, which that core's `supermini` variant does not define. `firmware/PMW3610` itself only
   ever uses `LED_BUILTIN`. Deliberately not worked around here: defining a pin the core omits means
