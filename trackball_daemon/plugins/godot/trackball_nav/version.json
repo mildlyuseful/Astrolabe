@@ -1,4 +1,4 @@
 {
-  "version": "0.1.12",
-  "_comment": "Kept in sync with plugin.cfg / ADDIN_VERSION. 0.1.12: independent orbit/zoom holds."
+  "version": "0.1.13",
+  "_comment": "Kept in sync with plugin.cfg / ADDIN_VERSION. 0.1.13: dual-probe the current and previous daemon configuration roots."
 }

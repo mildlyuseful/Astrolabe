@@ -28,13 +28,17 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 - Exercise the exact release wheel and onedir GUI on a clean Windows account without Python or a
   source checkout.
 - Write release notes before publishing an alpha.
-- Migrate the legacy on-disk identity to the frozen product identity in `trackball_daemon/product.py`.
-  The `%APPDATA%\TrackballDaemon` configuration directory, the `TrackballDaemon` HKCU Run value, and
-  the `Local\TrackballDaemon.Controller.v1` mutex are still what is written on disk. Moving them
-  needs a staged, validated configuration copy that keeps the legacy directory for rollback, a Run
-  value that is not left registered under both names, a mutex change that cannot let an old and a
-  new build own the controller at once, and host add-ons that still find a newer daemon after the
-  move.
+- Verify the on-disk identity migration on a machine that really ran an earlier build. Automated
+  tests cover the copy, the verification, the rollback guarantees, the Run-value carry-over, and the
+  add-on probe order, but not a real upgrade: confirm that settings, profiles, and an
+  already-trusted Onshape certificate survive, that `%APPDATA%\TrackballDaemon` is left untouched,
+  that Start at login still fires exactly once, and that each host add-on installed by the earlier
+  build still connects.
+- Retire the legacy configuration root once no supported upgrade path starts from it. Until then
+  `paths.bridge_publication_paths` mirrors `bridge.json` there, the shipped add-on payloads probe
+  it, and the preserved directory is the documented rollback copy. Removing it means dropping the
+  mirror, the payload fallbacks, and the migration itself — and it cannot happen before the bundled
+  AutoCAD DLL is rebuilt, since that plugin can read nowhere else.
 - Rename the onedir tree the release ZIP contains. Nuitka names it after the entry script, so
   `Astrolabe-<version>-windows-x64.zip` currently unpacks to a folder called `release_entry.dist`.
   The archive, the executable, and the installer are already named for the product; this last
@@ -188,6 +192,11 @@ open epic and acceptance gates only.
   rebuilt for a real change. Editing those sources marks the shipped DLL stale against its
   provenance manifest, so `licensing.json` carries their Apache-2.0 disposition instead; remove that
   exemption once the headers land.
+- Re-point the bundled AutoCAD plugin at the current configuration root in that same rebuild.
+  `BrokerConfig.cs` and `Plugin.cs` compile `%APPDATA%\TrackballDaemon` in for `bridge.json` and
+  `acad_plugin.log`, so it is the only add-on that cannot probe both roots. Give it the same
+  current-then-previous probe the source payloads use; that is what allows the mirror in
+  `paths.bridge_publication_paths` to be dropped.
 - Enforce Developer Certificate of Origin sign-off in CI. `CONTRIBUTING.md` requires a
   `Signed-off-by` trailer on new commits, nothing checks it, and the history that predates the
   policy carries no trailers, so the gate needs a start-point rule.

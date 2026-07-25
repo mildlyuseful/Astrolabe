@@ -127,10 +127,15 @@ necessarily incompatible, while a known-unsupported version is called out separa
 
 ## Controls and configuration
 
-All persistent user configuration lives in `%APPDATA%\TrackballDaemon\config.json`; transient mode,
+All persistent user configuration lives in `%APPDATA%\Mildly Useful\Astrolabe\config.json`; transient mode,
 pressed-control, focus, and gesture state lives only in the daemon's `RuntimeStore`. Settings changes
 apply live except for BLE device identity, which applies on reconnect, and host add-on code, which
 applies when that host reloads it.
+
+If an earlier build left a `%APPDATA%\TrackballDaemon` directory, its contents are copied to the
+current location once, verified, and then left where they are: the old directory is never modified,
+so reverting to an earlier build only means deleting the new one. Old log files stay behind rather
+than being carried across.
 
 ### Pointer and 3D modes
 
@@ -179,7 +184,7 @@ restore three-axis orbit without overwriting the user's choice.
 - Open **3D Apps** and inspect the runtime-health detail before running the listed host health
   check. A connected row shows the loaded integration version; degraded and failed rows retain the
   transport or protocol error that needs attention.
-- Check `%APPDATA%\TrackballDaemon\daemon.log`; host-specific log paths are listed in each app's
+- Check `%APPDATA%\Mildly Useful\Astrolabe\daemon.log`; host-specific log paths are listed in each app's
   Instructions panel and maintainer guide.
 - Lower the app's **Viewport refresh rate** if navigation queues or stutters.
 - Restart the host after an add-on update. AutoCAD may require closing the host before a locked DLL

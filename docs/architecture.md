@@ -62,8 +62,25 @@ single-instance mutex, configuration directory, and artifact names all resolve t
 release build asks it for the archive name rather than composing one. Values under its *frozen*
 heading cannot change once a signed installer has written them to a real machine: a different
 upgrade identifier makes the next release install beside the old one instead of replacing it.
-Values under its *legacy* heading are the identity currently written on disk under the project's
-original name; they stay authoritative until a migration carries existing users across.
+Values under its *legacy* heading are the identity earlier builds wrote under the project's original
+name. Nothing is written there now, but a machine that ran an earlier build still holds it, so those
+values remain recognized rather than removed.
+
+[`../trackball_daemon/paths.py`](../trackball_daemon/paths.py) resolves the configuration root from
+that authority and owns the one-time move off the legacy directory. Its rules follow from the
+directory possibly being the only copy of a user's bindings and of the Onshape certificate they have
+already trusted: an existing new root always wins and is never re-derived, a copy is verified in a
+staging directory and moved into place with a single rename so the new root cannot exist in a partial
+state, the legacy directory is only ever read and is left in place as the rollback copy, and any
+failure keeps using the legacy directory rather than overwriting either location. Rotating logs stay
+behind; they are the only files another process may append to mid-copy, and the preserved directory
+keeps them readable.
+
+Two consumers cannot follow that move. The bundled AutoCAD plugin compiles the legacy discovery path
+into a DLL whose provenance manifest pins the shipped binary, and any host add-on an earlier build
+installed knows only the legacy root. The daemon therefore keeps publishing `bridge.json` to the
+legacy root whenever either could be present, and every add-on payload this project ships as source
+probes the current root and then the legacy one.
 
 The distribution name and the import package are deliberately different — `astrolabe-daemon` and
 `trackball_daemon`. Renaming the import namespace for branding would break every existing import

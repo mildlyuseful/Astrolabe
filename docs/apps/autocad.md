@@ -43,6 +43,13 @@ The plugin rereads `%APPDATA%\TrackballDaemon\bridge.json` on every reconnect at
 numeric `port` in `1..65535`; missing, malformed, or invalid discovery data falls back to `47900`.
 The broker host is fixed to `127.0.0.1`.
 
+That path is deliberately the *previous* configuration root. The daemon moved to
+`%APPDATA%\Mildly Useful\Astrolabe`, and every add-on this project ships as source now probes both,
+but this one is a compiled DLL whose provenance manifest pins the shipped binary — re-pointing it
+means rebuilding it. So the daemon keeps publishing `bridge.json` to the old root whenever a staged
+plugin or an earlier build's directory is present, and the plugin's own
+`%APPDATA%\TrackballDaemon\acad_plugin.log` stays there too. `TODO.md` carries the rebuild.
+
 The socket thread never touches AutoCAD APIs. It parses target-isolated broker frames and accumulates
 motion. A WinForms timer created on AutoCAD's UI thread drains that state, applies the resolved
 profile, and owns the complete GraphicsSystem gesture lifecycle.

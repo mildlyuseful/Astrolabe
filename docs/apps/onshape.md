@@ -238,7 +238,7 @@ does not manufacture a transition, and the straight-up/down singularity is skipp
 
 - We mint a **unique self-signed cert** at setup (`ensure_cert`, via `cryptography` else the
   `openssl` CLI) with `CN=127.51.68.120` and a mandatory **`subjectAltName = IP:127.51.68.120`**,
-  stored at `%APPDATA%\TrackballDaemon\onshape_cert.pem` / `onshape_key.pem`. The WSS server loads
+  stored at `%APPDATA%\Mildly Useful\Astrolabe\onshape_cert.pem` / `onshape_key.pem`. The WSS server loads
   them with stdlib `ssl`. **Generating the cert touches no trust store** (just our config dir).
 - **Trusting it is per-browser (see §8.9):**
   - Chrome/Edge use the **Windows cert store** → `certutil -user -addstore Root "<cert>"` (per-user,
@@ -410,7 +410,7 @@ certificate paths use generated defaults. Under-cursor orbit needs the userscrip
 - **Restarting with environment variables:** use tray **Quit** first so providers, sockets, and held
   controls shut down cleanly, then relaunch from the repository with the variable set. Forced
   termination is recovery-only: identify the exact PID and verify its executable and complete command
-  line before stopping it. Logs go to `%APPDATA%\TrackballDaemon\daemon.log`.
+  line before stopping it. Logs go to `%APPDATA%\Mildly Useful\Astrolabe\daemon.log`.
 - **What a healthy session looks like in the log:** `onshape: created 3dcontroller for client
   'Onshape' <client-version>` → `onshape: client subscribed` → `onshape: focus -> True` (with
   `TB_ONSHAPE_DEBUG=1`) → on first successful motion, `onshape: orbit reached the view.affine camera

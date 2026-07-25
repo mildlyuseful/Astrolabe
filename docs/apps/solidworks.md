@@ -178,7 +178,7 @@ Useful diagnostics:
 - a connected state with no motion usually means the wrong ROT instance, no active document, or failed
   foreground routing;
 - operation failures are logged once per orbit/pan/zoom/redraw category; and
-- `%APPDATA%\TrackballDaemon\daemon.log` is the daemon-side evidence source.
+- `%APPDATA%\Mildly Useful\Astrolabe\daemon.log` is the daemon-side evidence source.
 
 Automated tests mock the COM boundary and cover camera operations, pivots, raycast typing and
 selection restoration, cursor-transform inversion, hold lifetimes, horizon leveling, attach/drop, and

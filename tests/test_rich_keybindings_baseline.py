@@ -113,10 +113,8 @@ def test_scheme_inheritance_uses_only_the_explicit_default_sentinel():
     }
 
 
-def test_malformed_json_falls_back_without_overwriting_source(isolated_config):
-    directory = isolated_config / "TrackballDaemon"
-    directory.mkdir(parents=True, exist_ok=True)
-    path = directory / "config.json"
+def test_malformed_json_falls_back_without_overwriting_source(config_dir):
+    path = config_dir / "config.json"
     malformed = '{"version": 8, "general": '
     path.write_text(malformed, encoding="utf-8")
 

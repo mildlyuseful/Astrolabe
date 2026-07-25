@@ -8,7 +8,7 @@ existing DLL blocked by a Windows sharing/lock violation is reported as a staged
 """
 from pathlib import Path
 
-from trackball_daemon import integrations
+from trackball_daemon import integrations, paths
 from trackball_daemon.config import Config
 
 
@@ -34,6 +34,9 @@ def test_install_copies_plugin_and_manifest(isolated_config, monkeypatch):
     assert ac["enabled"] is True and ac["installed"] is True
     assert ac["addin_version"] == bundled
     assert "TBNAV" in msg
+    # Staging the plugin is what makes the legacy discovery path live, and the NETLOAD that follows
+    # setup reads it immediately -- a non-default bridge port must not need a daemon restart.
+    assert (paths.legacy_config_dir() / paths.BRIDGE_FILENAME).is_file()
 
 
 def test_locked_dll_stages_the_update(isolated_config, monkeypatch):
@@ -56,6 +59,9 @@ def test_locked_dll_stages_the_update(isolated_config, monkeypatch):
     assert "STAGED" in msg and "next time" in msg.lower()
     assert integrations.installed_addin_version("autocad") == "0.0.1"
     assert cfg.snapshot().app_operational["autocad"]["installed"] is True
+    # Scoped to AutoCAD: an unscoped auto_update walks real host add-on directories on the machine
+    # running the tests, so its full result is not this test's business.
+    monkeypatch.setattr(integrations, "_ADDINS", {"autocad": integrations._ADDINS["autocad"]})
     assert integrations.auto_update(cfg) == []       # do not claim the locked runtime copy changed
 
 

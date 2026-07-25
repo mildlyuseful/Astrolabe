@@ -19,9 +19,11 @@ import time
 # Redirect APPDATA so bridge.json + the add-on log land in a temp dir, not the real user dir.
 _tmp = tempfile.mkdtemp(prefix="tbnav_probe_")
 os.environ["APPDATA"] = _tmp
-os.makedirs(os.path.join(_tmp, "TrackballDaemon"), exist_ok=True)
+# The add-on resolves its own root, so build the discovery file where the daemon would write it.
+_CONFIG_ROOT = os.path.join(_tmp, "Mildly Useful", "Astrolabe")
+os.makedirs(_CONFIG_ROOT, exist_ok=True)
 _PORT = 47913
-with open(os.path.join(_tmp, "TrackballDaemon", "bridge.json"), "w") as f:
+with open(os.path.join(_CONFIG_ROOT, "bridge.json"), "w") as f:
     json.dump({"port": _PORT}, f)
 
 _HERE = os.path.dirname(os.path.abspath(__file__))

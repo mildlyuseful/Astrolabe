@@ -4,7 +4,7 @@
 
 extends EditorPlugin
 
-const ADDIN_VERSION := "0.1.12"
+const ADDIN_VERSION := "0.1.13"
 const DEFAULT_PORT := 47900
 const PIVOT_HOLD_IDLE := 0.5
 const OBJ_CACHE_SEC := 0.5
@@ -66,12 +66,28 @@ func _process(_delta: float) -> void:
 		idle = 0.0
 
 
-func _bridge_port() -> int:
+# The daemon's configuration root, then the root earlier daemon builds wrote. Probing both is what
+# lets this add-on and the daemon be updated independently: whichever of the two is older, they
+# still meet at the same discovery file. Prefers a file that already exists, then the first root
+# that exists, then the current root. Keep in step with trackball_daemon/product.py.
+func _config_file(name: String) -> String:
 	var appdata := OS.get_environment("APPDATA")
 	if appdata.is_empty():
-		return DEFAULT_PORT
-	var path := appdata.path_join("TrackballDaemon").path_join("bridge.json")
-	if not FileAccess.file_exists(path):
+		return ""
+	var roots := [appdata.path_join("Mildly Useful").path_join("Astrolabe"),
+			appdata.path_join("TrackballDaemon")]
+	for root in roots:
+		if FileAccess.file_exists(root.path_join(name)):
+			return root.path_join(name)
+	for root in roots:
+		if DirAccess.dir_exists_absolute(root):
+			return root.path_join(name)
+	return roots[0].path_join(name)
+
+
+func _bridge_port() -> int:
+	var path := _config_file("bridge.json")
+	if path.is_empty() or not FileAccess.file_exists(path):
 		return DEFAULT_PORT
 	var f := FileAccess.open(path, FileAccess.READ)
 	if f == null:
@@ -597,12 +613,10 @@ func _vec2(v) -> Vector2:
 
 
 func _log(msg: String) -> void:
-	var appdata := OS.get_environment("APPDATA")
-	if appdata.is_empty():
+	var path := _config_file("godot_addin.log")
+	if path.is_empty():
 		return
-	var dir := appdata.path_join("TrackballDaemon")
-	DirAccess.make_dir_recursive_absolute(dir)
-	var path := dir.path_join("godot_addin.log")
+	DirAccess.make_dir_recursive_absolute(path.get_base_dir())
 	var f := FileAccess.open(path, FileAccess.READ_WRITE)
 	if f == null:
 		f = FileAccess.open(path, FileAccess.WRITE)

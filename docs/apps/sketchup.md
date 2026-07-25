@@ -49,10 +49,10 @@ The hello is:
 {"type":"hello","app":"sketchup","version":"<add-in>","host":"<SketchUp>","pid":1234}
 ```
 
-Every reconnect attempt reads `%APPDATA%\TrackballDaemon\bridge.json`, falling back to `47900` if
+Every reconnect attempt reads `%APPDATA%\Mildly Useful\Astrolabe\bridge.json`, falling back to `47900` if
 it is missing or unreadable. The host remains fixed to `127.0.0.1`. Socket errors close the client
 and retry after 1.5 seconds. Diagnostics go to
-`%APPDATA%\TrackballDaemon\sketchup_addin.log`.
+`%APPDATA%\Mildly Useful\Astrolabe\sketchup_addin.log`.
 
 ## 3. Verified camera model
 

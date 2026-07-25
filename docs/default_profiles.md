@@ -17,7 +17,7 @@ Avoid the unqualified word “default” when **System value**, **Global value**
 - `trackball_daemon/default_profiles.json` is frozen compatibility data for exact v8-to-v9 migration.
   Its `0`, `"default"`, null/missing, and `general.buttons` conventions are historical input to the
   migration boundary. Do not use it for new defaults.
-- `%APPDATA%/TrackballDaemon/config.json` stores sparse per-user state. The settings UI edits this
+- `%APPDATA%/Mildly Useful/Astrolabe/config.json` stores sparse per-user state. The settings UI edits this
   layer through typed transactions; it does not mutate packaged data.
 - `SYSTEM_DEFAULTS` is the validated immutable in-memory view. Accessors return detached values so a
   config transaction cannot mutate the developer-owned layer.
@@ -110,7 +110,7 @@ Detailed version-by-version execution history belongs under `archive/`, not in t
 ### Host alignment
 
 1. Stop the daemon and edit `trackball_daemon/host_profiles.json` in the source tree. Do not calibrate
-   by changing `%APPDATA%/TrackballDaemon/config.json` or an installed host copy.
+   by changing `%APPDATA%/Mildly Useful/Astrolabe/config.json` or an installed host copy.
 2. Flip an intrinsic direction with `orbit_sign`, `pan_sign`, or `zoom_sign`. Tune magnitude with the
    positive `orbit_scale`, `pan_scale`, `zoom_scale`, or `move_scale` value.
 3. For a mode-specific inside/out correction in a rich integration, add or remove a `mode.action`

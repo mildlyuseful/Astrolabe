@@ -366,7 +366,7 @@ supported way to distinguish routing, channel, and viewport failures.
 
 ## 12. Diagnostics & known limitations
 
-- **Log:** the add-on writes `%APPDATA%\TrackballDaemon\blender_addin.log` (rate-limited). Key lines:
+- **Log:** the add-on writes `%APPDATA%\Mildly Useful\Astrolabe\blender_addin.log` (rate-limited). Key lines:
   `scheme: nav=…` (what mode/options the add-on received), `rx orbit/pan/zoom …` (which channel is
   arriving — distinguishes daemon/Shift issues from add-on issues), `applied persp=…->… rotD=… locD=…`
   (did the view actually change, and where). The daemon log shows `scheme -> blender: … blender_nav=…`.

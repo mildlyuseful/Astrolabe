@@ -29,6 +29,9 @@ from types import MappingProxyType
 from typing import Callable, Optional
 
 from .app_registry import APP_SPECS_BY_ID, AppSpec
+from .paths import publish_bridge_port, user_config_dir
+from .product import CONFIG_DIRECTORY_DISPLAY as _CONFIG_DIR
+from .product import LEGACY_CONFIG_DIRECTORY_DISPLAY as _LEGACY_CONFIG_DIR
 
 
 _PAYLOAD_INSTALL_LOCK = threading.RLock()
@@ -536,7 +539,7 @@ def setup_solidworks(appdef: "AppDef", cfg) -> tuple[bool, str]:
 
 # --- AutoCAD: bundled NETLOAD plugin (sole transport) + COM plugin loader --------------------
 def _acad_runtime_plugin_dir():
-    """Where the plugin runs from (%APPDATA%\\TrackballDaemon\\acad_plugin) -- single source of
+    """Where the plugin runs from (the config root's acad_plugin folder) -- single source of
     truth lives next to the NETLOAD logic in autocad_driver."""
     from . import autocad_driver
     return autocad_driver._runtime_plugin_dir()
@@ -601,6 +604,13 @@ def install_autocad(appdef: "AppDef", cfg) -> tuple[bool, str]:
     copy_status, copy_detail = _copy_acad_plugin()
     if copy_status == "error":
         return False, copy_detail
+    # Staging the plugin is what makes the legacy discovery path a live requirement on this
+    # machine, and the DLL reads it on the NETLOAD that follows this setup -- not at the next
+    # daemon start. Republish now, or a non-default bridge port would not reach it until a restart.
+    try:
+        publish_bridge_port(cfg.snapshot().bridge_port)
+    except OSError:
+        pass                                  # the daemon already published at start; not fatal
     a = _operational_state(cfg, appdef.key)
     a["installed"] = True
     a["enabled"] = True
@@ -1135,12 +1145,17 @@ def _unity_project_candidates() -> list:
     return out
 
 
+def _unity_staging_dir() -> Path:
+    """Where the UPM package waits when Set up found no project to copy it into."""
+    return user_config_dir() / "unity" / "com.astrolabe.trackball-nav"
+
+
 def unity_plugin_dir() -> Path:
-    """Primary install dir for version reads: first project Packages/…, else APPDATA fallback."""
+    """Primary install dir for version reads: first project Packages/…, else the staging copy."""
     projects = _unity_project_candidates()
     if projects:
         return Path(projects[0]) / "Packages" / "com.astrolabe.trackball-nav"
-    return Path(os.environ.get("APPDATA", "")) / "TrackballDaemon" / "unity" / "com.astrolabe.trackball-nav"
+    return _unity_staging_dir()
 
 
 def install_unity(appdef: "AppDef", cfg) -> tuple[bool, str]:
@@ -1156,8 +1171,8 @@ def install_unity(appdef: "AppDef", cfg) -> tuple[bool, str]:
     a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     if not projects:
-        # Fallback: stage under APPDATA and ask the user to open a project + Set up again.
-        dest = Path(os.environ.get("APPDATA", "")) / "TrackballDaemon" / "unity" / "com.astrolabe.trackball-nav"
+        # Fallback: stage under the config root and ask the user to open a project + Set up again.
+        dest = _unity_staging_dir()
         try:
             _install_payloads_transactionally(((src, dest),))
         except OSError as e:
@@ -1342,11 +1357,16 @@ def _godot_enable_plugin(project_godot: Path) -> None:
     project_godot.write_text(text, encoding="utf-8")
 
 
+def _godot_staging_dir() -> Path:
+    """Where the EditorPlugin waits when Set up found no project to copy it into."""
+    return user_config_dir() / "godot" / "trackball_nav"
+
+
 def godot_plugin_dir() -> Path:
     projects = _godot_project_candidates()
     if projects:
         return Path(projects[0]) / "addons" / "trackball_nav"
-    return Path(os.environ.get("APPDATA", "")) / "TrackballDaemon" / "godot" / "trackball_nav"
+    return _godot_staging_dir()
 
 
 def install_godot(appdef: "AppDef", cfg) -> tuple[bool, str]:
@@ -1358,7 +1378,7 @@ def install_godot(appdef: "AppDef", cfg) -> tuple[bool, str]:
     a = _operational_state(cfg, appdef.key)
     was_installed = a.get("installed", False)
     if not projects:
-        dest = Path(os.environ.get("APPDATA", "")) / "TrackballDaemon" / "godot" / "trackball_nav"
+        dest = _godot_staging_dir()
         try:
             _install_payloads_transactionally(((src, dest),))
         except OSError as e:
@@ -1594,7 +1614,7 @@ _APP_UX = {
                         "trackball_nav, then enable Trackball Nav in Preferences > Add-ons. "
                         "No administrator access is required."),
         health_check=("Restart Blender. The row should show connected while Blender is focused; "
-                      "details are in %APPDATA%\\TrackballDaemon\\blender_addin.log."),
+                      f"details are in {_CONFIG_DIR}\\blender_addin.log."),
         security_notes=("Copies unsigned Python source only into Blender's current-user folders. "
                         "The optional startup shim runs that source at Blender launch; the UI asks "
                         "separately before installing it. No elevation or external listener."),
@@ -1607,7 +1627,7 @@ _APP_UX = {
                         "%APPDATA%\\FreeCAD\\v<major>-<minor>\\Mod\\TrackballNav (FreeCAD 1.x), "
                         "then restart FreeCAD. Use %APPDATA%\\FreeCAD\\Mod for older layouts."),
         health_check=("Open a 3D view and focus FreeCAD; the row should show connected. Check "
-                      "%APPDATA%\\TrackballDaemon\\freecad_addin.log if it does not."),
+                      f"{_CONFIG_DIR}\\freecad_addin.log if it does not."),
         security_notes=("Copies unsigned Python into FreeCAD's current-user Mod folder, where "
                         "FreeCAD loads it at startup. No elevation, registry write, or external port."),
     ),
@@ -1619,7 +1639,7 @@ _APP_UX = {
                         "trackball_nav folder to %APPDATA%\\SketchUp\\SketchUp <year>\\SketchUp\\"
                         "Plugins, then restart SketchUp. SketchUp for Web is not supported."),
         health_check=("Extension Manager should list Trackball Nav; focus a model and look for "
-                      "connected in this row or inspect %APPDATA%\\TrackballDaemon\\sketchup_addin.log."),
+                      f"connected in this row or inspect {_CONFIG_DIR}\\sketchup_addin.log."),
         security_notes=("Copies an unsigned Ruby extension into SketchUp's current-user Plugins "
                         "folder. SketchUp executes it at startup. No elevation or external listener."),
     ),
@@ -1632,7 +1652,7 @@ _APP_UX = {
                         "TrackballNav to <YourProject>\\Plugins\\TrackballNav. Enable Trackball Nav "
                         "and Python Editor Script Plugin in Edit > Plugins, then restart the editor."),
         health_check=("Focus a perspective level viewport; the row should show connected. Check "
-                      "%APPDATA%\\TrackballDaemon\\unreal_addin.log and the Output Log on failure."),
+                      f"{_CONFIG_DIR}\\unreal_addin.log and the Output Log on failure."),
         security_notes=("Engine-wide setup writes an unsigned Python editor plugin under Program "
                         "Files and may require UAC/elevation. Per-project installation avoids "
                         "elevation. The plugin connects only to the loopback nav broker."),
@@ -1648,9 +1668,9 @@ _APP_UX = {
                             "project's Packages folder; Unity recompiles it automatically."),
         manual_install=("Copy trackball_daemon\\plugins\\unity\\com.astrolabe.trackball-nav to "
                         "<YourProject>\\Packages\\com.astrolabe.trackball-nav. If Set up found no "
-                        "project, the same package is staged under %APPDATA%\\TrackballDaemon\\unity."),
+                        f"project, the same package is staged under {_CONFIG_DIR}\\unity."),
         health_check=("Open and focus a Scene view; the row should show connected. Check the Unity "
-                      "Console and %APPDATA%\\TrackballDaemon\\unity_addin.log."),
+                      f"Console and {_CONFIG_DIR}\\unity_addin.log."),
         security_notes=("Copies unsigned C# editor source into each detected project's Packages "
                         "folder; Unity compiles and executes it in the Editor. No elevation or "
                         "machine-wide setting change."),
@@ -1663,9 +1683,9 @@ _APP_UX = {
         manual_install=("Copy trackball_daemon\\plugins\\godot\\trackball_nav to "
                         "<YourProject>\\addons\\trackball_nav, then enable Trackball Nav under "
                         "Project > Project Settings > Plugins. A staged copy is also placed under "
-                        "%APPDATA%\\TrackballDaemon\\godot when no project is found."),
+                        f"{_CONFIG_DIR}\\godot when no project is found."),
         health_check=("Reload the project, focus a 3D editor viewport, and look for connected. "
-                      "Check %APPDATA%\\TrackballDaemon\\godot_addin.log on failure."),
+                      f"Check {_CONFIG_DIR}\\godot_addin.log on failure."),
         security_notes=("Copies unsigned GDScript into each detected project and edits that "
                         "project's project.godot to enable the plugin. No elevation or machine-wide "
                         "setting change."),
@@ -1683,7 +1703,7 @@ _APP_UX = {
                         "Options > General, add _-RunPythonScript \"<path>\\start.py\" to startup "
                         "commands, then restart Rhino."),
         health_check=("Focus a Rhino viewport and look for connected. Check "
-                      "%APPDATA%\\TrackballDaemon\\rhino_addin.log if startup failed."),
+                      f"{_CONFIG_DIR}\\rhino_addin.log if startup failed."),
         security_notes=("Copies unsigned Python into Rhino's current-user scripts folder and may "
                         "edit the current-user Rhino startup-command XML so it runs at launch. No "
                         "elevation or machine-wide registry write."),
@@ -1700,7 +1720,7 @@ _APP_UX = {
                         "%APPDATA%\\Autodesk\\Autodesk Fusion 360\\API\\AddIns\\TrackballNav, "
                         "then run it from Utilities > Add-Ins. No administrator access is required."),
         health_check=("Focus an open design and look for connected. Check "
-                      "%APPDATA%\\TrackballDaemon\\fusion_addin.log if the add-in does not handshake."),
+                      f"{_CONFIG_DIR}\\fusion_addin.log if the add-in does not handshake."),
         security_notes=("Copies unsigned Python into Fusion's current-user AddIns folder. Fusion "
                         "does not execute it until you explicitly Run it and select Run on Startup. "
                         "No elevation or machine-wide setting change."),
@@ -1715,7 +1735,7 @@ _APP_UX = {
         manual_install=("There is nothing to copy. If the prerequisite check fails, install "
                         "pywin32 into the daemon's Python environment with: pip install pywin32."),
         health_check=("Open a part or assembly and focus SOLIDWORKS; the row should show connected. "
-                      "Driver messages are recorded in %APPDATA%\\TrackballDaemon\\daemon.log."),
+                      f"Driver messages are recorded in {_CONFIG_DIR}\\daemon.log."),
         security_notes=("Uses per-user COM automation against an already-running SOLIDWORKS "
                         "instance. It does not register a COM server, install a DLL, launch "
                         "SOLIDWORKS, request elevation, or listen on an external interface."),
@@ -1729,7 +1749,7 @@ _APP_UX = {
                         "the Set up dialog or certutil -user, then install the supplied userscript "
                         "only if Under Cursor orbit is wanted. Administrator access is not required."),
         health_check=("Open and focus an Onshape document; the row should show connected after the "
-                      "browser handshake. Check %APPDATA%\\TrackballDaemon\\daemon.log."),
+                      f"browser handshake. Check {_CONFIG_DIR}\\daemon.log."),
         security_notes=("Creates a per-user self-signed leaf certificate and binds TLS only to "
                         "127.51.68.120. Trust-store installation is never automatic. The optional "
                         "Onshape-only userscript reports canvas-relative pointer coordinates; it "
@@ -1745,10 +1765,12 @@ _APP_UX = {
         setup_instructions=("Set up stages TrackballNavAcad.dll under the daemon's APPDATA folder. "
                             "The daemon adds that folder to TRUSTEDPATHS and NETLOADs it on attach."),
         manual_install=("Copy trackball_daemon\\plugins\\autocad\\TrackballNavAcad.dll and "
-                        "version.json to %APPDATA%\\TrackballDaemon\\acad_plugin. Add that folder "
+                        f"version.json to {_CONFIG_DIR}\\acad_plugin. Add that folder "
                         "to TRUSTEDPATHS and run NETLOAD on the DLL. No Program Files write is needed."),
+        # The plugin's own log is the one path this product cannot move: the compiled DLL writes it
+        # to the previous configuration root, and rebuilding it would invalidate its provenance.
         health_check=("Type TBNAV in AutoCAD or look for connected in this row. Plugin details are "
-                      "in %APPDATA%\\TrackballDaemon\\acad_plugin.log."),
+                      f"in {_LEGACY_CONFIG_DIR}\\acad_plugin.log."),
         security_notes=("Stages an unsigned .NET DLL under the current user's APPDATA, adds only "
                         "that exact folder to AutoCAD TRUSTEDPATHS, and NETLOADs it through COM. "
                         "It never launches AutoCAD, writes Program Files, or requires elevation."),

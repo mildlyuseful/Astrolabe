@@ -25,7 +25,7 @@ def _patch_unity(monkeypatch, project):
 
 def test_unity_is_a_bundled_addin():
     assert "unity" in integrations.ADDIN_KEYS
-    assert integrations.bundled_addin_version("unity") == "0.1.15"
+    assert integrations.bundled_addin_version("unity") == "0.1.16"
     assert integrations.APPS_BY_KEY["unity"].setup is integrations.install_unity
 
 
@@ -38,13 +38,13 @@ def test_install_copies_package_and_enables(isolated_config, tmp_path, monkeypat
     assert ok is True
     u = cfg.snapshot().app_operational["unity"]
     assert u["installed"] is True and u["enabled"] is True
-    assert u["addin_version"] == "0.1.15"
+    assert u["addin_version"] == "0.1.16"
     dest = proj / "Packages" / "com.astrolabe.trackball-nav"
     assert (dest / "package.json").exists()
     assert (dest / "version.json").exists()
     assert (dest / "Editor" / "TrackballNav.cs").exists()
     assert (dest / "Editor" / "TrackballNavCamera.cs").exists()
-    assert integrations.installed_addin_version("unity") == "0.1.15"
+    assert integrations.installed_addin_version("unity") == "0.1.16"
 
 
 def test_install_fails_without_project(isolated_config, monkeypatch):
@@ -83,7 +83,7 @@ def test_auto_update_recopies_on_version_bump(isolated_config, tmp_path, monkeyp
     assert integrations.update_available("unity") is True
     updated = integrations.auto_update(cfg)
     assert any(key == "unity" for key, _o, _n in updated)
-    assert integrations.installed_addin_version("unity") == "0.1.15"
+    assert integrations.installed_addin_version("unity") == "0.1.16"
 
 
 def test_hub_projects_v1_unwraps_data(tmp_path, monkeypatch):

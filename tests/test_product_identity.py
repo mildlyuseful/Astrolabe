@@ -13,9 +13,9 @@ import re
 
 import pytest
 
-from trackball_daemon import product
-from trackball_daemon.instance_lock import MUTEX_NAME
-from trackball_daemon.paths import APP_NAME
+from trackball_daemon import paths, product
+from trackball_daemon.instance_lock import MUTEX_NAMES
+from trackball_daemon.tray import _LEGACY_RUN_NAME, _RUN_NAME
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -28,6 +28,9 @@ OWNED_LITERALS = (
     product.APP_USER_MODEL_ID,
     product.INSTALLER_APP_ID,
     product.INSTALL_DIRECTORY,
+    product.CONFIG_DIRECTORY,
+    product.LEGACY_CONFIG_DIRECTORY,
+    product.SINGLE_INSTANCE_MUTEX,
     product.LEGACY_SINGLE_INSTANCE_MUTEX,
     product.STARTUP_REGISTRY_KEY,
 )
@@ -49,8 +52,22 @@ def test_identity_literals_appear_only_in_the_authority(literal):
 
 
 def test_consumers_read_their_identity_from_the_authority():
-    assert MUTEX_NAME == product.LEGACY_SINGLE_INSTANCE_MUTEX
-    assert APP_NAME == product.LEGACY_CONFIG_DIRECTORY
+    assert MUTEX_NAMES == (product.SINGLE_INSTANCE_MUTEX, product.LEGACY_SINGLE_INSTANCE_MUTEX)
+    assert (_RUN_NAME, _LEGACY_RUN_NAME) == (
+        product.STARTUP_VALUE_NAME, product.LEGACY_STARTUP_VALUE_NAME)
+
+
+@pytest.mark.parametrize("directory, resolve", [
+    (product.CONFIG_DIRECTORY, paths.canonical_config_dir),
+    (product.LEGACY_CONFIG_DIRECTORY, paths.legacy_config_dir),
+])
+def test_displayed_config_paths_are_the_ones_actually_resolved(directory, resolve):
+    """Help text and documentation name a real path; a drifted one sends users to an empty folder."""
+    components = tuple(directory.split("\\"))
+
+    assert resolve().parts[-len(components):] == components
+    assert f"%APPDATA%\\{directory}" in (
+        product.CONFIG_DIRECTORY_DISPLAY, product.LEGACY_CONFIG_DIRECTORY_DISPLAY)
 
 
 def test_installer_upgrade_identity_is_a_well_formed_frozen_guid():

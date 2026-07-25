@@ -10,13 +10,16 @@ import pytest
 
 from trackball_daemon.app_registry import APP_IDS
 from trackball_daemon.config_store import ConfigChangeEvent, ConfigStore
+from trackball_daemon.product import CONFIG_DIRECTORY
 
 
 FIXTURES = Path(__file__).with_name("fixtures")
 
 
 def _store_path(tmp_path):
-    return tmp_path / "TrackballDaemon" / "config.json"
+    """A store path shaped like the real one. ConfigStore is given it directly, so these tests
+    never resolve the config root themselves -- the shape is only here to stay recognizable."""
+    return tmp_path.joinpath(*CONFIG_DIRECTORY.split("\\")) / "config.json"
 
 
 def _load_fixture_store(tmp_path, name):

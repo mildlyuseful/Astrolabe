@@ -9,13 +9,17 @@ manifest to the per-user runtime directory, extends ``TRUSTEDPATHS``, and issues
 session. AutoCAD locks a loaded DLL, so an in-use runtime copy is a staged update for the next host
 session. After loading, the worker only monitors liveness.
 
+The DLL is the one add-on this project cannot re-point at the current configuration root: it compiles
+the legacy discovery path in, and rebuilding it to probe twice would invalidate its provenance
+manifest. `paths.bridge_publication_paths` therefore keeps publishing the broker port where it looks.
+
 Without pywin32 the loader logs once and becomes a no-op; the plugin can still be loaded manually.
 The retired COM navigation transport and its rationale live under ``archive/autocad_com_transport/``.
 """
 import threading
 from pathlib import Path
 
-from .paths import user_config_dir
+from .paths import ACAD_PLUGIN_DIRECTORY, user_config_dir
 from .service_health import ServiceHealth, ServiceHealthState
 from .util import get_logger
 
@@ -42,7 +46,7 @@ def _bundled_plugin_path():
 def _runtime_plugin_dir():
     """Where the plugin is COPIED before NETLOAD (see the module docstring for why the
     indirection exists). integrations.py imports this as the single source of truth."""
-    return user_config_dir() / "acad_plugin"
+    return user_config_dir() / ACAD_PLUGIN_DIRECTORY
 
 
 def _trusted_path_present(current, candidate):

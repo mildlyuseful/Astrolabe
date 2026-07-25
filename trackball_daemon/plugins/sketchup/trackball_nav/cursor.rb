@@ -90,9 +90,9 @@ module TrackballNav
 
       # Print the live cursor mapping to the log (for the GUI verify pass): run
       #   TrackballNav::CursorTracker.selftest
-      # in the Ruby Console, move the mouse over a face, and read %APPDATA%/TrackballDaemon/
-      # sketchup_addin.log -- confirm the reported viewport pixel matches the cursor position and
-      # that a pickray there hits what's under the mouse.
+      # in the Ruby Console, move the mouse over a face, and read the sketchup_addin.log that
+      # TrackballNav.config_file resolves -- confirm the reported viewport pixel matches the
+      # cursor position and that a pickray there hits what's under the mouse.
       def selftest(view = Sketchup.active_model.active_view)
         load_win32
         px = viewport_pixel(view)

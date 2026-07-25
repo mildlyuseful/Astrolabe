@@ -18,7 +18,7 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.15";  // keep in sync with package and version metadata
+        const string AddinVersion = "0.1.16";  // keep in sync with package and version metadata
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.5f;
         const float ObjCacheSec = 0.5f;
@@ -378,12 +378,31 @@ namespace Astrolabe.TrackballNav
             return found;
         }
 
+        // The daemon's configuration root, then the root earlier daemon builds wrote. Probing both
+        // is what lets this package and the daemon be updated independently: whichever of the two
+        // is older, they still meet at the same discovery file. Prefers a file that already exists,
+        // then the first root that exists, then the current root. Keep in step with
+        // trackball_daemon/product.py.
+        static string ConfigFile(string name)
+        {
+            var appdata = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var roots = new[]
+            {
+                Path.Combine(appdata, "Mildly Useful", "Astrolabe"),
+                Path.Combine(appdata, "TrackballDaemon"),
+            };
+            foreach (var root in roots)
+                if (File.Exists(Path.Combine(root, name))) return Path.Combine(root, name);
+            foreach (var root in roots)
+                if (Directory.Exists(root)) return Path.Combine(root, name);
+            return Path.Combine(roots[0], name);
+        }
+
         static int BridgePort()
         {
             try
             {
-                var appdata = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                var path = Path.Combine(appdata, "TrackballDaemon", "bridge.json");
+                var path = ConfigFile("bridge.json");
                 if (!File.Exists(path)) return DefaultPort;
                 var json = File.ReadAllText(path);
                 var m = System.Text.RegularExpressions.Regex.Match(json, "\"port\"\\s*:\\s*(\\d+)");
@@ -1053,11 +1072,9 @@ namespace Astrolabe.TrackballNav
         {
             try
             {
-                var appdata = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                var dir = Path.Combine(appdata, "TrackballDaemon");
-                Directory.CreateDirectory(dir);
-                File.AppendAllText(Path.Combine(dir, "unity_addin.log"),
-                    DateTime.Now.ToString("HH:mm:ss ") + msg + "\n");
+                var path = ConfigFile("unity_addin.log");
+                Directory.CreateDirectory(Path.GetDirectoryName(path));
+                File.AppendAllText(path, DateTime.Now.ToString("HH:mm:ss ") + msg + "\n");
             }
             catch { /* ignore */ }
         }

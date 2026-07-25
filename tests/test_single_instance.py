@@ -1,22 +1,44 @@
 # SPDX-FileCopyrightText: 2026 Dylan Lee
 # SPDX-License-Identifier: Apache-2.0
 
-from trackball_daemon.instance_lock import ERROR_ALREADY_EXISTS, MUTEX_NAME, SingleInstanceGuard
+from trackball_daemon import product
+from trackball_daemon.instance_lock import (
+    ERROR_ALREADY_EXISTS,
+    MUTEX_NAMES,
+    SingleInstanceGuard,
+)
 
 
-def test_first_instance_holds_named_mutex_until_close():
+def _handing_out(handles, *, last_error=0):
+    """A CreateMutexW stand-in that returns the given handles in order."""
+    remaining = list(handles)
     calls = []
+
+    def create_mutex(security, owner, name):
+        calls.append((security, owner, name))
+        return remaining.pop(0)
+
+    return create_mutex, calls, (lambda: last_error)
+
+
+def test_first_instance_holds_every_name_until_close():
+    create_mutex, calls, last_error = _handing_out([101, 102])
+    closed = []
     guard = SingleInstanceGuard(
-        create_mutex=lambda security, owner, name: calls.append(
-            (security, owner, name)) or 101,
-        close_handle=lambda handle: calls.append(("close", handle)),
-        get_last_error=lambda: 0)
+        create_mutex=create_mutex, close_handle=closed.append, get_last_error=last_error)
 
     assert guard.acquire() is True
-    assert guard.acquire() is True
-    assert calls == [(None, False, MUTEX_NAME)]
+    assert guard.acquire() is True                      # idempotent: no second round of creates
+    assert calls == [(None, False, name) for name in MUTEX_NAMES]
+    assert closed == []
     guard.close()
-    assert calls[-1] == ("close", 101)
+    assert closed == [101, 102]
+
+
+def test_both_generations_of_the_name_are_claimed():
+    """The rename may not open a window where an old and a new build cannot see each other."""
+    assert set(MUTEX_NAMES) == {
+        product.SINGLE_INSTANCE_MUTEX, product.LEGACY_SINGLE_INSTANCE_MUTEX}
 
 
 def test_second_instance_closes_duplicate_handle_and_cannot_acquire():
@@ -28,6 +50,21 @@ def test_second_instance_closes_duplicate_handle_and_cannot_acquire():
 
     assert guard.acquire() is False
     assert closed == [202]
+    assert guard.acquired is False
+
+
+def test_losing_a_later_name_gives_up_the_ones_already_held():
+    """A build that took the new name but found the old one taken must not keep holding either."""
+    errors = iter([0, ERROR_ALREADY_EXISTS])
+    create_mutex, calls, _unused = _handing_out([301, 302])
+    closed = []
+    guard = SingleInstanceGuard(
+        create_mutex=create_mutex, close_handle=closed.append,
+        get_last_error=lambda: next(errors))
+
+    assert guard.acquire() is False
+    assert len(calls) == 2
+    assert closed == [302, 301]                         # the duplicate, then what was already held
     assert guard.acquired is False
 
 

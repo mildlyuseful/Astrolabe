@@ -42,7 +42,7 @@ Open the project in the editor, then click **Set up** again so detection can see
 ### Manual install (when detection finds nothing)
 
 Set up still stages a copy at
-`%APPDATA%\TrackballDaemon\godot\trackball_nav\` and shows **Copy** buttons.
+`%APPDATA%\Mildly Useful\Astrolabe\godot\trackball_nav\` and shows **Copy** buttons.
 
 1. Copy that `trackball_nav` folder to `<YourProject>\addons\trackball_nav\`.
 2. Enable the plugin: **Project → Project Settings → Plugins → Trackball Nav**, or add
@@ -72,7 +72,7 @@ Intrinsic signs/scales arrive in `adv.host_baseline`; camera math stays neutral.
 
 ## Logs
 
-`%APPDATA%\TrackballDaemon\godot_addin.log`
+`%APPDATA%\Mildly Useful\Astrolabe\godot_addin.log`
 
 ## Reload
 

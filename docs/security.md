@@ -24,7 +24,7 @@ launch a supported 3D application. Shared ownership and lifecycle rules are defi
   Some endpoint-security products still notify whenever a process listens, even on loopback. Do not
   add a public/private-network firewall rule; the software does not need one.
 - AutoCAD may object to an unsigned managed DLL. After explicit setup, the loader adds only
-  `%APPDATA%\TrackballDaemon\acad_plugin` to AutoCAD `TRUSTEDPATHS`, then issues `NETLOAD`. It does
+  `%APPDATA%\Mildly Useful\Astrolabe\acad_plugin` to AutoCAD `TRUSTEDPATHS`, then issues `NETLOAD`. It does
   not lower `SECURELOAD`, trust a parent directory, write `Program Files`, or launch AutoCAD.
 - SketchUp installations with a restrictive extension-loading policy may warn about or block the
   unsigned Ruby extension. Prefer signing/distributing through SketchUp's supported extension
@@ -40,7 +40,8 @@ launch a supported 3D application. Shared ownership and lifecycle rules are defi
 |---|---|---|
 | BLE input | Connects to the configured Trackball BLE device. | No driver or service installed. Remove/forget the device normally. |
 | Keyboard bindings | Lazily registers the standard Windows keyboard device class through Raw Input only while an enabled compiled binding references keyboard controls. | No driver, hook, service, key suppression, or startup registration. Disable all keyboard bindings or stop the daemon to unregister it and synthesize releases. |
-| Start at login | When explicitly toggled in the tray, writes `TrackballDaemon` under the current user's Windows `Run` key. | No service or scheduled task. Toggle it off or delete the HKCU value. |
+| Start at login | When explicitly toggled in the tray, writes `Astrolabe` under the current user's Windows `Run` key. An earlier build's `TrackballDaemon` value is carried onto that name at startup and then removed, so only one registration ever fires at login. | No service or scheduled task. Toggle it off or delete the HKCU value. |
+| Configuration directory | Per-user state under `%APPDATA%\Mildly Useful\Astrolabe`. An earlier build's `%APPDATA%\TrackballDaemon` is copied there once, verified, and then left in place unmodified as the rollback copy. | Delete either directory. Deleting the new one reverts to the preserved copy. |
 | Navigation broker | TCP JSON listener on `127.0.0.1:<configured port>`. | Loopback only; stops with the daemon. No firewall rule created. |
 | Blender | Copies Python add-on and, only after a separate confirmation, an auto-enable startup shim. | Current-user Blender scripts. Delete `trackball_nav` and `trackball_nav_startup.py`. |
 | FreeCAD | Copies a Python Mod add-on. | Current-user FreeCAD Mod folder; delete `TrackballNav`. |

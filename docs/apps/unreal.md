@@ -375,7 +375,7 @@ editor session and remain tracked in [`TODO.md`](../../TODO.md).
 - **Live boundary:** install via the daemon's **Set up** (or drop the
   plugin into a project's `Plugins/`), enable it in *Edit → Plugins* + restart, run the daemon, open a
   level, switch to 3D mode, focus the editor, **click the level viewport**, set Orbit pivot =
-  Under Cursor, and use the trackball. Lean on `%APPDATA%\TrackballDaemon\unreal_addin.log`
+  Under Cursor, and use the trackball. Lean on `%APPDATA%\Mildly Useful\Astrolabe\unreal_addin.log`
   (`start:` / `scheme:` / `rx orbit|pan|zoom` / `screen-center-pivot` / `cursor-pivot:` / `applied`).
   **Sign/scale calibration requires a real trackball.** Tune intrinsic suite alignment in
   `host_profiles.json`; use per-app inversion/gain only for user preferences. Keep add-on camera math
@@ -385,7 +385,7 @@ editor session and remain tracked in [`TODO.md`](../../TODO.md).
 
 ## 11. Diagnostics & known limitations
 
-- **Log:** `%APPDATA%\TrackballDaemon\unreal_addin.log` (rate-limited). Key lines: `start:` (loaded +
+- **Log:** `%APPDATA%\Mildly Useful\Astrolabe\unreal_addin.log` (rate-limited). Key lines: `start:` (loaded +
   engine version), `scheme:` (op/os/zm received), `rx orbit|pan|zoom` (which channel arrived —
   distinguishes a daemon/Shift issue from an add-on issue), `screen-center-pivot:` / `cursor-pivot:` (surface
   hit or fallback — cursor needs viewport Slate focus), `applied` (the camera actually changed),
