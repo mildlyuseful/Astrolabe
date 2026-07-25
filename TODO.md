@@ -222,6 +222,15 @@ open epic and acceptance gates only.
   `acad_plugin.log`, so it is the only add-on that cannot probe both roots. Give it the same
   current-then-previous probe the source payloads use; that is what allows the mirror in
   `paths.bridge_publication_paths` to be dropped.
+- Make the `firmware` CI job compile. It was added with the P0 merge and has never once executed —
+  the workflow file was invalid until 2026-07-25, so twelve runs were rejected before any job started.
+  On its first real run the SuperMini target failed inside the *board core*, not our sketch:
+  `nRFMicro-like-Boards:nrf52@1.0.0`'s bundled `Bluefruit52Lib/src/bluefruit.cpp` references
+  `LED_BLUE`, which that core's `supermini` variant does not define. `firmware/PMW3610` itself only
+  ever uses `LED_BUILTIN`. Deliberately not worked around here: defining a pin the core omits means
+  inventing a value, and changing the pinned core or index commit changes what the bench-validated
+  firmware was compiled against, which is a hardware decision rather than a CI fix. The XIAO target's
+  result is unknown — the job stops at the SuperMini step.
 - Stop the Tk tests from skipping themselves on a Tk-capable machine. `tests/test_settings_ui_tk.py`
   and `tests/test_support_tiers.py` skip when `tk.Tk()` raises, which is right for headless CI but
   also swallows a real failure: creating and destroying several Tk roots in one pytest session
