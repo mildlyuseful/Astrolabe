@@ -67,8 +67,9 @@ already-supported contract.
 - Enumerate the native libraries inside a built onedir tree and give each one an attribution.
   `tools/audit_notices.py` resolves every Python distribution in the release runtime, and
   `THIRD_PARTY_NOTICES.md` records CPython, Tcl/Tk, and the Nuitka runtime from the build
-  configuration, but nothing yet walks the produced tree to confirm which native libraries the
-  embedded runtime actually carries.
+  configuration. The builder now explicitly stages the seven dynamic files the pinned CPython
+  distribution needs even when Nuitka does not discover them, but nothing yet walks the completed
+  tree to confirm every native library it actually carries and reconcile that inventory to notices.
 - Enable GitHub private vulnerability reporting at the moment the repository becomes public.
   `SECURITY.md` advertises `security/advisories/new` as the only reporting channel, and that feature
   cannot be enabled while the repository is private, so the advertised link does not resolve until

@@ -45,10 +45,13 @@ build dependencies are outside the application lock. It verifies the bundled Aut
 its source-tree and hash manifest, builds the sdist and wheel in an isolated PEP 517 environment,
 keeps dependency and Nuitka caches under `build/release`, explicitly includes the AutoCAD DLL,
 creates a Windows standalone onedir executable, normalizes its root to `Astrolabe`, and runs its
-side-effect-free packaged-resource
-smoke. The Windows build explicitly includes PyWinRT's projection package because collection
+side-effect-free packaged-resource smoke. The Windows build explicitly includes PyWinRT's projection
+package because collection
 projections used by BLE advertisement callbacks are imported dynamically and are invisible to static
-freezer analysis. The smoke imports that runtime projection, validates the AutoCAD DLL, loads
+freezer analysis. It also stages the pinned CPython build's dynamic runtime DLLs explicitly because
+not every valid interpreter distribution is recognized by Nuitka's dependency scanner. Packaged
+smoke waits for the GUI-subsystem process and checks its actual exit code; it is not an asynchronous
+launch. The smoke imports that runtime projection, validates the AutoCAD DLL, loads
 defaults, profiles, descriptors, schemas, and examples, then compiles both System profiles without
 acquiring the controller mutex, opening BLE or Raw Input, starting the tray, loading host
 integrations, or writing user config. The script creates a deterministic ZIP of the complete onedir

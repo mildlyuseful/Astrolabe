@@ -51,6 +51,20 @@ def test_release_build_pins_python_and_normalizes_the_user_visible_onedir():
     assert "unexpectedly contains non-shipping ui_demo content" in RELEASE_BUILD
 
 
+def test_release_build_explicitly_stages_the_pinned_python_native_runtime():
+    for runtime_file in (
+            "python3.dll", "vcruntime140_1.dll", "DLLs/tcl86t.dll", "DLLs/tk86t.dll",
+            "DLLs/libcrypto-3-x64.dll", "DLLs/libssl-3-x64.dll", "DLLs/libffi-8.dll"):
+        assert f'"{runtime_file}"' in RELEASE_BUILD
+    assert 'Copy-Item -LiteralPath $sourceRuntimePath' in RELEASE_BUILD
+
+
+def test_packaged_smoke_waits_for_the_gui_subsystem_process_exit_code():
+    assert 'Start-Process -FilePath $Executable -ArgumentList "--release-smoke"' in RELEASE_BUILD
+    assert "-Wait -PassThru -NoNewWindow" in RELEASE_BUILD
+    assert "$SmokeProcess.ExitCode -ne 0" in RELEASE_BUILD
+
+
 def test_release_build_signs_staged_bytes_before_archive_and_manifest():
     executable_sign = RELEASE_BUILD.index('-ArtifactKey $item[0]')
     archive = RELEASE_BUILD.index("tools/archive_release.py")

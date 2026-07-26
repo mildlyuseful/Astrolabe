@@ -200,6 +200,30 @@ try {
         throw "The release tree unexpectedly contains non-shipping ui_demo content."
     }
 
+    # Nuitka normally follows these native dependencies, but its dependency scanner does not
+    # recognize every valid CPython distribution flavor. In particular, a uv-managed standalone
+    # interpreter can otherwise produce an onedir that has _tkinter.pyd but omits Tcl/Tk and the
+    # stable-ABI/runtime DLLs it loads. Stage the pinned interpreter's known dynamic runtime
+    # dependencies explicitly, then let packaged smoke prove that the resulting tree starts.
+    $PythonBase = (& $ReleasePython -c "import sys; print(sys.base_prefix)").Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($PythonBase)) {
+        throw "Could not resolve the pinned interpreter base directory."
+    }
+    foreach ($relativeRuntimePath in @(
+            "python3.dll",
+            "vcruntime140_1.dll",
+            "DLLs/tcl86t.dll",
+            "DLLs/tk86t.dll",
+            "DLLs/libcrypto-3-x64.dll",
+            "DLLs/libssl-3-x64.dll",
+            "DLLs/libffi-8.dll")) {
+        $sourceRuntimePath = Join-Path $PythonBase $relativeRuntimePath
+        if (-not (Test-Path -LiteralPath $sourceRuntimePath -PathType Leaf)) {
+            throw "Pinned interpreter runtime file is missing: $sourceRuntimePath"
+        }
+        Copy-Item -LiteralPath $sourceRuntimePath -Destination $ReleaseDirectory -Force
+    }
+
     $SignatureReport = Join-Path $OutputRoot "signature-report.json"
     if (Test-Path -LiteralPath $SignatureReport) {
         Remove-Item -LiteralPath $SignatureReport -Force
@@ -222,9 +246,13 @@ try {
         }
     }
 
-    & $Executable --release-smoke
-    if ($LASTEXITCODE -ne 0) {
-        throw "Packaged release smoke failed with exit code $LASTEXITCODE"
+    # A Windows GUI-subsystem executable returns control to PowerShell immediately when invoked
+    # with `&`, so $LASTEXITCODE can describe an earlier command while the packaged process crashes
+    # in the background. Start-Process -Wait makes this a real release gate.
+    $SmokeProcess = Start-Process -FilePath $Executable -ArgumentList "--release-smoke" `
+        -Wait -PassThru -NoNewWindow
+    if ($SmokeProcess.ExitCode -ne 0) {
+        throw "Packaged release smoke failed with exit code $($SmokeProcess.ExitCode)"
     }
 
     $Archive = Join-Path $OutputRoot $Identity.archive_name
