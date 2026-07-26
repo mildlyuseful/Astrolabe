@@ -145,6 +145,7 @@ class TrayController:
         return pystray.Menu(
             pystray.MenuItem("Open Settings", lambda icon, item: self.app.open_settings(),
                              default=True),
+            pystray.MenuItem("Setup guide…", lambda icon, item: self.app.open_onboarding()),
             pystray.MenuItem(self._status_text, None, enabled=False),
             pystray.MenuItem(self._apps_text, None, enabled=False),
             pystray.MenuItem(self._health_text, None, enabled=False),

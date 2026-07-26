@@ -23,6 +23,7 @@ Every path currently tracked in this repository is licensed under Apache-2.0.
 | `trackball_daemon/` | The daemon, its Python package, packaged default data, schemas, examples, and the host add-on payloads copied into 3D applications |
 | `plugin_src/` | AutoCAD .NET plugin source and its navigation-math test project |
 | `firmware/` | Device firmware, including future production firmware |
+| `installer/` | Per-user Windows installer definition |
 | `tools/` | Build, release, calibration, probe, and acceptance tooling |
 | `tests/`, `conftest.py`, `cube_test.py` | Automated suite and the standalone cube verification demo |
 | `docs/`, `README.md`, `AGENTS.md`, `TODO.md`, `archive/` | Documentation, contributor routing, and retained investigation records |

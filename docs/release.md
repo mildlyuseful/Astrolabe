@@ -37,7 +37,7 @@ reads it from there.
 
 | Artifact | Notes |
 |---|---|
-| `nuitka/release_entry.dist/` | The complete onedir tree, including licences, notices, and every host add-on payload. |
+| `nuitka/Astrolabe/` | The complete onedir tree, including licences, notices, and every host add-on payload. |
 | `Astrolabe-<version>-windows-x64.zip` | Deterministic archive of that tree, plus a `.sha256` beside it. |
 | `Astrolabe-<version>-windows-x64.cdx.json` | CycloneDX SBOM generated from the locked runtime environment, not from the lock file. |
 | `Astrolabe-<version>-windows-x64.manifest.json` | The release record described below. |
@@ -45,6 +45,12 @@ reads it from there.
 
 The manifest sits *beside* the archive rather than inside it, because it records the archive's own
 hash.
+
+The staged onedir is normalized to `nuitka/Astrolabe/` before it is signed or archived, so the ZIP
+has one product-named root instead of exposing Nuitka's entry-script naming. Pass `-BuildInstaller`
+to also produce `AstrolabeSetup-<version>-windows-x64.exe` from that same staged tree. Public builds
+require the installer; internal-alpha builds may omit it or build it unsigned for private
+qualification.
 
 Pass `-RequireCleanRevision` to refuse a build whose working tree has uncommitted changes. Local
 builds omit it and the manifest records the tree as dirty instead.
@@ -149,8 +155,10 @@ exists the job cannot use credentials anyway, so the setting is currently belt-a
 
 ## Signing
 
-Nothing is signed yet, and the manifest says so rather than staying quiet about it. The contract a
-signing step has to satisfy already exists and is tested:
+No release has been signed yet because the persistent Mildly Useful certificate does not exist.
+The implementation is present and fails closed: a public-channel build requires `-Sign`, an
+installer, and a certificate thumbprint, and the protected workflow imports that identity only from
+the `release` environment. The signing contract is:
 
 - sign the **staged** AutoCAD DLL, never the checked-in one. Signing changes bytes, and the
   checked-in DLL must keep matching the source provenance manifest that `verify_autocad_artifact.py`
@@ -164,13 +172,8 @@ signing step has to satisfy already exists and is tested:
 - expect `verify_release_manifest.py` to fail if an artifact was signed *after* its hash was recorded.
   That is intended: signing is a modification, and the signed bytes must be hashed as their own fact.
 
-Three things block it, and `release.yml` fails closed on a final version rather than work around any
-of them:
-
-1. **No code-signing certificate.** Nothing else can proceed without one.
-2. **The build has no signing stage.** `build_release.ps1` runs compile → archive → manifest, with no
-   point between compiling and archiving at which signed bytes could be produced. A signed release
-   needs that restructuring so the archive is built from signed binaries.
-3. **No installer exists**, so the installer signing and verification steps have nothing to act on.
-
-[`TODO.md`](../TODO.md) carries all three.
+The builder now runs compile → normalize/stage → sign the executable and staged AutoCAD DLL →
+archive → build/sign the installer → finalize the SBOM → write and re-verify the manifest. The
+remaining blockers are operational: obtain the certificate, configure protected secrets and
+required reviewers, and qualify the exact signed artifacts. [`TODO.md`](../TODO.md) carries those
+open gates.

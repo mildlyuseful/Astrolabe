@@ -102,12 +102,17 @@ def test_distribution_and_import_names_stay_intentionally_distinct():
 def test_artifact_names_follow_the_documented_pattern():
     assert product.archive_name("0.2.0a1") == "Astrolabe-0.2.0a1-windows-x64.zip"
     assert product.installer_name("1.0.0") == "AstrolabeSetup-1.0.0-windows-x64.exe"
+    assert product.windows_file_version("0.2.0a2") == "0.2.0.2"
+    assert product.windows_file_version("1.0.0") == "1.0.0.0"
 
 
 def test_release_build_takes_artifact_naming_from_the_authority():
     build = (ROOT / "tools" / "build_release.ps1").read_text(encoding="utf-8")
+    identity = (ROOT / "tools" / "release_identity.py").read_text(encoding="utf-8")
 
-    assert "from trackball_daemon.product import archive_name" in build
+    assert "tools/release_identity.py" in build
+    assert "product.archive_name(version)" in identity
+    assert "product.installer_name(version)" in identity
     assert "Astrolabe-$Version-windows-x64.zip" not in build
 
 

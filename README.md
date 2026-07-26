@@ -10,8 +10,9 @@ three-axis controller for 3D applications.
 - Eleven integrations are included: Fusion 360, SolidWorks, AutoCAD, Onshape, Blender, FreeCAD,
   SketchUp Desktop, Unreal Engine, Unity, Godot, and Rhino.
 
-The daemon is currently pre-alpha software. It is usable from source, but packaged and signed
-end-user builds have not been released yet.
+The daemon is currently internal-alpha software. It is usable from source, and the repository can
+build private onedir and per-user installer artifacts, but signed end-user builds have not been
+released yet.
 
 ## Capabilities
 
@@ -64,15 +65,24 @@ For the optional cube verification window:
 python -m trackball_daemon --debug
 ```
 
-The daemon starts with its passive control panel and no settings window. Use the tray icon to open
-Settings, show/hide the control panel, inspect connection status, enable **Start at login**, or
-quit. Input and navigation modes are changed by the declarative bindings shown under
-**Keybindings**. Closing Settings hides it; it does not stop the daemon.
+On first run the daemon opens a setup guide for device connection, input-state inspection,
+supported-versus-experimental application review, existing integration consent/instructions,
+navigation health, and the optional **Start at login** choice. It performs no host, certificate,
+startup, or project changes without the corresponding explicit action. The guide remains available
+from the tray.
+
+Later starts show only the passive control panel. Use the tray icon to open Settings or the setup
+guide, show/hide the control panel, inspect connection status, enable **Start at login**, or quit.
+Input and navigation modes are changed by the declarative bindings shown under **Keybindings**.
+Closing Settings or the guide hides/closes that window; it does not stop the daemon.
 
 Do not pair the trackball as a Windows Bluetooth mouse while the daemon is consuming its BLE
 rotation service. With the daemon closed, the firmware's ordinary HID mouse path works normally.
 
 ## First-time setup
+
+The first-run guide walks through this sequence and can be reopened from the tray. The detailed
+manual path remains:
 
 1. Open tray → **Settings** and configure the device name or BLE address if discovery does not find
    the trackball.

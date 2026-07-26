@@ -169,6 +169,11 @@ The settings and keybinding interfaces consume `SettingsUIModel` and `BindingUIM
 not mutable config maps. Packaged System defaults and binding bases remain developer-owned; user
 edits are sparse overrides.
 
+The first-run setup guide is another passive projection over these authorities. It may select an
+existing input profile and apply the existing Start-at-login action only after the user chooses
+them. Integration setup, trust, and host changes remain behind `integrations.py` and the same
+explicit confirmation boundaries used by Settings.
+
 ### Live state
 
 Persistent configuration is not live control state.

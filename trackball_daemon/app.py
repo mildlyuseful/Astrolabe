@@ -646,7 +646,7 @@ class App:
                 start_debug_view(self.engine, self, self.stop_event)
 
             if self.first_run:
-                self.root.after(500, self.open_settings)
+                self.root.after(500, self.open_onboarding)
             self.root.after(300, self._poll)
             self.root.mainloop()
         except BaseException:
@@ -660,6 +660,11 @@ class App:
         # Safe from any thread: marshal the GUI work onto the Tk thread.
         if self.root is not None:
             self.root.after(0, self.ui.show)
+
+    def open_onboarding(self):
+        # Reopenable from the tray; all UI ownership remains on the Tk thread.
+        if self.root is not None:
+            self.root.after(0, self.ui.show_onboarding)
 
     def set_control_hud_visible(self, visible):
         """Typed persistent visibility action safe for the tray thread."""

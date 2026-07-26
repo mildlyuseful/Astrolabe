@@ -233,22 +233,11 @@ jobs:
 
       - name: Install pinned validation board cores
         env:
-          NRF_MICRO_INDEX: https://raw.githubusercontent.com/pdcook/nRFMicro-Arduino-Core/3dab6477754d9b28053fe36b06c718cde6e93d3f/package_nRFMicro_index.json
           SEEED_INDEX: https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
         run: |
           mkdir -p "$ARDUINO_DIRECTORIES_USER"
-          INDEXES="$NRF_MICRO_INDEX,$SEEED_INDEX"
-          arduino-cli core update-index --additional-urls "$INDEXES"
-          arduino-cli core install "nRFMicro-like-Boards:nrf52@1.0.0" --additional-urls "$INDEXES"
-          arduino-cli core install "Seeeduino:nrf52@1.1.12" --additional-urls "$INDEXES"
-
-      - name: Compile SuperMini PMW3610 validation firmware
-        run: |
-          arduino-cli compile \
-            --fqbn "nRFMicro-like-Boards:nrf52:supermini:softdevice=s140v6,debug=l0" \
-            --warnings all \
-            --output-dir build/firmware/PMW3610 \
-            firmware/PMW3610
+          arduino-cli core update-index --additional-urls "$SEEED_INDEX"
+          arduino-cli core install "Seeeduino:nrf52@1.1.12" --additional-urls "$SEEED_INDEX"
 
       - name: Compile XIAO PMW3389 protocol-bench firmware
         run: |

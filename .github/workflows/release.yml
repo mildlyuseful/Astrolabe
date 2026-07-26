@@ -50,7 +50,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.13.14"
 
       - name: Set up pinned uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -64,7 +64,7 @@ jobs:
           dotnet-version: "8.0.x"
 
       - name: Synchronize locked Python environment
-        run: uv sync --locked --all-extras --python 3.13
+        run: uv sync --locked --all-extras --python 3.13.14
 
       # Step 2: versions must agree before anything is built. A tag that disagrees with the package
       # version would produce an artifact whose own manifest contradicts the release it appears under.
@@ -129,7 +129,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.13.14"
 
       - name: Set up pinned uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -137,43 +137,69 @@ jobs:
           version: "0.11.28"
           enable-cache: true
 
-      # Steps 4, 5, 11, 14: the staging tree, licences and notices, the deterministic archive, the
-      # SBOM, and the pre-signing manifest. -RequireCleanRevision refuses a build whose recorded
-      # revision would not describe it.
-      - name: Build the release staging tree
+      - name: Install pinned Inno Setup
         shell: pwsh
         run: |
-          .\tools\build_release.ps1 -RequireCleanRevision
-          if ($LASTEXITCODE -ne 0) { throw "Release build failed." }
+          $Inno = (& .\tools\install_inno_setup.ps1 `
+            -DestinationDirectory (Join-Path $env:RUNNER_TEMP "astrolabe-inno")).Trim()
+          if (-not $Inno) { throw "Pinned Inno Setup installation failed." }
+          "ASTROLABE_INNO_COMPILER=$Inno" |
+            Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
-      # Steps 6 to 10, 12, 13: sign and timestamp the staged AutoCAD DLL, the executable, and the
-      # installer, then verify every expected signature.
-      #
-      # Not implemented, and deliberately not stubbed. No code-signing certificate exists, and the
-      # current build orders compile -> archive -> manifest with no staging point between compiling and
-      # archiving for signed bytes to be produced -- so signing needs that restructuring as well as a
-      # certificate. TODO.md carries both. A pre-release build is legitimately unsigned and continues;
-      # a final version stops here rather than emit an unsigned artifact under a released name.
-      - name: Sign and timestamp the staged binaries
+      - name: Import the release signing identity
+        shell: pwsh
+        env:
+          CHANNEL: ${{ needs.gates.outputs.channel }}
+          SIGNING_CERTIFICATE_BASE64: ${{ secrets.SIGNING_CERTIFICATE_BASE64 }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          if ($env:CHANNEL -ne "public") {
+            Write-Host "$env:CHANNEL is an unsigned channel; no signing identity is imported."
+            exit 0
+          }
+          if (-not $env:SIGNING_CERTIFICATE_BASE64 -or
+              -not $env:SIGNING_CERTIFICATE_PASSWORD) {
+            throw "A public release requires both protected signing-certificate secrets."
+          }
+          $Pfx = Join-Path $env:RUNNER_TEMP "astrolabe-release-signing.pfx"
+          [System.IO.File]::WriteAllBytes(
+            $Pfx, [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_BASE64))
+          $Password = ConvertTo-SecureString $env:SIGNING_CERTIFICATE_PASSWORD `
+            -AsPlainText -Force
+          $Certificate = Import-PfxCertificate -FilePath $Pfx `
+            -CertStoreLocation Cert:\CurrentUser\My -Password $Password
+          if ($Certificate) {
+            "ASTROLABE_SIGNING_THUMBPRINT=$($Certificate.Thumbprint)" |
+              Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          }
+          "ASTROLABE_SIGNING_PFX=$Pfx" |
+            Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+          if (-not $Certificate -or -not $Certificate.HasPrivateKey) {
+            throw "The release signing certificate was not imported with its private key."
+          }
+
+      # The builder owns the exact order: compile -> stage -> sign binaries -> archive -> build/sign
+      # installer -> SBOM -> manifest. Public-channel builds fail closed if any signing input or
+      # verified signature is missing.
+      - name: Build, sign, and record the release
         shell: pwsh
         env:
           CHANNEL: ${{ needs.gates.outputs.channel }}
         run: |
-          if ($env:CHANNEL -ne "public") {
-            Write-Host "$env:CHANNEL is an unsigned channel; skipping signing."
-            exit 0
+          $Python = (Get-Command python -ErrorAction Stop).Source
+          $Inno = $env:ASTROLABE_INNO_COMPILER
+          if (-not $Inno) { throw "Pinned ISCC.exe was not found after installation." }
+          $Arguments = @(
+            "-RequireCleanRevision",
+            "-BuildInstaller",
+            "-BuildPython", $Python,
+            "-InnoCompilerPath", $Inno
+          )
+          if ($env:CHANNEL -eq "public") {
+            $Arguments += "-Sign"
           }
-          throw @"
-          Authenticode signing is not implemented, so a public release cannot be produced here.
-          Required before this step can run:
-            * a code-signing certificate available to the 'release' environment;
-            * a staging point in build_release.ps1 between Nuitka and archiving, so the archive is
-              created from signed bytes (step 11 of the plan's release order);
-            * a signature report written for tools/build_release_manifest.py --signature-report,
-              recording subject, issuer, thumbprint, timestamp authority, and the verification verdict
-              per artifact.
-          Release a pre-release version instead, or complete the above.
-          "@
+          .\tools\build_release.ps1 @Arguments
+          if ($LASTEXITCODE -ne 0) { throw "Release build failed." }
 
       # Step 14: the manifest is the last thing written, and immediately re-verified. For an unsigned
       # channel build_release.ps1 has already produced and verified it; this re-checks it after every
@@ -212,7 +238,21 @@ jobs:
             build/release/*.zip.sha256
             build/release/*.cdx.json
             build/release/*.manifest.json
+            build/release/*.exe
             build/release/python/*
+
+      - name: Remove the imported signing identity
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:ASTROLABE_SIGNING_THUMBPRINT) {
+            Remove-Item -LiteralPath (
+              "Cert:\CurrentUser\My\$env:ASTROLABE_SIGNING_THUMBPRINT") -Force
+          }
+          if ($env:ASTROLABE_SIGNING_PFX -and
+              (Test-Path -LiteralPath $env:ASTROLABE_SIGNING_PFX)) {
+            Remove-Item -LiteralPath $env:ASTROLABE_SIGNING_PFX -Force
+          }
 
   draft:
     name: Create a draft release
@@ -223,6 +263,11 @@ jobs:
       contents: write
 
     steps:
+      - name: Check out the exact revision for release notes
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.revision || github.ref }}
+
       - name: Download the release artifacts
         uses: actions/download-artifact@v4
         with:
@@ -239,7 +284,9 @@ jobs:
         run: |
           set -euo pipefail
           MANIFEST="artifacts/${{ needs.stage.outputs.manifest }}"
+          RELEASE_NOTES="docs/release-notes/$VERSION.md"
           test -f "$MANIFEST" || { echo "manifest missing from artifacts" >&2; exit 1; }
+          test -f "$RELEASE_NOTES" || { echo "release notes missing: $RELEASE_NOTES" >&2; exit 1; }
           {
             echo "Channel: \`$CHANNEL\`"
             echo
@@ -247,7 +294,7 @@ jobs:
               echo "**Unsigned private artifact.** Not a released product, and not for distribution."
               echo
             fi
-            echo "Release notes have not been written; see TODO.md."
+            cat "$RELEASE_NOTES"
             echo
             echo '<details><summary>Release manifest</summary>'
             echo
@@ -257,11 +304,15 @@ jobs:
             echo
             echo '</details>'
           } > notes.md
+          PRERELEASE=()
+          if [ "$CHANNEL" != "public" ]; then
+            PRERELEASE+=(--prerelease)
+          fi
           gh release create "v$VERSION" \
             --repo "$GITHUB_REPOSITORY" \
             --title "Astrolabe $VERSION" \
             --notes-file notes.md \
             --draft \
-            --prerelease \
+            "${PRERELEASE[@]}" \
             $(find artifacts -type f ! -name '*.manifest.json' -print) "$MANIFEST"
           echo "Draft created. Publishing is a separate, human action." >> "$GITHUB_STEP_SUMMARY"

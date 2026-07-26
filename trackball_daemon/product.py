@@ -162,3 +162,10 @@ def archive_name(version):
 
 def installer_name(version):
     return INSTALLER_BASENAME.format(version=version)
+
+
+def windows_file_version(version):
+    """Return the numeric four-part version required by Windows executable metadata."""
+    release, phase, serial = parse_version(version)
+    build = serial if phase is not None else 0
+    return ".".join(str(part) for part in (*release, build))

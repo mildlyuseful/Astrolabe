@@ -4,6 +4,10 @@ This is the sole ledger for unresolved engineering, verification, parity, and re
 Current cross-component contracts live in [`docs/architecture.md`](docs/architecture.md); completed
 plans, dated evidence, and implementation history belong under [`archive/`](archive/).
 
+V1 is feature-frozen. Until the P1 production/release blockers and the V1 host claims selected from
+P2 are closed, P3-P5 work enters V1 only when it fixes a release blocker or a regression in an
+already-supported contract.
+
 ## P1 — Production and release blockers
 
 ### Production hardware
@@ -22,16 +26,21 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
   reconnect, held-input, sleep/wake, and mode-transition matrix there. The XIAO three-button bench
   validates the protocol boundary and the completed SuperMini PMW3610 loop validates the five-way
   prototype; neither qualifies the final product hardware.
+- Replace CI's `firmware/XIAO3389` protocol-bench compile with the official
+  `firmware/Astrolabe` XIAO nRF52840 target when that placeholder becomes the frozen production
+  firmware. The obsolete SuperMini compile gate was removed: its pinned third-party board core no
+  longer compiles its own `bluefruit.cpp`, and a prototype controller is not a public-V1 build
+  target. Keep the historical PMW3610 sketch and its physical evidence, but do not restore it as a
+  required release job.
 
 ### Release qualification
 
-- Exercise the exact release wheel and onedir GUI on a clean Windows account without Python or a
-  source checkout.
-- Write release notes before publishing an alpha.
-- Daily-drive the packaged `0.2.0a1` artifact and record what it finds. The process, the per
+- Exercise the exact release wheel, onedir GUI, and per-user installer on a clean Windows account
+  without Python or a source checkout.
+- Daily-drive the packaged `0.2.0a2` artifact and record what it finds. The process, the per
   observation fields, and what does not count as evidence are in
   [`docs/release.md`](docs/release.md); executed-artifact evidence belongs under
-  `archive/release-evidence/`. Nothing about this build has been observed outside a source run yet.
+  `archive/release-evidence/`. Packaged-resource smoke is not daily-driver or host evidence.
 - Establish whether the release executable can be made reproducible, or state that it cannot. Two
   builds of the identical clean tree produced different `Astrolabe.exe` bytes and therefore different
   archive hashes, while the SBOM stayed byte-identical — so the non-determinism is in Nuitka's output,
@@ -49,16 +58,6 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
   it, and the preserved directory is the documented rollback copy. Removing it means dropping the
   mirror, the payload fallbacks, and the migration itself — and it cannot happen before the bundled
   AutoCAD DLL is rebuilt, since that plugin can read nowhere else.
-- Rename the onedir tree the release ZIP contains. Nuitka names it after the entry script, so
-  `Astrolabe-<version>-windows-x64.zip` currently unpacks to a folder called `release_entry.dist`.
-  The archive, the executable, and the installer are already named for the product; this last
-  user-visible path is not.
-- Pin the interpreter that `build_release.ps1` embeds. It resolves `$BuildPython` from whatever
-  `python` is first on the operator's PATH, so the embedded runtime version is a property of the
-  build machine. An interpreter below the declared floor now fails the locked sync outright rather
-  than resolving a different dependency set, and the release manifest now records the exact embedded
-  version, so a divergence is at least visible after the fact — but it is still chosen by the
-  operator's PATH rather than declared.
 - Move to bleak 3.x. The dependency is deliberately capped at `<2` because bleak 2.0 changed GATT
   error types and 3.0 changed the scanner/client keyword surface. The transport's usage is narrow
   (`find_device_by_filter`, `BleakClient`, `start_notify`/`stop_notify`) and no documented breaking
@@ -77,24 +76,18 @@ plans, dated evidence, and implementation history belong under [`archive/`](arch
 - Replace the placeholder contact promises once the Mildly Useful domain exists. `SECURITY.md` says
   a security mailbox will be added and `TRADEMARKS.md` says a permission contact will be listed;
   both must become real addresses or stop promising one.
-- Authenticode-sign the daemon, eventual installer/updater, and bundled AutoCAD DLL with one
-  timestamped publisher identity. Publish the source revision and whole-artifact checksum. The
-  manifest contract for this already exists and is tested — a signature report carrying subject,
-  issuer, thumbprint, timestamp authority, and verification verdict per artifact, with the signed hash
-  recorded separately from the development one — so what is missing is the certificate itself plus the
-  two items below. `.github/workflows/release.yml` fails closed on a final version until then.
-- Give `build_release.ps1` a signing stage. It runs compile → archive → manifest, so there is no point
-  between compiling and archiving at which signed bytes could exist; the plan's release order requires
-  the archive to be created from the signed staged tree. Sign the staged AutoCAD DLL, never the
-  checked-in one, or `verify_autocad_artifact.py` will correctly reject it.
+- Obtain the persistent Mildly Useful Authenticode certificate used for the daemon, per-user
+  installer, and staged AutoCAD DLL. The release builder and protected workflow now implement and
+  verify the required order — compile, stage, sign binaries, archive, build/sign installer, write
+  the manifest last — and fail closed for a public version when the certificate or any verified
+  signature is absent. What remains is the real publisher identity and credential, not another
+  unsigned substitute.
 - Configure required reviewers on the `release` GitHub environment before any signed release. A
   GitHub environment with no reviewers grants no approval — the job just proceeds — so the workflow
   currently relies on only ever creating a draft, and publishing being a manual action, for that gate.
 - Verify SmartScreen, Defender and third-party antivirus, Windows Firewall, UAC, host trust prompts,
   and Onshape certificate behavior against the exact signed artifact.
 - Test every uninstall/reversal path listed in `docs/security.md`.
-- Define the first-alpha support classification and maintenance policy: supported, experimental, or
-  unsupported host/version combinations.
 - Qualify the packaged Raw Input path with a non-US AltGr layout and across a Remote Desktop
   connect/disconnect boundary.
 
@@ -104,6 +97,10 @@ Automated math, migration, routing, metadata, and installer tests do not establi
 behavior. Record the host version, projection mode, exact artifact, result, and any baseline change in
 a dated file under `archive/release-evidence/`; keep only distilled invariants and warnings in the
 matching active app guide.
+
+The current five supported hosts remain the V1 qualification set. If any one cannot complete its
+live matrix before the release candidate, demote it in the central app registry and user
+documentation instead of weakening or silently waiving its gate.
 
 ### Shared matrix
 
@@ -231,14 +228,6 @@ open epic and acceptance gates only.
   the cause. The job-level restriction is real in GitHub's documented context availability, so the
   change stands either way — but the mechanism is unproven and the first post-fix push to `main` is the
   only evidence. Watch the next few pushes to `main` before treating this as closed.
-- Make the `firmware` CI job compile. Added with the P0 merge, it first executed on 2026-07-25.
-  The SuperMini target failed inside the *board core*, not our sketch:
-  `nRFMicro-like-Boards:nrf52@1.0.0`'s bundled `Bluefruit52Lib/src/bluefruit.cpp` references
-  `LED_BLUE`, which that core's `supermini` variant does not define. `firmware/PMW3610` itself only
-  ever uses `LED_BUILTIN`. Deliberately not worked around here: defining a pin the core omits means
-  inventing a value, and changing the pinned core or index commit changes what the bench-validated
-  firmware was compiled against, which is a hardware decision rather than a CI fix. The XIAO target's
-  result is unknown — the job stops at the SuperMini step.
 - Stop the Tk tests from skipping themselves on a Tk-capable machine. `tests/test_settings_ui_tk.py`
   and `tests/test_support_tiers.py` skip when `tk.Tk()` raises, which is right for headless CI but
   also swallows a real failure: creating and destroying several Tk roots in one pytest session

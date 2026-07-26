@@ -1,0 +1,182 @@
+<!--
+SPDX-FileCopyrightText: 2026 Dylan Lee
+SPDX-License-Identifier: Apache-2.0
+-->
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Astrolabe — Settings (Vernier UI study)</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- icon sprite: 16px grid, 1.5 stroke, currentColor -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <g id="i-mark" fill="none" stroke="currentColor" stroke-width="1.3">
+      <circle cx="8" cy="8" r="6.2"/><circle cx="8" cy="8" r="2.1"/>
+      <path d="M8 .9v2.2M8 12.9v2.2M.9 8h2.2M12.9 8h2.2" stroke-linecap="round"/>
+      <path d="M3.3 3.3l1.6 1.6M11.1 11.1l1.6 1.6" stroke-linecap="round" opacity=".55"/>
+    </g>
+    <g id="i-state" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+      <circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="1.6" fill="currentColor" stroke="none"/>
+      <path d="M8 2v1.8M8 12.2V14" opacity=".6"/>
+    </g>
+    <g id="i-device" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 1.6v12.8"/><path d="M4.6 4.4L11.4 10 8 12.6"/><path d="M4.6 11.6L11.4 6 8 3.4"/>
+    </g>
+    <g id="i-global" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+      <path d="M2.4 4.4h11.2M2.4 8h11.2M2.4 11.6h11.2"/>
+      <circle cx="5.6" cy="4.4" r="1.5" fill="var(--surface-2)"/>
+      <circle cx="10.4" cy="8" r="1.5" fill="var(--surface-2)"/>
+      <circle cx="6.8" cy="11.6" r="1.5" fill="var(--surface-2)"/>
+    </g>
+    <g id="i-perapp" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+      <path d="M8 1.8l6 3-6 3-6-3z"/><path d="M2 8l6 3 6-3"/><path d="M2 11.4l6 3 6-3" opacity=".55"/>
+    </g>
+    <g id="i-apps" fill="none" stroke="currentColor" stroke-width="1.4">
+      <rect x="2.2" y="2.2" width="4.8" height="4.8" rx="1.1"/>
+      <rect x="9" y="2.2" width="4.8" height="4.8" rx="1.1"/>
+      <rect x="2.2" y="9" width="4.8" height="4.8" rx="1.1"/>
+      <rect x="9" y="9" width="4.8" height="4.8" rx="1.1" opacity=".5"/>
+    </g>
+    <g id="i-keys" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+      <rect x="1.4" y="4" width="13.2" height="8.4" rx="1.6"/>
+      <path d="M4 6.8h.01M6.4 6.8h.01M8.8 6.8h.01M11.2 6.8h.01M4.6 9.6h6.8"/>
+    </g>
+    <g id="i-link" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+      <path d="M6.4 9.6l3.2-3.2"/>
+      <path d="M9.1 4.6l.9-.9a2.4 2.4 0 013.3 3.3l-.9.9"/>
+      <path d="M6.9 11.4l-.9.9a2.4 2.4 0 01-3.3-3.3l.9-.9"/>
+    </g>
+    <g id="i-unlink" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+      <path d="M9.1 4.6l.9-.9a2.4 2.4 0 013.3 3.3l-.9.9"/>
+      <path d="M6.9 11.4l-.9.9a2.4 2.4 0 01-3.3-3.3l.9-.9"/>
+      <path d="M12.6 12.6l-1.3-1.3M3.4 3.4l1.3 1.3M8 1.6v1.5M1.6 8h1.5" opacity=".85"/>
+    </g>
+    <g id="i-reset" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M13.4 8a5.4 5.4 0 11-1.9-4.1"/><path d="M13.6 1.9v3.2h-3.2"/>
+    </g>
+    <g id="i-chev" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 3.6L10.4 8 6 12.4"/>
+    </g>
+    <g id="i-check" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 8.4l3.2 3.2L13 4.8"/>
+    </g>
+    <g id="i-alert" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 2.4l6 10.4H2z"/><path d="M8 6.4v3.1M8 11.4h.01"/>
+    </g>
+    <g id="i-info" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+      <circle cx="8" cy="8" r="6.1"/><path d="M8 7.2v4M8 4.9h.01"/>
+    </g>
+    <g id="i-copy" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+      <rect x="5.4" y="5.4" width="8.2" height="8.2" rx="1.4"/>
+      <path d="M10.6 5.4V3.8a1.4 1.4 0 00-1.4-1.4H3.8a1.4 1.4 0 00-1.4 1.4v5.4a1.4 1.4 0 001.4 1.4h1.6"/>
+    </g>
+    <g id="i-plus" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round">
+      <path d="M8 3.4v9.2M3.4 8h9.2"/>
+    </g>
+    <g id="i-trash" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.6 4.6h10.8M6.4 4.6V2.9h3.2v1.7M4.2 4.6l.7 8.5h6.2l.7-8.5"/>
+    </g>
+    <g id="i-record" fill="none" stroke="currentColor" stroke-width="1.4">
+      <circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.4" fill="currentColor" stroke="none"/>
+    </g>
+    <g id="i-play" fill="currentColor" stroke="none"><path d="M4.6 3.2l8 4.8-8 4.8z"/></g>
+    <g id="i-pause" fill="currentColor" stroke="none"><rect x="4.4" y="3.4" width="2.6" height="9.2" rx=".8"/><rect x="9" y="3.4" width="2.6" height="9.2" rx=".8"/></g>
+    <g id="i-sun" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+      <circle cx="8" cy="8" r="3.1"/>
+      <path d="M8 1.4v1.6M8 13v1.6M1.4 8h1.6M13 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1"/>
+    </g>
+    <g id="i-moon" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M13 10.2A5.6 5.6 0 015.8 3a5.9 5.9 0 107.2 7.2z"/>
+    </g>
+    <g id="i-menu" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+      <path d="M2.6 4.4h10.8M2.6 8h10.8M2.6 11.6h10.8"/>
+    </g>
+    <g id="i-recenter" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+      <circle cx="8" cy="8" r="4.3"/><path d="M8 .9v2.4M8 12.7v2.4M.9 8h2.4M12.7 8h2.4"/>
+    </g>
+    <g id="i-x" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 4l8 8M12 4l-8 8"/></g>
+    <g id="i-up" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9.6L8 5.6l4 4"/></g>
+    <g id="i-down" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.4l4 4 4-4"/></g>
+    <g id="i-shield" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+      <path d="M8 1.8l5 1.8v4.1c0 3.1-2.1 5.3-5 6.5-2.9-1.2-5-3.4-5-6.5V3.6z"/>
+    </g>
+    <g id="i-download" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8 2.4v7.2M5 6.8L8 9.8l3-3M3 12.8h10"/>
+    </g>
+    <g id="i-power" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+      <path d="M8 2.2v5"/><path d="M4.4 4.6a5 5 0 107.2 0"/>
+    </g>
+    <g id="i-folder" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+      <path d="M1.8 4.4A1.4 1.4 0 013.2 3h2.9l1.5 1.7h5.2a1.4 1.4 0 011.4 1.4v5.5a1.4 1.4 0 01-1.4 1.4H3.2a1.4 1.4 0 01-1.4-1.4z"/>
+    </g>
+    <g id="i-pointer" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+      <path d="M4.2 2.4l8.4 5.2-3.7.6 2.2 4.2-1.8 1-2.2-4.2-2 2.6z"/>
+    </g>
+    <g id="i-orbit" fill="none" stroke="currentColor" stroke-width="1.4">
+      <circle cx="8" cy="8" r="2.4"/>
+      <ellipse cx="8" cy="8" rx="6.2" ry="2.7" transform="rotate(-24 8 8)"/>
+    </g>
+    <g id="i-gauge" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+      <path d="M2.4 11.6a6 6 0 1111.2 0"/><path d="M8 11.6L11 6.9"/>
+    </g>
+    <g id="i-lock" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round">
+      <rect x="3.4" y="7" width="9.2" height="6.6" rx="1.3"/><path d="M5.6 7V5.2a2.4 2.4 0 014.8 0V7"/>
+    </g>
+    <g id="i-eye" fill="none" stroke="currentColor" stroke-width="1.4">
+      <path d="M1.6 8S4.1 3.8 8 3.8 14.4 8 14.4 8 11.9 12.2 8 12.2 1.6 8 1.6 8z"/><circle cx="8" cy="8" r="1.9"/>
+    </g>
+    <g id="i-swap" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2.6 5.4h9.2l-2.4-2.4M13.4 10.6H4.2l2.4 2.4"/>
+    </g>
+  </defs>
+</svg>
+
+<div class="app" id="app">
+  <header class="titlebar">
+    <span class="mark"><svg width="17" height="17" viewBox="0 0 16 16"><use href="#i-mark"/></svg></span>
+    <span class="wordmark">Astrolabe</span>
+    <span class="chip" id="version-chip"></span>
+    <span class="spacer"></span>
+    <span class="statuspill" id="status-pill" title="BLE transport state"></span>
+    <button class="iconbtn" id="theme-btn" title="Light / dark"></button>
+    <button class="iconbtn" id="tray-btn" title="Tray menu">
+      <svg width="15" height="15" viewBox="0 0 16 16"><use href="#i-menu"/></svg>
+    </button>
+  </header>
+
+  <div class="body">
+    <nav class="rail" id="rail" role="tablist" aria-label="Panels">
+      <span class="rail-indicator" id="rail-indicator"></span>
+    </nav>
+    <div class="main">
+      <div class="panelhead" id="panelhead"></div>
+      <div class="subtabs" id="subtabs" role="tablist">
+        <span class="sub-indicator" id="sub-indicator"></span>
+      </div>
+      <div class="content" id="content"></div>
+    </div>
+  </div>
+
+  <footer class="statusbar" id="statusbar"></footer>
+  <div class="toasts" id="toasts"></div>
+</div>
+
+<!-- the passive control panel, drawn where it actually lives: over the desktop -->
+<div class="hud" id="hud"></div>
+
+<p class="demo-note">
+  <svg width="13" height="13" viewBox="0 0 16 16"><use href="#i-info"/></svg>
+  Static UI study — nothing is wired to a daemon. Window frame is held at
+  <span class="mono">1010 × 632</span>, a quarter of a 1080p desktop, so every panel has to fit without scrolling.
+</p>
+
+<script src="data.js"></script>
+<script src="ball.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

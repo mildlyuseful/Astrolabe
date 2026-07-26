@@ -88,3 +88,14 @@ def test_release_contracts_are_declared_and_readable_as_package_data():
     autocad = package_root.joinpath("plugins", "autocad")
     assert autocad.joinpath("TrackballNavAcad.dll").read_bytes().startswith(b"MZ")
     assert json.loads(autocad.joinpath("version.json").read_text(encoding="utf-8"))["schema"] == 1
+
+
+def test_ui_prototypes_are_not_release_inputs():
+    """Tracked design studies must never become daemon or onedir payload by proximity."""
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    manifest = (ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+    builder = (ROOT / "tools" / "build_release.ps1").read_text(encoding="utf-8")
+
+    assert 'include = ["trackball_daemon*"]' in pyproject
+    assert "recursive-include ui_demo" not in manifest
+    assert "--include-data-dir=ui_demo" not in builder

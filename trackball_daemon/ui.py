@@ -24,6 +24,7 @@ from .config import (ORBIT_PIVOT_METHODS,
                      normalize_axis_permutation, normalize_orbit_pivot_fallbacks,
                      swap_axis_source)
 from .service_health import ServiceHealthState
+from .product import PRODUCT_NAME
 
 _PAD = {"padx": 8, "pady": 4}
 _PIVOT_LABELS = {
@@ -128,6 +129,7 @@ class SettingsWindow:
         self._app_category = None
         self._selected_binding_id = None
         self._pending_setting_commit = None
+        self._onboarding = None
         self.cfg.add_listener(self._on_config_event)
         self.root.bind_all("<Button-1>", self._focus_blank_space, add="+")
 
@@ -143,6 +145,14 @@ class SettingsWindow:
             except tk.TclError:
                 pass
         self._build()
+
+    def show_onboarding(self):
+        from .onboarding import FirstRunWizard
+
+        if self._onboarding is None:
+            self._onboarding = FirstRunWizard(
+                self.root, self.app, open_settings=self.show)
+        self._onboarding.show()
 
     def _on_close(self):
         # Hide to tray; do NOT destroy/exit. App exits only via tray -> Quit.
@@ -238,7 +248,7 @@ class SettingsWindow:
     # --- build --------------------------------------------------------------------
     def _build(self):
         self.win = tk.Toplevel(self.root)
-        self.win.title("Trackball Daemon — Settings")
+        self.win.title(f"{PRODUCT_NAME} — Settings")
         self.win.geometry("900x680")
         self.win.minsize(720, 520)
         self.win.protocol("WM_DELETE_WINDOW", self._on_close)

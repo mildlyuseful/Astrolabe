@@ -63,7 +63,8 @@ SCHEMA = 1
 #: than no manifest.
 ARTIFACT_OPTIONS = ("executable", "autocad_plugin", "archive", "sbom", "installer")
 
-#: Artifacts a build must produce. The installer does not exist yet, so it stays optional.
+#: Artifacts every build produces. The installer stays optional here because private-alpha onedir
+#: builds may omit it; the public-channel builder requires it before this tool runs.
 REQUIRED_ARTIFACTS = ("executable", "autocad_plugin", "archive", "sbom")
 
 #: Artifacts a signed release must carry an Authenticode signature for. The archive and the SBOM are

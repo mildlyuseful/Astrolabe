@@ -26,12 +26,26 @@ dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj --confi
 git diff --check
 ```
 
-`build_release.ps1` refuses output paths outside the repository and synchronizes an exact,
+The release interpreter is pinned to Python 3.13.14. A different interpreter fails before
+dependency synchronization; pass `-BuildPython <exact path>` when it is not the first `python` on
+PATH. For installer qualification, install the pinned Inno Setup compiler and run:
+
+```powershell
+& ".\tools\build_release.ps1" -BuildInstaller -InnoCompilerPath <path-to-ISCC.exe>
+```
+
+Public-channel builds additionally require `-Sign`, a certificate thumbprint, and `signtool.exe`.
+The builder signs and verifies staged binaries before archiving, signs and verifies the installer,
+and passes the resulting signature report into the final manifest.
+
+`build_release.ps1` refuses output paths outside the repository, refuses an interpreter other than
+the pinned patch version, and synchronizes an exact,
 non-editable build environment from `uv.lock`; the PEP 517 backend is constrained separately because
 build dependencies are outside the application lock. It verifies the bundled AutoCAD DLL against
 its source-tree and hash manifest, builds the sdist and wheel in an isolated PEP 517 environment,
 keeps dependency and Nuitka caches under `build/release`, explicitly includes the AutoCAD DLL,
-creates a Windows standalone onedir executable, and runs its side-effect-free packaged-resource
+creates a Windows standalone onedir executable, normalizes its root to `Astrolabe`, and runs its
+side-effect-free packaged-resource
 smoke. The Windows build explicitly includes PyWinRT's projection package because collection
 projections used by BLE advertisement callbacks are imported dynamically and are invisible to static
 freezer analysis. The smoke imports that runtime projection, validates the AutoCAD DLL, loads
@@ -77,9 +91,12 @@ merely declared:
 
 CI also builds and installs the wheel outside the checkout before running its smoke and binding
 validation, runs that notice verification against the installed wheel, and runs the bundled
-component audit against a separately synchronized release runtime. A separate job compiles both retained validation-firmware sketches with pinned Arduino
-CLI and board-core inputs, reports binary sizes, and retains the firmware artifacts. These checks
-establish reproducible buildability; they do not qualify the final product hardware.
+component audit against a separately synchronized release runtime. A separate job compiles the
+retained XIAO protocol-bench sketch with pinned Arduino CLI and board-core inputs, reports binary
+sizes, and retains the firmware artifacts. The obsolete SuperMini prototype remains available as
+source and evidence but is no longer a release target. Replace the bench compile with the official
+XIAO production firmware when its hardware contract is frozen. These checks establish reproducible
+buildability; they do not qualify the final product hardware.
 
 Before release, also install the wheel into a clean Windows account without Python or a source
 checkout, exercise the onedir GUI there, uninstall/reverse every path in `security.md`, and retain

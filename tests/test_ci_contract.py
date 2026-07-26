@@ -28,19 +28,55 @@ def test_ci_builds_and_smokes_wheel_outside_checkout():
     assert "--name \"astrolabe-daemon\" --version $InstalledVersion" in WORKFLOW
 
 
-def test_ci_pins_and_compiles_both_validation_firmware_targets():
+def test_ci_pins_and_compiles_the_current_xiao_validation_target():
     assert 'version: "1.5.0"' in WORKFLOW
-    assert "pdcook/nRFMicro-Arduino-Core/3dab6477754d9b28053fe36b06c718cde6e93d3f" in WORKFLOW
-    assert '"nRFMicro-like-Boards:nrf52@1.0.0"' in WORKFLOW
     assert '"Seeeduino:nrf52@1.1.12"' in WORKFLOW
-    assert '"nRFMicro-like-Boards:nrf52:supermini:softdevice=s140v6,debug=l0"' in WORKFLOW
     assert '"Seeeduino:nrf52:xiaonRF52840:softdevice=s140v6,debug=l0"' in WORKFLOW
+    assert "firmware/XIAO3389" in WORKFLOW
+    assert "firmware/PMW3610" not in WORKFLOW
+    assert "nRFMicro-like-Boards" not in WORKFLOW
     assert "Report firmware artifact sizes" in WORKFLOW
     assert "actions/upload-artifact@v4" in WORKFLOW
 
 
 def test_windows_release_includes_dynamic_winrt_projection_package():
     assert "--include-package=winrt" in RELEASE_BUILD
+
+
+def test_release_build_pins_python_and_normalizes_the_user_visible_onedir():
+    assert '[string]$PythonVersion = "3.13.14"' in RELEASE_BUILD
+    assert "$ActualPythonVersion -ne $PythonVersion" in RELEASE_BUILD
+    assert '$ReleaseDirectory = Join-Path $NuitkaArtifacts $Identity.product_name' in RELEASE_BUILD
+    assert "Move-Item -LiteralPath $RawReleaseDirectory -Destination $ReleaseDirectory" in RELEASE_BUILD
+    assert "unexpectedly contains non-shipping ui_demo content" in RELEASE_BUILD
+
+
+def test_release_build_signs_staged_bytes_before_archive_and_manifest():
+    executable_sign = RELEASE_BUILD.index('-ArtifactKey $item[0]')
+    archive = RELEASE_BUILD.index("tools/archive_release.py")
+    installer_sign = RELEASE_BUILD.index('-ArtifactKey "installer"')
+    manifest = RELEASE_BUILD.index('"tools/build_release_manifest.py"')
+
+    assert executable_sign < archive < installer_sign < manifest
+    assert '"--signature-report", $SignatureReport' in RELEASE_BUILD
+    assert 'A public release requires -Sign' in RELEASE_BUILD
+    assert 'A public release requires -BuildInstaller' in RELEASE_BUILD
+
+
+def test_release_build_discovers_versioned_windows_sdk_signing_tools():
+    assert 'function Resolve-WindowsSignTool' in RELEASE_BUILD
+    assert '"^\\d+\\.\\d+\\.\\d+\\.\\d+$"' in RELEASE_BUILD
+    assert 'Join-Path $_.FullName "x64/signtool.exe"' in RELEASE_BUILD
+
+
+def test_release_uses_a_hash_and_signature_verified_inno_compiler():
+    installer = Path("tools/install_inno_setup.ps1").read_text(encoding="utf-8")
+
+    assert "innosetup-6.7.3.exe" in installer
+    assert "9c73c3bae7ed48d44112a0f48e66742c00090bdb5bef71d9d3c056c66e97b732" in installer
+    assert "Get-AuthenticodeSignature" in installer
+    assert "Pyrsys B.V." in installer
+    assert "tools\\install_inno_setup.ps1" in RELEASE_WORKFLOW
 
 
 def test_installed_wheel_notices_are_verified_outside_the_checkout():
@@ -111,7 +147,8 @@ def test_every_gate_runs_before_any_artifact_is_produced():
 
 
 def test_the_release_build_requires_a_clean_revision():
-    assert "build_release.ps1 -RequireCleanRevision" in RELEASE_WORKFLOW
+    assert '"-RequireCleanRevision"' in RELEASE_WORKFLOW
+    assert ".\\tools\\build_release.ps1 @Arguments" in RELEASE_WORKFLOW
 
 
 def test_signing_credentials_are_scoped_to_one_environment():
@@ -120,8 +157,10 @@ def test_signing_credentials_are_scoped_to_one_environment():
 
 def test_a_public_release_cannot_be_produced_without_signing():
     """Failing closed is the difference between "not signed yet" and "shipped unsigned"."""
-    assert "Authenticode signing is not implemented" in RELEASE_WORKFLOW
-    assert 'if ($env:CHANNEL -ne "public")' in RELEASE_WORKFLOW
+    assert "SIGNING_CERTIFICATE_BASE64" in RELEASE_WORKFLOW
+    assert "SIGNING_CERTIFICATE_PASSWORD" in RELEASE_WORKFLOW
+    assert '$Arguments += "-Sign"' in RELEASE_WORKFLOW
+    assert "A public release requires both protected signing-certificate secrets." in RELEASE_WORKFLOW
     assert "A public release manifest must record signatures." in RELEASE_WORKFLOW
 
 
