@@ -107,6 +107,15 @@ wire value is baseline XOR saved user preference.
 
 Detailed version-by-version execution history belongs under `archive/`, not in this current contract.
 
+## Pointer acceleration
+
+Pointer acceleration is a Global-only v9 setting family in `system_defaults.json`, not a legacy
+materialized profile field. `off` preserves constant cursor sensitivity. `linear` and `smooth` map
+planar angular speed from the configured onset across the configured ramp to a bounded maximum
+multiplier. The curve is evaluated before cursor sensitivity, using motion-sample timestamps, so its
+thresholds remain in radians per second and do not change with BLE notification cadence. Scroll and
+3D navigation bypass the curve.
+
 ## Developer tuning workflow
 
 ### Host alignment

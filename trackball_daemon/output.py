@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 import math
 import struct
 import threading
+import time
 
 from .config import host_baseline
 from .app_registry import binding_profile
@@ -65,6 +66,19 @@ def quat_to_gl_matrix(q):
 
 
 MODE_CUBE, MODE_CURSOR = 0, 1
+
+
+def _pointer_acceleration_multiplier(curve, speed, onset, ramp, max_gain):
+    """Return a bounded cursor multiplier for one planar angular speed."""
+    values = (speed, onset, ramp, max_gain)
+    if curve == "off" or not all(math.isfinite(float(value)) for value in values):
+        return 1.0
+    if curve not in ("linear", "smooth") or speed <= onset or ramp <= 0 or max_gain <= 1:
+        return 1.0
+    progress = min(1.0, (speed - onset) / ramp)
+    if curve == "smooth":
+        progress = progress * progress * (3.0 - 2.0 * progress)
+    return 1.0 + (max_gain - 1.0) * progress
 
 
 @dataclass(frozen=True)
@@ -133,6 +147,7 @@ class OutputEngine:
         self._mx = 0.0
         self._my = 0.0
         self._sc = 0.0
+        self._last_pointer_timestamp = None
         self._last_mode = MODE_CUBE
         # Optional sink for 3D-app driving: fn(ox, oy, oz, pan_x, pan_y, zoom). When set, the
         # same per-frame orbit/pan/zoom deltas that move the local cube are ALSO forwarded to
@@ -331,7 +346,7 @@ class OutputEngine:
                  aligned_p[0], aligned_p[1], aligned_z)
 
     # --- the data path -------------------------------------------------------------
-    def handle_packet(self, data, runtime_snapshot=None):
+    def handle_packet(self, data, runtime_snapshot=None, timestamp=None):
         if len(data) < 12:
             return
         runtime_snapshot = runtime_snapshot or self.runtime.snapshot()
@@ -346,6 +361,7 @@ class OutputEngine:
         if mode != self._last_mode:                 # reset cursor accumulators on any switch
             self._last_mode = mode
             self._mx = self._my = self._sc = 0.0
+            self._last_pointer_timestamp = None
 
         if mode == MODE_CUBE:
             if runtime_snapshot.effective_navigation_layer == "secondary":
@@ -380,6 +396,13 @@ class OutputEngine:
         # ---- CURSOR mode: convert this packet's rotation into pointer/wheel input ----
         yaw = mapping.s_sign * recv[mapping.s_src]
         plane = math.hypot(recv[mapping.c_xsrc], recv[mapping.c_ysrc])
+        current_timestamp = time.monotonic() if timestamp is None else float(timestamp)
+        previous_timestamp = self._last_pointer_timestamp
+        if math.isfinite(current_timestamp) and current_timestamp >= 0:
+            self._last_pointer_timestamp = current_timestamp
+        else:
+            current_timestamp = previous_timestamp = None
+            self._last_pointer_timestamp = None
         if abs(yaw) > mapping.s_dead and abs(yaw) > mapping.s_dom * plane:
             # yaw dominates -> scroll the wheel, carry the fractional remainder
             self._sc += yaw * mapping.s_gain
@@ -388,9 +411,23 @@ class OutputEngine:
                 send_mouse(wheel=notches)
                 self._sc -= notches
         else:
-            # otherwise -> move the pointer, carry sub-pixel remainder
-            self._mx += mapping.c_xsign * recv[mapping.c_xsrc] * mapping.c_gain
-            self._my += mapping.c_ysign * recv[mapping.c_ysrc] * mapping.c_gain
+            # Otherwise move the pointer. Acceleration uses physical angular speed, before
+            # sensitivity, so changing cursor gain does not also move the curve's thresholds.
+            acceleration = 1.0
+            if (previous_timestamp is not None and current_timestamp is not None and
+                    current_timestamp > previous_timestamp):
+                settings = runtime_snapshot.effective_settings
+                acceleration = _pointer_acceleration_multiplier(
+                    settings.get("pointer.acceleration.curve", "off"),
+                    plane / (current_timestamp - previous_timestamp),
+                    settings.get("pointer.acceleration.onset", 0.4),
+                    settings.get("pointer.acceleration.ramp", 2.0),
+                    settings.get("pointer.acceleration.max_gain", 3.0),
+                )
+            # Carry the sub-pixel remainder after applying the bounded curve.
+            gain = mapping.c_gain * acceleration
+            self._mx += mapping.c_xsign * recv[mapping.c_xsrc] * gain
+            self._my += mapping.c_ysign * recv[mapping.c_ysrc] * gain
             ix, iy = int(self._mx), int(self._my)
             if ix or iy:
                 send_mouse(dx=ix, dy=iy)

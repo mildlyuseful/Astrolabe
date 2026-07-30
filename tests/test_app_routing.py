@@ -25,6 +25,7 @@ from trackball_daemon.config import Config, host_baseline_payload
 from trackball_daemon.config_store import ConfigStore
 from trackball_daemon.commands import (
     RequestSettingOverride, RequestState, SerializedCommandQueue, SetFocusedContext)
+from trackball_daemon.devices import MotionSample
 from trackball_daemon.input import BindingController, load_system_binding_profiles
 from trackball_daemon.output import OutputEngine
 from trackball_daemon.navigation_router import NavigationRouter
@@ -302,6 +303,18 @@ def test_packet_envelope_captures_runtime_revision():
 
     assert app.broker.targets[-1] == ("blender", 17)
     assert captured == [17]
+
+
+def test_motion_sample_timestamp_reaches_output_engine():
+    app = App.__new__(App)
+    captured = []
+    app._handle_ble_packet = lambda payload, *, timestamp=None: captured.append(
+        (payload, timestamp))
+    sample = MotionSample("test.motion", struct.pack("<fff", 0.0, 0.0, 0.0), timestamp=12.5)
+
+    app._handle_ble_motion(sample)
+
+    assert captured == [(sample.payload, 12.5)]
 
 
 def test_packet_with_no_active_app_selects_no_navigation_target():
