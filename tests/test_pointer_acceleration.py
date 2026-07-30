@@ -69,6 +69,26 @@ def test_equal_displacement_over_a_longer_interval_gets_less_acceleration(
     assert moves == [(2, 0, 0)]
 
 
+def test_live_pointer_sensitivity_scales_accelerated_motion(engine, monkeypatch):
+    moves = []
+    monkeypatch.setattr(
+        output_mod, "send_mouse",
+        lambda dx=0, dy=0, wheel=0: moves.append((dx, dy, wheel)))
+    engine.cfg.add_listener(lambda _event: engine.apply_config())
+    _configure(engine, "linear")
+    engine.set_mode(OutputEngine.MODE_CURSOR)
+
+    engine.cfg.set_global("pointer.cursor.gain", 64.0)
+    engine.handle_packet(_pkt(0.0, 0.03125, 0.0), timestamp=30.0)
+    engine.handle_packet(_pkt(0.0, 0.03125, 0.0), timestamp=30.01)
+
+    engine.cfg.set_global("pointer.cursor.gain", 32.0)
+    engine.handle_packet(_pkt(0.0, 0.03125, 0.0), timestamp=40.0)
+    engine.handle_packet(_pkt(0.0, 0.03125, 0.0), timestamp=40.01)
+
+    assert moves == [(2, 0, 0), (6, 0, 0), (1, 0, 0), (3, 0, 0)]
+
+
 def test_pointer_acceleration_never_changes_3d_navigation(engine):
     _configure(engine, "linear", onset=0.0, ramp=0.001, max_gain=10.0)
     nav = []

@@ -129,6 +129,7 @@ class SettingsWindow:
         self._app_category = None
         self._selected_binding_id = None
         self._pending_setting_commit = None
+        self._suppress_generated_refresh = False
         self._onboarding = None
         self.cfg.add_listener(self._on_config_event)
         self.root.bind_all("<Button-1>", self._focus_blank_space, add="+")
@@ -266,7 +267,7 @@ class SettingsWindow:
             fill="x", padx=10, pady=4)
 
     def _on_config_event(self, _event):
-        if self.win is None or self._refresh_pending:
+        if self.win is None or self._refresh_pending or self._suppress_generated_refresh:
             return
         self._refresh_pending = True
         try:
@@ -429,19 +430,56 @@ class SettingsWindow:
             var = tk.StringVar(value=self._setting_value_text(view.value))
             control = ttk.Entry(row, textvariable=var, width=26)
             control.pack(side="left")
+            last_value = [view.value]
+            live_apply_after = [None]
 
-            def commit(_event=None):
-                if self._pending_setting_commit is commit:
-                    self._pending_setting_commit = None
+            def commit(_event=None, *, live=False):
+                if live_apply_after[0] is not None:
+                    try:
+                        control.after_cancel(live_apply_after[0])
+                    except tk.TclError:
+                        pass
+                    live_apply_after[0] = None
                 try:
                     value = self._parse_setting_value(spec, var.get().strip())
                 except (TypeError, ValueError):
-                    var.set(self._setting_value_text(view.value))
+                    if not live:
+                        var.set(self._setting_value_text(last_value[0]))
                     return
-                self._run_setting_action(lambda: (
-                    self.settings_model.set_app(app_id, spec.id, value) if app_id else
-                    self.settings_model.set_global(spec.id, value)))
-            entry_pending = lambda _event=None: setattr(self, "_pending_setting_commit", commit)
+                if not spec.validates(value):
+                    if not live:
+                        var.set(self._setting_value_text(last_value[0]))
+                    return
+                if self._pending_setting_commit is commit:
+                    self._pending_setting_commit = None
+                if value != last_value[0]:
+                    self._suppress_generated_refresh = True
+                    try:
+                        if app_id:
+                            self.settings_model.set_app(app_id, spec.id, value)
+                        else:
+                            self.settings_model.set_global(spec.id, value)
+                    except (TypeError, ValueError) as exc:
+                        if live:
+                            return
+                        messagebox.showerror("Invalid setting", str(exc), parent=self.win)
+                        var.set(self._setting_value_text(last_value[0]))
+                        return
+                    finally:
+                        self._suppress_generated_refresh = False
+                    last_value[0] = value
+                if not live:
+                    self.root.after(0, self._refresh_generated_tabs)
+
+            def entry_pending(_event=None):
+                self._pending_setting_commit = commit
+                if spec.value_kind not in (ValueKind.INTEGER, ValueKind.NUMBER):
+                    return
+                if live_apply_after[0] is not None:
+                    control.after_cancel(live_apply_after[0])
+                live_apply_after[0] = control.after(
+                    250, lambda: commit(live=True))
+
             control.bind("<FocusIn>", entry_pending)
             control.bind("<KeyRelease>", entry_pending)
             control.bind("<Return>", commit)

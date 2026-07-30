@@ -168,9 +168,10 @@ Tiers live in `trackball_daemon/app_registry.py` and version ranges in
 ## Controls and configuration
 
 All persistent user configuration lives in `%APPDATA%\Mildly Useful\Astrolabe\config.json`; transient mode,
-pressed-control, focus, and gesture state lives only in the daemon's `RuntimeStore`. Settings changes
-apply live except for BLE device identity, which applies on reconnect, and host add-on code, which
-applies when that host reloads it.
+pressed-control, focus, and gesture state lives only in the daemon's `RuntimeStore`. Numeric settings
+apply after a short typing pause (or immediately on Enter/focus change); other Settings changes apply
+live except for BLE device identity, which applies on reconnect, and host add-on code, which applies
+when that host reloads it.
 
 If an earlier build left a `%APPDATA%\TrackballDaemon` directory, its contents are copied to the
 current location once, verified, and then left where they are: the old directory is never modified,
