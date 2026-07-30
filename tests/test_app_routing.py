@@ -118,8 +118,10 @@ def _bare_app():
     app.config = ConfigStore(Path(app._config_tmp.name) / "config.json").load()
     with app.config.transaction() as tx:
         tx.set_selected_app("fusion360")
+        tx.set_app("blender", "navigation.orbit.pivot_fallbacks", ["selection"])
         tx.set_app("solidworks", "navigation.refresh_rate", 60)
         tx.set_app("solidworks", "navigation.orbit.pivot", "object")
+        tx.set_app("solidworks", "navigation.orbit.pivot_fallbacks", ["origin", "selection"])
         tx.set_app("solidworks", "navigation.zoom.target", "to_object")
         tx.set_app("solidworks", "navigation.orbit.pivot_hold_seconds", 0.75)
         tx.set_app("solidworks", "navigation.zoom.cursor_hold_seconds", 1.25)
@@ -340,8 +342,11 @@ def test_all_targets_receive_independent_schemes():
     assert app.sw_driver.schemes[-1] == {
         "orbit_pivot": "object", "orbit_style": "free", "zoom_mode": "to_object",
         "selection_overrides_pivot": True,
-        "orbit_pivot_fallbacks": ["cursor_3d", "camera", "object", "origin"],
+        "orbit_pivot_fallbacks": ["origin", "selection"],
         "level_horizon_on_entry": True}
+    blender = next(item for item in app.broker.schemes if item["target"] == "blender")
+    assert blender["advanced"]["orbit_pivot_fallbacks"] == ["selection"]
+    assert blender["advanced"]["orbit_pivot_candidates"] == ["camera", "selection"]
     assert app.sw_driver.holds[-1] == 0.75       # per-app screen-center-pivot hold pushed to the driver
 
 

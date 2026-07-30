@@ -34,6 +34,8 @@ Missing overrides mean inheritance:
   while remaining linked.
 - Unlinking an app setting materializes its current effective value.
 - Relinking deletes the app override.
+- Orbit-pivot fallback order uses this same link model: Global supplies the default chain and an app
+  override may reorder, add, remove, or deliberately clear its own chain.
 - Resetting one app setting pins its concrete app System value and breaks that setting's Global link.
 - **Reset app** pins every applicable concrete app System value and breaks the app's Global links.
 - **Link all to Global** deletes the app's setting overrides.

@@ -312,13 +312,13 @@ class App:
         if navigation is None:
             return
         snapshot = self.config.snapshot()
-        fallbacks = normalize_orbit_pivot_fallbacks(
-            list(snapshot.global_value("navigation.orbit.pivot_fallbacks")))
         if not isinstance(getattr(self, "_last_scheme_pushed", None), dict):
             self._last_scheme_pushed = {}
         for spec in APP_SPECS:
             key = spec.app_id
             scheme = self._effective_scheme(key)
+            fallbacks = normalize_orbit_pivot_fallbacks(
+                list(snapshot.app_value(key, "navigation.orbit.pivot_fallbacks")))
             # Socket integrations consume this additive profile from their matching frames. Direct
             # transports receive the shared fields below through the same router configuration API.
             appcfg = snapshot.app_profile(key)

@@ -258,7 +258,7 @@ def migrate_v8_to_v9(disk):
     for app_id in APP_IDS:
         app = APP_SPECS_BY_ID[app_id]
         for spec in SETTING_SPECS:
-            if not spec.applies_to(app):
+            if not spec.applies_to(app) or not spec.app_path:
                 continue
             actual = _legacy_app_value(legacy, spec, app_id)
             if spec.setting_id in global_inherited_ids:
@@ -378,7 +378,7 @@ def _materialize_app(app_id, values, internal_overrides):
     profile = default_app_profile(app_id)
     app = APP_SPECS_BY_ID[app_id]
     for spec in SETTING_SPECS:
-        if spec.applies_to(app):
+        if spec.applies_to(app) and spec.app_path:
             _set_path(profile, spec.app_path, values[spec.setting_id])
     for internal_id, value in internal_overrides.items():
         _set_path(profile, APP_INTERNAL_PATH_IDS[internal_id], value)

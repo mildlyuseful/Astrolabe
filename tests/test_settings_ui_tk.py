@@ -67,6 +67,19 @@ def test_generated_tabs_and_linked_value_refresh_after_global_edit(tmp_path):
         global_categories.select(orbit_tab)
         root.update()
 
+        fallback_row, _label = _row_with_label(global_tab, "Orbit pivot fallback order")
+        fallback_list = next(widget for widget in _walk(fallback_row)
+                             if isinstance(widget, tk.Listbox))
+        assert fallback_list.get(0, "end") == (
+            "1. 3D Cursor", "2. Camera", "3. Model Center", "4. World Origin")
+        fallback_list.selection_set(0)
+        down = next(widget for widget in _walk(fallback_row)
+                    if isinstance(widget, ttk.Button) and widget.cget("text") == "Down")
+        down.invoke()
+        root.update()
+        assert store.snapshot().global_value("navigation.orbit.pivot_fallbacks") == (
+            "camera", "cursor_3d", "object", "origin")
+
         orbit_row, _label = _row_with_label(global_tab, "Orbit pivot hold")
         orbit_entry = next(widget for widget in orbit_row.winfo_children()
                            if isinstance(widget, ttk.Entry))
@@ -85,6 +98,10 @@ def test_generated_tabs_and_linked_value_refresh_after_global_edit(tmp_path):
         assert global_categories.tab(global_categories.select(), "text") == "Orbit"
 
         per_app = _tab(notebook, "Per-App")
+        fallback_row, fallback_label = _row_with_label(
+            per_app, "Orbit pivot fallback order")
+        assert any(isinstance(widget, tk.Listbox) for widget in _walk(fallback_row))
+        assert str(fallback_label.cget("foreground")) == "#777"
         row, label = _row_with_label(per_app, "Orbit sensitivity")
         entry = next(widget for widget in row.winfo_children()
                      if isinstance(widget, ttk.Entry))

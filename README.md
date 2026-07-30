@@ -195,10 +195,12 @@ layer; software-convention corrections are supplied by immutable host baselines.
 ### Orbit targets and fallback order
 
 The app's selected **Orbit pivot** is tried first. If it is unsupported or a raycast misses, the
-daemon restarts at the beginning of **Global → Orbit → Orbit pivot fallback order**. Unsupported
-methods are skipped, duplicates are removed, and an empty list means no orbit is performed after the
-primary target fails. **Selection overrides orbit center** has higher priority when enabled, except
-that a Camera primary remains a true turn-in-place operation.
+daemon restarts at the beginning of the app's effective **Orbit pivot fallback order**. Edit the
+default under **Global → Orbit**, or use the link control beside the same setting under **Per-App**
+to give one host its own order. Unsupported methods are skipped, duplicates are removed, and an
+empty list means no orbit is performed after the primary target fails. **Selection overrides orbit
+center** has higher priority when enabled, except that a Camera primary remains a true turn-in-place
+operation.
 
 ### Horizon entry and gesture holds
 

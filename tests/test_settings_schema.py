@@ -98,6 +98,9 @@ def test_every_applicable_setting_has_a_valid_shipped_value():
         app = APP_SPECS_BY_ID[app_id]
         leaves = dict(_leaves(_merge(raw["common"], override)))
         for setting in setting_specs_for_app(app):
+            if not setting.app_path:
+                assert setting.setting_id == "navigation.orbit.pivot_fallbacks"
+                continue
             assert setting.app_path in leaves, f"missing {app_id}:{setting.setting_id}"
             assert setting_value_valid_for_app(setting, app, leaves[setting.app_path]), (
                 app_id, setting.setting_id, leaves[setting.app_path])

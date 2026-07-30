@@ -406,6 +406,8 @@ class SettingsWindow:
                 lambda: (self.settings_model.set_app(app_id, spec.id, var.get()) if app_id else
                          self.settings_model.set_global(spec.id, var.get()))))
             control.pack(side="left")
+        elif spec.ui.control == "ordered_list":
+            control = self._ordered_list_setting_control(row, view, app_id)
         elif choices or spec.value_kind is ValueKind.ENUM or spec.nullable:
             values = list(choices)
             if spec.nullable and None not in values:
@@ -471,6 +473,76 @@ class SettingsWindow:
                     lambda: self.settings_model.reset_global(spec.id)))
                 reset.pack(side="right")
                 self._tooltip(reset, "Reset global to System default")
+
+    def _ordered_list_setting_control(self, parent, view, app_id):
+        """Render one ordered setting list for either Global or an app override."""
+        spec = view.spec
+        chain = list(view.value)
+        body = ttk.Frame(parent)
+        body.pack(side="left", fill="x", expand=True)
+        listbox = tk.Listbox(body, height=4, width=28, exportselection=False)
+        listbox.grid(row=0, column=0, rowspan=4, sticky="nsew")
+        body.columnconfigure(0, weight=1)
+
+        def label(value):
+            return _PIVOT_LABELS.get(value, _option_label(value))
+
+        def render(select=None):
+            listbox.delete(0, "end")
+            for index, value in enumerate(chain, 1):
+                listbox.insert("end", f"{index}. {label(value)}")
+            if chain and select is not None:
+                select = max(0, min(select, len(chain) - 1))
+                listbox.selection_set(select)
+                listbox.activate(select)
+
+        def selected():
+            selection = listbox.curselection()
+            return int(selection[0]) if selection else None
+
+        def save(select=None):
+            self._run_setting_action(lambda: (
+                self.settings_model.set_app(app_id, spec.id, list(chain)) if app_id else
+                self.settings_model.set_global(spec.id, list(chain))))
+            render(select)
+
+        def move(delta):
+            index = selected()
+            if index is None or not 0 <= index + delta < len(chain):
+                return
+            chain[index], chain[index + delta] = chain[index + delta], chain[index]
+            save(index + delta)
+
+        def remove():
+            index = selected()
+            if index is not None:
+                chain.pop(index)
+                save(min(index, len(chain) - 1))
+
+        ttk.Button(body, text="Up", width=8, command=lambda: move(-1)).grid(
+            row=0, column=1, padx=(6, 0), sticky="ew")
+        ttk.Button(body, text="Down", width=8, command=lambda: move(1)).grid(
+            row=1, column=1, padx=(6, 0), sticky="ew")
+        ttk.Button(body, text="Remove", width=8, command=remove).grid(
+            row=2, column=1, padx=(6, 0), sticky="ew")
+
+        add_var = tk.StringVar(value=label(spec.choices[0]))
+        add_combo = ttk.Combobox(
+            body, textvariable=add_var, values=[label(value) for value in spec.choices],
+            state="readonly", width=18)
+        add_combo.grid(row=4, column=0, sticky="w", pady=(4, 0))
+
+        def add():
+            value = next(
+                (value for value in spec.choices if label(value) == add_var.get()), None)
+            if value is not None and value not in chain:
+                chain.append(value)
+                save(len(chain) - 1)
+
+        ttk.Button(body, text="Add", width=8, command=add).grid(
+            row=4, column=1, padx=(6, 0), pady=(4, 0), sticky="ew")
+        render()
+        return listbox
 
     def _build_global_tab(self, notebook):
         host = ttk.Frame(notebook)
