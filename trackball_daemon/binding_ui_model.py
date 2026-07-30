@@ -86,6 +86,14 @@ _COMMON_BY_ID = {action_id: (label, press, release)
 _POINTER_ACTION_IDS = frozenset({"pointer.left", "pointer.right", "pointer.middle"})
 
 
+def _setting_editor_choices(spec):
+    """Return canonical runtime choices without inheritance or migration sentinels."""
+    excluded = {"default"}
+    if spec.id == "input.mode.default":
+        excluded.update({"cube", "cursor"})
+    return tuple(value for value in spec.choices if value not in excluded)
+
+
 class BindingUIModel:
     def __init__(self, store, catalog, aggregator=None):
         self.store = store
@@ -124,9 +132,11 @@ class BindingUIModel:
         if SettingOperation.RUNTIME_SET in spec.operations:
             options.append(("hold", "Hold a value; restore it on release"))
         if SettingOperation.RUNTIME_TOGGLE in spec.operations:
-            options.append(("toggle", "Toggle between two values"))
+            label = ("Toggle On / Off" if spec.value_kind is ValueKind.BOOLEAN
+                     else "Toggle between two values")
+            options.append(("toggle", label))
         if SettingOperation.RUNTIME_CYCLE in spec.operations:
-            options.append(("cycle", "Cycle through available values"))
+            options.append(("cycle", "Cycle through selected values"))
         if SettingOperation.RUNTIME_ADD in spec.operations:
             options.append(("add", "Add an amount"))
         if SettingOperation.RUNTIME_MULTIPLY in spec.operations:
@@ -140,8 +150,7 @@ class BindingUIModel:
             values = ("True", "False")
             return (("None",) + values) if spec.nullable else values
         if spec.value_kind is ValueKind.ENUM:
-            return tuple(str(value) for value in spec.choices
-                         if value not in {"default", "cube", "cursor"})
+            return tuple(str(value) for value in _setting_editor_choices(spec))
         return ()
 
     @staticmethod
@@ -174,11 +183,6 @@ class BindingUIModel:
             operation = command_to_operation[action["command"]]
         else:
             return SimpleActionView("", advanced_only=True)
-        if operation == "cycle" and "value" in action:
-            canonical = [value for value in SETTING_SPECS_BY_ID[setting_id].choices
-                         if value not in {"default", "cube", "cursor"}]
-            if action["value"] != canonical:
-                return SimpleActionView("", advanced_only=True)
         value = action.get("value")
         if isinstance(value, list):
             value_text = ", ".join(str(item) for item in value)
@@ -231,10 +235,16 @@ class BindingUIModel:
                 press[0]["value"] = values
             release = []
         elif operation_id == "cycle":
-            choices = [value for value in spec.choices
-                       if value not in {"default", "cube", "cursor"}]
+            raw = value_text.strip()
+            if not raw or raw.casefold() == "automatic":
+                choices = _setting_editor_choices(spec)
+            else:
+                choices = tuple(one_value(item) for item in raw.split(",") if item.strip())
+            if (len(choices) < 2 or len(set(choices)) != len(choices) or
+                    not all(spec.validates(value) for value in choices)):
+                raise ValueError("cycle requires at least two distinct valid values")
             press = [{"command": "setting.cycle_runtime", "target": setting_id,
-                      "value": choices}]
+                      "value": list(choices)}]
             release = []
         elif operation_id in {"add", "multiply"}:
             value = float(value_text.strip())

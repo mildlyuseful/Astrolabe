@@ -682,23 +682,33 @@ class SettingsWindow:
 
         when = row.get("when", {})
         selected_apps = when.get("apps", [])
-        app_labels = {"All applications": ""}
-        app_labels.update({app.display_name: app.app_id for app in APP_SPECS})
-        current_app_label = "All applications"
-        if len(selected_apps) == 1 and selected_apps[0] in APP_SPECS_BY_ID:
-            current_app_label = APP_SPECS_BY_ID[selected_apps[0]].display_name
         app_line = ttk.Frame(parent)
         app_line.pack(fill="x", padx=8, pady=3)
-        ttk.Label(app_line, text="Active application", width=18, anchor="w").pack(side="left")
-        app_var = tk.StringVar(value=current_app_label)
-        app_combo = ttk.Combobox(app_line, textvariable=app_var, values=tuple(app_labels),
-                                 state="readonly", width=28)
-        app_combo.pack(side="left")
+        app_label = ttk.Label(app_line, text="Applications", width=18, anchor="nw")
+        app_label.pack(side="left")
+        app_selector = ttk.Frame(app_line)
+        app_selector.pack(side="left", fill="x", expand=True)
+        app_list = tk.Listbox(
+            app_selector, selectmode="multiple", exportselection=False, height=5)
+        app_scroll = ttk.Scrollbar(app_selector, orient="vertical", command=app_list.yview)
+        app_list.configure(yscrollcommand=app_scroll.set)
+        app_list.pack(side="left", fill="x", expand=True)
+        app_scroll.pack(side="right", fill="y")
+        for index, app_spec in enumerate(APP_SPECS):
+            app_list.insert("end", app_spec.display_name)
+            if app_spec.app_id in selected_apps:
+                app_list.selection_set(index)
+        all_apps = ttk.Button(app_line, text="All", width=6, command=lambda: app_list.selection_clear(
+            0, "end"))
+        all_apps.pack(side="left", padx=(6, 0))
+        app_help = "Select any number of applications. No selection means all applications."
+        self._tooltip(app_label, app_help)
+        self._tooltip(app_list, app_help)
+        self._tooltip(all_apps, app_help)
 
         simple = self.binding_model.simple_action(row)
         editor_advanced_only = bool(
-            simple.advanced_only or len(selected_apps) > 1 or
-            when.get("executables") or when.get("input_profiles"))
+            simple.advanced_only or when.get("executables") or when.get("input_profiles"))
         target_options = dict(self.binding_model.simple_target_options())
         target_by_label = {label: target_id for target_id, label in target_options.items()}
         simple_frame = ttk.LabelFrame(parent, text="Action")
@@ -740,7 +750,12 @@ class SettingsWindow:
             setting_id = target_id.removeprefix("setting:")
             operation_id = operation_ids.get(operation_var.get(), "")
             choices = self.binding_model.setting_value_options(setting_id)
-            if operation_id == "cycle" or (operation_id == "toggle" and choices):
+            if operation_id == "cycle":
+                value_label.configure(text="Values (A, B, …)")
+                value_entry.configure(values=(), state="normal")
+                if value_var.get() in {"", "Automatic"} and choices:
+                    value_var.set(", ".join(choices))
+            elif operation_id == "toggle" and choices:
                 value_label.configure(text="Values")
                 value_entry.configure(values=(), state="disabled")
                 value_var.set("Automatic")
@@ -798,9 +813,10 @@ class SettingsWindow:
 
         def current_row():
             when_value = {}
-            selected_app = app_labels[app_var.get()]
-            if selected_app:
-                when_value["apps"] = [selected_app]
+            selected_app_ids = [
+                APP_SPECS[index].app_id for index in app_list.curselection()]
+            if selected_app_ids:
+                when_value["apps"] = selected_app_ids
             target_id = target_by_label.get(target_var.get(), "")
             operation_id = operation_ids.get(operation_var.get(), "")
             activation, press, release = self.binding_model.build_simple_action(

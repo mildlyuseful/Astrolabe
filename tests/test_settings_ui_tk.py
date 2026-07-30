@@ -105,6 +105,13 @@ def test_generated_tabs_and_linked_value_refresh_after_global_edit(tmp_path):
                           if isinstance(widget, ttk.Label)}
         assert "What it controls" in visible_labels
         assert "Behavior" in visible_labels
+        assert "Applications" in visible_labels
+        assert "Active application" not in visible_labels
+        app_row, _label = _row_with_label(keybindings, "Applications")
+        app_selector = next(widget for widget in _walk(app_row)
+                            if isinstance(widget, tk.Listbox))
+        assert str(app_selector.cget("selectmode")) == "multiple"
+        assert {"Blender", "Unity"} <= set(app_selector.get(0, "end"))
         assert "Executables" not in visible_labels
         assert "Input profiles" not in visible_labels
         assert "On press (JSON)" not in visible_labels

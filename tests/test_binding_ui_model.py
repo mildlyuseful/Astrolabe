@@ -145,17 +145,55 @@ def test_simple_setting_builder_owns_hold_release_and_toggle_semantics(tmp_path)
     assert release == []
 
 
+def test_simple_editor_exposes_under_cursor_and_custom_setting_cycles(tmp_path):
+    _store, model = _model(tmp_path)
+    pivot_values = model.setting_value_options("navigation.orbit.pivot")
+    assert "cursor" in pivot_values
+    assert "default" not in pivot_values
+
+    activation, press, release = model.build_simple_action(
+        "setting:navigation.orbit.pivot", "cycle", "cursor, selection, camera")
+    assert activation == "hold"
+    assert press == [{
+        "command": "setting.cycle_runtime",
+        "target": "navigation.orbit.pivot",
+        "value": ["cursor", "selection", "camera"],
+    }]
+    assert release == []
+    view = model.simple_action({
+        "activation": activation, "press": press, "release": release,
+    })
+    assert not view.advanced_only
+    assert (view.target_id, view.operation_id, view.value_text) == (
+        "setting:navigation.orbit.pivot", "cycle", "cursor, selection, camera")
+
+    _activation, numeric_press, _release = model.build_simple_action(
+        "setting:navigation.orbit.sensitivity", "cycle", "0.5, 1, 2")
+    assert numeric_press[0]["value"] == [0.5, 1.0, 2.0]
+
+
+def test_simple_editor_preserves_multiple_app_contexts(tmp_path):
+    _store, model = _model(tmp_path)
+    binding_id = model.next_custom_id()
+    model.save({
+        "id": binding_id,
+        "label": "Shared Blender and Unity binding",
+        "enabled": True,
+        "when": {"apps": ["blender", "unity"]},
+        "chord": ["keyboard:f12"],
+        "match": "exact",
+        "activation": "hold",
+        "priority": 0,
+        "press": [{"command": "input.mode.toggle"}],
+        "release": [],
+    })
+    row = model.row(binding_id)
+    assert row["when"] == {"apps": ["blender", "unity"]}
+    assert not model.simple_action(row).advanced_only
+
+
 def test_low_level_latched_activation_remains_advanced_dsl_only(tmp_path):
     _store, model = _model(tmp_path)
     row = model.row("keyboard.ctrl.3d")
     row["activation"] = "toggle"
-    assert model.simple_action(row).advanced_only
-
-    row = model.row("keyboard.ctrl.3d")
-    row["press"] = [{
-        "command": "setting.cycle_runtime",
-        "target": "navigation.orbit.style",
-        "value": ["turntable", "free"],
-    }]
-    row["release"] = []
     assert model.simple_action(row).advanced_only

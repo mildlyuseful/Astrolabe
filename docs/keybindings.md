@@ -18,11 +18,11 @@ profile does not copy or rewrite it. User edits are sparse patches stored under 
 `%APPDATA%\Mildly Useful\Astrolabe\config.json`. Switching profiles preserves each profile's own patches.
 The daemon never changes profiles merely because BLE hardware appears or disappears.
 
-The ordinary Keybindings editor exposes the control chord, one app context, plain-language action
-or setting, and setting behavior/value. It generates paired release/restoration actions for holds.
-Advanced DSL exposes executable and multi-app contexts, profile context, explicit priority,
-low-level activation, and custom action lists. Invalid edits are rejected before the live compiled
-profile changes.
+The ordinary Keybindings editor exposes the control chord, any number of registered app contexts,
+plain-language action or setting, and setting behavior/value. No selected app means the binding is
+global. It generates paired release/restoration actions for holds. Advanced DSL exposes executable
+and profile contexts, explicit priority, low-level activation, and custom action lists. Invalid
+edits are rejected before the live compiled profile changes.
 
 ## Matching and dependency behavior
 
@@ -60,7 +60,8 @@ through actions:
   when one releases.
 - A toggle uses `setting.toggle_runtime` on the press edge. Boolean settings need no values;
   non-boolean settings require two distinct valid values.
-- Cycle, numeric add, and numeric multiply are press-edge runtime operations.
+- Cycle accepts two or more distinct comma-separated enum or numeric values and advances once per
+  press edge. Numeric add and numeric multiply are also press-edge runtime operations.
 - `setting.set_persistent` is an explicit atomic config transaction and cannot be mixed with runtime
   actions in the same phase.
 
