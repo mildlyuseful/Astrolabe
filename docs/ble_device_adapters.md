@@ -111,8 +111,10 @@ The validated five-way prototype publisher is
 [`firmware/PMW3610/PMW3610.ino`](../firmware/PMW3610/PMW3610.ino): SuperMini nRF52840, dual
 PMW3610 sensors, interrupt-driven reads, and the five-way protocol bit map under the `Astrolabe`
 advertised name. Standalone HID maps Down/Right/Center to left/right/middle mouse buttons; Up and Left
-are protocol-only. Its completed validation does not qualify the final Seeed Studio XIAO nRF52840
-product hardware. Prototype pins, 2.0 in ball diameter, and mount angles live only in that sketch.
+are protocol-only. Motion reported while the sensors re-lock after rest is drained through a bounded
+minimum-plus-quiet wake guard before either output path can consume it. Its completed validation does
+not qualify the final Seeed Studio XIAO nRF52840 product hardware. Prototype pins, 2.0 in ball
+diameter, mount angles, and wake timings live only in that sketch.
 
 The five-way switch is active-low with internal pull-ups, with debounce owned by firmware. Its
 mechanism ordinarily permits only one direction at a time. That is descriptive hardware metadata,

@@ -22,6 +22,10 @@ already-supported contract.
   - confirm Up/Down/Left/Right/Center pins, polarity, debounce timing, and simultaneous-input behavior;
   - battery/power design, USB/BLE expectations, host-profile behavior, and an always-reachable
     mode/recovery control.
+- Re-flash the SuperMini validation prototype and verify repeated rest-to-run transitions in both
+  standalone HID and daemon-owned modes. The firmware now drains wake-time motion through a bounded
+  minimum-plus-quiet guard; automated source checks do not establish that the physical cursor jerk is
+  gone or that the cap preserves acceptable first-motion latency.
 - Port the frozen contract to the final XIAO nRF52840 assembly and repeat the physical switch, sensor,
   reconnect, held-input, sleep/wake, and mode-transition matrix there. The XIAO three-button bench
   validates the protocol boundary and the completed SuperMini PMW3610 loop validates the five-way

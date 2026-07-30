@@ -109,10 +109,13 @@
 // lockstep, ~x0.75 decay per frame, occasionally railing +/-2048 with cratered SQUAL).
 // The old 80 ms idle timeout re-entered rest between ordinary interaction pauses, so
 // nearly every button press or first touch woke the sensors and fired the transient.
-// Keep run mode through normal use and pay the transition cost only after real idle,
-// then discard the settle frames — invalid-by-design output, not a data heuristic.
+// Keep run mode through normal use and pay the transition cost only after real idle.
+// Blank a minimum interval, then require a quiet tail so a late relock frame extends
+// rejection. The maximum bounds how long genuine continuous motion can be hidden.
 #define MOTION_IDLE_MS   2000   // no motion/button activity -> MCU+sensor sleep
-#define WAKE_SETTLE_MS   40     // ignore motion this long after a rest->run transition
+#define WAKE_SETTLE_MIN_MS    40
+#define WAKE_SETTLE_QUIET_MS  20
+#define WAKE_SETTLE_MAX_MS   120
 #define DEBOUNCE_MS     8
 #define DEBUG_PRINT     1
 #define IPS_REPORT_MS   8000
@@ -530,7 +533,8 @@ uint16_t g_inputSequence=0;
 uint32_t lastScrollMs=0, lastSendMs=0, lastBlinkMs=0, lastIpsReportMs=0;
 uint32_t lastPollUs=0, lastActivityMs=0;
 uint32_t g_lastTxUs=0;   // last successful BLE notify/report, for CALIB txAge telemetry
-uint32_t g_wakeSettleUntilMs=0;  // motion reports invalid until then after rest->run
+uint32_t g_wakeSettleUntilMs=0;
+uint32_t g_wakeSettleMaxUntilMs=0;
 bool     ledState=false;
 bool     g_sensorsAwake=false;
 bool     g_okL=false, g_okR=false;
@@ -550,6 +554,10 @@ static inline float countsToIps(int16_t dx, int16_t dy, float dtSec){
   return sqrtf((float)dx*dx + (float)dy*dy) / (float)SENSOR_CPI / dtSec;
 }
 
+static inline bool deadlinePending(uint32_t nowMs, uint32_t deadlineMs){
+  return (int32_t)(nowMs - deadlineMs) < 0;
+}
+
 static inline bool motionPinActive(){
   return (g_okL && digitalRead(PIN_MOTION_L) == LOW)
       || (g_okR && digitalRead(PIN_MOTION_R) == LOW);
@@ -561,8 +569,10 @@ static void sensorsForceAwake(){
   if(g_okR) sensorR.setForceAwake(true);
   g_sensorsAwake = true;
   // Rest->run transition just happened: the trackers' output is invalid while their
-  // servos re-lock. Reads continue (they clear the sensors) but are not believed.
-  g_wakeSettleUntilMs = millis() + WAKE_SETTLE_MS;
+  // servos re-lock. Reads continue to drain the sensor without being believed.
+  uint32_t nowMs = millis();
+  g_wakeSettleUntilMs = nowMs + WAKE_SETTLE_MIN_MS + WAKE_SETTLE_QUIET_MS;
+  g_wakeSettleMaxUntilMs = nowMs + WAKE_SETTLE_MAX_MS;
 }
 
 static void sensorsEnterRest(){
@@ -575,6 +585,22 @@ static void sensorsEnterRest(){
 static void clearMotionAccumulators(){
   gx = gy = gz = 0.0f;
   accX = accY = accScroll = 0.0f;
+}
+
+static bool rejectWakeMotion(uint32_t nowMs, bool reportedMotion){
+  if(!deadlinePending(nowMs, g_wakeSettleUntilMs)
+      || !deadlinePending(nowMs, g_wakeSettleMaxUntilMs)){
+    g_wakeSettleUntilMs = g_wakeSettleMaxUntilMs = nowMs;
+    return false;
+  }
+  if(reportedMotion){
+    uint32_t quietUntilMs = nowMs + WAKE_SETTLE_QUIET_MS;
+    if(deadlinePending(g_wakeSettleUntilMs, quietUntilMs)){
+      g_wakeSettleUntilMs = deadlinePending(quietUntilMs, g_wakeSettleMaxUntilMs)
+          ? quietUntilMs : g_wakeSettleMaxUntilMs;
+    }
+  }
+  return deadlinePending(nowMs, g_wakeSettleUntilMs);
 }
 
 static void onConnect(uint16_t conn_handle){
@@ -942,11 +968,10 @@ void loop(){
   if(g_okL) a = sensorL.readMotion();
   if(g_okR) b = sensorR.readMotion();
 
-  // Inside the wake-settle window the sensors are still re-locking after rest->run and
-  // their motion output is invalid by design — discard it (SETTLE lines show what was
-  // dropped). It must not accumulate, and must not count as activity: phantom frames
-  // holding the poll window open was the old runaway-jerk feedback loop.
-  if((int32_t)(nowMs - g_wakeSettleUntilMs) < 0){
+  // Drain wake-time motion through the minimum interval and quiet tail. It must not
+  // accumulate or count as activity: phantom frames holding the poll window open was
+  // the old runaway-jerk feedback loop. SETTLE lines show what was dropped.
+  if(rejectWakeMotion(nowMs, a.isMotion || b.isMotion)){
 #if DEBUG_PRINT
     if(a.isMotion || b.isMotion){
       Serial.print("SETTLE,");
