@@ -333,6 +333,20 @@ def test_explicit_two_value_toggle_and_enum_cycle_macros():
     assert runtime.snapshot().effective_settings["navigation.orbit.style"] == "free"
 
 
+def test_numeric_setting_cycle_supports_more_than_two_selected_values():
+    cycle = _binding_row(
+        ("keyboard:a",),
+        ({"command": "setting.cycle_runtime", "target": "navigation.orbit.sensitivity",
+          "value": [0.5, 2.0, 4.0]},))
+    controller, runtime, _catalog = _controller(overrides={"custom.cycle": cycle})
+
+    for expected in (0.5, 2.0, 4.0, 0.5):
+        controller.update_pressed(("keyboard:a",))
+        controller.update_pressed(())
+        assert runtime.snapshot().effective_settings[
+            "navigation.orbit.sensitivity"] == expected
+
+
 def test_persistent_macro_uses_one_config_transaction_without_runtime_latch(tmp_path):
     config = ConfigStore(tmp_path / "config.json").load()
     binding = _binding_row(

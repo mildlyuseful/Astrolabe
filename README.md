@@ -74,6 +74,8 @@ from the tray.
 Later starts show only the passive control panel. Use the tray icon to open Settings or the setup
 guide, show/hide the control panel, inspect connection status, enable **Start at login**, or quit.
 Input and navigation modes are changed by the declarative bindings shown under **Keybindings**.
+One binding may target any selected set of registered apps, and setting cycles accept a
+comma-separated sequence of two or more enum or numeric values.
 Closing Settings or the guide hides/closes that window; it does not stop the daemon.
 
 Do not pair the trackball as a Windows Bluetooth mouse while the daemon is consuming its BLE

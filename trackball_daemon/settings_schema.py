@@ -176,8 +176,9 @@ BINDING_SECTIONS = (
 
 _PERSIST = frozenset({SettingOperation.UI_PERSIST, SettingOperation.MACRO_PERSIST})
 _NUMBER_OPS = _PERSIST | frozenset({
-    SettingOperation.RUNTIME_SET, SettingOperation.RUNTIME_TOGGLE, SettingOperation.RUNTIME_ADD,
-    SettingOperation.RUNTIME_MULTIPLY, SettingOperation.RUNTIME_RESTORE,
+    SettingOperation.RUNTIME_SET, SettingOperation.RUNTIME_TOGGLE, SettingOperation.RUNTIME_CYCLE,
+    SettingOperation.RUNTIME_ADD, SettingOperation.RUNTIME_MULTIPLY,
+    SettingOperation.RUNTIME_RESTORE,
 })
 _BOOL_OPS = _PERSIST | frozenset({
     SettingOperation.RUNTIME_SET, SettingOperation.RUNTIME_TOGGLE,
