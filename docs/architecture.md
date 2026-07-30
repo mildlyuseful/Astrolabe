@@ -324,9 +324,9 @@ Shared meanings:
 - Ray-derived orbit pivots require a real supported hit.
 
 The configured primary pivot is tried first. If it is unsupported or fails, resolution restarts at
-the beginning of the global fallback chain. Unsupported, unknown, and duplicate entries are skipped.
-An empty usable chain means no orbit after the primary fails; integrations must not add hidden
-host-local fallbacks.
+the beginning of the app's effective fallback chain: an app override when present, otherwise Global.
+Unsupported, unknown, and duplicate entries are skipped. An empty usable chain means no orbit after
+the primary fails; integrations must not add hidden host-local fallbacks.
 
 When supported and enabled, a non-empty selection may override external orbit pivots and To Cursor
 zoom. A `camera` primary remains turn-in-place and is exempt from that override.

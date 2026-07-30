@@ -291,11 +291,12 @@ _SPECS = [
             "Scroll deadzone", category="pointer", minimum=0.0),
     _global("pointer.scroll.dominance", ("general", "scroll", "dominance"), ValueKind.NUMBER,
             "Scroll dominance", category="pointer", minimum=0.0),
-    _global("navigation.orbit.pivot_fallbacks", ("general", "orbit_pivot_fallbacks"),
-            ValueKind.STRING_LIST, "Orbit pivot fallback order", category="orbit",
-            choices=("camera", "screen_center", "cursor", "selection", "cursor_3d", "object",
-                     "origin"), control="ordered_list",
-            operations=frozenset({SettingOperation.UI_PERSIST})),
+    _app("navigation.orbit.pivot_fallbacks", (),
+         ValueKind.STRING_LIST, "Orbit pivot fallback order", "orbit_pivot", category="orbit",
+         choices=("camera", "screen_center", "cursor", "selection", "cursor_3d", "object",
+                  "origin"), control="ordered_list",
+         global_path=("general", "orbit_pivot_fallbacks"),
+         operations=frozenset({SettingOperation.UI_PERSIST})),
 
     _app("navigation.refresh_rate", ("rate_hz",), ValueKind.INTEGER, "Viewport refresh rate",
          "rate", category="sensitivity", minimum=0, maximum=240,
@@ -511,6 +512,8 @@ def setting_value_valid_for_app(setting_spec, app_spec, value):
     if not setting_spec.applies_to(app_spec) or not setting_spec.validates(value):
         return False
     choices = setting_choices_for_app(setting_spec, app_spec)
+    if setting_spec.value_kind is ValueKind.STRING_LIST:
+        return True
     return not choices or value in choices
 
 

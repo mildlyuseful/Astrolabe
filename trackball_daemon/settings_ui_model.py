@@ -10,6 +10,7 @@ from .settings_schema import (
     SETTING_SPECS,
     SettingScope,
     setting_choices_for_app,
+    setting_value_valid_for_app,
 )
 from .system_defaults import SYSTEM_DEFAULTS
 
@@ -93,7 +94,8 @@ class SettingsUIModel:
             system = SYSTEM_DEFAULTS.app_value(app_id, spec.id)
             choices = tuple(value for value in setting_choices_for_app(spec, app)
                             if value != "default")
-            global_compatible = not choices or snapshot.global_value(spec.id) in choices
+            global_compatible = setting_value_valid_for_app(
+                spec, app, snapshot.global_value(spec.id))
             views.append(AppSettingView(
                 spec, app_id, value, system, linked, global_compatible, tuple(choices)))
         return tuple(views)

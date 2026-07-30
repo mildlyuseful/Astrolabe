@@ -107,6 +107,23 @@ def test_app_projection_excludes_unsupported_settings_and_restricts_choices(tmp_
     assert godot["navigation.orbit.style"].choices == ("turntable",)
 
 
+def test_app_pivot_fallback_order_can_override_and_relink_to_global(tmp_path):
+    store, model = _model(tmp_path)
+    setting_id = "navigation.orbit.pivot_fallbacks"
+    global_order = ("cursor_3d", "camera", "object", "origin")
+    view = next(item for item in model.app_views("blender") if item.spec.id == setting_id)
+    assert view.linked and view.value == global_order and view.global_compatible
+
+    model.set_app("blender", setting_id, ["selection", "camera"])
+    snapshot = store.snapshot()
+    assert snapshot.app_value("blender", setting_id) == ("selection", "camera")
+    assert snapshot.global_value(setting_id) == global_order
+
+    model.toggle_app_link("blender", setting_id)
+    assert store.snapshot().app_value("blender", setting_id) == global_order
+    assert setting_id not in store.snapshot().app_override_ids["blender"]
+
+
 def test_physical_axis_edit_remains_a_permutation(tmp_path):
     store, model = _model(tmp_path)
     before = [store.snapshot().global_value(
