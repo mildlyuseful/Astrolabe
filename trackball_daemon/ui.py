@@ -792,6 +792,9 @@ class SettingsWindow:
 
         when = row.get("when", {})
         selected_apps = when.get("apps", [])
+        app_options = tuple(
+            (app_spec.app_id, app_spec.display_name) for app_spec in APP_SPECS
+        ) + ((None, "Other applications (not integrated)"),)
         app_line = ttk.Frame(parent)
         app_line.pack(fill="x", padx=8, pady=3)
         app_label = ttk.Label(app_line, text="Applications", width=18, anchor="nw")
@@ -804,14 +807,16 @@ class SettingsWindow:
         app_list.configure(yscrollcommand=app_scroll.set)
         app_list.pack(side="left", fill="x", expand=True)
         app_scroll.pack(side="right", fill="y")
-        for index, app_spec in enumerate(APP_SPECS):
-            app_list.insert("end", app_spec.display_name)
-            if app_spec.app_id in selected_apps:
+        for index, (app_id, app_label_text) in enumerate(app_options):
+            app_list.insert("end", app_label_text)
+            if app_id in selected_apps or (app_id is None and when.get("other_apps")):
                 app_list.selection_set(index)
         all_apps = ttk.Button(app_line, text="All", width=6, command=lambda: app_list.selection_clear(
             0, "end"))
         all_apps.pack(side="left", padx=(6, 0))
-        app_help = "Select any number of applications. No selection means all applications."
+        app_help = (
+            "Select any combination of integrated apps and Other applications. "
+            "No selection means all applications.")
         self._tooltip(app_label, app_help)
         self._tooltip(app_list, app_help)
         self._tooltip(all_apps, app_help)
@@ -923,10 +928,13 @@ class SettingsWindow:
 
         def current_row():
             when_value = {}
-            selected_app_ids = [
-                APP_SPECS[index].app_id for index in app_list.curselection()]
+            selected_options = [app_options[index] for index in app_list.curselection()]
+            selected_app_ids = [app_id for app_id, _label in selected_options
+                                if app_id is not None]
             if selected_app_ids:
                 when_value["apps"] = selected_app_ids
+            if any(app_id is None for app_id, _label in selected_options):
+                when_value["other_apps"] = True
             target_id = target_by_label.get(target_var.get(), "")
             operation_id = operation_ids.get(operation_var.get(), "")
             activation, press, release = self.binding_model.build_simple_action(
