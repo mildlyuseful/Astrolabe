@@ -14,6 +14,9 @@
  *   DOWN=P1.13  CENTER=P1.15  LEFT=P0.02  UP=P0.29  RIGHT=P0.31
  *   (cardinals rotated 90° CW from silk so physical Up/Down/Left/Right match the housing)
  *
+ * Fused rotation is published in the housing frame, whose "up" leans right with the tilted
+ * ball plane rather than standing vertical (see FRAME_TILT_DEG).
+ *
  * Advertises as "Astrolabe" and publishes the production five-way snapshot bit map
  * (bit0 Up, bit1 Down, bit2 Left, bit3 Right, bit4 Center). Standalone HID maps
  * Down=LMB, Right=RMB, Center=MMB. Daemon subscription suppresses HID pointer/buttons;
@@ -64,14 +67,27 @@
 #endif
 
 // L = sensor A rows, R = sensor B rows in the dual-sensor solver.
-#define SENSOR_L_PHI    140.0f
-#define SENSOR_L_THETA  130.0f
-#define SENSOR_R_PHI    230.0f
-#define SENSOR_R_THETA  130.0f
+#define SENSOR_L_PHI    145.0f
+#define SENSOR_L_THETA  120.0f
+#define SENSOR_R_PHI    215.0f
+#define SENSOR_R_THETA  120.0f
 #define SENSOR_L_MOUNT_DEG  270.0f
 #define SENSOR_L_FLIP       1
 #define SENSOR_R_MOUNT_DEG  270.0f
 #define SENSOR_R_FLIP       1
+
+// Housing frame tilt. The ball's horizontal plane is rolled 20 deg to the right, so the
+// housing's own "up" points up-and-right, not straight up. The sensor poses above are
+// written in the level frame the solver was built in; this reports the fused rotation in
+// the housing frame instead, so a level sideways roll stays pure X/Y and no longer leaks
+// into Z (which is the twist axis feeding the scroll gesture).
+// Frame conventions, read off the validated standalone-HID cursor map (CURSOR_SWAP_XY
+// with both inversions: cursor-right comes from wy, cursor-up from wx): +Z is up, -X is
+// right, -Y is away from the user. A rightward tilt is therefore a roll in the X-Z plane,
+// and positive degrees lean +Z toward -X. Flip the sign for a left-leaning housing; set
+// FRAME_TILT_ENABLE to 0 to report in the level frame as before (compiles to nothing).
+#define FRAME_TILT_ENABLE   1
+#define FRAME_TILT_DEG      -20.0f
 
 #define SENSOR_CPI       1600
 #define CURSOR_GAIN      0.125f
@@ -432,6 +448,18 @@ static void sensorAxes(const float n[3], float mountDeg, bool flip,
   }
 }
 
+#if FRAME_TILT_ENABLE
+// Re-express a level-frame vector in the tilted housing frame: a roll in the X-Z plane,
+// so only two components mix and Y is untouched.
+static void tiltToHousing(float v[3]) {
+  const float a = FRAME_TILT_DEG * (float)M_PI / 180.0f;
+  const float c = cosf(a), s = sinf(a);
+  float x = v[0], z = v[2];
+  v[0] =  c*x + s*z;
+  v[2] = -s*x + c*z;
+}
+#endif
+
 static bool invert3x3(const float m[3][3], float out[3][3]) {
   float det = m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1])
             - m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0])
@@ -463,6 +491,17 @@ static bool buildSolver() {
   sensorAxes(nR, SENSOR_R_MOUNT_DEG, SENSOR_R_FLIP, rDx, rDy);
   cross3(nL, lDx, A[0]); cross3(nL, lDy, A[1]);
   cross3(nR, rDx, A[2]); cross3(nR, rDy, A[3]);
+#if FRAME_TILT_ENABLE
+  // Tilt the four geometry rows once at boot instead of every solved omega at 1 kHz. Each
+  // row already satisfies row . omega == that sensor axis' counts, and for an orthogonal
+  // map M, (M row) . (M omega) == row . omega — so tilting the rows makes pinv come out
+  // already expressed in the housing frame, and the poll path is byte-for-byte unchanged.
+  // Deliberately after sensorAxes(): the mount angles are referenced to the level frame's
+  // Z inside localFrame(), so tilting the normals first would redefine them. The residual
+  // search in tools/calibrate_sensor_mounts.py is invariant under a whole-frame rotation,
+  // so its rankings and the calibrated poses above still apply as-is.
+  for (int r=0;r<4;r++) tiltToHousing(A[r]);
+#endif
   float AtA[3][3] = {{0}};
   for (int i=0;i<3;i++) for (int j=0;j<3;j++)
     for (int r=0;r<4;r++) AtA[i][j] += A[r][i]*A[r][j];
@@ -813,6 +852,15 @@ void setup(){
 
   bool solverOK = buildSolver();
   if(!solverOK) haltBlink(4, "Geometry singular");
+#if DEBUG_PRINT
+  // Which frame this build reports in is otherwise invisible on hardware.
+#if FRAME_TILT_ENABLE
+  Serial.print("frame tilt = "); Serial.print(FRAME_TILT_DEG, 1);
+  Serial.println(" deg right (housing frame)");
+#else
+  Serial.println("frame tilt = off (level frame)");
+#endif
+#endif
 
   g_okL = sensorL.begin(PIN_CS_L, SENSOR_CPI);
   if(!g_okL){ delay(100); g_okL = sensorL.begin(PIN_CS_L, SENSOR_CPI); }
