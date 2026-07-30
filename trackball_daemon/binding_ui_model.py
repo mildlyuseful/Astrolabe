@@ -83,6 +83,7 @@ _COMMON_ACTIONS = (
 )
 _COMMON_BY_ID = {action_id: (label, press, release)
                  for action_id, label, press, release in _COMMON_ACTIONS}
+_POINTER_ACTION_IDS = frozenset({"pointer.left", "pointer.right", "pointer.middle"})
 
 
 class BindingUIModel:
@@ -107,6 +108,14 @@ class BindingUIModel:
             (f"setting:{spec.id}", f"Setting — {spec.ui.label}")
             for spec in SETTING_SPECS if spec.keybindable)
         return common + settings
+
+    @staticmethod
+    def recommended_match_policy(target_id, current_policy):
+        """Default simple pointer actions to normal Shift/Ctrl/Alt/Meta click semantics."""
+        if current_policy not in {"exact", "allow_extra_modifiers"}:
+            raise ValueError(f"unknown match policy: {current_policy}")
+        return ("allow_extra_modifiers"
+                if target_id in _POINTER_ACTION_IDS else current_policy)
 
     @staticmethod
     def setting_operation_options(setting_id):

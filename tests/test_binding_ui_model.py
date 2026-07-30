@@ -52,6 +52,13 @@ def test_editor_saves_custom_binding_and_validates_before_commit(tmp_path):
     assert store.snapshot().revision == before
 
 
+def test_simple_pointer_actions_default_to_modifier_passthrough():
+    assert BindingUIModel.recommended_match_policy(
+        "pointer.left", "exact") == "allow_extra_modifiers"
+    assert BindingUIModel.recommended_match_policy(
+        "input.toggle", "exact") == "exact"
+
+
 def test_delete_and_restore_follow_system_vs_custom_ownership(tmp_path):
     store, model = _model(tmp_path)
     model.delete("keyboard.ctrl.3d")

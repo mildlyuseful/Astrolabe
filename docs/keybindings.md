@@ -71,7 +71,9 @@ setting toggle and is intentionally hidden from ordinary editing.
 Pointer buttons are limited to paired, momentary Left/Right/Middle/X1/X2 press and release actions.
 Profile reload, provider disconnect, owner replacement, and shutdown release their identity-owned
 holds. Keyboard controls remain pass-through; Windows Raw Input does not suppress the key's normal
-application behavior.
+application behavior. Shipped pointer buttons and new simple-editor click actions allow extra
+modifiers, so holding Shift, Ctrl, Alt, or Meta produces the foreground application's normal modified
+click. Advanced DSL may still select `exact` when a click must be disabled while a modifier is held.
 
 ## App context and capabilities
 

@@ -182,6 +182,23 @@ def _remove_deprecated_v9_settings(state):
     return changed
 
 
+def _repair_pointer_button_matches(state):
+    """Let sparse System-binding click overrides inherit normal OS modifier behavior."""
+    changed = False
+    for overrides in state.get("keybinding_overrides", {}).values():
+        for patch in overrides.values():
+            if not isinstance(patch, dict) or "match" in patch:
+                continue
+            press = patch.get("press")
+            if (isinstance(press, list) and
+                    any(isinstance(action, dict) and
+                        action.get("command") == "pointer.button.press"
+                        for action in press)):
+                patch["match"] = "allow_extra_modifiers"
+                changed = True
+    return changed
+
+
 def _normalize_legacy(disk):
     """Run the established v1-v8 upgrades in memory without touching the source file."""
     raw_version = disk.get("version", 1) if isinstance(disk, dict) else None
@@ -606,6 +623,7 @@ class ConfigStore:
                     if isinstance(disk, dict) and disk.get("version") == CONFIG_VERSION:
                         candidate = copy.deepcopy(disk)
                         cleaned = _remove_deprecated_v9_settings(candidate)
+                        cleaned = _repair_pointer_button_matches(candidate) or cleaned
                         rejected_endpoint = _repair_fixed_onshape_endpoint(candidate)
                         validate_v9_state(candidate)
                         if cleaned and not rejected_endpoint:

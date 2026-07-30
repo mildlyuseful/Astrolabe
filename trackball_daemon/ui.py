@@ -779,7 +779,16 @@ class SettingsWindow:
                 value_var.set("")
                 value_entry.configure(state="disabled")
                 value_label.configure(text="Value")
-        target_combo.bind("<<ComboboxSelected>>", refresh_action_fields)
+        def select_action_fields(*_):
+            target_id = target_by_label.get(target_var.get(), "")
+            current_policy = match_labels[match_var.get()]
+            recommended = self.binding_model.recommended_match_policy(
+                target_id, current_policy)
+            match_var.set(next(label for label, value in match_labels.items()
+                               if value == recommended))
+            refresh_action_fields()
+
+        target_combo.bind("<<ComboboxSelected>>", select_action_fields)
         operation_combo.bind("<<ComboboxSelected>>", refresh_value_field)
         refresh_action_fields()
 
