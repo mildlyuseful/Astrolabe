@@ -112,7 +112,7 @@ sensor deltas
   -> MotionSample
   -> App captures foreground target and one RuntimeSnapshot revision
   -> OutputEngine applies one immutable mapping for the complete sample
-       -> pointer mode: bounded OS pointer/wheel output
+       -> pointer mode: optional time-based planar acceleration, then bounded OS pointer/wheel output
        -> 3D mode: NavigationEnvelope(target, deltas, state revision)
   -> NavigationRouter
   -> target transport

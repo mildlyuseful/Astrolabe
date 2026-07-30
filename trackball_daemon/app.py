@@ -490,7 +490,7 @@ class App:
             self._engine_app = key
             self.engine.set_active_bindings(key)
 
-    def _handle_ble_packet(self, data):
+    def _handle_ble_packet(self, data, *, timestamp=None):
         """Choose one focused app for both mapping and routing of this complete BLE packet."""
         context = self._foreground_app_context()
         key = self._apply_foreground_context(context)
@@ -503,7 +503,11 @@ class App:
         try:
             if runtime_snapshot is not None:
                 self._apply_runtime_navigation_profile(runtime_snapshot)
-            self.engine.handle_packet(bytes(data), runtime_snapshot=runtime_snapshot)
+            if timestamp is None:
+                self.engine.handle_packet(bytes(data), runtime_snapshot=runtime_snapshot)
+            else:
+                self.engine.handle_packet(
+                    bytes(data), runtime_snapshot=runtime_snapshot, timestamp=timestamp)
         finally:
             self._packet_app_key = previous
             self._packet_state_revision = previous_revision
@@ -511,7 +515,7 @@ class App:
     def _handle_ble_motion(self, sample):
         if not isinstance(sample, MotionSample):
             raise TypeError("BLE device adapters must emit MotionSample values")
-        self._handle_ble_packet(sample.payload)
+        self._handle_ble_packet(sample.payload, timestamp=sample.timestamp)
 
     def _nav_sink(self, ox, oy, oz, px, py, zoom):
         # Called synchronously by _handle_ble_packet after that method selected the app whose

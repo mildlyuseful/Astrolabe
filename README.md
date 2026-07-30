@@ -178,6 +178,9 @@ than being carried across.
 ### Pointer and 3D modes
 
 - **Pointer mode** converts ball rotation into cursor movement or wheel input.
+- Pointer sensitivity is constant by default. Under **Global → Pointer**, an optional Linear or
+  Smooth acceleration curve can increase cursor speed from a configurable ball-speed onset to a
+  bounded maximum multiplier. Acceleration affects cursor movement only, never wheel or 3D motion.
 - **3D mode** sends orbit input by default. With the shipped binding, holding **Shift** switches the
   same motion to pan and zoom.
 - The mode switch is global and manual. Navigation is otherwise selected by the foreground app.
