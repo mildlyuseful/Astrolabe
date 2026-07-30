@@ -36,6 +36,8 @@ def test_packaged_profiles_are_complete_immutable_and_keyboard_only_is_device_fr
     assert _binding(hardware, "astrolabe.center.toggle_mode").chord == (
         "ble.astrolabe:fiveway.center",)
     assert _binding(hardware, "xiao.left.pointer_button").release_actions[0].target == "left"
+    assert all(_binding(hardware, f"xiao.{button}.pointer_button").match_policy ==
+               "allow_extra_modifiers" for button in ("left", "right", "middle"))
     assert all(token.startswith("keyboard:")
                for binding in keyboard.bindings for token in binding.chord)
     with pytest.raises(TypeError):
@@ -114,6 +116,25 @@ def test_config_persists_profile_scoped_overrides_and_switching_preserves_each_p
     reloaded = ConfigStore(path).load().snapshot()
     assert reloaded.input_profile == "keyboard_only"
     assert reloaded.keybinding_overrides == snapshot.keybinding_overrides
+
+
+def test_sparse_system_click_override_gains_modifier_passthrough_on_reload(tmp_path):
+    path = tmp_path / "config.json"
+    store = ConfigStore(path).load()
+    store.set_keybinding_override("astrolabe_5way", "astrolabe.down.walk", {
+        "press": [{"command": "pointer.button.press", "target": "left"}],
+        "release": [{"command": "pointer.button.release", "target": "left"}],
+    })
+    store.set_keybinding_override("astrolabe_5way", "astrolabe.right.fly", {
+        "match": "exact",
+        "press": [{"command": "pointer.button.press", "target": "right"}],
+        "release": [{"command": "pointer.button.release", "target": "right"}],
+    })
+
+    overrides = ConfigStore(path).load().snapshot().keybinding_overrides["astrolabe_5way"]
+
+    assert overrides["astrolabe.down.walk"]["match"] == "allow_extra_modifiers"
+    assert overrides["astrolabe.right.fly"]["match"] == "exact"
 
 
 def test_invalid_override_transaction_is_atomic_and_preserves_disk(tmp_path):

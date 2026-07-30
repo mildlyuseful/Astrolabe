@@ -233,6 +233,24 @@ def test_pointer_resource_is_identity_owned_and_reload_synthesizes_release():
     assert sink.events[0][2] == sink.events[1][2]
 
 
+def test_system_pointer_click_remains_active_with_pass_through_modifiers():
+    sink = _RecordingPointerSink()
+    controller, _runtime_store, _catalog = _controller(
+        "astrolabe_5way", pointer_sink=sink)
+
+    controller.update_pressed((
+        "keyboard:shift.left", "ble.xiao3389:button.left"))
+    controller.update_pressed(("keyboard:shift.left",))
+    controller.update_pressed((
+        "keyboard:ctrl.right", "ble.xiao3389:button.right"))
+    controller.update_pressed(("keyboard:ctrl.right",))
+
+    assert [(phase, button) for phase, button, _owner in sink.events] == [
+        ("press", "left"), ("release", "left"),
+        ("press", "right"), ("release", "right"),
+    ]
+
+
 def test_ble_disconnect_releases_a_real_pointer_output_sink():
     events = []
     sink = SendInputPointerButtonSink(
