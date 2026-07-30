@@ -111,7 +111,24 @@ The validated five-way prototype publisher is
 [`firmware/PMW3610/PMW3610.ino`](../firmware/PMW3610/PMW3610.ino): SuperMini nRF52840, dual
 PMW3610 sensors, interrupt-driven reads, and the five-way protocol bit map under the `Astrolabe`
 advertised name. Standalone HID maps Down/Right/Center to left/right/middle mouse buttons; Up and Left
-are protocol-only. Its completed validation does not qualify the final Seeed Studio XIAO nRF52840
+are protocol-only. Its normal sensor path keeps Performance `FMODE=0`, allowing the sensors to manage
+Run/Rest automatically; the MCU can wait for MOTION while motion bursts remain readable in automatic
+Rest. It does not use forced Rest, Force Awake, or the visible board LED for normal power/status
+management.
+
+For repeatable PMW3610 transition characterization, set `PMW_WAKE_STRESS` to `1`, flash the prototype,
+keep the ball stationary, and run:
+
+```powershell
+python tools/pmw3610_wake_stress.py --serial auto --cycles 100 --log wake.log
+```
+
+The diagnostic pauses normal HID/BLE processing and, on each serial command, forces Rest1, restores
+normal operation, and records raw deltas, Motion bits, SQUAL, shutter, and observed sensor modes. It
+exists to reproduce and classify the suspect transition; forced modes are not the production power
+policy. Restore `PMW_WAKE_STRESS` to `0` and reflash before ordinary testing.
+
+The prototype's protocol and input validation do not qualify the final Seeed Studio XIAO nRF52840
 product hardware. Prototype pins, 2.0 in ball diameter, and mount angles live only in that sketch.
 
 The five-way switch is active-low with internal pull-ups, with debounce owned by firmware. Its

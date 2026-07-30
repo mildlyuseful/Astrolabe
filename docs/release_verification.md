@@ -138,10 +138,12 @@ Record firmware revision, descriptor ID, physical control, debounce value, and p
 - legacy rotation-only operation with keyboard bindings;
 - daemon-absent standard HID pointer and button operation.
 
-The XIAO three-button/jumper bench proves the host protocol boundary, and the completed SuperMini
-PMW3610 loop proves the current five-way prototype behavior. Neither is the product assembly. The
-final Seeed Studio XIAO nRF52840 build's sensor path, Up/Down/Left/Right/Center pin map, debounce, and
-physical five-way matrix remain release blockers until exercised on that hardware.
+The XIAO three-button/jumper bench proves the host protocol boundary, and the SuperMini PMW3610 loop
+proves the current five-way prototype's protocol and input behavior. Its corrected PMW3610
+sleep/wake cursor path still requires the physical matrix tracked in `TODO.md`; neither bench is the
+product assembly. The final Seeed Studio XIAO nRF52840 build's sensor path,
+Up/Down/Left/Right/Center pin map, debounce, and physical five-way matrix remain release blockers
+until exercised on that hardware.
 
 ## Host control matrix
 

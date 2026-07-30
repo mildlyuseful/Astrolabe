@@ -245,8 +245,11 @@ The working five-way validation firmware is
 [`firmware/PMW3610/PMW3610.ino`](firmware/PMW3610/PMW3610.ino) (SuperMini nRF52840, dual PMW3610,
 advertised name `Astrolabe`). It fuses the two sensors, exposes BLE HID, publishes the custom
 rotation characteristic, and publishes the five-way input-state snapshot used by the daemon. Its
-validation loop is complete, but its SuperMini controller and board are not the product hardware. The
-older
+normal path leaves PMW3610 Run/Rest transitions under the sensor's automatic policy; a separate
+serial wake-stress build is documented in
+[`docs/ble_device_adapters.md`](docs/ble_device_adapters.md). Its SuperMini controller and board are
+not the product hardware, and the current sleep/wake correction still requires the physical
+re-verification tracked in [`TODO.md`](TODO.md). The older
 [`firmware/XIAO3389/XIAO3389.ino`](firmware/XIAO3389/XIAO3389.ino) dual-PMW3389 three-button bench
 remains supported under advertised name `Trackball BLE`. Legacy rotation-only firmware also remains
 supported. See [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) for the packet and

@@ -22,13 +22,13 @@
  * Down=LMB, Right=RMB, Center=MMB. Daemon subscription suppresses HID pointer/buttons;
  * with the daemon, those directions are Walk / Fly / mode-toggle bindings, not OS clicks.
  *
- * Power: MOTION/button IRQ opens an active window with 1 kHz dual-sensor polling
- * (XIAO3389 cadence). After MOTION_IDLE_MS with no activity, sensors enter rest and
- * the MCU waits for the next interrupt. No simulated IPS throttling. Ball = 2.0 in.
+ * Power: the PMW3610s stay in normal operation and manage Run/Rest automatically.
+ * MOTION/button IRQ opens an active window with 1 kHz dual-sensor polling (XIAO3389
+ * cadence); after MOTION_IDLE_MS the MCU waits for the next interrupt. Motion burst
+ * remains readable in every automatic Rest mode. No simulated IPS throttling. Ball = 2.0 in.
  *
- * LED: solid while connected, 600 ms blink only while disconnected AND sensors are
- * asleep. The LED is visible to the sensors off the ball; any toggle while they are
- * imaging reads as a phantom slide (see updateLed).
+ * LED: disabled during normal operation because its light reaches both sensors off the
+ * ball and an illumination step can be reported as motion. Sensor-fault blink codes remain.
  */
 #include <Adafruit_TinyUSB.h>
 #include <bluefruit.h>
@@ -103,16 +103,11 @@
 
 #define BLE_NAME        "Astrolabe"
 #define BLE_SEND_MS     7
-#define POLL_INTERVAL_US 1000   // 1 kHz while awake (matches XIAO3389)
-// Rest/run policy. The PMW3610 emits bogus motion while re-locking its frame-rate and
-// exposure servos on every rest->run transition (the "phantom slide": both sensors in
-// lockstep, ~x0.75 decay per frame, occasionally railing +/-2048 with cratered SQUAL).
-// The old 80 ms idle timeout re-entered rest between ordinary interaction pauses, so
-// nearly every button press or first touch woke the sensors and fired the transient.
-// Keep run mode through normal use and pay the transition cost only after real idle,
-// then discard the settle frames — invalid-by-design output, not a data heuristic.
-#define MOTION_IDLE_MS   2000   // no motion/button activity -> MCU+sensor sleep
-#define WAKE_SETTLE_MS   40     // ignore motion this long after a rest->run transition
+#define POLL_INTERVAL_US 1000   // 1 kHz during the MCU active window (matches XIAO3389)
+// The required 0x0d Performance setting leaves FMODE=0: automatic Run/Rest. Forced Rest
+// and Force Awake have long wake times and are intentionally excluded from normal power
+// management (PMW3610 datasheet R2.4, "Notes on Shutdown and Forced Rest").
+#define MOTION_IDLE_MS   2000   // no motion/button activity -> MCU event wait
 #define DEBOUNCE_MS     8
 #define DEBUG_PRINT     1
 #define IPS_REPORT_MS   8000
@@ -130,6 +125,15 @@
 #ifndef DIAG_MUTE_NOTIFIES
 #define DIAG_MUTE_NOTIFIES 0
 #endif
+// Diagnostic-only serial harness for reproducing forced Rest1 -> normal transitions.
+// Set to 1, flash, then run tools/pmw3610_wake_stress.py. Normal BLE/HID processing is
+// paused while enabled; the production path never writes a forced FMODE.
+#ifndef PMW_WAKE_STRESS
+#define PMW_WAKE_STRESS 0
+#endif
+#define WAKE_STRESS_REST_MS    250
+#define WAKE_STRESS_SAMPLE_MS  160
+#define WAKE_STRESS_MAX_EVENTS 192
 
 // ---------------------------------------------------------------------------
 // [GATT] Custom 3-axis rotation service (purely additive; HID mouse untouched)
@@ -192,7 +196,7 @@ static const float R_COUNTS      = (BALL_DIAMETER_MM * 0.5f) * COUNTS_PER_MM;
 #define SPI_PAGE0               0x00
 #define SPI_PAGE1               0xFF
 #define PERFORMANCE_INIT        0x0D
-#define PERFORMANCE_FORCE_AWAKE 0xF0
+#define PERFORMANCE_FMODE_REST1 0x01
 #define RUN_DOWNSHIFT_INIT      0x04
 #define REST1_RATE_INIT         0x04
 #define REST1_DOWNSHIFT_INIT    0x0F
@@ -293,7 +297,6 @@ public:
     spiClkOff();
 
     setCPI(cpi);
-    setForceAwake(false);
     return true;
   }
 
@@ -310,18 +313,23 @@ public:
     spiClkOff();
   }
 
-  void setForceAwake(bool enable) {
-    spiClkOn();
-    uint8_t val = readRaw(REG_Performance);
-    val = (uint8_t)((val & ~0xF0) | (enable ? PERFORMANCE_FORCE_AWAKE : 0x00));
-    writeRaw(REG_Performance, val);
-    // Leave SPI clock enabled while force-awake so motion polls need no clk-on dance.
-    if (!enable) spiClkOff();
+  void clearMotion() {
+    writeRaw(REG_Motion, 0x00);
   }
 
-  void enterRest() {
-    setForceAwake(false);
+#if PMW_WAKE_STRESS
+  void setPerformanceMode(uint8_t fmode) {
+    spiClkOn();
+    writeRaw(REG_Performance, (uint8_t)(PERFORMANCE_INIT | ((fmode & 0x0F) << 4)));
+    spiClkOff();
   }
+
+  uint8_t observationMode(uint16_t frameWaitMs) {
+    writeRaw(REG_Observation1, 0x00);
+    delay(frameWaitMs);
+    return (uint8_t)((readRaw(REG_Observation1) >> 6) & 0x03);
+  }
+#endif
 
   // Motion Burst (0x12): one CS-framed transaction returns Motion, both deltas, and
   // SQUAL from a single latch. Discrete per-register reads are NOT a shared snapshot — a
@@ -527,12 +535,9 @@ uint8_t  lastHidButtons=0;
 uint8_t  g_protocolButtons=0;
 uint8_t  g_hidButtons=0;
 uint16_t g_inputSequence=0;
-uint32_t lastScrollMs=0, lastSendMs=0, lastBlinkMs=0, lastIpsReportMs=0;
+uint32_t lastScrollMs=0, lastSendMs=0, lastIpsReportMs=0;
 uint32_t lastPollUs=0, lastActivityMs=0;
 uint32_t g_lastTxUs=0;   // last successful BLE notify/report, for CALIB txAge telemetry
-uint32_t g_wakeSettleUntilMs=0;  // motion reports invalid until then after rest->run
-bool     ledState=false;
-bool     g_sensorsAwake=false;
 bool     g_okL=false, g_okR=false;
 bool     g_debouncePending=false;
 
@@ -555,23 +560,6 @@ static inline bool motionPinActive(){
       || (g_okR && digitalRead(PIN_MOTION_R) == LOW);
 }
 
-static void sensorsForceAwake(){
-  if(g_sensorsAwake) return;
-  if(g_okL) sensorL.setForceAwake(true);
-  if(g_okR) sensorR.setForceAwake(true);
-  g_sensorsAwake = true;
-  // Rest->run transition just happened: the trackers' output is invalid while their
-  // servos re-lock. Reads continue (they clear the sensors) but are not believed.
-  g_wakeSettleUntilMs = millis() + WAKE_SETTLE_MS;
-}
-
-static void sensorsEnterRest(){
-  if(!g_sensorsAwake) return;
-  if(g_okL) sensorL.enterRest();
-  if(g_okR) sensorR.enterRest();
-  g_sensorsAwake = false;
-}
-
 static void clearMotionAccumulators(){
   gx = gy = gz = 0.0f;
   accX = accY = accScroll = 0.0f;
@@ -583,7 +571,6 @@ static void onConnect(uint16_t conn_handle){
   // Drop any pre-connection residue so the first reports are not a backlog dump.
   clearMotionAccumulators();
   lastActivityMs = millis();
-  sensorsForceAwake();
 #if DEBUG_PRINT
   uint16_t iv = c->getConnectionInterval();
   Serial.print("conn interval = "); Serial.print(iv*1.25f,2);
@@ -597,7 +584,6 @@ static void onDisconnect(uint16_t conn_handle, uint8_t reason){
   clearMotionAccumulators();
   if(!Bluefruit.connected()){
     lastHidButtons = 0;
-    sensorsEnterRest();
   }
 }
 
@@ -711,21 +697,12 @@ static void startAdv(){
   Bluefruit.Advertising.start(0);
 }
 
-// The board LED shares the housing with two auto-exposure optical sensors. Every toggle
-// is an illumination step the PMW3610s see off the ball, and the tracker answers a step
-// with a phantom slide — hundreds of counts/ms in a geometry-fixed direction, decaying
-// over ~10-20 frames while the shutter servo re-converges — and the step can even wake a
-// resting sensor, chaining into the next blink. The old 200 ms controller blink was the
-// daemon-mode-only cursor jerk (solid-LED HID mode was clean; the 600 ms disconnected
-// blink polluted calibration captures). So: solid while connected — daemon vs HID
-// indication belongs on the host — and blink only while disconnected AND the sensors are
-// asleep, accepting a rare light-step wake as the cost of a pairing beacon.
+// The board LED is visible to both auto-exposure sensors off the ball. Keep it dark in
+// the normal path so connection, controller ownership, and idle transitions cannot inject
+// illumination steps into motion. Sensor-fault blink codes above remain available.
 static void updateLed(uint32_t nowMs){
-  if(!Bluefruit.connected()){
-    if(g_sensorsAwake) return;
-    if(nowMs - lastBlinkMs > 600){ lastBlinkMs=nowMs; ledState=!ledState;
-      digitalWrite(LED_BUILTIN, ledState?LED_STATE_ON:!LED_STATE_ON); }
-  } else if(!ledState){ digitalWrite(LED_BUILTIN,LED_STATE_ON); ledState=true; }
+  (void)nowMs;
+  digitalWrite(LED_BUILTIN, !LED_STATE_ON);
 }
 
 static void flushOutputs(uint32_t nowMs){
@@ -783,8 +760,7 @@ static void flushOutputs(uint32_t nowMs){
 static void trySleepUntilInterrupt(uint32_t nowMs){
   // "Pending" means SENDABLE: clamp8/wheel truncation leaves sub-unit float residue in
   // the HID accumulators that can never produce a report. Testing != 0.0f here kept the
-  // sensors force-awake forever after any HID-mode motion — which incidentally masked
-  // the rest->run wake transient in HID mode while every other mode suffered it.
+  // MCU polling forever after any HID-mode motion instead of reaching its event wait.
   bool pendingOut = (gx!=0.0f || gy!=0.0f || gz!=0.0f)
                  || (!g_controller && (fabsf(accX)>=1.0f || fabsf(accY)>=1.0f
                                        || fabsf(accScroll)>=SCROLL_DIVISOR
@@ -794,9 +770,6 @@ static void trySleepUntilInterrupt(uint32_t nowMs){
   if((nowMs - lastActivityMs) < MOTION_IDLE_MS) return;
   if(g_motionWake || g_buttonWake || motionPinActive()) return;
 
-  sensorsEnterRest();
-  updateLed(nowMs);
-
   noInterrupts();
   if(!g_motionWake && !g_buttonWake && !motionPinActive()){
     interrupts();
@@ -805,6 +778,109 @@ static void trySleepUntilInterrupt(uint32_t nowMs){
     interrupts();
   }
 }
+
+#if PMW_WAKE_STRESS
+struct WakeStressEvent {
+  uint32_t elapsedUs;
+  uint8_t motionMask;
+  PMW3610_DATA left;
+  PMW3610_DATA right;
+};
+
+static WakeStressEvent g_wakeStressEvents[WAKE_STRESS_MAX_EVENTS];
+static uint32_t g_wakeStressCycle=0;
+
+static uint16_t absDelta(int16_t value){
+  return value < 0 ? (uint16_t)(-value) : (uint16_t)value;
+}
+
+static void runWakeStressCycle(){
+  g_wakeStressCycle++;
+  if(g_okL) sensorL.setPerformanceMode(PERFORMANCE_FMODE_REST1);
+  if(g_okR) sensorR.setPerformanceMode(PERFORMANCE_FMODE_REST1);
+  delay(WAKE_STRESS_REST_MS);
+
+  uint8_t restModeL = g_okL ? sensorL.observationMode(50) : 0xFF;
+  uint8_t restModeR = g_okR ? sensorR.observationMode(50) : 0xFF;
+  if(g_okL) sensorL.clearMotion();
+  if(g_okR) sensorR.clearMotion();
+  if(g_okL) sensorL.setPerformanceMode(0);
+  if(g_okR) sensorR.setPerformanceMode(0);
+
+  uint16_t eventCount=0;
+  bool overflow=false;
+  uint32_t totalAbs=0;
+  uint16_t peakAbs=0;
+  uint32_t startedUs=micros();
+  uint32_t nextPollUs=startedUs;
+  while((uint32_t)(micros() - startedUs) < (uint32_t)WAKE_STRESS_SAMPLE_MS * 1000UL){
+    uint32_t nowUs=micros();
+    if((int32_t)(nowUs - nextPollUs) < 0) continue;
+    nextPollUs += POLL_INTERVAL_US;
+
+    PMW3610_DATA left = {false, true, 0, 0, 0, 0};
+    PMW3610_DATA right = {false, true, 0, 0, 0, 0};
+    if(g_okL) left = sensorL.readMotion();
+    if(g_okR) right = sensorR.readMotion();
+    bool interesting = left.isMotion || right.isMotion
+                    || left.dx || left.dy || right.dx || right.dy;
+    if(!interesting) continue;
+
+    uint16_t magnitudes[4] = {
+      absDelta(left.dx), absDelta(left.dy), absDelta(right.dx), absDelta(right.dy)
+    };
+    for(uint8_t i=0; i<4; i++){
+      totalAbs += magnitudes[i];
+      if(magnitudes[i] > peakAbs) peakAbs = magnitudes[i];
+    }
+    if(eventCount < WAKE_STRESS_MAX_EVENTS){
+      WakeStressEvent &event = g_wakeStressEvents[eventCount++];
+      event.elapsedUs = (uint32_t)(nowUs - startedUs);
+      event.motionMask = (left.isMotion ? 0x01 : 0x00)
+                       | (right.isMotion ? 0x02 : 0x00);
+      event.left = left;
+      event.right = right;
+    } else {
+      overflow = true;
+    }
+  }
+
+  uint8_t endModeL = g_okL ? sensorL.observationMode(50) : 0xFF;
+  uint8_t endModeR = g_okR ? sensorR.observationMode(50) : 0xFF;
+  for(uint16_t i=0; i<eventCount; i++){
+    const WakeStressEvent &event = g_wakeStressEvents[i];
+    Serial.print("WAKE,event,");
+    Serial.print(g_wakeStressCycle); Serial.print(',');
+    Serial.print(event.elapsedUs); Serial.print(',');
+    Serial.print(event.motionMask); Serial.print(',');
+    Serial.print(event.left.dx); Serial.print(',');
+    Serial.print(event.left.dy); Serial.print(',');
+    Serial.print(event.right.dx); Serial.print(',');
+    Serial.print(event.right.dy); Serial.print(',');
+    Serial.print(event.left.SQUAL); Serial.print(',');
+    Serial.print(event.right.SQUAL); Serial.print(',');
+    Serial.print(event.left.shutter); Serial.print(',');
+    Serial.println(event.right.shutter);
+  }
+  Serial.print("WAKE,summary,");
+  Serial.print(g_wakeStressCycle); Serial.print(',');
+  Serial.print(restModeL); Serial.print(',');
+  Serial.print(restModeR); Serial.print(',');
+  Serial.print(endModeL); Serial.print(',');
+  Serial.print(endModeR); Serial.print(',');
+  Serial.print(eventCount); Serial.print(',');
+  Serial.print(totalAbs); Serial.print(',');
+  Serial.print(peakAbs); Serial.print(',');
+  Serial.println(overflow ? 1 : 0);
+}
+
+static void serviceWakeStress(){
+  while(Serial.available()){
+    char command=(char)Serial.read();
+    if(command == 'C' || command == 'c') runWakeStressCycle();
+  }
+}
+#endif
 
 void setup(){
   pinMode(PIN_CS_L, OUTPUT); digitalWrite(PIN_CS_L, HIGH);
@@ -821,9 +897,11 @@ void setup(){
   pinMode(PIN_BTN_CENTER, INPUT_PULLUP);
   pinMode(LED_BUILTIN, OUTPUT); digitalWrite(LED_BUILTIN, !LED_STATE_ON);
 
-#if DEBUG_PRINT
+#if DEBUG_PRINT || PMW_WAKE_STRESS
   Serial.begin(115200);
   for(uint32_t t0=millis(); !Serial && (millis()-t0)<2000; ) delay(10);
+#endif
+#if DEBUG_PRINT
   Serial.println("PMW3610 Astrolabe bring-up");
   Serial.print("pins CS_L="); Serial.print((int)PIN_CS_L);
   Serial.print(" CS_R="); Serial.print((int)PIN_CS_R);
@@ -873,6 +951,11 @@ void setup(){
   Serial.print("sensors L="); Serial.print(g_okL ? "ok" : "FAIL");
   Serial.print(" R="); Serial.println(g_okR ? "ok" : "FAIL");
 #endif
+#if PMW_WAKE_STRESS
+  Serial.print("WAKE,ready,");
+  Serial.print(WAKE_STRESS_REST_MS); Serial.print(',');
+  Serial.println(WAKE_STRESS_SAMPLE_MS);
+#endif
 
   if(g_okL) attachInterrupt(digitalPinToInterrupt(PIN_MOTION_L), motionIsr, FALLING);
   if(g_okR) attachInterrupt(digitalPinToInterrupt(PIN_MOTION_R), motionIsr, FALLING);
@@ -888,12 +971,18 @@ void setup(){
 }
 
 void loop(){
+#if PMW_WAKE_STRESS
+  serviceWakeStress();
+  delay(1);
+  return;
+#endif
+
   uint32_t nowMs = millis();
 
-  // MOTION/button IRQ (or still-asserted MOTION) opens an active-poll window.
+  // MOTION/button IRQ (or still-asserted MOTION) opens an active-poll window. The
+  // sensors remain in automatic normal operation; a burst is valid in Run and Rest.
   if(g_motionWake || g_buttonWake || motionPinActive()){
     lastActivityMs = nowMs;
-    sensorsForceAwake();
   }
 
   bool inActiveWindow = ((nowMs - lastActivityMs) < MOTION_IDLE_MS)
@@ -933,32 +1022,12 @@ void loop(){
   g_motionWake = false;
   g_buttonWake = false;
 
-  sensorsForceAwake();
-
-  // Always burst-read both sensors while awake — matches XIAO3389 and keeps the
-  // dual-sensor least-squares solve fully determined. Gate contributions on isMotion.
+  // Always burst-read both sensors during active polling — matches XIAO3389 and keeps
+  // the dual-sensor least-squares solve fully determined. Gate contributions on isMotion.
   PMW3610_DATA a = {false, true, 0, 0, 0, 0};
   PMW3610_DATA b = {false, true, 0, 0, 0, 0};
   if(g_okL) a = sensorL.readMotion();
   if(g_okR) b = sensorR.readMotion();
-
-  // Inside the wake-settle window the sensors are still re-locking after rest->run and
-  // their motion output is invalid by design — discard it (SETTLE lines show what was
-  // dropped). It must not accumulate, and must not count as activity: phantom frames
-  // holding the poll window open was the old runaway-jerk feedback loop.
-  if((int32_t)(nowMs - g_wakeSettleUntilMs) < 0){
-#if DEBUG_PRINT
-    if(a.isMotion || b.isMotion){
-      Serial.print("SETTLE,");
-      Serial.print(a.dx); Serial.print(',');
-      Serial.print(a.dy); Serial.print(',');
-      Serial.print(b.dx); Serial.print(',');
-      Serial.println(b.dy);
-    }
-#endif
-    a.isMotion = false;
-    b.isMotion = false;
-  }
 
   bool sawMotion = a.isMotion || b.isMotion;
   if(sawMotion) lastActivityMs = nowMs;

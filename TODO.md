@@ -28,10 +28,15 @@ already-supported contract.
   prototype; neither qualifies the final product hardware.
 - Replace CI's `firmware/XIAO3389` protocol-bench compile with the official
   `firmware/Astrolabe` XIAO nRF52840 target when that placeholder becomes the frozen production
-  firmware. The obsolete SuperMini compile gate was removed: its pinned third-party board core no
-  longer compiles its own `bluefruit.cpp`, and a prototype controller is not a public-V1 build
-  target. Keep the historical PMW3610 sketch and its physical evidence, but do not restore it as a
-  required release job.
+  firmware. The obsolete SuperMini compile gate was removed because a prototype controller is not a
+  public-V1 build target. Keep the PMW3610 sketch locally compilable for diagnosis, but do not
+  restore it as a required release job.
+- Re-verify the SuperMini PMW3610 cursor path after removing forced Rest/Force Awake from normal
+  power management. First flash `PMW_WAKE_STRESS=1` and preserve a stationary 100-cycle
+  `tools/pmw3610_wake_stress.py` log; then restore the flag to `0`, reflash, and exercise repeated
+  idle/MOTION, button wake, BLE reconnect, standalone HID, and daemon-owned pointer transitions.
+  Static tests establish the intended register policy and diagnostic format, not the physical
+  absence of a cursor jerk.
 
 ### Release qualification
 
