@@ -211,6 +211,23 @@ def test_app_and_executable_contexts_recompute_stationary_hold():
     assert runtime.snapshot().effective_input_mode == "pointer"
 
 
+def test_other_apps_context_unions_unregistered_apps_with_selected_integrations():
+    custom = _binding_row(
+        ("keyboard:a",), ({"command": "state.request", "target": "input.3d"},),
+        ({"command": "state.release", "target": "input.3d"},),
+        when={"apps": ["onshape"], "other_apps": True})
+
+    for context, expected in (
+            (FocusedContext(None, "notes.exe"), "3d"),
+            (FocusedContext("onshape", "chrome.exe"), "3d"),
+            (FocusedContext("blender", "blender.exe"), "pointer")):
+        runtime = _runtime(app_id=context.app_id, executable=context.executable)
+        controller, _runtime_store, _catalog = _controller(
+            overrides={"custom.context": custom}, runtime=runtime)
+        controller.update_pressed(("keyboard:a",))
+        assert runtime.snapshot().effective_input_mode == expected
+
+
 class _RecordingPointerSink(PointerButtonSink):
     def __init__(self):
         self.events = []

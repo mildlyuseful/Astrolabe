@@ -78,10 +78,13 @@ click. Advanced DSL may still select `exact` when a click must be disabled while
 
 ## App context and capabilities
 
-`when.apps` uses registered app IDs, `when.executables` uses case-insensitive executable names, and
-`when.input_profiles` narrows a binding to its own System profile. Empty context means global.
-Foreground identity comes from the independent Windows foreground monitor, not the app selected in
-Settings and not the most recent motion packet.
+`when.apps` uses registered app IDs. `when.other_apps: true` matches foreground applications that
+are not registered integrations; it is unioned with `when.apps`, so one binding can target, for
+example, Onshape plus every non-integrated application while excluding the other integrated 3D
+hosts. `when.executables` uses case-insensitive executable names, and `when.input_profiles` narrows
+a binding to its own System profile. Empty context means global. Foreground identity comes from the
+independent Windows foreground monitor, not the app selected in Settings and not the most recent
+motion packet.
 
 Navigation actions and per-app settings are capability-checked against the foreground host. A Fly
 or Walk hold can remain physically held while an Orbit-only host is focused; the unsupported action

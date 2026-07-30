@@ -29,6 +29,7 @@
       "additionalProperties": false,
       "properties": {
         "apps": {"$ref": "#/$defs/uniqueTextArray"},
+        "other_apps": {"type": "boolean"},
         "executables": {"$ref": "#/$defs/uniqueTextArray"},
         "input_profiles": {"$ref": "#/$defs/uniqueTextArray"}
       }

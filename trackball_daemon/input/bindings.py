@@ -58,17 +58,18 @@ def _freeze_mapping(value):
 @dataclass(frozen=True)
 class BindingContext:
     apps: tuple = ()
+    other_apps: bool = False
     executables: tuple = ()
     input_profiles: tuple = ()
 
     @property
     def specificity(self):
         return sum(bool(value) for value in (
-            self.apps, self.executables, self.input_profiles))
+            self.apps or self.other_apps, self.executables, self.input_profiles))
 
     @property
     def signature(self):
-        return self.apps, self.executables, self.input_profiles
+        return self.apps, self.other_apps, self.executables, self.input_profiles
 
 
 @dataclass(frozen=True)
@@ -146,8 +147,10 @@ def _control_selectors():
 def _parse_context(value, profile_id):
     if value is None:
         return BindingContext()
-    if not isinstance(value, dict) or set(value) - {"apps", "executables", "input_profiles"}:
-        raise ValueError("binding when must contain only apps, executables, and input_profiles")
+    expected = {"apps", "other_apps", "executables", "input_profiles"}
+    if not isinstance(value, dict) or set(value) - expected:
+        raise ValueError(
+            "binding when must contain only apps, other_apps, executables, and input_profiles")
 
     def values(key):
         rows = value.get(key, [])
@@ -160,6 +163,9 @@ def _parse_context(value, profile_id):
         return normalized
 
     apps = values("apps")
+    other_apps = value.get("other_apps", False)
+    if type(other_apps) is not bool:
+        raise ValueError("binding when.other_apps must be boolean")
     executables = values("executables")
     profiles = values("input_profiles")
     unknown_apps = set(apps) - set(APP_IDS)
@@ -171,7 +177,9 @@ def _parse_context(value, profile_id):
             f"binding context has unknown input profiles: {sorted(unknown_profiles)}")
     if profiles and profile_id not in profiles:
         raise ValueError(f"binding in {profile_id} can never match its input-profile context")
-    return BindingContext(apps, executables, profiles)
+    return BindingContext(
+        apps=apps, other_apps=other_apps, executables=executables,
+        input_profiles=profiles)
 
 
 def _validate_paired_actions(binding_id, activation, press, release):
@@ -285,6 +293,8 @@ def _binding_to_row(binding):
     when = {}
     if binding.context.apps:
         when["apps"] = list(binding.context.apps)
+    if binding.context.other_apps:
+        when["other_apps"] = True
     if binding.context.executables:
         when["executables"] = list(binding.context.executables)
     if binding.context.input_profiles:
@@ -607,7 +617,12 @@ def _context_matches(context, focused_context, profile_id):
     app_id = (focused_context.app_id or "").casefold()
     executable = (focused_context.executable or "").replace("/", "\\").rsplit("\\", 1)[-1]
     executable = executable.casefold()
-    return ((not context.apps or app_id in context.apps) and
+    app_matches = (
+        (not context.apps and not context.other_apps) or
+        app_id in context.apps or
+        (context.other_apps and app_id not in APP_SPECS_BY_ID)
+    )
+    return (app_matches and
             (not context.executables or executable in context.executables) and
             (not context.input_profiles or profile_id in context.input_profiles))
 
@@ -765,7 +780,8 @@ class BindingController:
             priority=binding.priority,
             context_specificity=binding.context.specificity,
             exact_match=binding.match_policy == "exact", chord_size=len(binding.chord),
-            context_app_id=(snapshot.focused_context.app_id if binding.context.apps else None),
+            context_app_id=(snapshot.focused_context.app_id
+                            if binding.context.apps or binding.context.other_apps else None),
             label=binding.label,
         )
         command_id = action.command_id

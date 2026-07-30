@@ -129,6 +129,18 @@ def test_generated_tabs_and_linked_value_refresh_after_global_edit(tmp_path):
                             if isinstance(widget, tk.Listbox))
         assert str(app_selector.cget("selectmode")) == "multiple"
         assert {"Blender", "Unity"} <= set(app_selector.get(0, "end"))
+        assert "Other applications (not integrated)" in app_selector.get(0, "end")
+        selected_binding_id = ui._selected_binding_id
+        app_selector.selection_clear(0, "end")
+        app_selector.selection_set(app_selector.get(0, "end").index("Onshape"))
+        app_selector.selection_set(
+            app_selector.get(0, "end").index("Other applications (not integrated)"))
+        save = next(widget for widget in _walk(keybindings)
+                    if isinstance(widget, ttk.Button) and widget.cget("text") == "Save")
+        save.invoke()
+        root.update()
+        assert ui.binding_model.row(selected_binding_id)["when"] == {
+            "apps": ["onshape"], "other_apps": True}
         assert "Executables" not in visible_labels
         assert "Input profiles" not in visible_labels
         assert "On press (JSON)" not in visible_labels

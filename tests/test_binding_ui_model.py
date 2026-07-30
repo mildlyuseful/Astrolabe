@@ -192,6 +192,37 @@ def test_simple_editor_preserves_multiple_app_contexts(tmp_path):
     assert not model.simple_action(row).advanced_only
 
 
+def test_simple_editor_preserves_other_apps_with_selected_integrations(tmp_path):
+    _store, model = _model(tmp_path)
+    binding_id = model.next_custom_id()
+    model.save({
+        "id": binding_id,
+        "label": "Onshape and other applications",
+        "enabled": True,
+        "when": {"apps": ["onshape"], "other_apps": True},
+        "chord": ["keyboard:f12"],
+        "match": "exact",
+        "activation": "hold",
+        "priority": 0,
+        "press": [{"command": "input.mode.toggle"}],
+        "release": [],
+    })
+
+    row = model.row(binding_id)
+
+    assert row["when"] == {"apps": ["onshape"], "other_apps": True}
+    assert not model.simple_action(row).advanced_only
+
+
+def test_other_apps_context_requires_a_boolean(tmp_path):
+    _store, model = _model(tmp_path)
+    row = model.row("keyboard.ctrl.3d")
+    row["when"] = {"other_apps": "yes"}
+
+    with pytest.raises(ValueError, match="other_apps must be boolean"):
+        model.save(row)
+
+
 def test_low_level_latched_activation_remains_advanced_dsl_only(tmp_path):
     _store, model = _model(tmp_path)
     row = model.row("keyboard.ctrl.3d")
