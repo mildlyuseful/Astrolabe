@@ -35,6 +35,9 @@ here.
   the broken invariant, remove compensating workarounds once the root cause is understood, and do not
   accept avoidable lifecycle, latency, or maintenance debt merely because a patch passes the current
   test.
+- Due to the open-source goals of the project, prefer brief code solutions. Create systems in
+  simplistic frameworks that allow later contributors to add apps and functionality with minimal
+  refactoring or churn. Avoid writing needlessly verbose comments and docs.
 - Code and packaged data are authoritative. Documentation explains current contracts and earned
   behavior that code alone cannot establish.
 - `trackball_daemon/app_registry.py` is the only supported-app identity, order, transport, and
