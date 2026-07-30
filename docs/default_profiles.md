@@ -112,9 +112,10 @@ Detailed version-by-version execution history belongs under `archive/`, not in t
 Pointer acceleration is a Global-only v9 setting family in `system_defaults.json`, not a legacy
 materialized profile field. `off` preserves constant cursor sensitivity. `linear` and `smooth` map
 planar angular speed from the configured onset across the configured ramp to a bounded maximum
-multiplier. The curve is evaluated before cursor sensitivity, using motion-sample timestamps, so its
-thresholds remain in radians per second and do not change with BLE notification cadence. Scroll and
-3D navigation bypass the curve.
+multiplier. The curve multiplier and effective Pointer sensitivity compose multiplicatively. The
+curve is evaluated from physical motion before sensitivity, using motion-sample timestamps, so its
+thresholds remain in radians per second and do not change with sensitivity or BLE notification
+cadence. Scroll and 3D navigation bypass the curve.
 
 ## Developer tuning workflow
 

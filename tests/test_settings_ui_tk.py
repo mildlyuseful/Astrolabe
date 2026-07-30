@@ -4,6 +4,7 @@
 """Small Tk smoke tests; semantic behavior remains covered by UI-independent models."""
 
 from types import SimpleNamespace
+import time
 import tkinter as tk
 from tkinter import ttk
 
@@ -96,6 +97,24 @@ def test_generated_tabs_and_linked_value_refresh_after_global_edit(tmp_path):
         global_categories = next(widget for widget in _walk(global_tab)
                                  if isinstance(widget, ttk.Notebook))
         assert global_categories.tab(global_categories.select(), "text") == "Orbit"
+
+        pointer_tab = next(tab_id for tab_id in global_categories.tabs()
+                           if global_categories.tab(tab_id, "text") == "Pointer")
+        global_categories.select(pointer_tab)
+        root.update()
+        sensitivity_row, _label = _row_with_label(global_tab, "Pointer sensitivity")
+        sensitivity_entry = next(widget for widget in sensitivity_row.winfo_children()
+                                 if isinstance(widget, ttk.Entry))
+        sensitivity_entry.event_generate("<FocusIn>")
+        sensitivity_entry.delete(0, "end")
+        sensitivity_entry.insert(0, "64")
+        sensitivity_entry.event_generate("<KeyRelease>")
+        deadline = time.monotonic() + 0.5
+        while (store.snapshot().global_value("pointer.cursor.gain") != 64.0 and
+               time.monotonic() < deadline):
+            root.update()
+            time.sleep(0.01)
+        assert store.snapshot().global_value("pointer.cursor.gain") == 64.0
 
         per_app = _tab(notebook, "Per-App")
         fallback_row, fallback_label = _row_with_label(
