@@ -31,9 +31,10 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.14"         # keep in sync with version.json and TrackballNav.uplugin
+ADDIN_VERSION = "0.2.19"         # keep in sync with version.json and TrackballNav.uplugin
 _DEFAULT_PORT = 47900
 PIVOT_HOLD_IDLE = 0.5            # fallback for adv.orbit_hold_sec / adv.zoom_hold_sec
+OBJECT_GESTURE_IDLE = 0.5        # coalesce one continuous actor transform into one undo step
 OBJ_CACHE_SEC = 0.5              # selection bounding-box centre cache lifetime
 BBOX_MARGIN = 0.10               # accept a hit inside the model bbox grown by this * diagonal
 TRACE_BIG = 1.0e7               # cm: raycast length along camera forward / deprojected ray
@@ -60,6 +61,7 @@ _horizon = {"fixed": None}
 _focus = {"dist": cammath.DIST_DEFAULT}   # eye->focus distance (cm), scales pan/zoom; updated on orbit
 _last_scheme = {"v": None}
 _georef_logged = {"missing": False}      # one-shot warn if GeoReferencing Python type is absent
+_object_transaction = {"scope": None, "t": 0.0}
 
 
 # ======================================================================================
@@ -284,6 +286,64 @@ def _selected_actors():
             return unreal.EditorLevelLibrary.get_selected_level_actors()
         except Exception:
             return []
+
+
+def _actor_key(actor):
+    try:
+        return actor.get_path_name()
+    except Exception:
+        return str(actor)
+
+
+def _selected_actor_roots():
+    """Selected actors excluding descendants of another selected actor."""
+    actors = [actor for actor in (_selected_actors() or []) if actor is not None]
+    selected = {_actor_key(actor) for actor in actors}
+    roots = []
+    for actor in actors:
+        parent = None
+        try:
+            parent = actor.get_attach_parent_actor()
+        except Exception:
+            pass
+        seen = set()
+        while parent is not None and _actor_key(parent) not in seen:
+            key = _actor_key(parent)
+            seen.add(key)
+            if key in selected:
+                break
+            try:
+                parent = parent.get_attach_parent_actor()
+            except Exception:
+                parent = None
+        else:
+            roots.append(actor)
+    return roots
+
+
+def _end_object_transaction():
+    scope = _object_transaction["scope"]
+    _object_transaction["scope"] = None
+    if scope is not None:
+        try:
+            scope.__exit__(None, None, None)
+        except Exception:
+            _log_rl("object_undo", "could not close the Object transform undo transaction")
+
+
+def _begin_object_transaction(idle):
+    if _object_transaction["scope"] is not None and idle > OBJECT_GESTURE_IDLE:
+        _end_object_transaction()
+    if _object_transaction["scope"] is None:
+        transaction_type = getattr(unreal, "ScopedEditorTransaction", None)
+        if transaction_type is not None:
+            try:
+                scope = transaction_type("Astrolabe Object Transform")
+                scope.__enter__()
+                _object_transaction["scope"] = scope
+            except Exception:
+                _log_rl("object_undo", "Object transform undo transaction is unavailable")
+    _object_transaction["t"] = time.time()
 
 
 def _all_actors():
@@ -613,10 +673,19 @@ def _apply_action_routing(nav_mode, op, o, p, z, adv):
         p = [_routed(movement, a, w, "strafe", 0),
              _routed(movement, a, w, "forward", 1)]
         z = _routed(movement, a, w, "vertical", 2)
+    elif nav_mode == "object":
+        obj = inv.get("object", {})
+        a = axes.get("object", {})
+        o = [_routed(rotation, a, obj, "pitch", 0),
+             _routed(rotation, a, obj, "yaw", 1),
+             _routed(rotation, a, obj, "roll", 2)]
+        p = [_routed(movement, a, obj, "translate_x", 0),
+             _routed(movement, a, obj, "translate_y", 1)]
+        z = _routed(movement, a, obj, "translate_z", 2)
     else:                                            # orbit
         ob = inv.get("orbit", {})
         oa = axes.get("orbit", {})
-        if op == "camera":
+        if nav_mode == "orbit" and op == "camera":
             vp = inv.get("camera", {})
             va = axes.get("camera", {})
             o = [_routed(rotation, va, vp, "pitch", 0), _routed(rotation, va, vp, "yaw", 1),
@@ -641,6 +710,11 @@ def _apply_host_baseline(nav_mode, twist_action, o, p, z, adv):
         o = [o[0] * float(orbit[0]), o[1] * float(orbit[1]), o[2] * twist_factor]
         p = [p[i] * float(pan[i]) for i in range(2)]
         z *= zoom
+    elif nav_mode == "object":
+        rotation = baseline.get("object_rotation", [-float(value) for value in orbit])
+        o = [o[i] * float(rotation[i]) for i in range(3)]
+        p = [v * move for v in p]
+        z *= move
     else:
         o = [o[i] * float(orbit[i]) for i in range(3)]
         p = [v * move for v in p]
@@ -730,6 +804,65 @@ def _apply_walk(cam, o, p, z, adv):
     return False
 
 
+def _actor_frame(actor):
+    location = actor.get_actor_location()
+    forward, right, up = _basis_from_rotator(actor.get_actor_rotation())
+    return cammath.Camera(
+        (location.x, location.y, location.z), forward, right, up)
+
+
+def _write_actor_frame(actor, frame):
+    rotation = _rotator_from_basis(frame.forward, frame.up)
+    location = unreal.Vector(frame.location[0], frame.location[1], frame.location[2])
+    actor.set_actor_location(location, False, False)
+    actor.set_actor_rotation(rotation, False)
+
+
+def _apply_object(cam, o, p, z, idle, adv):
+    """Rotate or translate the selected actor roots as one view-relative group."""
+    if not (o[0] or o[1] or o[2] or p[0] or p[1] or z):
+        return False
+    actors = _selected_actor_roots()
+    if not actors:
+        _log_rl("object_selection", "Object mode input ignored: no level actors are selected")
+        _end_object_transaction()
+        return False
+
+    _begin_object_transaction(idle)
+    frames = []
+    for actor in actors:
+        try:
+            actor.modify()
+        except Exception:
+            pass
+        try:
+            frames.append((actor, _actor_frame(actor)))
+        except Exception:
+            continue
+    if not frames:
+        return False
+
+    if o[0] or o[1] or o[2]:
+        count = float(len(frames))
+        pivot = tuple(sum(frame.location[i] for _actor, frame in frames) / count
+                      for i in range(3))
+        for actor, frame in frames:
+            cammath.rotate_object(frame, o, cam, pivot)
+            _write_actor_frame(actor, frame)
+    else:
+        delta = cammath.object_translation(
+            p, z, cam, _focus["dist"], adv.get("object_translation_frame", "view"),
+            adv.get("object_translation_sensitivity", 1.0))
+        for actor, frame in frames:
+            frame.location = list(cammath.v_add(tuple(frame.location), delta))
+            _write_actor_frame(actor, frame)
+
+    _object_transaction["t"] = time.time()
+    _obj_cache.update(t=0.0, center=None, bbox=None)
+    _scene_cache.update(t=0.0, center=None)
+    return True
+
+
 def _apply(info, frame, idle):
     """Apply one nav frame to the active perspective viewport camera. Exactly one of orbit / pan /
     zoom is non-zero per frame (the daemon gates them on Shift). Reads o/p/z/op/os/zm AND the
@@ -746,15 +879,17 @@ def _apply(info, frame, idle):
     lock = bool(adv.get("lock_horizon", False))
     twist_action = adv.get("twist_action", "roll")
     zoom_style = adv.get("zoom_style", "dolly")
+    object_frame = adv.get("object_translation_frame", "view")
     pan_scales = bool(adv.get("pan_scales_with_distance", True))
     sel_override = bool(adv.get("selection_overrides_pivot", True))
     orbit_hold = max(0.0, min(10.0, float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE))))
     zoom_hold = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
 
-    sig = (nav_mode, op, style, zm, twist_action, zoom_style, lock, sel_override)
+    sig = (nav_mode, op, style, zm, twist_action, zoom_style, object_frame, lock, sel_override)
     if sig != _last_scheme["v"]:
         _last_scheme["v"] = sig
-        _log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s pan_zoom=%s horizon=%s sel_override=%s" % sig)
+        _log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s pan_zoom=%s "
+             "object_frame=%s horizon=%s sel_override=%s" % sig)
 
     o, p, z = _apply_action_routing(nav_mode, op, o, p, z, adv)
     o, p, z = _apply_host_baseline(nav_mode, twist_action, o, p, z, adv)
@@ -775,18 +910,27 @@ def _apply(info, frame, idle):
             _log("horizon: leveled on fixed-horizon mode entry (nav=%s style=%s)"
                  % (nav_mode, style))
 
-    if nav_mode == "fly":
+    if nav_mode == "object":
+        changed = _apply_object(cam, o, p, z, idle, adv)
+        leveled = False
+    elif nav_mode == "fly":
+        _end_object_transaction()
         changed = _apply_fly(cam, o, p, z, adv)
     elif nav_mode == "walk":
+        _end_object_transaction()
         changed = _apply_walk(cam, o, p, z, adv)
     else:                                            # orbit
+        _end_object_transaction()
         changed = _apply_orbit(cam, o, p, z, op, style, zm, twist_action, zoom_style,
                                lock, pan_scales, idle,
                                sel_override=sel_override,
                                pivot_candidates=adv.get("orbit_pivot_candidates") or [op],
                                orbit_hold=orbit_hold, zoom_hold=zoom_hold)
 
-    if changed or leveled:
+    if nav_mode == "object":
+        if changed:
+            _log_rl("applied", "applied nav=object actors=%d" % len(_selected_actor_roots()))
+    elif changed or leveled:
         _write_camera(cam)
         _log_rl("applied", "applied nav=%s op=%s pos=(%.1f,%.1f,%.1f) dist=%.0f"
                 % (nav_mode, op, cam.location[0], cam.location[1], cam.location[2], _focus["dist"]))
@@ -802,6 +946,9 @@ def _pump(_delta_seconds=0.0):
             except queue.Empty:
                 break
         if not frames:
+            if (_object_transaction["scope"] is not None and
+                    time.time() - _object_transaction["t"] > OBJECT_GESTURE_IDLE):
+                _end_object_transaction()
             return
         now = time.time()
         idle = now - _gesture["t"]                # frames arrive only during motion -> gap = gesture end
@@ -881,6 +1028,7 @@ def start():
     _zoom_gesture["pivot"] = None
     _focus["dist"] = cammath.DIST_DEFAULT
     _georef_logged["missing"] = False
+    _end_object_transaction()
     _reader_thread = threading.Thread(target=_reader, name="trackball-nav-reader", daemon=True)
     _reader_thread.start()
     try:
@@ -898,6 +1046,7 @@ def start():
 def stop():
     global _tick_handle
     _stop.set()
+    _end_object_transaction()
     try:
         if _tick_handle is not None:
             unreal.unregister_slate_post_tick_callback(_tick_handle)

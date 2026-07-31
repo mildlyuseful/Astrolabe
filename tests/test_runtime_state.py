@@ -307,6 +307,43 @@ def test_held_navigation_mode_is_inert_in_unsupported_focus_and_resumes_safely()
     assert runtime.snapshot().effective_input_mode == "3d"
 
 
+def test_object_mode_hold_requires_host_support_and_restores_on_release():
+    def base(context):
+        modes = (("orbit", "fly", "walk", "object")
+                 if context.app_id == "blender" else ("orbit", "fly", "walk"))
+        return RuntimeBaseState("pointer", supported_navigation_modes=modes)
+
+    runtime = RuntimeStore(base)
+    commands = SerializedCommandQueue(runtime)
+    commands.dispatch(SetFocusedContext(context=FocusedContext(app_id="blender")))
+    commands.dispatch(_request("object", "object-1", "navigation.object"))
+    assert runtime.snapshot().effective_input_mode == "3d"
+    assert runtime.snapshot().effective_navigation_mode == "object"
+    assert runtime.snapshot().control_help.state_label == "Object"
+
+    commands.dispatch(SetFocusedContext(context=FocusedContext(app_id="godot")))
+    assert runtime.snapshot().effective_navigation_mode == "orbit"
+    commands.dispatch(SetFocusedContext(context=FocusedContext(app_id="blender")))
+    assert runtime.snapshot().effective_navigation_mode == "object"
+
+    commands.dispatch(ReleaseAll(origin="test"))
+    assert runtime.snapshot().effective_navigation_mode == "orbit"
+
+
+def test_generic_secondary_layer_preserves_object_navigation_mode():
+    runtime = RuntimeStore(lambda _context: RuntimeBaseState(
+        "3d", navigation_mode="object",
+        supported_navigation_modes=("orbit", "fly", "walk", "object")))
+    commands = SerializedCommandQueue(runtime)
+
+    snapshot = commands.dispatch(_request(
+        "secondary", "secondary-1", "navigation.secondary"))
+
+    assert snapshot.effective_input_mode == "3d"
+    assert snapshot.effective_navigation_mode == "object"
+    assert snapshot.effective_navigation_layer == "secondary"
+
+
 def test_release_all_can_reconcile_one_provider_without_touching_another():
     runtime = RuntimeStore(_base)
     commands = SerializedCommandQueue(runtime)

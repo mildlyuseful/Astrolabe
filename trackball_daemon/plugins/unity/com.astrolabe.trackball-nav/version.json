@@ -1,4 +1,4 @@
 {
-  "version": "0.1.16",
-  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.16: dual-probe the current and previous daemon configuration roots."
+  "version": "0.1.21",
+  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.21: apply the user-configurable Object movement sensitivity."
 }

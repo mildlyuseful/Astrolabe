@@ -145,6 +145,27 @@ namespace Astrolabe.TrackballNav
             cam.Location += rh * (p.x * k) + fh * (p.y * k) + WorldUp * (z * k);
         }
 
+        public static void RotateObject(ref Cam obj, Vector3 o, Cam view, Vector3 pivot)
+        {
+            var angles = Vector3.Scale(o, OrbitScale);
+            var axes = new[] { view.Right, view.Up, view.Forward };
+            var values = new[] { angles.x, angles.y, angles.z };
+            for (int i = 0; i < axes.Length; i++)
+                if (Mathf.Abs(values[i]) > 1e-15f)
+                    RotateFrame(ref obj, axes[i], values[i], pivot);
+        }
+
+        public static Vector3 ObjectTranslation(
+            Vector2 p, float z, Cam view, float dist, string frame = "view",
+            float sensitivity = 1f)
+        {
+            float k = MoveScale * ClampDist(dist) * sensitivity;
+            if (frame == "ground")
+                return Horizontal(view.Right) * (p.x * k) +
+                    Horizontal(view.Forward) * (p.y * k) + WorldUp * (z * k);
+            return view.Right * (p.x * k) + view.Up * (p.y * k) + view.Forward * (z * k);
+        }
+
         static Vector3 Horizontal(Vector3 v)
         {
             var h = new Vector3(v.x, 0f, v.z);

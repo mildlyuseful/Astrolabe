@@ -188,7 +188,9 @@ publishes one coherent immutable `RuntimeSnapshot` with a monotonic revision.
 State dependencies and precedence are resolved in the runtime layer. A dependent request carries its
 prerequisites; if a prerequisite loses a conflict, the dependent leaf is suppressed rather than
 creating an unreachable mixed state. A held navigation mode unsupported by the focused app is inert
-there and may resume when focus returns to a compatible app.
+there and may resume when focus returns to a compatible app. The generic secondary-layer request
+requires 3D input but deliberately does not assign a navigation mode, so Shift cannot replace Object,
+Fly, or Walk with Orbit.
 
 `OutputEngine` derives its mode from `RuntimeSnapshot`; it does not own an independent mutable mode.
 The HUD is a passive snapshot consumer and never becomes a state authority.
@@ -233,12 +235,23 @@ Mapping order is a contract:
 3. The active app's user source, inversion, gain, and action settings map logical motion into
    orbit/pan/zoom or richer navigation actions.
 4. The immutable host baseline aligns those actions with the host's camera conventions exactly once.
-5. The host integration applies the resulting motion to its camera or view.
+5. The host integration applies the resulting motion to its camera, view, or selected scene objects.
 
 Lean integrations receive host-aligned deltas from the daemon. Rich, mode-aware integrations receive
 the host baseline in the additive transport profile and apply it after choosing the active
-Orbit/Fly/Walk action. `AppSpec` capability data and `host_profiles.json:apply_in_daemon` must agree so
-the baseline has exactly one owner.
+Orbit/Fly/Walk/Object action. `AppSpec` capability data and `host_profiles.json:apply_in_daemon` must
+agree so the baseline has exactly one owner.
+
+Object mode is capability-gated to Blender, Unity, and Unreal. Object Pitch/Yaw/Roll and Translate
+X/Y/Z have independent source-axis and inversion routes. The View translation frame maps planar
+motion to viewport right/up and twist to viewport depth; Ground matches Walk movement by mapping
+planar motion to horizontal view-right/forward and twist to world up. The per-app Object movement
+sensitivity multiplies translation after action routing and does not affect rotation. The immutable
+object-rotation baseline is the perceptual inverse of the corresponding camera baseline, while saved
+user inversion remains neutral.
+Hosts transform selected roots only, rotate multiple objects about one shared selection center,
+ignore input when the selection is empty, and group a continuous gesture into one host undo
+operation. The viewport camera remains unchanged.
 
 Do not move host-specific signs or scales into firmware fusion, global physical orientation, pointer
 math, or the debug cube. Do not compensate in both daemon and add-on code.

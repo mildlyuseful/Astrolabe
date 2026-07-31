@@ -46,17 +46,20 @@
         "pan_scales_with_distance": true,
         "fly_speed": 1.0,
         "walk_speed": 1.0,
+        "object_translation_frame": "view",
         "invert": {
           "orbit": {"pitch": false, "yaw": false, "twist": false, "pan_x": false, "pan_y": false, "zoom": false},
           "camera": {"pitch": false, "yaw": false, "roll": false},
           "fly": {"pitch": false, "yaw": false, "bank": false, "forward": false, "strafe": false, "vertical": false},
-          "walk": {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false}
+          "walk": {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false},
+          "object": {"pitch": false, "yaw": false, "roll": false, "translate_x": false, "translate_y": false, "translate_z": false}
         },
         "axis_source": {
           "orbit": {"pitch": 0, "yaw": 1, "twist": 2, "pan_x": 0, "pan_y": 1, "zoom": 2},
           "camera": {"pitch": 0, "yaw": 1, "roll": 2},
           "fly": {"pitch": 0, "yaw": 1, "bank": 2, "forward": 1, "strafe": 0, "vertical": 2},
-          "walk": {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2}
+          "walk": {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2},
+          "object": {"pitch": 0, "yaw": 1, "roll": 2, "translate_x": 0, "translate_y": 1, "translate_z": 2}
         }
       }
     },
@@ -91,17 +94,20 @@
         "pan_scales_with_distance": true,
         "fly_speed": 1.0,
         "walk_speed": 1.0,
+        "object_translation_frame": "view",
         "invert": {
           "orbit": {"pitch": false, "yaw": false, "twist": false, "pan_x": false, "pan_y": false, "zoom": false},
           "camera": {"pitch": false, "yaw": false, "roll": false},
           "fly": {"pitch": false, "yaw": false, "bank": false, "forward": false, "strafe": false, "vertical": false},
-          "walk": {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false}
+          "walk": {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false},
+          "object": {"pitch": false, "yaw": false, "roll": false, "translate_x": false, "translate_y": false, "translate_z": false}
         },
         "axis_source": {
           "orbit": {"pitch": 0, "yaw": 1, "twist": 2, "pan_x": 0, "pan_y": 1, "zoom": 2},
           "camera": {"pitch": 0, "yaw": 1, "roll": 2},
           "fly": {"pitch": 0, "yaw": 1, "bank": 2, "forward": 1, "strafe": 0, "vertical": 2},
-          "walk": {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2}
+          "walk": {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2},
+          "object": {"pitch": 0, "yaw": 1, "roll": 2, "translate_x": 0, "translate_y": 1, "translate_z": 2}
         }
       }
     },
@@ -113,17 +119,20 @@
         "pan_scales_with_distance": true,
         "fly_speed": 1.0,
         "walk_speed": 1.0,
+        "object_translation_frame": "view",
         "invert": {
           "orbit": {"pitch": false, "yaw": false, "twist": false, "pan_x": false, "pan_y": false, "zoom": false},
           "camera": {"pitch": false, "yaw": false, "roll": false},
           "fly": {"pitch": false, "yaw": false, "bank": false, "forward": false, "strafe": false, "vertical": false},
-          "walk": {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false}
+          "walk": {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false},
+          "object": {"pitch": false, "yaw": false, "roll": false, "translate_x": false, "translate_y": false, "translate_z": false}
         },
         "axis_source": {
           "orbit": {"pitch": 0, "yaw": 1, "twist": 2, "pan_x": 0, "pan_y": 1, "zoom": 2},
           "camera": {"pitch": 0, "yaw": 1, "roll": 2},
           "fly": {"pitch": 0, "yaw": 1, "bank": 2, "forward": 1, "strafe": 0, "vertical": 2},
-          "walk": {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2}
+          "walk": {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2},
+          "object": {"pitch": 0, "yaw": 1, "roll": 2, "translate_x": 0, "translate_y": 1, "translate_z": 2}
         },
         "override_dynamic_clip": true,
         "pivot_extent_mult": 8.0

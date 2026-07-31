@@ -225,17 +225,21 @@ def _profile(app_id, title, *, features=(), pivots=PIVOTS_DEFAULT, orbit_styles=
 
 
 def _spec(app_id, display_name, process_names, title, *, tier, transport=TransportKind.BROKER,
-          focus_kind=FocusKind.DESKTOP_PROCESS, rich=False, no_roll=False, **profile_kwargs):
+          focus_kind=FocusKind.DESKTOP_PROCESS, rich=False, no_roll=False,
+          supported_modes=None, **profile_kwargs):
     profile = _profile(app_id, title, rich=rich, no_roll=no_roll, **profile_kwargs)
     capabilities = set(profile.features)
     capabilities.add("rich_actions" if rich else "lean_actions")
     if not no_roll:
         capabilities.add("roll")
+    modes = tuple(supported_modes or (("orbit", "fly", "walk") if rich else ("orbit",)))
+    if "object" in modes:
+        capabilities.add("object_manipulation")
     return AppSpec(
         app_id=app_id,
         display_name=display_name,
         process_selectors=_selectors(*process_names),
-        supported_modes=("orbit", "fly", "walk") if rich else ("orbit",),
+        supported_modes=modes,
         capabilities=frozenset(capabilities),
         transport=transport,
         focus_kind=focus_kind,
@@ -249,9 +253,12 @@ def _spec(app_id, display_name, process_names, title, *, tier, transport=Transpo
 APP_SPECS = (
     _spec("blender", "Blender", ("blender.exe",), "Blender viewport navigation", rich=True,
           tier=SupportTier.SUPPORTED,
+          supported_modes=("orbit", "fly", "walk", "object"),
           pivots=("camera", "screen_center", "cursor", "selection", "cursor_3d", "object", "origin"),
           twist_actions=("roll", "zoom", "dolly", "none"),
-          zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior", "camera_lock")),
+          zoom_behaviors=("zoom", "dolly"),
+          features=("zoom_behavior", "camera_lock", "object_translation_sensitivity",
+                    "object_translation_frame")),
     _spec("freecad", "FreeCAD", ("freecad.exe",), "FreeCAD navigation",
           tier=SupportTier.SUPPORTED),
     _spec("sketchup", "SketchUp", ("sketchup.exe",), "SketchUp model navigation", rich=True,
@@ -260,14 +267,19 @@ APP_SPECS = (
           zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
     _spec("unreal", "Unreal Engine", ("unrealeditor.exe", "ue4editor.exe"),
           "Unreal Editor viewport navigation", rich=True, tier=SupportTier.EXPERIMENTAL,
+          supported_modes=("orbit", "fly", "walk", "object"),
           pivots=PIVOTS_CAMERA,
           twist_actions=("roll", "zoom", "dolly", "none"),
-          zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),
+          zoom_behaviors=("zoom", "dolly"),
+          features=("zoom_behavior", "object_translation_sensitivity",
+                    "object_translation_frame")),
     _spec("unity", "Unity", ("unity.exe",), "Unity Scene view navigation", rich=True,
           tier=SupportTier.EXPERIMENTAL,
+          supported_modes=("orbit", "fly", "walk", "object"),
           pivots=PIVOTS_CAMERA, twist_actions=("roll", "zoom", "dolly", "none"),
           zoom_behaviors=("zoom", "dolly"),
-          features=("zoom_behavior", "dynamic_clip", "pivot_extent")),
+          features=("zoom_behavior", "dynamic_clip", "pivot_extent",
+                    "object_translation_sensitivity", "object_translation_frame")),
     _spec("godot", "Godot", (
               ProcessSelector(
                   "godot.exe",

@@ -48,6 +48,23 @@ def test_snapshot_semantic_help_tracks_mode_layer_and_twist_action():
     assert snapshot.control_help.current_help == snapshot.control_help.secondary_help
 
 
+def test_snapshot_help_explains_object_rotation_and_translation():
+    runtime = RuntimeStore(lambda _context: RuntimeBaseState(
+        "3d", navigation_mode="object",
+        supported_navigation_modes=("orbit", "fly", "walk", "object")))
+    snapshot = runtime.snapshot()
+    assert snapshot.control_help.state_label == "Object"
+    assert snapshot.control_help.current_help == \
+        "Ball: rotate selected objects in view axes"
+
+    ground = RuntimeStore(lambda _context: RuntimeBaseState(
+        "3d", navigation_mode="object",
+        settings={"navigation.object.translation_frame": "ground"},
+        supported_navigation_modes=("orbit", "fly", "walk", "object"))).snapshot()
+    assert ground.control_help.secondary_help == \
+        "Ball: move selection sideways / forward · twist = up / down"
+
+
 def test_pure_projection_uses_registered_and_plain_executable_contexts():
     runtime = _runtime("3d")
     commands = SerializedCommandQueue(runtime)

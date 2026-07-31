@@ -38,7 +38,7 @@ _PIVOT_LABELS = {
 }
 _OPTION_LABELS = {
     "default": "Default", "free": "Free", "turntable": "Turntable",
-    "orbit": "Orbit", "fly": "Fly", "walk": "Walk",
+    "orbit": "Orbit", "fly": "Fly", "walk": "Walk", "object": "Object",
     "roll": "Roll", "zoom": "Zoom", "dolly": "Dolly", "none": "None",
     "shift": "Shift", "3d": "3D", "pointer": "Pointer",
     "left": "Left", "right": "Right", "middle": "Middle",
@@ -1898,14 +1898,27 @@ class SettingsWindow:
                             hint="Shift uses normal motion for orbit and shifted motion for pan/zoom. "
                                  "None keeps the profile in orbit routing.")
         elif field == "nav_mode":
-            self._combo_row(parent, "Mode", adv + ("nav_mode",), values=["orbit", "fly", "walk"],
-                            hint="Orbit rotates around a pivot; Fly is free 6DOF; Walk keeps a fixed horizon.")
+            self._combo_row(
+                parent, "Mode", adv + ("nav_mode",),
+                values=list(APP_SPECS_BY_ID[app_key].supported_modes),
+                hint=("Orbit rotates around a pivot; Fly is free 6DOF; Walk keeps a fixed "
+                      "horizon; Object transforms the current selection."))
         elif field == "fly_speed":
             self._entry_row(parent, "Fly speed", adv + ("fly_speed",),
                             hint="Movement multiplier while Mode is Fly.")
         elif field == "walk_speed":
             self._entry_row(parent, "Walk speed", adv + ("walk_speed",),
                             hint="Movement multiplier while Mode is Walk.")
+        elif field == "object_translation_sensitivity":
+            self._entry_row(
+                parent, "Movement sensitivity", adv + ("object_translation_sensitivity",),
+                hint="Multiplier for selected-object movement on Object's secondary layer.")
+        elif field == "object_translation_frame":
+            self._mapped_combo_row(
+                parent, "Movement frame", adv + ("object_translation_frame",),
+                [("View", "view"), ("Ground", "ground")],
+                hint=("View moves in the viewport plane with twist for depth. Ground moves "
+                      "sideways/forward in the ground plane with twist for up/down."))
         elif field == "orbit_style":
             controls["orbit_style"] = self._mapped_combo_row(
                 parent, "Orbit style", base + ("scheme", "orbit_style"),
@@ -1996,7 +2009,9 @@ class SettingsWindow:
                            hint="When viewing through the Blender scene camera, drive that camera directly.")
         elif field == "action_routing":
             if profile.rich_actions:
-                self._rich_action_routing(parent, adv, profile.no_roll)
+                self._rich_action_routing(
+                    parent, adv, profile.no_roll,
+                    "object_manipulation" in APP_SPECS_BY_ID[app_key].capabilities)
             else:
                 self._binding_axis_rows(parent, base)
         elif field == "onshape_userscript":
@@ -2006,7 +2021,7 @@ class SettingsWindow:
             button.pack(anchor="w", padx=12, pady=6)
             self._tooltip(button, "Required only for the Under Cursor orbit pivot in Onshape.")
 
-    def _rich_action_routing(self, parent, adv, no_roll):
+    def _rich_action_routing(self, parent, adv, no_roll, object_manipulation=False):
         self._action_routing_group(parent, "Orbit", adv,
                                    [("Pitch", "pitch"), ("Yaw", "yaw"), ("Twist", "twist"),
                                     ("Pan X", "pan_x"), ("Pan Y", "pan_y"), ("Zoom", "zoom")])
@@ -2022,6 +2037,12 @@ class SettingsWindow:
                                    [("Pitch", "pitch"), ("Yaw", "yaw"),
                                     ("Forward", "forward"), ("Strafe", "strafe"),
                                     ("Up/Down", "vertical")])
+        if object_manipulation:
+            self._action_routing_group(
+                parent, "Object", adv,
+                [("Pitch", "pitch"), ("Yaw", "yaw"), ("Roll", "roll"),
+                 ("Translate X", "translate_x"), ("Translate Y", "translate_y"),
+                 ("Translate Z", "translate_z")])
 
     def _binding_axis_rows(self, parent, base):
         rows = [

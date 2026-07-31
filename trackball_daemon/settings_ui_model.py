@@ -25,6 +25,7 @@ CATEGORY_TITLES = {
     "sensitivity": "Sensitivity & rate",
     "pan_zoom": "Pan / Zoom",
     "navigation": "Navigation",
+    "object": "Object",
     "camera": "Camera",
     "routing": "Axis routing",
 }

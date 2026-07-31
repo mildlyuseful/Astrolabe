@@ -153,6 +153,60 @@ def test_action_axis_routing_defaults_are_bit_identical():
     assert (o, p, z) == ([1.0, 2.0, 3.0], [4.0, 5.0], 6.0)
 
 
+def test_object_routing_has_independent_axes_even_with_camera_pivot():
+    adv = {
+        "axis_source": {
+            "orbit": {
+                "pitch": 2, "yaw": 0, "twist": 1,
+                "pan_x": 1, "pan_y": 2, "zoom": 0,
+            },
+            "camera": {"pitch": 0, "yaw": 1, "roll": 2},
+            "object": {
+                "pitch": 2, "yaw": 0, "roll": 1,
+                "translate_x": 1, "translate_y": 2, "translate_z": 0,
+            },
+        },
+        "invert": {"object": {"yaw": True, "translate_z": True}},
+    }
+    o, p, z = tn._apply_action_routing(
+        "object", "camera", [1.0, 2.0, 3.0], [4.0, 5.0], 6.0, adv)
+    assert o == [3.0, -1.0, 2.0]
+    assert p == [5.0, 6.0]
+    assert z == -4.0
+
+
+def test_object_host_baseline_uses_opposite_rotation_without_changing_translation():
+    o, p, z = tn._apply_host_baseline(
+        "object", "roll", [1.0, 2.0, 3.0], [4.0, 5.0], 6.0,
+        {"host_baseline": {
+            "orbit": [2.0, -3.0, 4.0],
+            "object_rotation": [-2.0, 3.0, -4.0],
+            "move": 5.0,
+        }})
+    assert o == [-2.0, 6.0, -12.0]
+    assert p == [20.0, 25.0]
+    assert z == 30.0
+
+
+def test_selected_actor_roots_exclude_an_attached_child(monkeypatch):
+    class Actor:
+        def __init__(self, name, parent=None):
+            self.name = name
+            self.parent = parent
+
+        def get_path_name(self):
+            return self.name
+
+        def get_attach_parent_actor(self):
+            return self.parent
+
+    parent = Actor("parent")
+    child = Actor("child", parent)
+    other = Actor("other")
+    monkeypatch.setattr(tn, "_selected_actors", lambda: [parent, child, other])
+    assert tn._selected_actor_roots() == [parent, other]
+
+
 @pytest.fixture(autouse=True)
 def _reset():
     tn._gesture.update(t=0.0, pivot=None, invalid=True)

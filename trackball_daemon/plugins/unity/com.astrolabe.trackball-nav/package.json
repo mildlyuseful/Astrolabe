@@ -1,9 +1,9 @@
 {
   "name": "com.astrolabe.trackball-nav",
   "displayName": "Trackball Nav",
-  "version": "0.1.16",
+  "version": "0.1.21",
   "unity": "2021.3",
-  "description": "Astrolabe / Trackball Daemon Scene view navigation (orbit / fly / walk) over the local nav broker.",
+  "description": "Astrolabe Scene view navigation and selected-object transforms over the local nav broker.",
   "keywords": ["trackball", "navigation", "astrolabe", "spacemouse"],
   "author": {
     "name": "Astrolabe"

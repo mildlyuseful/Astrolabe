@@ -38,11 +38,11 @@ either physical side; side-specific tokens remain available.
 - The compiler evaluates the complete pressed set atomically, so Ctrl+Shift behaves the same in
   either press order.
 
-State dependencies cascade as state, not as simulated keybindings. Requesting Pan also requests its
-3D and secondary-control prerequisites. If a higher-precedence request makes a prerequisite
-impossible, the dependent leaf is suppressed rather than producing a mixed state. A user may bind
-Shift directly to Pan or use the physically descriptive Ctrl+Shift chord; both use the same
-dependency closure.
+State dependencies cascade as state, not as simulated keybindings. The shipped Shift bindings
+request the generic secondary layer, which requires 3D input but preserves the active Orbit, Fly,
+Walk, or Object mode. Explicit Pan still requests its Orbit and secondary-control prerequisites. If
+a higher-precedence request makes a prerequisite impossible, the dependent leaf is suppressed rather
+than producing a mixed state.
 
 When definitions overlap, runtime precedence is explicit priority, context specificity, exact
 matching, larger chord, then activation recency. The binding compiler separately suppresses a
@@ -86,10 +86,11 @@ a binding to its own System profile. Empty context means global. Foreground iden
 independent Windows foreground monitor, not the app selected in Settings and not the most recent
 motion packet.
 
-Navigation actions and per-app settings are capability-checked against the foreground host. A Fly
-or Walk hold can remain physically held while an Orbit-only host is focused; the unsupported action
-is inert there and can resume when focus returns to a compatible host. Global settings remain
-available without a recognized foreground host.
+Navigation actions and per-app settings are capability-checked against the foreground host. A Fly,
+Walk, or Object hold can remain physically held while an incompatible host is focused; the
+unsupported action is inert there and can resume when focus returns to a compatible host. Object is
+available only for Blender, Unity, and Unreal. Global settings remain available without a recognized
+foreground host.
 
 ## Schemas, examples, and validation
 

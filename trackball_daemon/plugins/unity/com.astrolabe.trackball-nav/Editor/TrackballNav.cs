@@ -3,7 +3,7 @@
 
 // TrackballNav — Unity Editor Scene view add-on.
 // Background socket thread reads the Trackball Daemon nav broker; EditorApplication.update
-// drains frames on the main thread and drives SceneView (orbit / fly / walk).
+// drains frames on the main thread and drives SceneView or selected transforms.
 using System;
 using System.Collections.Concurrent;
 using System.IO;
@@ -18,9 +18,10 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.16";  // keep in sync with package and version metadata
+        const string AddinVersion = "0.1.21";  // keep in sync with package and version metadata
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.5f;
+        const float ObjectGestureIdle = 0.5f;
         const float ObjCacheSec = 0.5f;
         const float SceneExtentCacheSec = 1.5f;
         const float BboxMargin = 0.10f;
@@ -60,6 +61,9 @@ namespace Astrolabe.TrackballNav
         static float _sceneExtentR = 10f;
         static Bounds? _sceneBounds;
         static bool _sceneExtentValid;
+        static int _objectUndoGroup = -1;
+        static double _objectGestureT;
+        static double _lastObjectSelectionLog;
 
         struct ProjectionZoom
         {
@@ -92,6 +96,9 @@ namespace Astrolabe.TrackballNav
             _dynClipOverridden = false;
             _savedDynClip = null;
             _pivotExtentMult = DefaultPivotExtentMult;
+            _objectUndoGroup = -1;
+            _objectGestureT = 0.0;
+            _lastObjectSelectionLog = 0.0;
             _reader = new Thread(() => ReaderLoop(_cts.Token)) { IsBackground = true, Name = "trackball-nav-reader" };
             _reader.Start();
             EditorApplication.update += Pump;
@@ -103,6 +110,7 @@ namespace Astrolabe.TrackballNav
         {
             if (!_started) return;
             _started = false;
+            EndObjectUndo();
             EditorApplication.update -= Pump;
             SceneView.duringSceneGui -= OnSceneGui;
             try { _cts?.Cancel(); } catch { /* ignore */ }
@@ -472,7 +480,13 @@ namespace Astrolabe.TrackballNav
 
         static void Pump()
         {
-            if (Queue.IsEmpty) return;
+            if (Queue.IsEmpty)
+            {
+                if (_objectUndoGroup >= 0 &&
+                    EditorApplication.timeSinceStartup - _objectGestureT > ObjectGestureIdle)
+                    EndObjectUndo();
+                return;
+            }
             var sv = SceneView.lastActiveSceneView;
             if (sv == null) return;
             if (EditorApplication.isPlayingOrWillChangePlaymode) return;
@@ -510,6 +524,7 @@ namespace Astrolabe.TrackballNav
             bool lockHorizon = MiniJson.Bool(adv, "lock_horizon");
             string twistAction = MiniJson.Str(adv, "twist_action", "roll");
             string zoomStyle = MiniJson.Str(adv, "zoom_style", "dolly");
+            string objectFrame = MiniJson.Str(adv, "object_translation_frame", "view");
             bool panScales = MiniJson.Bool(adv, "pan_scales_with_distance", true);
             bool selOverride = MiniJson.Bool(adv, "selection_overrides_pivot", true);
             var pivotCandidates = MiniJson.StringList(adv, "orbit_pivot_candidates", op);
@@ -518,15 +533,22 @@ namespace Astrolabe.TrackballNav
             float orbitHold = Mathf.Clamp(MiniJson.Float(adv, "orbit_hold_sec", PivotHoldIdle), 0f, 10f);
             float zoomHold = Mathf.Clamp(MiniJson.Float(adv, "zoom_hold_sec", PivotHoldIdle), 0f, 10f);
 
-            var sig = $"{navMode}|{op}|{style}|{zm}|{twistAction}|{zoomStyle}|{lockHorizon}|{selOverride}|{MiniJson.Bool(adv, "override_dynamic_clip", true)}";
+            var sig = $"{navMode}|{op}|{style}|{zm}|{twistAction}|{zoomStyle}|{objectFrame}|{lockHorizon}|{selOverride}|{MiniJson.Bool(adv, "override_dynamic_clip", true)}";
             if (sig != _lastScheme)
             {
                 _lastScheme = sig;
-                Log($"scheme: nav={navMode} pivot={op} style={style} zoom={zm} twist={twistAction} pan_zoom={zoomStyle} horizon={lockHorizon} sel_override={selOverride} override_dyn_clip={MiniJson.Bool(adv, "override_dynamic_clip", true)}");
+                Log($"scheme: nav={navMode} pivot={op} style={style} zoom={zm} twist={twistAction} pan_zoom={zoomStyle} object_frame={objectFrame} horizon={lockHorizon} sel_override={selOverride} override_dyn_clip={MiniJson.Bool(adv, "override_dynamic_clip", true)}");
             }
 
             ApplyActionRouting(navMode, op, ref o, ref p, ref z, adv);
             ApplyHostBaseline(navMode, twistAction, ref o, ref p, ref z, adv);
+
+            if (navMode == "object")
+            {
+                if (ApplyObject(sv, o, p, z, idle, adv)) sv.Repaint();
+                return;
+            }
+            EndObjectUndo();
 
             // SceneView.size is a fit-sphere radius, NOT eye→pivot distance.
             // Real distance is sv.cameraDistance (= size/sin(fov/2) in perspective).
@@ -829,6 +851,95 @@ namespace Astrolabe.TrackballNav
             return false;
         }
 
+        static Transform[] SelectedTransformRoots()
+        {
+            var selected = Selection.transforms;
+            if (selected == null || selected.Length == 0) return Array.Empty<Transform>();
+            var all = new System.Collections.Generic.HashSet<Transform>(selected);
+            var roots = new System.Collections.Generic.List<Transform>();
+            foreach (var transform in selected)
+            {
+                if (transform == null) continue;
+                var parent = transform.parent;
+                while (parent != null && !all.Contains(parent)) parent = parent.parent;
+                if (parent == null) roots.Add(transform);
+            }
+            return roots.ToArray();
+        }
+
+        static void BeginObjectUndo(Transform[] transforms, float idle)
+        {
+            if (_objectUndoGroup >= 0 && idle > ObjectGestureIdle) EndObjectUndo();
+            if (_objectUndoGroup < 0)
+            {
+                Undo.IncrementCurrentGroup();
+                _objectUndoGroup = Undo.GetCurrentGroup();
+                Undo.SetCurrentGroupName("Astrolabe Object Transform");
+            }
+            Undo.RecordObjects(transforms, "Astrolabe Object Transform");
+            _objectGestureT = EditorApplication.timeSinceStartup;
+        }
+
+        static void EndObjectUndo()
+        {
+            if (_objectUndoGroup < 0) return;
+            Undo.CollapseUndoOperations(_objectUndoGroup);
+            _objectUndoGroup = -1;
+        }
+
+        static bool ApplyObject(SceneView sv, Vector3 o, Vector2 p, float z, float idle,
+            System.Collections.Generic.Dictionary<string, object> adv)
+        {
+            if (o == Vector3.zero && p == Vector2.zero && Mathf.Abs(z) < 1e-15f) return false;
+            var transforms = SelectedTransformRoots();
+            if (transforms.Length == 0)
+            {
+                EndObjectUndo();
+                double now = EditorApplication.timeSinceStartup;
+                if (now - _lastObjectSelectionLog > 1.0)
+                {
+                    _lastObjectSelectionLog = now;
+                    Log("Object mode input ignored: no objects are selected");
+                }
+                return false;
+            }
+
+            BeginObjectUndo(transforms, idle);
+            float eyeDist = ReadEyeDistance(sv);
+            var view = TrackballNavCamera.FromSceneView(sv.pivot, sv.rotation, eyeDist);
+            if (o != Vector3.zero)
+            {
+                Vector3 pivot = Vector3.zero;
+                foreach (var transform in transforms) pivot += transform.position;
+                pivot /= transforms.Length;
+                foreach (var transform in transforms)
+                {
+                    var obj = TrackballNavCamera.Cam.FromQuaternion(
+                        transform.position, transform.rotation);
+                    TrackballNavCamera.RotateObject(ref obj, o, view, pivot);
+                    transform.SetPositionAndRotation(obj.Location, obj.ToQuaternion());
+                    EditorUtility.SetDirty(transform);
+                }
+            }
+            else
+            {
+                var delta = TrackballNavCamera.ObjectTranslation(
+                    p, z, view, eyeDist, MiniJson.Str(adv, "object_translation_frame", "view"),
+                    MiniJson.Float(adv, "object_translation_sensitivity", 1f));
+                foreach (var transform in transforms)
+                {
+                    transform.position += delta;
+                    EditorUtility.SetDirty(transform);
+                }
+            }
+            _objectGestureT = EditorApplication.timeSinceStartup;
+            _objCenter = null;
+            _objBbox = null;
+            _objCacheT = 0.0;
+            _sceneExtentValid = false;
+            return true;
+        }
+
         static Vector3? OrbitPivot(string op, TrackballNavCamera.Cam cam, float idle, float holdSec,
             bool selOverride, System.Collections.Generic.List<string> candidates, SceneView sv)
         {
@@ -1021,11 +1132,21 @@ namespace Astrolabe.TrackballNav
                     Routed(movement, a, w, "forward", 1));
                 z = Routed(movement, a, w, "vertical", 2);
             }
+            else if (navMode == "object")
+            {
+                var obj = MiniJson.Obj(inv, "object") ?? new System.Collections.Generic.Dictionary<string, object>();
+                var a = MiniJson.Obj(axes, "object") ?? new System.Collections.Generic.Dictionary<string, object>();
+                o = new Vector3(Routed(rotation, a, obj, "pitch", 0),
+                    Routed(rotation, a, obj, "yaw", 1), Routed(rotation, a, obj, "roll", 2));
+                p = new Vector2(Routed(movement, a, obj, "translate_x", 0),
+                    Routed(movement, a, obj, "translate_y", 1));
+                z = Routed(movement, a, obj, "translate_z", 2);
+            }
             else
             {
                 var ob = MiniJson.Obj(inv, "orbit") ?? new System.Collections.Generic.Dictionary<string, object>();
                 var oa = MiniJson.Obj(axes, "orbit") ?? new System.Collections.Generic.Dictionary<string, object>();
-                if (op == "camera")
+                if (navMode == "orbit" && op == "camera")
                 {
                     var vp = MiniJson.Obj(inv, "camera") ?? new System.Collections.Generic.Dictionary<string, object>();
                     var va = MiniJson.Obj(axes, "camera") ?? new System.Collections.Generic.Dictionary<string, object>();
@@ -1048,10 +1169,12 @@ namespace Astrolabe.TrackballNav
         {
             var baseline = MiniJson.Obj(adv, "host_baseline") ?? new System.Collections.Generic.Dictionary<string, object>();
             Vector3 orbit = MiniJson.Vec3(baseline, "orbit");
+            Vector3 objectRotation = MiniJson.Vec3(baseline, "object_rotation");
             Vector2 pan = MiniJson.Vec2(baseline, "pan");
             float zoom = MiniJson.Float(baseline, "zoom", 1f);
             float move = MiniJson.Float(baseline, "move", 1f);
             if (orbit == Vector3.zero) orbit = Vector3.one;
+            if (objectRotation == Vector3.zero) objectRotation = -orbit;
             if (pan == Vector2.zero) pan = Vector2.one;
             if (navMode == "orbit")
             {
@@ -1059,6 +1182,12 @@ namespace Astrolabe.TrackballNav
                 o = new Vector3(o.x * orbit.x, o.y * orbit.y, o.z * twistFactor);
                 p = new Vector2(p.x * pan.x, p.y * pan.y);
                 z *= zoom;
+            }
+            else if (navMode == "object")
+            {
+                o = Vector3.Scale(o, objectRotation);
+                p *= move;
+                z *= move;
             }
             else
             {

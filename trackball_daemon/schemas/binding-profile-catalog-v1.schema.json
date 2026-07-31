@@ -73,7 +73,7 @@
           "required": ["command", "target"],
           "properties": {
             "command": {"const": "navigation.mode.set"},
-            "target": {"enum": ["orbit", "fly", "walk"]}
+            "target": {"enum": ["orbit", "fly", "walk", "object"]}
           }
         },
         {

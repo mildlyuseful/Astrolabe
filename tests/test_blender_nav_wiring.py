@@ -61,11 +61,17 @@ def test_set_scheme_stores_advanced():
 
 
 # --- config: the additive Blender advanced block --------------------------------------
+def _assert_blender_advanced_defaults(advanced):
+    legacy = default_app_profile("blender")["advanced"]
+    assert {key: advanced[key] for key in legacy} == legacy
+    assert advanced["object_translation_sensitivity"] == 1.0
+
+
 def test_blender_app_has_advanced_block(isolated_config):
     cfg = Config().load()
     blender = cfg.snapshot().app_profile("blender")
     assert "advanced" in blender
-    assert _plain(blender["advanced"]) == default_app_profile("blender")["advanced"]
+    _assert_blender_advanced_defaults(_plain(blender["advanced"]))
     # Blender's native default pivot is "camera" (orbit about view_location)
     assert blender["bindings"]["scheme"]["orbit_pivot"] == "camera"
     # Every app now has the shared Twist action; Fusion additionally supports zoom vs dolly.
@@ -112,6 +118,26 @@ def test_blender_addon_consumes_shared_zoom_target_and_behavior():
     assert "_dolly(rv, z, pivot)" in source
 
 
+def test_blender_object_mode_transforms_selected_roots_with_undo():
+    source = (Path(__file__).parents[1] /
+              "trackball_daemon/plugins/blender/trackball_nav/__init__.py").read_text(
+                  encoding="utf-8")
+    assert "def _selected_transform_roots():" in source
+    assert "def _object_translation(rv, p, z, frame, sensitivity=1.0):" in source
+    assert 'adv.get("object_translation_sensitivity", 1.0)' in source
+    assert 'right, up, fwd = _horizontal(right), Vector((0.0, 0.0, 1.0)), _horizontal(fwd)' in source
+    assert "def _apply_object(window, area, region, rv, o, p, z, adv):" in source
+    assert "TRACKBALL_NAV_OT_object_gesture" in source
+    assert "bl_options = {'INTERNAL', 'UNDO'}" in source
+    assert "event_timer_add(" in source
+    assert "event.timer" not in source
+    assert "if bpy.app.background:" in source
+    assert "return {'FINISHED', 'PASS_THROUGH'}" in source
+    assert "'UNDO_GROUPED'" not in source
+    assert "bpy.ops.ed.undo_push" not in source
+    assert "ob.matrix_world = transform @ ob.matrix_world" in source
+
+
 def test_advanced_appears_on_old_config_via_deep_merge(isolated_config):
     # Simulate a pre-existing v2 config that predates the advanced block.
     import copy
@@ -122,7 +148,8 @@ def test_advanced_appears_on_old_config_via_deep_merge(isolated_config):
     with open(path, "w", encoding="utf-8") as f:
         json.dump(disk, f)
     cfg = Config().load()
-    assert _plain(cfg.snapshot().app_profile("blender")["advanced"]) == default_app_profile("blender")["advanced"]
+    _assert_blender_advanced_defaults(
+        _plain(cfg.snapshot().app_profile("blender")["advanced"]))
 
 
 def test_sketchup_app_has_blender_parity_advanced_block(isolated_config):
@@ -224,6 +251,14 @@ def test_per_app_level_horizon_override_is_sent(isolated_config):
     app = _app_with_real_config(cfg, "blender")
     app._apply_schemes()
     assert _sent(app, "blender")["advanced"]["level_horizon_on_entry"] is False
+
+
+def test_per_app_object_translation_sensitivity_is_sent(isolated_config):
+    cfg = Config().load()
+    cfg.set_app("blender", "navigation.object.translation_sensitivity", 2.5)
+    app = _app_with_real_config(cfg, "blender")
+    app._apply_schemes()
+    assert _sent(app, "blender")["advanced"]["object_translation_sensitivity"] == 2.5
 
 
 def test_sketchup_focus_sends_its_advanced(isolated_config):

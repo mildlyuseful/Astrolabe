@@ -8,7 +8,7 @@ import json
 import pytest
 
 from trackball_daemon.app_registry import APP_SPECS, APP_SPECS_BY_ID
-from trackball_daemon.config import DEFAULT_PROFILE_PATH, DEFAULTS
+from trackball_daemon.config import Config, DEFAULT_PROFILE_PATH, DEFAULTS
 from trackball_daemon.settings_schema import (
     APP_INTERNAL_PROFILE_PATHS,
     APP_OPERATIONAL_PATHS,
@@ -92,18 +92,21 @@ def test_every_resolved_v8_app_profile_leaf_has_a_deliberate_classification():
     assert APP_INTERNAL_PROFILE_PATHS
 
 
-def test_every_applicable_setting_has_a_valid_shipped_value():
-    raw = json.loads(DEFAULT_PROFILE_PATH.read_text(encoding="utf-8"))
-    for app_id, override in raw["profiles"].items():
+def test_every_applicable_setting_has_a_valid_shipped_value(isolated_config):
+    snapshot = Config().load().snapshot()
+    for app_id in APP_SPECS_BY_ID:
         app = APP_SPECS_BY_ID[app_id]
-        leaves = dict(_leaves(_merge(raw["common"], override)))
+        profile = snapshot.app_profile(app_id)
         for setting in setting_specs_for_app(app):
             if not setting.app_path:
                 assert setting.setting_id == "navigation.orbit.pivot_fallbacks"
                 continue
-            assert setting.app_path in leaves, f"missing {app_id}:{setting.setting_id}"
-            assert setting_value_valid_for_app(setting, app, leaves[setting.app_path]), (
-                app_id, setting.setting_id, leaves[setting.app_path])
+            try:
+                value = _get_path(profile, setting.app_path)
+            except (KeyError, IndexError):
+                pytest.fail(f"missing {app_id}:{setting.setting_id}")
+            assert setting_value_valid_for_app(setting, app, value), (
+                app_id, setting.setting_id, value)
 
 
 def test_every_current_global_ui_path_is_registered_or_explicitly_deprecated():
@@ -134,6 +137,18 @@ def test_per_app_choices_reject_unsupported_modes_and_options():
     assert not setting_value_valid_for_app(style, godot, "free")
     assert not setting_value_valid_for_app(twist, godot, "roll")
     assert setting_value_valid_for_app(mode, godot, "walk")
+    assert not setting_value_valid_for_app(mode, godot, "object")
+
+    blender = APP_SPECS_BY_ID["blender"]
+    assert setting_value_valid_for_app(mode, blender, "object")
+    object_frame = SETTING_SPECS_BY_ID["navigation.object.translation_frame"]
+    assert object_frame.applies_to(blender)
+    assert object_frame.choices == ("view", "ground")
+    assert not object_frame.applies_to(godot)
+    object_sensitivity = SETTING_SPECS_BY_ID["navigation.object.translation_sensitivity"]
+    assert object_sensitivity.applies_to(blender)
+    assert object_sensitivity.minimum == 0.0
+    assert not object_sensitivity.applies_to(godot)
 
     fusion = APP_SPECS_BY_ID["fusion360"]
     assert not setting_value_valid_for_app(mode, fusion, "fly")

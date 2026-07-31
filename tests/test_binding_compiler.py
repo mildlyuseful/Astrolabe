@@ -95,6 +95,19 @@ def test_cascading_dependencies_work_in_every_ctrl_shift_order():
         assert runtime.snapshot().effective_input_mode == "pointer"
 
 
+def test_shipped_shift_binding_preserves_object_mode_while_selecting_secondary_layer():
+    runtime = RuntimeStore(lambda _context: RuntimeBaseState(
+        "3d", navigation_mode="object",
+        supported_navigation_modes=("orbit", "fly", "walk", "object")))
+    controller, runtime, _catalog = _controller(runtime=runtime)
+
+    controller.update_pressed(("keyboard:shift.left",))
+    snapshot = runtime.snapshot()
+
+    assert snapshot.effective_navigation_mode == "object"
+    assert snapshot.effective_navigation_layer == "secondary"
+
+
 def test_exact_modifier_policy_and_generic_left_right_matching():
     controller, runtime, _catalog = _controller(overrides={
         "keyboard.ctrl.3d": {"match": "exact"},
@@ -434,6 +447,30 @@ def test_context_scoped_hold_rejects_an_unsupported_navigation_mode():
     assert any(item.binding_id == "bad.freecad.fly.hold" and
                item.code == "unsupported_navigation_mode"
                for item in compiled.diagnostics)
+
+
+def test_object_mode_binding_is_accepted_only_for_capable_hosts():
+    catalog = load_system_binding_profiles()
+    base = catalog.profile("keyboard_only")
+    template = base.bindings[0]
+
+    def binding(app_id):
+        return replace(
+            template, binding_id=f"{app_id}.object",
+            context=replace(template.context, apps=(app_id,)),
+            press_actions=(replace(
+                base.bindings[1].press_actions[0],
+                command_id="state.request", target="navigation.object"),),
+            release_actions=(replace(
+                base.bindings[1].release_actions[0],
+                command_id="state.release", target="navigation.object"),))
+
+    profile = SystemBindingProfile(
+        base.id, base.label, base.bindings + (binding("blender"), binding("godot")))
+    compiled = compile_binding_profile(profile, catalog)
+    ids = {item.id for item in compiled.bindings}
+    assert "blender.object" in ids
+    assert "godot.object" not in ids
 
 
 def test_malformed_editor_row_is_isolated_with_actionable_diagnostic():

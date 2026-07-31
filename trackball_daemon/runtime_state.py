@@ -22,7 +22,7 @@ from .app_registry import APP_SPECS_BY_ID
 logger = logging.getLogger("trackball_daemon.runtime_state")
 
 INPUT_MODES = ("pointer", "3d")
-NAVIGATION_MODES = ("orbit", "fly", "walk")
+NAVIGATION_MODES = ("orbit", "fly", "walk", "object")
 NAVIGATION_LAYERS = ("primary", "secondary")
 
 
@@ -132,6 +132,13 @@ def _control_help(input_mode, navigation_mode, navigation_layer, settings):
         primary = "Ball: planar = look · twist = unused"
         secondary = "Ball: planar = strafe / forward · twist = rise / fall"
         secondary_label = "Move"
+    elif navigation_mode == "object":
+        primary = "Ball: rotate selected objects in view axes"
+        if settings.get("navigation.object.translation_frame", "view") == "ground":
+            secondary = "Ball: move selection sideways / forward · twist = up / down"
+        else:
+            secondary = "Ball: move selection right / up · twist = depth"
+        secondary_label = "Move Selection"
     else:
         twist = str(settings.get("navigation.orbit.twist_action", "roll"))
         twist_label = {
@@ -226,16 +233,21 @@ DEFAULT_DEPENDENCY_GRAPH = DependencyGraph((
     StateNode("navigation.orbit", {"navigation.mode": "orbit"}, ("input.3d",)),
     StateNode("navigation.fly", {"navigation.mode": "fly"}, ("input.3d",)),
     StateNode("navigation.walk", {"navigation.mode": "walk"}, ("input.3d",)),
+    StateNode("navigation.object", {"navigation.mode": "object"}, ("input.3d",)),
+    StateNode("navigation.secondary", {"navigation.layer": "secondary"}, ("input.3d",)),
     StateNode("orbit.primary", {"navigation.layer": "primary"}, ("navigation.orbit",)),
     StateNode("orbit.secondary", {"navigation.layer": "secondary"}, ("navigation.orbit",)),
     StateNode("fly.primary", {"navigation.layer": "primary"}, ("navigation.fly",)),
     StateNode("fly.secondary", {"navigation.layer": "secondary"}, ("navigation.fly",)),
     StateNode("walk.primary", {"navigation.layer": "primary"}, ("navigation.walk",)),
     StateNode("walk.secondary", {"navigation.layer": "secondary"}, ("navigation.walk",)),
+    StateNode("object.primary", {"navigation.layer": "primary"}, ("navigation.object",)),
+    StateNode("object.secondary", {"navigation.layer": "secondary"}, ("navigation.object",)),
     StateNode("pan", {}, ("orbit.secondary",)),
     StateNode("zoom", {}, ("orbit.secondary",)),
     StateNode("fly.move", {}, ("fly.secondary",)),
     StateNode("walk.move", {}, ("walk.secondary",)),
+    StateNode("object.move", {}, ("object.secondary",)),
 ))
 
 

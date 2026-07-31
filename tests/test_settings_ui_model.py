@@ -105,6 +105,12 @@ def test_app_projection_excludes_unsupported_settings_and_restricts_choices(tmp_
     assert "navigation.mode" not in freecad
     godot = {view.spec.id: view for view in model.app_views("godot")}
     assert godot["navigation.orbit.style"].choices == ("turntable",)
+    assert godot["navigation.mode"].choices == ("orbit", "fly", "walk")
+    blender = {view.spec.id: view for view in model.app_views("blender")}
+    assert blender["navigation.mode"].choices == ("orbit", "fly", "walk", "object")
+    assert blender["navigation.object.translation_frame"].choices == ("view", "ground")
+    assert "navigation.routing.object.roll.invert" in blender
+    assert "navigation.object.translation_frame" not in godot
 
 
 def test_app_pivot_fallback_order_can_override_and_relink_to_global(tmp_path):
