@@ -466,11 +466,11 @@ def test_object_mode_binding_is_accepted_only_for_capable_hosts():
                 command_id="state.release", target="navigation.object"),))
 
     profile = SystemBindingProfile(
-        base.id, base.label, base.bindings + (binding("blender"), binding("godot")))
+        base.id, base.label, base.bindings + (binding("blender"), binding("rhino")))
     compiled = compile_binding_profile(profile, catalog)
     ids = {item.id for item in compiled.bindings}
     assert "blender.object" in ids
-    assert "godot.object" not in ids
+    assert "rhino.object" not in ids
 
 
 def test_malformed_editor_row_is_isolated_with_actionable_diagnostic():

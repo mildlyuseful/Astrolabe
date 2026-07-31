@@ -52,7 +52,6 @@ launch a supported 3D application. Shared ownership and lifecycle rules are defi
 | SketchUp | Copies a Ruby extension. | Current-user Plugins folder; delete loader and `trackball_nav`. |
 | Fusion 360 | Copies a Python add-in; Fusion requires the user to Run/enable startup. | Current-user Autodesk AddIns folder; remove it in Fusion or delete `TrackballNav`. |
 | Unity | Copies C# editor source into detected projects. | Project `Packages` only; delete `com.astrolabe.trackball-nav`. |
-| Godot | Copies GDScript and adds the plugin path to `project.godot`. | Project only; disable the plugin and remove `addons/trackball_nav`. |
 | Unreal | Copies a Python editor plugin per engine or per project. | Engine path may require elevation; project path does not. Disable/delete `TrackballNav`. |
 | Rhino | Copies Python and may append a current-user startup command. | Remove the script folder and the TrackballNav startup command in Rhino Options. |
 | SOLIDWORKS | Attaches to an already-running instance through COM automation. | No host files, registration, registry writes, listener, or launch. Disable the integration. |

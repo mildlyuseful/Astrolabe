@@ -143,11 +143,6 @@ For every applicable host:
   Play-In-Editor no-op behavior, and project-local versus engine-wide installation.
 - **Unity:** Dynamic Clipping restoration, pivot-extent cap, Object undo grouping, domain reload,
   and project detection.
-- **Godot:** project enable/reload in an installed editor. The parse smoke is now a command --
-  `python tools/godot_parse_check.py --godot <editor exe>` -- because the add-on shipped for several
-  versions with a GDScript type-inference error that made the whole script fail to load, and nothing
-  in this repository could see it. Run it whenever the payload changes; a Godot release can turn a
-  previously inferable expression into a parse error.
 - **Fusion 360:** occurrence/assembly bodies with `findBRepUsingRay`; confirm whether root-component
   queries miss occurrence-only geometry.
 - **SolidWorks:** COM throughput on representative large assemblies and multi-monitor DPI behavior.
@@ -254,7 +249,6 @@ open epic and acceptance gates only.
 
 These are deliberate scope boundaries, not active parity tasks:
 
-- Godot remains Turntable-only unless the editor begins preserving a rolled camera basis.
 - SketchUp for Web has no local Ruby hook and is unsupported.
 - Onshape Camera pivot is not useful in its supported orthographic view.
 - AutoCAD 2024 and older require a separate .NET Framework plugin build; the bundled .NET 8 plugin

@@ -135,7 +135,7 @@ def test_invalid_transaction_does_not_publish_or_touch_disk(tmp_path):
     with pytest.raises(ValueError):
         with store.transaction() as tx:
             tx.set_global("pointer.cursor.gain", 400.0)
-            tx.set_app("godot", "navigation.orbit.style", "free")
+            tx.set_app("rhino", "navigation.mode", "object")
     assert path.read_text(encoding="utf-8") == before
     assert store.snapshot().revision == revision
 

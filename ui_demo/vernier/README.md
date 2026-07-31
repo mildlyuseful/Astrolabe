@@ -70,7 +70,7 @@ app override  →  Global override (only if the host can represent it)  →  app
   resolving underneath — the app stays linked.
 - **Physical transform** sources swap rather than duplicate, and resetting one axis restores the
   permutation, including the partner axis.
-- Capability gating is real: Godot has no roll, no Free orbit style, and no horizon settings; lean
+- Capability gating is real: lean
   hosts route six generic channels while rich hosts route named mode actions; Unity alone shows the
   dynamic-clipping and pivot-extent controls.
 - The red `!` beside **Twist action** appears under the same condition as `ui.py`: effective orbit

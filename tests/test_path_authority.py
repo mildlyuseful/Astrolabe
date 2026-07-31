@@ -270,7 +270,7 @@ PAYLOAD_SUFFIXES = (".py", ".rb", ".cs", ".gd")
 #: Hosts whose add-on is source this project ships and can therefore re-point. AutoCAD is absent on
 #: purpose: its add-on is a compiled DLL, and rebuilding it would invalidate the provenance manifest
 #: that pins the shipped binary (`TODO.md` carries that work).
-PROBING_HOSTS = ("blender", "freecad", "fusion360", "godot", "rhino", "sketchup", "unity", "unreal")
+PROBING_HOSTS = ("blender", "freecad", "fusion360", "rhino", "sketchup", "unity", "unreal")
 
 
 def _payload_sources():

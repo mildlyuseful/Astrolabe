@@ -68,7 +68,7 @@ A surface miss remains a miss for orbit and advances the configured fallback cha
 Cursor** zoom, integrations synthesize a point on the cursor ray at a sensible target/model depth so
 empty space does not silently become **To Center**.
 
-Blender, SketchUp, Unreal, Unity, and Godot need the active Orbit/Fly/Walk action before host
+Blender, SketchUp, Unreal, and Unity need the active Orbit/Fly/Walk action before host
 alignment. The daemon therefore sends `adv.host_baseline` and those add-ons apply it immediately after
 per-action routing. Their local camera constants stay neutral to prevent double application.
 
@@ -85,7 +85,6 @@ calibration changes.
 | SketchUp | `(-1, -1, 1)` | `(-0.3, -0.3)` | `0.25` | `0.5` | add-on |
 | Unreal | `(2, 2, -2)` | `(-0.3, -0.3)` | `0.25` | `0.5` | add-on |
 | Unity | `(1, 1, -1)` | `(-0.14, -0.14)` | `0.25` | `0.25` | add-on |
-| Godot | `(-1, -1, 1)` | `(-0.3, -0.3)` | `0.25` | `0.5` | add-on |
 | Rhino | `(-1, -1, 1)` | `(-0.14, -0.14)` | `0.25` | `1` | daemon |
 | Fusion 360 | `(-1, -1, 1)` | `(-0.14, -0.14)` | `0.25` | `1` | daemon |
 | SolidWorks | `(1, 1, 1)` | `(0.2, 0.2)` | `0.5` | `1` | daemon |
@@ -137,7 +136,7 @@ cadence. Scroll and 3D navigation bypass the curve.
 3. For a mode-specific inside/out correction in a rich integration, add or remove a `mode.action`
    string in `advanced_invert`, such as `camera.roll` or `fly.bank`.
 4. Do not change `apply_in_daemon` while tuning feel. It is `false` only for Blender, SketchUp,
-   Unreal, Unity, and Godot because those integrations apply the baseline after resolving their
+   Unreal, and Unity because those integrations apply the baseline after resolving their
    active action. All other integrations use `true`.
 5. Restart the daemon. A source/editable install reads the JSON at startup; a packaged release must be
    rebuilt. Add-ins do not need a version bump for a data-only factor change because the daemon

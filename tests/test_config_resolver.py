@@ -47,11 +47,12 @@ def test_global_absence_means_system_and_never_a_sentinel():
     assert (explicit.value, explicit.layer) == (60, ResolutionLayer.GLOBAL)
 
 
-def test_incompatible_global_value_uses_host_system_value_but_remains_linked():
+def test_incompatible_global_value_uses_system_value_but_remains_linked():
     value = resolve_app(
-        "navigation.orbit.style", "godot", {"navigation.orbit.style": "free"}, {})
-    assert value.value == "turntable"
-    assert value.layer is ResolutionLayer.SYSTEM_APP
+        "navigation.orbit.twist_action", "fusion360",
+        {"navigation.orbit.twist_action": "dolly"}, {})
+    assert value.value == "roll"
+    assert value.layer is ResolutionLayer.SYSTEM
     assert value.follows_global
 
 
@@ -101,7 +102,7 @@ def test_v9_override_validation_requires_complete_sparse_app_suite():
     with pytest.raises(ValueError, match="app override suite mismatch"):
         validate_override_maps({}, {})
     maps = _empty_apps()
-    maps["godot"] = {"navigation.orbit.style": "free"}
+    maps["rhino"] = {"navigation.mode": "object"}
     with pytest.raises(ValueError, match="invalid app override"):
         validate_override_maps({}, maps)
     validate_override_maps({}, _empty_apps())

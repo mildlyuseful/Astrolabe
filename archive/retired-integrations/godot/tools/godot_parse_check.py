@@ -33,7 +33,7 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-ADDON = ROOT / "trackball_daemon" / "plugins" / "godot" / "trackball_nav"
+ADDON = ROOT / "plugin" / "trackball_nav"
 
 PROJECT_FILE = """config_version=5
 

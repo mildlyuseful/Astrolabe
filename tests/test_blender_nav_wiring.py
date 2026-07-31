@@ -286,7 +286,6 @@ def test_every_socket_integration_consumes_expanded_pivot_candidates():
         root / "trackball_daemon/plugins/blender/trackball_nav/__init__.py",
         root / "trackball_daemon/plugins/freecad/TrackballNav/tbnav_freecad.py",
         root / "trackball_daemon/plugins/fusion360/TrackballNav/TrackballNav.py",
-        root / "trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd",
         root / "trackball_daemon/plugins/rhino/TrackballNav/tbnav_rhino.py",
         root / "trackball_daemon/plugins/sketchup/trackball_nav/camera.rb",
         root / "trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs",
@@ -301,7 +300,6 @@ def test_every_rich_integration_consumes_per_action_axis_sources():
     root = Path(__file__).parents[1]
     sources = [
         root / "trackball_daemon/plugins/blender/trackball_nav/__init__.py",
-        root / "trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd",
         root / "trackball_daemon/plugins/sketchup/trackball_nav/camera.rb",
         root / "trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs",
         root / "trackball_daemon/plugins/unreal/TrackballNav/Content/Python/trackball_nav.py",

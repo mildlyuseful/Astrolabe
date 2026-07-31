@@ -321,7 +321,7 @@ def test_object_mode_hold_requires_host_support_and_restores_on_release():
     assert runtime.snapshot().effective_navigation_mode == "object"
     assert runtime.snapshot().control_help.state_label == "Object"
 
-    commands.dispatch(SetFocusedContext(context=FocusedContext(app_id="godot")))
+    commands.dispatch(SetFocusedContext(context=FocusedContext(app_id="rhino")))
     assert runtime.snapshot().effective_navigation_mode == "orbit"
     commands.dispatch(SetFocusedContext(context=FocusedContext(app_id="blender")))
     assert runtime.snapshot().effective_navigation_mode == "object"

@@ -135,11 +135,6 @@
     "unity": {
       "navigation.zoom.behavior": "dolly"
     },
-    "godot": {
-      "navigation.orbit.style": "turntable",
-      "navigation.orbit.twist_action": "zoom",
-      "navigation.zoom.behavior": "dolly"
-    },
     "rhino": {
       "navigation.zoom.behavior": "dolly"
     },

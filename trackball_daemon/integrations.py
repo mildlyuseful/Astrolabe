@@ -5,8 +5,8 @@
 and auto-update the bundled add-ons.
 
 Detection is best-effort via common Windows install paths. Every registered app has a real
-`setup`: the socket-add-on apps (Fusion, Blender, FreeCAD, SketchUp, Unreal, Unity, Godot,
-Rhino) copy their bundled add-on into the host app's add-on directory, AutoCAD stages its
+`setup`: the socket-add-on apps (Fusion, Blender, FreeCAD, SketchUp, Unreal, Unity, Rhino)
+copy their bundled add-on into the host app's add-on directory, AutoCAD stages its
 bundled NETLOAD plugin, and the daemon-side direct integrations (SolidWorks, Onshape) verify
 prerequisites and enable the driver (no file copy). `auto_update` re-copies a bundled add-on only when its
 bundled version is newer than the installed one (see `docs/architecture.md`), preserving the user's
@@ -310,17 +310,6 @@ def detect_unity():
     )
 
 
-def detect_godot():
-    # Steam / itch / manual zips: Godot_v4*.exe or Godot*.exe in Program Files or user Downloads.
-    la = os.environ.get("LOCALAPPDATA", "")
-    return _first_glob(
-        os.path.join(_pf(), "Godot*", "Godot*.exe"),
-        os.path.join(_pf(), "Godot", "Godot*.exe"),
-        os.path.join(la, "Programs", "Godot*", "Godot*.exe"),
-        os.path.join(os.environ.get("USERPROFILE", ""), "Downloads", "Godot*.exe"),
-    )
-
-
 def detect_rhino():
     # Rhino 8 default: C:\\Program Files\\Rhino 8\\System\\Rhino.exe
     found = _first_glob(
@@ -408,8 +397,6 @@ def detected_host_version(appdef: AppDef, detected=None):
         return _match_version(detected, r"UE_(\d+(?:\.\d+)?)")
     if key == "unity":
         return _match_version(detected, r"Editor[\\/](\d+(?:\.\d+)+(?:[abfp]\d+)?)")
-    if key == "godot":
-        return _match_version(Path(str(detected)).name, r"Godot[_-]?v?(\d+(?:\.\d+)+)")
     if key == "rhino":
         return _match_version(detected, r"Rhino\s+(\d+)")
     if key == "autocad":
@@ -465,9 +452,6 @@ def compatibility(appdef: AppDef, detected=None) -> Compatibility:
         known_incompatible = major != 5
     elif key == "unity":
         supported = major == 6000
-    elif key == "godot":
-        supported = major == 4 and 4 <= minor <= 7
-        known_incompatible = major != 4
     elif key == "rhino":
         supported = major == 8
         known_incompatible = major < 8
@@ -1238,230 +1222,6 @@ def install_unity(appdef: "AppDef", cfg) -> tuple[bool, str]:
     )
 
 
-# --- Godot 4: EditorPlugin into the open project's addons/ folder ----------------------
-_godot_running_cache = (0.0, [])
-
-
-def _godot_running_project_paths() -> list:
-    global _godot_running_cache
-    now = time.monotonic()
-    if now - _godot_running_cache[0] < 2.5:
-        return list(_godot_running_cache[1])
-
-    paths = []
-    try:
-        out = _hidden_check_output(
-            ["wmic", "process", "where", "name like 'Godot%'", "get", "CommandLine"],
-            timeout=5)
-        for line in out.splitlines():
-            # Godot is often launched as: Godot_v4.x.x.exe --path "C:\project"  or with project.godot arg
-            low = line.lower()
-            if "--path" in low:
-                idx = low.index("--path") + len("--path")
-                rest = line[idx:].strip()
-                if rest.startswith('"'):
-                    end = rest.find('"', 1)
-                    p = rest[1:end] if end > 0 else rest[1:]
-                else:
-                    p = rest.split()[0] if rest.split() else ""
-                if p and os.path.isdir(p):
-                    paths.append(p)
-            # Bare project.godot on the command line
-            for token in line.replace('"', " ").split():
-                if token.lower().endswith("project.godot"):
-                    p = os.path.dirname(token)
-                    if p and os.path.isdir(p):
-                        paths.append(p)
-    except Exception:
-        pass
-    _godot_running_cache = (now, list(paths))
-    return paths
-
-
-def _godot_recent_projects() -> list:
-    """Godot editor recent projects from %APPDATA%\\Godot\\.
-
-    Godot 4 ``projects.cfg`` stores each project as an INI section whose *name* is the
-    absolute path (forward slashes), e.g.::
-
-        [C:/Users/me/Documents/MyGame]
-        favorite=false
-
-    Older / alternate files (``editor_settings-*.tres``) may embed paths as plain text.
-    """
-    paths = []
-    appdata = os.environ.get("APPDATA", "")
-
-    def _accept(p: str) -> None:
-        if not p:
-            return
-        p = p.strip().strip('"').replace("/", os.sep)
-        if p.lower().endswith("project.godot"):
-            p = os.path.dirname(p)
-        try:
-            if os.path.isdir(p) and (Path(p) / "project.godot").exists():
-                paths.append(p)
-        except Exception:
-            pass
-
-    for name in ("projects.cfg", "editor_settings-4.tres", "editor_settings-3.tres"):
-        cand = Path(appdata) / "Godot" / name
-        if not cand.exists():
-            continue
-        try:
-            text = cand.read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            continue
-        text = text.replace("\\\\", "\\")
-        for raw in text.splitlines():
-            line = raw.strip()
-            # projects.cfg: section header is the project directory.
-            if line.startswith("[") and line.endswith("]") and len(line) > 2:
-                inner = line[1:-1].strip()
-                # Skip non-path sections (e.g. [application] if ever present).
-                if ":" in inner or inner.startswith("/") or (len(inner) >= 2 and inner[1] == ":"):
-                    _accept(inner)
-                continue
-            for part in line.replace(",", " ").replace('"', " ").split():
-                p = part.strip().strip("[]")
-                if not p:
-                    continue
-                if p.lower().endswith("project.godot") or (":" in p) or p.startswith("/"):
-                    _accept(p)
-    return paths
-
-
-def _godot_project_candidates() -> list:
-    seen, out = set(), []
-    for p in _godot_running_project_paths() + _godot_recent_projects():
-        ap = os.path.abspath(p)
-        if ap not in seen and (Path(ap) / "project.godot").exists():
-            seen.add(ap)
-            out.append(ap)
-    return out
-
-
-def _godot_enable_plugin(project_godot: Path) -> None:
-    """Idempotently enable res://addons/trackball_nav/plugin.cfg under [editor_plugins]."""
-    text = project_godot.read_text(encoding="utf-8") if project_godot.exists() else ""
-    plugin = "res://addons/trackball_nav/plugin.cfg"
-    if plugin in text:
-        return
-    marker = "[editor_plugins]"
-    enabled_line_prefix = "enabled=PackedStringArray("
-    if marker not in text:
-        text = text.rstrip() + f"\n\n{marker}\n{enabled_line_prefix}\"{plugin}\")\n"
-    else:
-        lines = text.splitlines(True)
-        out, done = [], False
-        for line in lines:
-            if (not done) and line.startswith("enabled=PackedStringArray("):
-                if line.rstrip().endswith(")"):
-                    inner = line[len(enabled_line_prefix):].rstrip()
-                    if inner.endswith(")"):
-                        inner = inner[:-1]
-                    inner = inner.strip()
-                    new_inner = (inner + f", \"{plugin}\"") if inner else f"\"{plugin}\""
-                    out.append(f"{enabled_line_prefix}{new_inner})\n")
-                else:
-                    out.append(line)
-                done = True
-            else:
-                out.append(line)
-        if not done:
-            out2 = []
-            for line in out:
-                out2.append(line)
-                if line.strip() == marker:
-                    out2.append(f"{enabled_line_prefix}\"{plugin}\")\n")
-            out = out2
-        text = "".join(out)
-    project_godot.write_text(text, encoding="utf-8")
-
-
-def _godot_staging_dir() -> Path:
-    """Where the EditorPlugin waits when Set up found no project to copy it into."""
-    return user_config_dir() / "godot" / "trackball_nav"
-
-
-def godot_plugin_dir() -> Path:
-    projects = _godot_project_candidates()
-    if projects:
-        return Path(projects[0]) / "addons" / "trackball_nav"
-    return _godot_staging_dir()
-
-
-def install_godot(appdef: "AppDef", cfg) -> tuple[bool, str]:
-    """Copy the EditorPlugin into each detected Godot project's addons/ and enable it."""
-    src = _bundled_addin("godot", "trackball_nav")
-    if not src.exists():
-        return False, "Bundled Godot add-on is missing from this build."
-    projects = _godot_project_candidates()
-    a = _operational_state(cfg, appdef.key)
-    was_installed = a.get("installed", False)
-    if not projects:
-        dest = _godot_staging_dir()
-        try:
-            _install_payloads_transactionally(((src, dest),))
-        except OSError as e:
-            return False, f"Couldn't stage the Godot add-on: {e}"
-        a["installed"] = False
-        _save_operational(cfg, appdef.key, a)
-        return False, (
-            "No Godot project was found automatically.\n\n"
-            "Set up looks for projects in:\n"
-            "  • Running Godot processes (--path / project.godot on the command line)\n"
-            "  • Recent projects under %APPDATA%\\Godot\\ "
-            "(projects.cfg / editor_settings-4.tres)\n"
-            "It does not scan a fixed projects folder.\n\n"
-            "Easiest fix: open your project in Godot, then click Set up again.\n\n"
-            "Manual install:\n"
-            "  1. Copy the staged trackball_nav folder into:\n"
-            "       <YourProject>\\addons\\trackball_nav\\\n"
-            "  2. In Godot: Project → Project Settings → Plugins → enable "
-            "\"Trackball Nav\"\n"
-            "     (or add under [editor_plugins] in project.godot:\n"
-            "      enabled=PackedStringArray("
-            "\"res://addons/trackball_nav/plugin.cfg\"))\n"
-            "  3. Reload the project or restart Godot, switch the daemon to 3D mode, "
-            "and focus the editor.\n\n"
-            "Staged add-on folder:\n  " + str(dest)
-        ), [
-            ("Copy staged add-on folder", str(dest)),
-            ("Copy plugin.cfg path", "res://addons/trackball_nav/plugin.cfg"),
-        ]
-    copied, failed = [], []
-    for proj in projects:
-        dest = Path(proj) / "addons" / "trackball_nav"
-        try:
-            _install_payloads_transactionally(((src, dest),))
-            _godot_enable_plugin(Path(proj) / "project.godot")
-            copied.append(proj)
-        except OSError as exc:
-            failed.append((proj, exc))
-    if not copied:
-        detail = "; ".join(f"{project}: {error}" for project, error in failed)
-        return False, (
-            "Couldn't write the Godot add-on into any project addons/ folder"
-            + (f": {detail}" if detail else "."))
-    a["installed"] = True
-    if not was_installed:
-        a["enabled"] = True
-    a["addin_version"] = bundled_addin_version(appdef.key) or ""
-    _save_operational(cfg, appdef.key, a)
-    verb = "updated" if was_installed else "installed"
-    failed_note = (
-        "\nSkipped projects: "
-        + "; ".join(f"{project}: {error}" for project, error in failed)
-        if failed else "")
-    return True, (
-        f"Trackball Nav {verb} (v{a['addin_version']}) into {len(copied)} Godot project(s).\n\n"
-        "The plugin is enabled in project.godot. Reload the project or restart Godot, switch the "
-        "daemon to 3D mode, and focus the editor — the row flips to \"connected\" on handshake."
-        + failed_note
-    )
-
-
 # --- Rhino 8: Python scripts + startup command ----------------------------------------
 def rhino_scripts_dir() -> Path:
     return (Path(os.environ.get("APPDATA", "")) / "McNeel" / "Rhinoceros" / "8.0" /
@@ -1562,7 +1322,6 @@ _ADDINS = {
     "sketchup": ("sketchup/trackball_nav", _sketchup_primary_addon_dir, "version.json"),
     "unreal": ("unreal/TrackballNav", unreal_plugin_dir, "version.json"),
     "unity": ("unity/com.astrolabe.trackball-nav", unity_plugin_dir, "version.json"),
-    "godot": ("godot/trackball_nav", godot_plugin_dir, "version.json"),
     "rhino": ("rhino/TrackballNav", rhino_scripts_dir, "version.json"),
     "autocad": ("autocad", _acad_runtime_plugin_dir, "version.json"),
 }
@@ -1697,24 +1456,6 @@ _APP_UX = {
                         "folder; Unity compiles and executes it in the Editor. No elevation or "
                         "machine-wide setting change."),
     ),
-    "godot": dict(
-        install_model="Godot EditorPlugin copied and enabled per project.",
-        verified_versions="Godot 4.4 through 4.7",
-        setup_instructions=("Set up finds running/recent projects, copies addons/trackball_nav, and "
-                            "enables res://addons/trackball_nav/plugin.cfg."),
-        manual_install=("Copy trackball_daemon\\plugins\\godot\\trackball_nav to "
-                        "<YourProject>\\addons\\trackball_nav, then enable Trackball Nav under "
-                        "Project > Project Settings > Plugins. A staged copy is also placed under "
-                        f"{_CONFIG_DIR}\\godot when no project is found."),
-        health_check=("Reload the project, focus a 3D editor viewport, and look for connected. "
-                      f"Check {_CONFIG_DIR}\\godot_addin.log on failure."),
-        security_notes=("Copies unsigned GDScript into each detected project and edits that "
-                        "project's project.godot to enable the plugin. No elevation or machine-wide "
-                        "setting change."),
-        security_confirmation=("Godot setup copies editor scripts into every detected project and "
-                               "edits project.godot to enable Trackball Nav. Review or use the "
-                               "manual project-local steps if automatic project edits are unwanted."),
-    ),
     "rhino": dict(
         install_model="Rhino 8 user Python scripts plus a per-user startup command.",
         verified_versions="Rhino 8",
@@ -1815,8 +1556,6 @@ APPS = (
            **_APP_UX["unreal"]),
     AppDef(APP_SPECS_BY_ID["unity"], True, detect_unity, setup=install_unity,
            **_APP_UX["unity"]),
-    AppDef(APP_SPECS_BY_ID["godot"], True, detect_godot, setup=install_godot,
-           **_APP_UX["godot"]),
     AppDef(APP_SPECS_BY_ID["rhino"], True, detect_rhino, setup=install_rhino,
            **_APP_UX["rhino"]),
     AppDef(APP_SPECS_BY_ID["fusion360"], True, detect_fusion, setup=install_fusion,

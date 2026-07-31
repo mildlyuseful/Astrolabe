@@ -80,8 +80,8 @@ class OnshapeFocusState(str, Enum):
 class ProcessSelector:
     """One normalized executable identity, optionally with a tightly scoped name family.
 
-    Desktop routing is deliberately basename-exact. ``family_pattern`` exists only for hosts such
-    as portable Godot builds that put a version in the executable basename; it is matched with
+    Desktop routing is deliberately basename-exact. ``family_pattern`` exists only for narrowly
+    scoped hosts that put a version in the executable basename; it is matched with
     :func:`re.fullmatch`, never as a substring.
     """
 
@@ -280,14 +280,6 @@ APP_SPECS = (
           zoom_behaviors=("zoom", "dolly"),
           features=("zoom_behavior", "dynamic_clip", "pivot_extent",
                     "object_translation_sensitivity", "object_translation_frame")),
-    _spec("godot", "Godot", (
-              ProcessSelector(
-                  "godot.exe",
-                  r"godot_v[0-9][a-z0-9_.-]*(?<!_console)\.exe"),),
-          "Godot editor viewport navigation", rich=True, tier=SupportTier.EXPERIMENTAL,
-          no_roll=True, pivots=PIVOTS_CAMERA, orbit_styles=("turntable",),
-          features=("zoom_behavior",), twist_actions=("zoom", "dolly", "none"),
-          zoom_behaviors=("zoom", "dolly"), exclude=("lock_horizon", "level_horizon")),
     _spec("rhino", "Rhino", ("rhino.exe",), "Rhino navigation",
           tier=SupportTier.EXPERIMENTAL, pivots=PIVOTS_CAMERA,
           zoom_behaviors=("zoom", "dolly"), features=("zoom_behavior",)),

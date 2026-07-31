@@ -39,10 +39,6 @@ DECLARATION_SITES = {
         ("fusion360/TrackballNav/TrackballNav.py", r'ADDIN_VERSION = "([\d.]+)"'),
         ("fusion360/TrackballNav/TrackballNav.manifest", r'"version": "([\d.]+)"'),
     ),
-    "godot": (
-        ("godot/trackball_nav/trackball_nav.gd", r'const ADDIN_VERSION := "([\d.]+)"'),
-        ("godot/trackball_nav/plugin.cfg", r'version="([\d.]+)"'),
-    ),
     "rhino": (
         ("rhino/TrackballNav/tbnav_rhino.py", r'ADDIN_VERSION = "([\d.]+)"'),
     ),

@@ -56,17 +56,6 @@
       "apply_in_daemon": false,
       "advanced_invert": []
     },
-    "godot": {
-      "orbit_sign": [-1, -1, 1],
-      "orbit_scale": [1, 1, 1],
-      "pan_sign": [-1, -1],
-      "pan_scale": 0.3,
-      "zoom_sign": 1,
-      "zoom_scale": 0.25,
-      "move_scale": 0.5,
-      "apply_in_daemon": false,
-      "advanced_invert": []
-    },
     "rhino": {
       "orbit_sign": [-1, -1, 1],
       "orbit_scale": [1, 1, 1],

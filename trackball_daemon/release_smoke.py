@@ -41,7 +41,6 @@ _PAYLOAD_DIRECTORIES = (
     ("blender", "trackball_nav"),
     ("freecad", "TrackballNav"),
     ("fusion360", "TrackballNav"),
-    ("godot", "trackball_nav"),
     ("rhino", "TrackballNav"),
     ("sketchup", "trackball_nav"),
     ("unity", "com.astrolabe.trackball-nav"),

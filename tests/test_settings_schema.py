@@ -23,7 +23,6 @@ from trackball_daemon.settings_schema import (
     SettingScope,
     V8_DEPRECATED_USER_PATHS,
     classify_app_profile_path,
-    setting_choices_for_app,
     setting_specs_for_app,
     setting_value_valid_for_app,
 )
@@ -129,26 +128,20 @@ def test_every_current_global_ui_path_is_registered_or_explicitly_deprecated():
 
 
 def test_per_app_choices_reject_unsupported_modes_and_options():
-    godot = APP_SPECS_BY_ID["godot"]
-    style = SETTING_SPECS_BY_ID["navigation.orbit.style"]
-    twist = SETTING_SPECS_BY_ID["navigation.orbit.twist_action"]
     mode = SETTING_SPECS_BY_ID["navigation.mode"]
-    assert setting_choices_for_app(style, godot) == ("default", "turntable")
-    assert not setting_value_valid_for_app(style, godot, "free")
-    assert not setting_value_valid_for_app(twist, godot, "roll")
-    assert setting_value_valid_for_app(mode, godot, "walk")
-    assert not setting_value_valid_for_app(mode, godot, "object")
-
     blender = APP_SPECS_BY_ID["blender"]
     assert setting_value_valid_for_app(mode, blender, "object")
     object_frame = SETTING_SPECS_BY_ID["navigation.object.translation_frame"]
     assert object_frame.applies_to(blender)
     assert object_frame.choices == ("view", "ground")
-    assert not object_frame.applies_to(godot)
     object_sensitivity = SETTING_SPECS_BY_ID["navigation.object.translation_sensitivity"]
     assert object_sensitivity.applies_to(blender)
     assert object_sensitivity.minimum == 0.0
-    assert not object_sensitivity.applies_to(godot)
+
+    rhino = APP_SPECS_BY_ID["rhino"]
+    assert not setting_value_valid_for_app(mode, rhino, "object")
+    assert not object_frame.applies_to(rhino)
+    assert not object_sensitivity.applies_to(rhino)
 
     fusion = APP_SPECS_BY_ID["fusion360"]
     assert not setting_value_valid_for_app(mode, fusion, "fly")

@@ -107,9 +107,9 @@ map is the contract the eventual UI should follow.
 
 Field visibility follows `app_registry.py` / `settings_schema.py`: per-app Pivot hold and
 Zoom hold timers, Twist action on every app, Pan-mode zoom (Zoom / Dolly) only where the host
-implements both paths, SketchUp as a full rich app, Godot turntable-only with no
-roll/horizon controls, Fusion's Roll/Zoom/None twist set, Unity's dynamic-clip and
-pivot-extent, Blender's camera-lock, and each integration's security notes from
+implements both paths, and SketchUp as a full rich app. Capability-specific controls include
+Fusion's Roll/Zoom/None twist set, Unity's dynamic-clip and pivot-extent, Blender's camera-lock,
+and each integration's security notes from
 `integrations.py`. Keybinding chords, actions, match modes, and the two System profiles are
 ported from `system_keybinding_profiles.json` and `devices/descriptor_data`. Free-orbit
 selection still nudges twist to Roll once, mirroring `ui.py`.

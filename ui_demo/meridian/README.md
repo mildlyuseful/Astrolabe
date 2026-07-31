@@ -24,7 +24,6 @@ You can also open `index.html` directly in a browser (file://). Hash deep-links 
 | `#hosts` | Hosts (last selection) |
 | `#hosts:global.feel` | Global defaults → Feel |
 | `#hosts:unreal.axes` | Unreal → Axes matrix |
-| `#hosts:godot.behavior` | Godot → Behavior (capability-gated) |
 | `#bindings` | Keybindings |
 | `#bindings:keyboard_only` | Keyboard-only profile |
 | `#system` | Device, orientation, HUD, session |
@@ -72,7 +71,7 @@ Overview is **not a page**. BLE status, Pointer/3D mode, handshake, and Quit liv
 
 ### Parity notes
 
-Field visibility follows the spirit of `app_registry.py` / `settings_schema.py` (Godot no-roll/horizon, Fusion twist set, Unity clip/extent, Blender camera lock, Onshape userscript). Keybinding profiles and chords mirror `system_keybinding_profiles.json`. This is a **UX prototype**, not a live projection of `SettingsUIModel` / `BindingUIModel`.
+Field visibility follows the spirit of `app_registry.py` / `settings_schema.py` (Fusion twist set, Unity clip/extent, Blender camera lock, Onshape userscript). Keybinding profiles and chords mirror `system_keybinding_profiles.json`. This is a **UX prototype**, not a live projection of `SettingsUIModel` / `BindingUIModel`.
 
 ### Prototype boundary
 

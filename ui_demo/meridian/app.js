@@ -55,8 +55,6 @@ const PROFILES = {
   unity:      { rich: true, pivots: PIVOTS_CAMERA, styles: ['free', 'turntable'],
                 twist: ['roll', 'zoom', 'dolly', 'none'], zb: ['zoom', 'dolly'],
                 dynamicClip: true, pivotExtent: true },
-  godot:      { rich: true, noRoll: true, noHorizon: true, pivots: PIVOTS_CAMERA,
-                styles: ['turntable'], twist: ['zoom', 'dolly', 'none'], zb: ['zoom', 'dolly'] },
   freecad:    { pivots: PIVOTS_DEFAULT, styles: ['free', 'turntable'],
                 twist: ['roll', 'zoom', 'none'], zb: [] },
   fusion360:  { pivots: PIVOTS_DEFAULT, styles: ['free', 'turntable'],
@@ -70,7 +68,7 @@ const PROFILES = {
   rhino:      { pivots: PIVOTS_CAMERA, styles: ['free', 'turntable'],
                 twist: ['roll', 'zoom', 'none'], zb: ['zoom', 'dolly'] },
 };
-const APP_ORDER = ['blender', 'freecad', 'sketchup', 'unreal', 'unity', 'godot',
+const APP_ORDER = ['blender', 'freecad', 'sketchup', 'unreal', 'unity',
   'rhino', 'fusion360', 'solidworks', 'onshape', 'autocad'];
 
 const TIP_RATE = 'Per app; Global is the bridge rate. Higher is smoother; lower if the host lags.';
@@ -136,7 +134,6 @@ const APP_SYS = {
   blender: { 'orbit.pivot': 'camera' },
   sketchup: { 'zoom.behavior': 'dolly' }, unreal: { 'zoom.behavior': 'dolly' },
   unity: { 'zoom.behavior': 'dolly' }, rhino: { 'zoom.behavior': 'dolly' },
-  godot: { 'orbit.style': 'turntable', 'twist': 'zoom', 'zoom.behavior': 'dolly' },
 };
 
 const DEFAULT_ACTION_AXIS_SOURCE = {
@@ -212,15 +209,6 @@ const APPS = [
       auto: 'Copies package into recent/running projects.',
       manual: 'Copy com.astrolabe.trackball-nav into Packages.',
       health: 'Focus a Scene view; see unity_addin.log.' } },
-  { key: 'godot', name: 'Godot',
-    status: { chip: 'off', text: 'not detected', short: '—' },
-    detected: '—', versions: '4.4–4.7',
-    installModel: 'EditorPlugin per project.', security: 'Edits project.godot only.',
-    setupRequired: true, action: 'Set up',
-    instructions: {
-      auto: 'Copies addons/trackball_nav and enables the plugin.',
-      manual: 'Copy into addons and enable under Project Settings → Plugins.',
-      health: 'Focus a 3D editor viewport.' } },
   { key: 'rhino', name: 'Rhino',
     status: { chip: 'idle', text: 'installed · v0.1.2', short: 'inst' },
     detected: 'v8.19', versions: 'Rhino 8',
@@ -387,7 +375,7 @@ const S = {
 };
 const DEFAULT_ENABLED = {
   blender: true, freecad: true, sketchup: true, unreal: true, unity: false,
-  godot: false, rhino: true, fusion360: true, solidworks: true, onshape: false, autocad: false,
+  rhino: true, fusion360: true, solidworks: true, onshape: false, autocad: false,
 };
 for (const key of APP_ORDER) {
   S.apps[key] = { enabled: DEFAULT_ENABLED[key], mode: 'orbit', ov: {}, route: freshRoute(key) };
