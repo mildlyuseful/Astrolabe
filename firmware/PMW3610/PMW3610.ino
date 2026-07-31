@@ -17,7 +17,8 @@
  * Fused rotation is published in the housing frame, whose "up" leans right with the tilted
  * ball plane rather than standing vertical (see FRAME_TILT_DEG).
  *
- * Advertises as "Astrolabe" and publishes the production five-way snapshot bit map
+ * Advertises as "Astrolabe", publishes a standard BLE battery estimate, and publishes
+ * the production five-way snapshot bit map
  * (bit0 Up, bit1 Down, bit2 Left, bit3 Right, bit4 Center). Standalone HID maps
  * Down=LMB, Right=RMB, Center=MMB. Daemon subscription suppresses HID pointer/buttons;
  * with the daemon, those directions are Walk / Fly / mode-toggle bindings, not OS clicks.
@@ -108,6 +109,7 @@
 // and Force Awake have long wake times and are intentionally excluded from normal power
 // management (PMW3610 datasheet R2.4, "Notes on Shutdown and Forced Rest").
 #define MOTION_IDLE_MS   2000   // no motion/button activity -> MCU event wait
+#define BATTERY_SAMPLE_MS 60000UL
 #define DEBOUNCE_MS     8
 #define DEBUG_PRINT     1
 #define IPS_REPORT_MS   8000
@@ -523,6 +525,7 @@ static bool buildSolver() {
 }
 
 BLEDis bledis;
+BLEBas blebas;
 BLEHidAdafruit blehid;
 BLEService        rotationService(ROT_SERVICE_UUID);
 BLECharacteristic rotationChar(ROT_CHAR_UUID);
@@ -537,9 +540,12 @@ uint8_t  g_hidButtons=0;
 uint16_t g_inputSequence=0;
 uint32_t lastScrollMs=0, lastSendMs=0, lastIpsReportMs=0;
 uint32_t lastPollUs=0, lastActivityMs=0;
+uint32_t g_lastBatterySampleMs=0;
 uint32_t g_lastTxUs=0;   // last successful BLE notify/report, for CALIB txAge telemetry
+uint8_t  g_batteryPercent=100;
 bool     g_okL=false, g_okR=false;
 bool     g_debouncePending=false;
+bool     g_usbPowerPresent=false;
 
 volatile bool g_controller = false;
 uint16_t      g_ctrlConn   = BLE_CONN_HANDLE_INVALID;
@@ -563,6 +569,46 @@ static inline bool motionPinActive(){
 static void clearMotionAccumulators(){
   gx = gy = gz = 0.0f;
   accX = accY = accScroll = 0.0f;
+}
+
+static inline bool usbPowerPresent(){
+  return (NRF_POWER->USBREGSTATUS & POWER_USBREGSTATUS_VBUSDETECT_Msk) != 0;
+}
+
+static uint16_t readBatteryMillivolts(){
+  analogReference(AR_INTERNAL_1_2);
+  analogReadResolution(12);
+  (void)analogReadVDDHDIV5(); // discard the first sample after changing the ADC
+  uint32_t sum=0;
+  for(uint8_t i=0; i<8; i++) sum += analogReadVDDHDIV5();
+  analogReference(AR_DEFAULT);
+  analogReadResolution(10);
+  // 1.2 V ADC range, 12 bits, and the nRF52840's internal VDDH/5 input.
+  return (uint16_t)((sum*6000UL + 16380UL) / 32760UL);
+}
+
+static uint8_t batteryPercentFromMillivolts(uint16_t millivolts){
+  if(millivolts <= 3300) return 0;
+  if(millivolts < 3600) return (uint8_t)((millivolts-3300)/30);
+  if(millivolts >= 4200) return 100;
+  return (uint8_t)(10 + ((uint32_t)(millivolts-3600)*90UL + 300UL)/600UL);
+}
+
+static void updateBatteryLevel(uint32_t nowMs, bool force){
+  bool usbPresent=usbPowerPresent();
+  bool usbRemoved=g_usbPowerPresent && !usbPresent;
+  g_usbPowerPresent=usbPresent;
+  // SuperMini VDDH becomes USB's 5 V while connected, so it is not a battery reading.
+  // Preserve the last estimate and refresh immediately after USB is removed.
+  if(usbPresent) return;
+  if(!force && !usbRemoved && (nowMs-g_lastBatterySampleMs)<BATTERY_SAMPLE_MS) return;
+
+  g_lastBatterySampleMs=nowMs;
+  uint8_t next=batteryPercentFromMillivolts(readBatteryMillivolts());
+  bool changed=next!=g_batteryPercent;
+  g_batteryPercent=next;
+  blebas.write(next);
+  if(changed && Bluefruit.connected() && blebas.notify(next)) g_lastTxUs=micros();
 }
 
 static void onConnect(uint16_t conn_handle){
@@ -920,6 +966,11 @@ void setup(){
   bledis.setModel("Dual-PMW3610 Trackball");
   bledis.begin();
 
+  blebas.begin();
+  g_usbPowerPresent=usbPowerPresent();
+  if(g_usbPowerPresent) blebas.write(g_batteryPercent);
+  else updateBatteryLevel(millis(), true);
+
   blehid.begin();
   Bluefruit.Periph.setConnInterval(6, 9);
   setupRotationService();
@@ -978,6 +1029,7 @@ void loop(){
 #endif
 
   uint32_t nowMs = millis();
+  updateBatteryLevel(nowMs, false);
 
   // MOTION/button IRQ (or still-asserted MOTION) opens an active-poll window. The
   // sensors remain in automatic normal operation; a burst is valid in Run and Rest.

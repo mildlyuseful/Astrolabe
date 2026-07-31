@@ -37,6 +37,11 @@ already-supported contract.
   idle/MOTION, button wake, BLE reconnect, standalone HID, and daemon-owned pointer transitions.
   Static tests establish the intended register policy and diagnostic format, not the physical
   absence of a cursor jerk.
+- Verify the SuperMini prototype's BLE battery estimate against a multimeter across a representative
+  discharge, confirm that USB insertion preserves the last battery-only value and USB removal
+  refreshes it, and confirm Battery Level appears after a clean Windows re-pair. The standard service
+  and voltage mapping are covered statically; this does not establish calibration for the installed
+  cell or the board's ADC tolerance.
 
 ### Release qualification
 

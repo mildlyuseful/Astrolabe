@@ -116,6 +116,14 @@ Run/Rest automatically; the MCU can wait for MOTION while motion bursts remain r
 Rest. It does not use forced Rest, Force Awake, or the visible board LED for normal power/status
 management.
 
+The prototype also exposes the standard BLE Battery Service. Once per minute while running from its
+LiPo, firmware averages the nRF52840's internal `VDDH/5` ADC input and maps 3.3–4.2 V to an estimated
+0–100% charge. SuperMini hardware drives VDDH from USB while attached, so firmware retains the last
+valid battery estimate instead of interpreting 5 V as battery voltage, then samples immediately after
+USB is removed. A boot that begins on USB uses 100% as the temporary externally-powered value until
+that first battery-only sample. Adding the service changes the GATT database; an already-bonded host
+may need the device removed and paired again before it displays Battery Level.
+
 For repeatable PMW3610 transition characterization, set `PMW_WAKE_STRESS` to `1`, flash the prototype,
 keep the ball stationary, and run:
 

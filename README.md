@@ -244,9 +244,12 @@ restore three-axis orbit without overwriting the user's choice.
 The working five-way validation firmware is
 [`firmware/PMW3610/PMW3610.ino`](firmware/PMW3610/PMW3610.ino) (SuperMini nRF52840, dual PMW3610,
 advertised name `Astrolabe`). It fuses the two sensors, exposes BLE HID, publishes the custom
-rotation characteristic, and publishes the five-way input-state snapshot used by the daemon. Its
-normal path leaves PMW3610 Run/Rest transitions under the sensor's automatic policy; a separate
-serial wake-stress build is documented in
+rotation characteristic, publishes the five-way input-state snapshot used by the daemon, and exposes
+an estimated charge level through the standard BLE Battery Service. The battery estimate refreshes
+once per minute while unplugged and immediately after USB is removed; an existing Windows pairing may
+need to be removed and recreated once after flashing this GATT change. Its normal path leaves PMW3610
+Run/Rest transitions under the sensor's automatic policy; a separate serial wake-stress build is
+documented in
 [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md). Its SuperMini controller and board are
 not the product hardware, and the current sleep/wake correction still requires the physical
 re-verification tracked in [`TODO.md`](TODO.md). The older
