@@ -167,12 +167,17 @@ cursor"). Two halves, like the other apps:
 
 ## 5. The control model
 
-### 5.1 Modes (`advanced.nav_mode`: `orbit` | `fly` | `walk`)
+### 5.1 Modes (`advanced.nav_mode`: `orbit` | `fly` | `walk` | `object`)
 - **orbit**: ball pitch/yaw rotate the view about the chosen pivot; twist = roll/zoom/dolly per
   `twist_action`. Shift → pan (ball plane) / zoom (twist).
 - **fly**: ball = look (rotate about the **eye**, turn in place) + bank on twist; Shift → move
   (ball-forward = thrust, ball-sideways = strafe, twist = rise/fall).
 - **walk**: like fly but horizon-locked look (no bank) and horizontal-plane movement.
+- **object**: primary motion rotates selected root objects as one group around their shared origin
+  center using the current view's right/up/forward axes. The secondary layer translates the group
+  in view right/up and uses twist for view depth. Empty selection is a no-op; selected descendants
+  of another selected object are excluded so parenting cannot apply motion twice. A gesture creates
+  one Blender undo checkpoint and never moves the viewport.
 
 Entering Turntable, Lock Horizon, or Walk from a free-roll state optionally calls `_level_horizon`
 once. It removes roll while keeping the forward direction, location, distance, and active pivot.
@@ -202,7 +207,9 @@ copy the numeric profile into this document; inspect the packaged JSON or
 | `_DEFAULT_PORT=47900` | broker port fallback if `bridge.json` is missing. |
 
 ### 5.4 Per-mode action routing (`advanced.axis_source` + `advanced.invert`)
-Each action under `{orbit,camera,fly,walk}` selects source X/Y/Z and has its own invert. Routing is
+Each action under `{orbit,camera,fly,walk}` selects source X/Y/Z and has its own invert. Object
+rotation deliberately reuses Orbit pitch/yaw/twist routing; its secondary translation reuses Orbit
+pan X/pan Y/zoom routing. Routing is
 applied **in the add-on**, in `_apply_action_routing`, just before dispatch because the daemon's
 effective navigation mode determines which action each channel means. Rotation actions select from
 `o`; secondary-layer movement actions select from `(p.x,p.y,z)`. Thus Walk Forward can select Z
@@ -218,7 +225,8 @@ flag — that key is now ignored if present in an old config.
 > per-mode ones. Don't wire both or you'll double-invert.
 
 ### 5.5 Navigation-mode authority
-Blender's *native* Walk/Fly cannot be driven by the trackball (Gotcha #5). Orbit/Fly/Walk selection
+Blender's *native* Walk/Fly cannot be driven by the trackball (Gotcha #5).
+Orbit/Fly/Walk/Object selection
 therefore belongs to the daemon runtime and may be changed by daemon keybindings or settings. The
 add-on has no local mode override, so a frame cannot disagree with the control state shown by the
 daemon.

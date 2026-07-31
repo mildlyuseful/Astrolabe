@@ -112,6 +112,16 @@ def test_blender_addon_consumes_shared_zoom_target_and_behavior():
     assert "_dolly(rv, z, pivot)" in source
 
 
+def test_blender_object_mode_transforms_selected_roots_with_undo():
+    source = (Path(__file__).parents[1] /
+              "trackball_daemon/plugins/blender/trackball_nav/__init__.py").read_text(
+                  encoding="utf-8")
+    assert "def _selected_transform_roots():" in source
+    assert "def _apply_object(rv, o, p, z, idle):" in source
+    assert 'bpy.ops.ed.undo_push(message="Astrolabe Object Transform")' in source
+    assert "ob.matrix_world = transform @ ob.matrix_world" in source
+
+
 def test_advanced_appears_on_old_config_via_deep_merge(isolated_config):
     # Simulate a pre-existing v2 config that predates the advanced block.
     import copy

@@ -31,12 +31,6 @@ already-supported contract.
   firmware. The obsolete SuperMini compile gate was removed because a prototype controller is not a
   public-V1 build target. Keep the PMW3610 sketch locally compilable for diagnosis, but do not
   restore it as a required release job.
-- Re-verify the SuperMini PMW3610 cursor path after removing forced Rest/Force Awake from normal
-  power management. First flash `PMW_WAKE_STRESS=1` and preserve a stationary 100-cycle
-  `tools/pmw3610_wake_stress.py` log; then restore the flag to `0`, reflash, and exercise repeated
-  idle/MOTION, button wake, BLE reconnect, standalone HID, and daemon-owned pointer transitions.
-  Static tests establish the intended register policy and diagnostic format, not the physical
-  absence of a cursor jerk.
 - Verify the SuperMini prototype's BLE battery estimate against a multimeter across a representative
   discharge, confirm that USB insertion preserves the last battery-only value and USB removal
   refreshes it, and confirm Battery Level appears after a clean Windows re-pair and agrees across the
@@ -128,6 +122,9 @@ For every applicable host:
   invalidation, view-rotation invalidation, and independent hold durations.
 - Test setup, reinstall/update, restart/reload, connection status, and a supported-versus-experimental
   host version.
+- In Blender, Unity, and Unreal, test Object mode with one object, unrelated multi-selection, and a
+  selected parent plus selected child. Verify view-relative three-axis rotation, right/up/depth
+  translation, empty-selection no-op, an unchanged camera, and one Undo restoring the whole gesture.
 
 ### Host-specific deltas
 
@@ -137,12 +134,13 @@ For every applicable host:
 - **Onshape:** strict fabricated-hit rejection near model extents, +Z Top-plane horizon leveling,
   stationary userscript samples, independent holds, orthographic/perspective behavior, and Chromium
   plus Firefox certificate UX.
-- **Blender:** passive modal mouse tracking, tracker restart after file load, camera-view handling, and
-  Orbit/Fly/Walk sign and feel.
+- **Blender:** passive modal mouse tracking, tracker restart after file load, camera-view handling,
+  and Orbit/Fly/Walk/Object sign and feel.
 - **SketchUp:** live Win32 cursor-to-viewport mapping across display scaling and annual host versions.
-- **Unreal:** focused-viewport cursor ray, live signs/scales, Play-In-Editor no-op behavior, and
-  project-local versus engine-wide installation.
-- **Unity:** Dynamic Clipping restoration, pivot-extent cap, domain reload, and project detection.
+- **Unreal:** focused-viewport cursor ray, live signs/scales, Object transaction lifetime,
+  Play-In-Editor no-op behavior, and project-local versus engine-wide installation.
+- **Unity:** Dynamic Clipping restoration, pivot-extent cap, Object undo grouping, domain reload,
+  and project detection.
 - **Godot:** project enable/reload in an installed editor. The parse smoke is now a command --
   `python tools/godot_parse_check.py --godot <editor exe>` -- because the add-on shipped for several
   versions with a GDScript type-inference error that made the whole script fail to load, and nothing

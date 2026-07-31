@@ -1,4 +1,4 @@
 {
-  "version": "0.1.24",
-  "_comment": "Kept in sync with bl_info['version'] and ADDIN_VERSION in __init__.py. The daemon's integrations._ADDINS['blender'] reads this (like Fusion's TrackballNav.manifest) to drive auto_update. 0.1.24: dual-probe the current and previous daemon configuration roots."
+  "version": "0.1.25",
+  "_comment": "Kept in sync with bl_info['version'] and ADDIN_VERSION in __init__.py. The daemon's integrations._ADDINS['blender'] reads this (like Fusion's TrackballNav.manifest) to drive auto_update. 0.1.25: add undoable view-relative Object mode."
 }

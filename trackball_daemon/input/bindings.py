@@ -791,7 +791,8 @@ class BindingController:
         if command_id == "navigation.mode.cycle":
             self._require_action_capability(action, snapshot)
             app_id = snapshot.focused_context.app_id
-            modes = APP_SPECS_BY_ID[app_id].supported_modes if app_id else ("orbit", "fly", "walk")
+            modes = (APP_SPECS_BY_ID[app_id].supported_modes if app_id
+                     else ("orbit", "fly", "walk", "object"))
             return (CycleNavigationMode(origin=_BINDING_SOURCE, modes=modes),)
         if command_id.startswith("setting."):
             self._require_action_capability(action, snapshot)

@@ -30,7 +30,7 @@
           "type": "object",
           "additionalProperties": false,
           "required": ["command", "target"],
-          "properties": {"command": {"const": "navigation.mode.set"}, "target": {"enum": ["orbit", "fly", "walk"]}}
+          "properties": {"command": {"const": "navigation.mode.set"}, "target": {"enum": ["orbit", "fly", "walk", "object"]}}
         },
         {
           "type": "object",

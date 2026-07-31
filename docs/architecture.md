@@ -233,12 +233,18 @@ Mapping order is a contract:
 3. The active app's user source, inversion, gain, and action settings map logical motion into
    orbit/pan/zoom or richer navigation actions.
 4. The immutable host baseline aligns those actions with the host's camera conventions exactly once.
-5. The host integration applies the resulting motion to its camera or view.
+5. The host integration applies the resulting motion to its camera, view, or selected scene objects.
 
 Lean integrations receive host-aligned deltas from the daemon. Rich, mode-aware integrations receive
 the host baseline in the additive transport profile and apply it after choosing the active
-Orbit/Fly/Walk action. `AppSpec` capability data and `host_profiles.json:apply_in_daemon` must agree so
-the baseline has exactly one owner.
+Orbit/Fly/Walk/Object action. `AppSpec` capability data and `host_profiles.json:apply_in_daemon` must
+agree so the baseline has exactly one owner.
+
+Object mode is capability-gated to Blender, Unity, and Unreal. It reuses Orbit rotation routing for
+primary motion and the secondary movement vector for translation: planar motion maps to viewport
+right/up and twist maps to viewport depth. Hosts transform selected roots only, rotate multiple
+objects about one shared selection center, ignore input when the selection is empty, and group a
+continuous gesture into one host undo operation. The viewport camera remains unchanged.
 
 Do not move host-specific signs or scales into firmware fusion, global physical orientation, pointer
 math, or the debug cube. Do not compensate in both daemon and add-on code.

@@ -120,7 +120,11 @@ def test_onshape_connection_and_foreground_are_explicit_independent_states():
 
 def test_supported_navigation_modes_are_capability_owned():
     rich = {"blender", "sketchup", "unreal", "unity", "godot"}
+    object_hosts = {"blender", "unreal", "unity"}
     for spec in APP_SPECS:
-        expected = ("orbit", "fly", "walk") if spec.app_id in rich else ("orbit",)
+        expected = (("orbit", "fly", "walk", "object")
+                    if spec.app_id in object_hosts else
+                    ("orbit", "fly", "walk") if spec.app_id in rich else ("orbit",))
         assert spec.supported_modes == expected
+        assert ("object_manipulation" in spec.capabilities) == (spec.app_id in object_hosts)
         assert spec.binding_profile.rich_actions is (spec.app_id in rich)

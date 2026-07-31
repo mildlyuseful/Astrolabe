@@ -155,7 +155,8 @@ targeted broker frame — see §5.1), interpreted for the editor's free-fly came
 settings resolve from immutable Global/System state plus Unreal overrides; the runtime contributes
 the daemon-authoritative effective navigation mode.
 
-- **Nav mode** (`advanced.nav_mode`): `orbit` | `fly` | `walk` — the daemon dropdown (or the toggle).
+- **Nav mode** (`advanced.nav_mode`): `orbit` | `fly` | `walk` | `object` — the daemon setting or
+  a persistent/held daemon binding.
   - **orbit**: un-shifted ball orbits about the pivot; Shift → pan/zoom. Twist is routed by
     `advanced.twist_action` (`roll` | `zoom` | `dolly` | `none`). Zoom changes the active level
     viewport FOV; Dolly moves the camera. `advanced.lock_horizon` forces turntable.
@@ -163,6 +164,11 @@ the daemon-authoritative effective navigation mode.
     camera's own axes** (forward dives/climbs with pitch, vertical along camera-up). `advanced.fly_speed`.
   - **walk**: un-shifted ball = **horizon-locked look** (no bank, twist dropped); Shift+ball = **move
     in the ground plane** (forward stays level) + rise/fall along **world Z**. `advanced.walk_speed`.
+  - **object**: primary motion rotates selected root actors as one group around their shared
+    location center using the current viewport axes. The secondary layer translates the group in
+    viewport right/up and uses twist for depth. Empty selection is a no-op, selected attached
+    descendants are filtered out, and one `ScopedEditorTransaction` is retained per gesture so Undo
+    restores the whole move. The level viewport camera is not written.
   - **fly ≠ walk** (verified): they only coincide when the camera is level and you don't twist. The
     two real differences are (a) banking on look, (b) 3D-along-look vs horizontal-plane movement. Kept
     as separate modes for Blender parity.
@@ -187,10 +193,11 @@ the daemon-authoritative effective navigation mode.
   point. **Pan-mode zoom** (`advanced.zoom_style`) selects native level-viewport FOV Zoom or camera
   Dolly. Under Cursor uses the same Geo ray and an independent held target; an empty-space miss
   synthesizes a point on that ray at the tracked focus depth.
-- **Per-mode action routes** (`advanced.axis_source` + `advanced.invert`): every action selects
+- **Per-mode action routes** (`advanced.axis_source` + `advanced.invert`): every camera action selects
   X/Y/Z and can invert independently in the add-on, where the active mode is known. Rotation uses
   `o`; shifted movement uses `(p.x,p.y,z)`, so twist can drive Walk Forward. Defaults preserve the
-  old wiring. Unlike Blender, no roll/bank inversion is baked in.
+  old wiring. Object rotation reuses Orbit pitch/yaw/twist and Object translation reuses Orbit pan
+  X/pan Y/zoom. Unlike Blender, no roll/bank inversion is baked in.
 - **`advanced.pan_scales_with_distance`**: pan scaled by the focus distance (zoom-stable) vs a fixed
   reference distance.
 

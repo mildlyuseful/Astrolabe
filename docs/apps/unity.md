@@ -32,7 +32,7 @@ you to open a project and Set up again. Manual: copy the staged folder into
 
 ## Controls (Unreal/Blender parity)
 
-Orbit / fly / walk, pivots (`camera`, `screen_center`, `cursor`, `selection`, `object`, `origin`),
+Orbit / fly / walk / object, pivots (`camera`, `screen_center`, `cursor`, `selection`, `object`, `origin`),
 free/turntable, `twist_action`, `selection_overrides_pivot`, and To Cursor zoom. Model Center uses
 aggregate scene bounds and is distinct from the current selection. Under-cursor stores a world ray on
 mouse move via `HandleUtility.GUIPointToWorldRay`, then hits with Physics / own mesh triangle
@@ -48,6 +48,12 @@ Per-mode `advanced.axis_source` and `advanced.invert` route every Orbit/Camera/F
 X/Y/Z independently. Rotation actions use `o`; shifted movement actions use `(p.x,p.y,z)`. The
 identity/default map is behavior-neutral, while mappings such as Walk Forward ← Z make twist drive
 forward.
+
+In **Object mode**, primary motion rotates selected root transforms as one group around their shared
+position center in Scene-view axes. The secondary layer translates the group in Scene-view right/up
+and uses twist for depth. Empty selection does nothing, selected descendants of another selected
+transform are filtered out, and `Undo.RecordObjects` plus a collapsed undo group makes a continuous
+gesture one Unity undo action. Scene-view camera and Dynamic Clipping state are not changed.
 
 **Pan-mode zoom:** Zoom changes `SceneView.CameraSettings.fieldOfView` in perspective or
 `SceneView.size` in orthographic mode. Dolly changes the eye-to-pivot distance. An object/cursor

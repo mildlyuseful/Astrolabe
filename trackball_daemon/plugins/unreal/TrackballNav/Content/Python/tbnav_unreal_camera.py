@@ -92,6 +92,29 @@ def rotate_about_axis(v, axis, angle):
             v[2] * c + cr[2] * s + ax[2] * d * omc)
 
 
+def rotate_object(frame, o, view, pivot):
+    """Rotate a transform frame about ``pivot`` using the viewport's fixed right/up/forward axes."""
+    axes = (view.right, view.up, view.forward)
+    angles = tuple(o[i] * ORBIT_SCALE[i] * ORBIT_SIGN[i] for i in range(3))
+    for axis, angle in zip(axes, angles):
+        if abs(angle) < 1e-15:
+            continue
+        frame.forward = v_normalize(rotate_about_axis(frame.forward, axis, angle))
+        frame.right = v_normalize(rotate_about_axis(frame.right, axis, angle))
+        frame.up = v_normalize(rotate_about_axis(frame.up, axis, angle))
+        relative = v_sub(tuple(frame.location), pivot)
+        frame.location = list(v_add(pivot, rotate_about_axis(relative, axis, angle)))
+
+
+def object_translation(p, z, view, dist):
+    """View-relative selection translation: planar motion is screen-right/up; twist is depth."""
+    scale = MOVE_SCALE * _clamp_dist(dist)
+    return v_add(
+        v_add(v_scale(view.right, p[0] * scale), v_scale(view.up, p[1] * scale)),
+        v_scale(view.forward, z * scale),
+    )
+
+
 # ---------------------------------------------------------------------------------------
 # rotator <-> basis (Unreal's VERIFIED FRotator convention, mirrored in pure Python).
 #

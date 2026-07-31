@@ -86,10 +86,11 @@ a binding to its own System profile. Empty context means global. Foreground iden
 independent Windows foreground monitor, not the app selected in Settings and not the most recent
 motion packet.
 
-Navigation actions and per-app settings are capability-checked against the foreground host. A Fly
-or Walk hold can remain physically held while an Orbit-only host is focused; the unsupported action
-is inert there and can resume when focus returns to a compatible host. Global settings remain
-available without a recognized foreground host.
+Navigation actions and per-app settings are capability-checked against the foreground host. A Fly,
+Walk, or Object hold can remain physically held while an incompatible host is focused; the
+unsupported action is inert there and can resume when focus returns to a compatible host. Object is
+available only for Blender, Unity, and Unreal. Global settings remain available without a recognized
+foreground host.
 
 ## Schemas, examples, and validation
 

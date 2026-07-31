@@ -59,6 +59,12 @@ def test_simple_pointer_actions_default_to_modifier_passthrough():
         "input.toggle", "exact") == "exact"
 
 
+def test_simple_editor_offers_persistent_and_held_object_mode():
+    options = dict(BindingUIModel.simple_target_options())
+    assert options["navigation.set_object"] == "Switch navigation to Object"
+    assert options["navigation.hold_object"] == "Hold Object mode"
+
+
 def test_delete_and_restore_follow_system_vs_custom_ownership(tmp_path):
     store, model = _model(tmp_path)
     model.delete("keyboard.ctrl.3d")

@@ -151,6 +151,35 @@ for ob in bpy.context.scene.objects:
 med = tn._selection_median()
 check("selection.median_at_origin", med is not None and med.length < 1e-5)
 
+# Object mode changes the selection, keeps the viewport fixed, and groups a burst behind one undo
+# checkpoint. The default cube is the selected root.
+cube = next(ob for ob in bpy.context.selected_objects if ob.type == 'MESH')
+cube0 = cube.matrix_world.copy()
+view_rot0 = rv.view_rotation.copy()
+view_loc0 = rv.view_location.copy()
+tn._gesture["t"] = 0.0
+feed({"o": [0.2, 0.1, 0.15], "p": [0, 0], "z": 0.0, "op": "camera", "os": "free",
+      "zm": "to_center", "adv": dict(ADV, nav_mode="object")})
+rotated = any(abs(cube0[i][j] - cube.matrix_world[i][j]) > 1e-6
+              for i in range(4) for j in range(4))
+check("object.rotates_selection", rotated)
+check("object.rotation_keeps_view",
+      rv.view_rotation.rotation_difference(view_rot0).angle < 1e-6
+      and (rv.view_location - view_loc0).length < 1e-6)
+location1 = cube.matrix_world.translation.copy()
+feed({"o": [0, 0, 0], "p": [0.1, 0.2], "z": 0.15, "op": "camera", "os": "free",
+      "zm": "to_center", "adv": dict(ADV, nav_mode="object")})
+check("object.translates_selection", (cube.matrix_world.translation - location1).length > 1e-6)
+if bpy.ops.ed.undo.poll():
+    bpy.ops.ed.undo()
+    cube = bpy.context.scene.objects.get(cube.name)
+    restored = cube is not None and all(
+        abs(cube0[i][j] - cube.matrix_world[i][j]) < 1e-5
+        for i in range(4) for j in range(4))
+    check("object.gesture_is_one_undo", restored)
+else:
+    print("SKIP object.gesture_is_one_undo (undo unavailable in this context)")
+
 # 3D cursor pivot reads scene.cursor.location
 bpy.context.scene.cursor.location = Vector((2.0, 0.0, 0.0))
 check("cursor.pivot_reads_cursor", (tn._cursor_location() - Vector((2, 0, 0))).length < 1e-6)

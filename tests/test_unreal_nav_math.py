@@ -114,6 +114,20 @@ def test_orbit_single_axis_roundtrip():
     assert vclose(c.forward, fwd0, 1e-9) and vclose(c.up, up0, 1e-9)
 
 
+def test_object_rotation_uses_fixed_view_axes_and_shared_pivot():
+    view = _idcam(0.0)
+    obj = cam.Camera.from_rotator((10.0, 0.0, 0.0), 0.0, 0.0, 0.0)
+    cam.rotate_object(obj, (0.0, math.pi / 2.0, 0.0), view, (0.0, 0.0, 0.0))
+    assert vclose(tuple(obj.location), (0.0, 10.0, 0.0))
+    assert vclose(obj.forward, (0.0, 1.0, 0.0))
+
+
+def test_object_translation_maps_planar_motion_to_screen_and_twist_to_depth():
+    view = _idcam(0.0)
+    delta = cam.object_translation((2.0, 3.0), 4.0, view, 10.0)
+    assert vclose(delta, (40.0, 20.0, 30.0))
+
+
 def test_level_horizon_removes_only_roll_and_is_idempotent():
     c = cam.Camera.from_rotator((2.0, 3.0, 4.0), 25.0, -35.0, 48.0)
     location0, forward0 = tuple(c.location), c.forward

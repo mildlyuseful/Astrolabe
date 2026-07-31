@@ -1,4 +1,4 @@
 {
-  "version": "0.2.14",
-  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.14: dual-probe the current and previous daemon configuration roots."
+  "version": "0.2.15",
+  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.15: add undoable view-relative Object mode."
 }

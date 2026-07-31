@@ -1,9 +1,9 @@
 {
 	"FileVersion": 3,
-	"Version": 4,
-	"VersionName": "0.2.14",
+	"Version": 5,
+	"VersionName": "0.2.15",
 	"FriendlyName": "Trackball Nav",
-	"Description": "Drive the Unreal Editor perspective viewport camera from the Trackball Daemon (orbit / pan / zoom / fly), like a 3Dconnexion SpaceMouse. Script-only (no C++): a bundled Python add-on connects to the daemon's local nav broker. Under-cursor orbit uses Epic's GeoReferencing editor helpers for the viewport mouse pixel.",
+	"Description": "Drive the Unreal Editor viewport camera or transform selected actors from the Astrolabe daemon. Script-only (no C++): a bundled Python add-on connects to the daemon's local nav broker.",
 	"Category": "Input",
 	"CreatedBy": "Trackball Daemon",
 	"CreatedByURL": "",

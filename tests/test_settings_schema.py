@@ -134,6 +134,10 @@ def test_per_app_choices_reject_unsupported_modes_and_options():
     assert not setting_value_valid_for_app(style, godot, "free")
     assert not setting_value_valid_for_app(twist, godot, "roll")
     assert setting_value_valid_for_app(mode, godot, "walk")
+    assert not setting_value_valid_for_app(mode, godot, "object")
+
+    blender = APP_SPECS_BY_ID["blender"]
+    assert setting_value_valid_for_app(mode, blender, "object")
 
     fusion = APP_SPECS_BY_ID["fusion360"]
     assert not setting_value_valid_for_app(mode, fusion, "fly")

@@ -38,7 +38,7 @@ _PIVOT_LABELS = {
 }
 _OPTION_LABELS = {
     "default": "Default", "free": "Free", "turntable": "Turntable",
-    "orbit": "Orbit", "fly": "Fly", "walk": "Walk",
+    "orbit": "Orbit", "fly": "Fly", "walk": "Walk", "object": "Object",
     "roll": "Roll", "zoom": "Zoom", "dolly": "Dolly", "none": "None",
     "shift": "Shift", "3d": "3D", "pointer": "Pointer",
     "left": "Left", "right": "Right", "middle": "Middle",
@@ -1898,8 +1898,11 @@ class SettingsWindow:
                             hint="Shift uses normal motion for orbit and shifted motion for pan/zoom. "
                                  "None keeps the profile in orbit routing.")
         elif field == "nav_mode":
-            self._combo_row(parent, "Mode", adv + ("nav_mode",), values=["orbit", "fly", "walk"],
-                            hint="Orbit rotates around a pivot; Fly is free 6DOF; Walk keeps a fixed horizon.")
+            self._combo_row(
+                parent, "Mode", adv + ("nav_mode",),
+                values=list(APP_SPECS_BY_ID[app_key].supported_modes),
+                hint=("Orbit rotates around a pivot; Fly is free 6DOF; Walk keeps a fixed "
+                      "horizon; Object transforms the current selection."))
         elif field == "fly_speed":
             self._entry_row(parent, "Fly speed", adv + ("fly_speed",),
                             hint="Movement multiplier while Mode is Fly.")

@@ -19,6 +19,8 @@ released yet.
 - Cursor movement and wheel scrolling without a vendor driver.
 - Orbit, pan, zoom, and dolly controls routed to the supported app that has focus.
 - Free-orbit, turntable, fly, and walk navigation where the host camera supports them.
+- View-relative selected-object rotation and translation in Blender, Unity, and Unreal, with
+  multi-selection grouping and host undo.
 - Screen-center, under-cursor, selection, model-center, world-origin, camera, and Blender 3D-cursor
   orbit targets, exposed only where each host has a real implementation.
 - A configurable fallback chain when a requested orbit target is unavailable.
@@ -189,6 +191,10 @@ than being carried across.
   bounded maximum multiplier. Acceleration affects cursor movement only, never wheel or 3D motion.
 - **3D mode** sends orbit input by default. With the shipped binding, holding **Shift** switches the
   same motion to pan and zoom.
+- Blender, Unity, and Unreal also offer **Object mode**. Primary motion rotates selected root objects
+  as a group around their shared center. The secondary layer moves the group right/up in the view
+  plane and uses twist for view depth. An empty selection is a no-op. Choose Object under the app's
+  Mode setting, or assign **Switch navigation to Object** / **Hold Object mode** in Keybindings.
 - The mode switch is global and manual. Navigation is otherwise selected by the foreground app.
 
 ### Physical orientation and action routing

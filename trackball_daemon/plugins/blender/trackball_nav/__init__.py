@@ -28,10 +28,10 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Mildly Useful",
-    "version": (0, 1, 24),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 25),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
-    "description": "Drive the 3D viewport from the Trackball Daemon (orbit/pan/zoom/roll/fly/walk).",
+    "description": "Navigate the 3D viewport or transform selected objects from Astrolabe.",
     "category": "3D View",
 }
 
@@ -46,7 +46,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.24"                   # keep in sync with bl_info and version.json
+ADDIN_VERSION = "0.1.25"                   # keep in sync with bl_info and version.json
 
 # Host correction arrives in ``adv.host_baseline`` from the daemon's immutable profile registry.
 # Camera math stays neutral so corrections cannot be double-applied here and in the daemon.
@@ -61,6 +61,7 @@ WALK_MOVE = 1.0
 
 DIST_MIN, DIST_MAX = 1e-3, 1e6  # view_distance clamp (Blender's own range is wide)
 PIVOT_HOLD_IDLE = 0.5           # fallback for adv.orbit_hold_sec / adv.zoom_hold_sec
+OBJECT_GESTURE_IDLE = 0.5       # coalesce one continuous object transform into one undo step
 
 _DEFAULT_PORT = 47900
 
@@ -420,6 +421,20 @@ def _selection_median():
         return None
 
 
+def _selected_transform_roots():
+    """Selected objects whose selected ancestors will not already carry their transform."""
+    objects = [ob for ob in bpy.context.selected_objects if ob is not None]
+    selected = {ob.as_pointer() for ob in objects}
+    roots = []
+    for ob in objects:
+        parent = ob.parent
+        while parent is not None and parent.as_pointer() not in selected:
+            parent = parent.parent
+        if parent is None:
+            roots.append(ob)
+    return roots
+
+
 def _object_center():
     """Center of the visible scene geometry's aggregate world-space bounding box, or None."""
     try:
@@ -602,7 +617,7 @@ def _apply_action_routing(nav_mode, op, o, p, z, adv):
         z = _routed(movement, a, w, "vertical", 2)
     else:
         ob, oa = inv.get("orbit", {}), axes.get("orbit", {})
-        if op == "camera":
+        if nav_mode == "orbit" and op == "camera":
             camera, ca = inv.get("camera", {}), axes.get("camera", {})
             o = [_routed(rotation, ca, camera, "pitch", 0),
                  _routed(rotation, ca, camera, "yaw", 1),
@@ -662,6 +677,38 @@ def _apply_walk(rv, o, p, z, adv):
         rv.view_location = rv.view_location + move
 
 
+def _apply_object(rv, o, p, z, idle):
+    """Rotate or translate selected object roots as one view-relative group."""
+    if not (o[0] or o[1] or o[2] or p[0] or p[1] or z):
+        return False
+    objects = _selected_transform_roots()
+    if not objects:
+        _log_rl("object_selection", "Object mode input ignored: no objects are selected")
+        return False
+    if idle > OBJECT_GESTURE_IDLE:
+        try:
+            bpy.ops.ed.undo_push(message="Astrolabe Object Transform")
+        except Exception:
+            _log_rl("object_undo", "Object transform undo checkpoint is unavailable")
+
+    if o[0] or o[1] or o[2]:
+        pivot = _selection_median_from(
+            [ob.matrix_world.translation.copy() for ob in objects])
+        rotation = _orbit_R(
+            rv, o[0] * ORBIT_SCALE[0], o[1] * ORBIT_SCALE[1],
+            o[2] * ORBIT_SCALE[2], False)
+        transform = (Matrix.Translation(pivot) @ rotation.to_matrix().to_4x4() @
+                     Matrix.Translation(-pivot))
+    else:
+        right, up, fwd, _back = _view_axes(rv)
+        scale = FLY_MOVE * max(float(rv.view_distance), 1.0)
+        delta = right * (p[0] * scale) + up * (p[1] * scale) + fwd * (z * scale)
+        transform = Matrix.Translation(delta)
+    for ob in objects:
+        ob.matrix_world = transform @ ob.matrix_world
+    return True
+
+
 def _apply(target, frame, idle):
     """Apply one nav frame to the resolved target VIEW_3D. Runs on the main thread.
     Exactly one of orbit / pan / zoom is non-zero per frame (the daemon gates them)."""
@@ -703,14 +750,17 @@ def _apply(target, frame, idle):
     # Blender's native behavior: navigating exits camera view to perspective so the edits are visible.
     # (When lock-camera-to-view is on we instead DRIVE the camera, handled below, so don't exit.)
     has_input = bool(o[0] or o[1] or o[2] or p[0] or p[1] or z)
-    if has_input and before_persp == 'CAMERA' and not bool(adv.get("lock_camera_to_view", False)):
+    if (has_input and nav_mode != "object" and before_persp == 'CAMERA' and
+            not bool(adv.get("lock_camera_to_view", False))):
         rv.view_perspective = 'PERSP'
 
     o, p, z = _apply_action_routing(nav_mode, op, o, p, z, adv)
     o, p, z = _apply_host_baseline(nav_mode, o, p, z, adv)
     zoom_hold_sec = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
 
-    if nav_mode == "fly":
+    if nav_mode == "object":
+        _apply_object(rv, o, p, z, idle)
+    elif nav_mode == "fly":
         _apply_fly(rv, o, p, z, adv)
         if p[0] or p[1] or z:
             _gesture.update({"pivot": None, "invalid": True})
@@ -735,7 +785,7 @@ def _apply(target, frame, idle):
             _gesture.update({"pivot": None, "invalid": True})
 
     # Camera view: optionally drive the real scene camera from the trackball.
-    if rv.view_perspective == 'CAMERA':
+    if nav_mode != "object" and rv.view_perspective == 'CAMERA':
         if bool(adv.get("lock_camera_to_view", False)):
             try:
                 space.lock_camera = True

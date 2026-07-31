@@ -436,6 +436,30 @@ def test_context_scoped_hold_rejects_an_unsupported_navigation_mode():
                for item in compiled.diagnostics)
 
 
+def test_object_mode_binding_is_accepted_only_for_capable_hosts():
+    catalog = load_system_binding_profiles()
+    base = catalog.profile("keyboard_only")
+    template = base.bindings[0]
+
+    def binding(app_id):
+        return replace(
+            template, binding_id=f"{app_id}.object",
+            context=replace(template.context, apps=(app_id,)),
+            press_actions=(replace(
+                base.bindings[1].press_actions[0],
+                command_id="state.request", target="navigation.object"),),
+            release_actions=(replace(
+                base.bindings[1].release_actions[0],
+                command_id="state.release", target="navigation.object"),))
+
+    profile = SystemBindingProfile(
+        base.id, base.label, base.bindings + (binding("blender"), binding("godot")))
+    compiled = compile_binding_profile(profile, catalog)
+    ids = {item.id for item in compiled.bindings}
+    assert "blender.object" in ids
+    assert "godot.object" not in ids
+
+
 def test_malformed_editor_row_is_isolated_with_actionable_diagnostic():
     valid = _binding_row(
         ("keyboard:a",), ({"command": "input.mode.toggle"},))
