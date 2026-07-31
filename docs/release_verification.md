@@ -96,10 +96,12 @@ CI also builds and installs the wheel outside the checkout before running its sm
 validation, runs that notice verification against the installed wheel, and runs the bundled
 component audit against a separately synchronized release runtime. A separate job compiles the
 retained XIAO protocol-bench sketch with pinned Arduino CLI and board-core inputs, reports binary
-sizes, and retains the firmware artifacts. The obsolete SuperMini prototype remains available as
-source and evidence but is no longer a release target. Replace the bench compile with the official
-XIAO production firmware when its hardware contract is frozen. These checks establish reproducible
-buildability; they do not qualify the final product hardware.
+sizes, and retains the firmware artifacts. Seeed's pinned nRF52 core bundles its packaging utility
+for Windows and macOS but calls `adafruit-nrfutil` from `PATH` on Linux, so that job installs and
+checks the pinned PyPI release before compiling. The obsolete SuperMini prototype remains available
+as source and evidence but is no longer a release target. Replace the bench compile with the
+official XIAO production firmware when its hardware contract is frozen. These checks establish
+reproducible buildability; they do not qualify the final product hardware.
 
 Before release, also install the wheel into a clean Windows account without Python or a source
 checkout, exercise the onedir GUI there, uninstall/reverse every path in `security.md`, and retain

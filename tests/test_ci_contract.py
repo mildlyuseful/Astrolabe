@@ -34,6 +34,19 @@ def test_ci_builds_and_smokes_wheel_outside_checkout():
 # authority for what gets compiled.
 
 
+def test_linux_firmware_job_installs_the_core_packaging_tool():
+    setup = "Set up Python for the nRF packaging tool"
+    install = "Install pinned Adafruit nRF utility"
+    compile_firmware = "Compile XIAO PMW3389 protocol-bench firmware"
+
+    assert setup in WORKFLOW
+    assert 'python-version: "3.11"' in WORKFLOW
+    assert install in WORKFLOW
+    assert 'python -m pip install "adafruit-nrfutil==0.5.3.post16"' in WORKFLOW
+    assert "adafruit-nrfutil version" in WORKFLOW
+    assert WORKFLOW.index(setup) < WORKFLOW.index(install) < WORKFLOW.index(compile_firmware)
+
+
 def test_windows_release_includes_dynamic_winrt_projection_package():
     assert "--include-package=winrt" in RELEASE_BUILD
 
