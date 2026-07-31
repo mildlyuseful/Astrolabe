@@ -367,8 +367,11 @@ release-first rule. Startup owns its partial-failure cleanup: any exception at a
 discovery-file, broker, direct-driver, add-in-update, BLE, or mainloop boundary runs the same
 idempotent release-first shutdown, and one cleanup failure cannot prevent later owners from stopping.
 Publishing the add-on discovery file is a required startup step rather than a swallowed best-effort
-write. BLE connection state is visible in the main status row and tray; normalized input-provider
-health is visible with its binding source.
+write. BLE connection state and the optional standard Battery Level value are visible in the main
+status row and tray; normalized input-provider health is visible with its binding source. Battery
+state is transport metadata rather than an Astrolabe motion/input protocol field. The most recent
+valid value remains identified as last known during a disconnect, while a connected device without
+the standard characteristic reports it as unavailable.
 
 Long-lived navigation services publish one immutable health value with a current detail. The shared
 states are `disabled` for a gated or stopped owner, `waiting` for a running owner awaiting its host

@@ -60,6 +60,7 @@ from .windows_pointer import SendInputPointerButtonSink
 
 _NO_PACKET_APP = object()
 _NO_PACKET_REVISION = object()
+_NO_BATTERY_LEVEL = object()
 
 
 def _set_nested(container, path, value):
@@ -106,7 +107,9 @@ class App:
         self._configure_binding_controls()
         self.stop_event = threading.Event()
         self._status = "starting"
+        self._battery_state = (None, False)
         self._last_pushed = None
+        self._last_battery_pushed = _NO_BATTERY_LEVEL
         self._health_lock = threading.Lock()
         self.service_health = {}
         self._last_health_pushed = None
@@ -193,6 +196,8 @@ class App:
     def set_status(self, text):
         # Called from the BLE thread; just store + log. The Tk poll pushes it to the GUI.
         self._status = text
+        if not text.startswith("subscribed"):
+            self._battery_state = (self._battery_state[0], False)
         self.log.info(text)
 
     def status_text(self):
@@ -200,6 +205,26 @@ class App:
 
     def is_connected(self):
         return self._status.startswith(("connected", "subscribed"))
+
+    def set_battery_level(self, level):
+        if level is not None and (type(level) is not int or not 0 <= level <= 100):
+            raise ValueError("BLE battery level must be an integer from 0 to 100 or None")
+        state = (level, level is not None)
+        if state == self._battery_state:
+            return
+        self._battery_state = state
+        self.log.info(
+            "BLE battery: %s", "unavailable" if level is None else f"{level}%")
+
+    def battery_level(self):
+        return self._battery_state[0]
+
+    def battery_status_text(self):
+        level, current = self._battery_state
+        if level is None:
+            return "Battery: unavailable"
+        suffix = "" if self.is_connected() and current else " (last known)"
+        return f"Battery: {level}%{suffix}"
 
     def _on_service_health_changed(self, health):
         if not isinstance(health, ServiceHealth):
@@ -643,6 +668,7 @@ class App:
                 self._handle_ble_motion,
                 self.set_status,
                 self.stop_event,
+                battery_callback=self.set_battery_level,
             )
 
             if self.debug:
@@ -679,6 +705,14 @@ class App:
             self._last_pushed = self._status
             if self.ui is not None:
                 self.ui.update_status(self._status)
+                self.ui.update_battery_status(self.battery_status_text())
+            if self.tray is not None:
+                self.tray.refresh()
+        battery_signature = self._battery_state
+        if battery_signature != self._last_battery_pushed:
+            self._last_battery_pushed = battery_signature
+            if self.ui is not None:
+                self.ui.update_battery_status(self.battery_status_text())
             if self.tray is not None:
                 self.tray.refresh()
         summary = self.app_connection_summary()

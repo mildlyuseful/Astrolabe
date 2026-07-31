@@ -127,13 +127,20 @@ class TrayController:
     def __init__(self, app):
         self.app = app
         self.icon = pystray.Icon(
-            PRODUCT_NAME, _make_icon_image(), DISPLAY_NAME,
+            PRODUCT_NAME, _make_icon_image(), self._title_text(),
             menu=self._build_menu(),
         )
         self._thread = None
 
+    def _title_text(self):
+        connection = "Connected" if self.app.is_connected() else "Disconnected"
+        return f"{DISPLAY_NAME} — {connection} — {self.app.battery_status_text()}"
+
     def _status_text(self, _item):
         return f"Status: {'Connected' if self.app.is_connected() else 'Disconnected'}"
+
+    def _battery_text(self, _item):
+        return self.app.battery_status_text()
 
     def _apps_text(self, _item):
         return f"Apps: {self.app.app_connection_summary()}"
@@ -147,6 +154,7 @@ class TrayController:
                              default=True),
             pystray.MenuItem("Setup guide…", lambda icon, item: self.app.open_onboarding()),
             pystray.MenuItem(self._status_text, None, enabled=False),
+            pystray.MenuItem(self._battery_text, None, enabled=False),
             pystray.MenuItem(self._apps_text, None, enabled=False),
             pystray.MenuItem(self._health_text, None, enabled=False),
             pystray.Menu.SEPARATOR,
@@ -177,6 +185,7 @@ class TrayController:
 
     def refresh(self):
         try:
+            self.icon.title = self._title_text()
             self.icon.update_menu()
         except Exception:
             pass

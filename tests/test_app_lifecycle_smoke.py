@@ -127,7 +127,7 @@ def _lifecycle_app(monkeypatch, tmp_path, *, fail_at=None):
             raise RuntimeError("auto-update startup failed")
         return []
 
-    def start_ble(*_args):
+    def start_ble(*_args, **_kwargs):
         events.append(("start", "ble"))
         if fail_at == "ble":
             raise RuntimeError("BLE startup failed")

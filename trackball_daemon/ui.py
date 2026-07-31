@@ -113,6 +113,7 @@ class SettingsWindow:
         self.cfg = app.config
         self.win = None
         self.status_var = None
+        self.battery_var = None
         self._broker_health_label = None
         self._app_status_labels = {}      # key -> ttk.Label (3D Apps tab)
         self._app_action_buttons = {}     # key -> setup/update button
@@ -167,6 +168,14 @@ class SettingsWindow:
             try:
                 if self.win.winfo_exists():
                     self.status_var.set(f"Connection: {text}")
+            except tk.TclError:
+                pass
+
+    def update_battery_status(self, text):
+        if self.battery_var is not None and self.win is not None:
+            try:
+                if self.win.winfo_exists():
+                    self.battery_var.set(text)
             except tk.TclError:
                 pass
 
@@ -262,9 +271,13 @@ class SettingsWindow:
         nb.add(self._build_keybindings_tab(nb), text="Keybindings")
 
         self.status_var = tk.StringVar(value=f"Connection: {self.app.status_text()}")
+        self.battery_var = tk.StringVar(value=self.app.battery_status_text())
         ttk.Separator(self.win).pack(fill="x")
-        ttk.Label(self.win, textvariable=self.status_var, anchor="w").pack(
-            fill="x", padx=10, pady=4)
+        footer = ttk.Frame(self.win)
+        footer.pack(fill="x", padx=10, pady=4)
+        ttk.Label(footer, textvariable=self.status_var, anchor="w").pack(
+            side="left", fill="x", expand=True)
+        ttk.Label(footer, textvariable=self.battery_var, anchor="e").pack(side="right")
 
     def _on_config_event(self, _event):
         if self.win is None or self._refresh_pending or self._suppress_generated_refresh:

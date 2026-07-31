@@ -15,6 +15,8 @@ from .model import BleConnectionConfig, DeviceSession, GattInventory
 
 logger = logging.getLogger("trackball_daemon.ble")
 
+BATTERY_LEVEL_UUID = "00002a19-0000-1000-8000-00805f9b34fb"
+
 
 def _iter_services(collection):
     if hasattr(collection, "services"):
@@ -35,20 +37,52 @@ def gatt_inventory(client):
 
 class BleTransport:
     def __init__(self, get_params, adapter_registry, motion_callback, status_callback, stop_event,
-                 *, scanner=None, client_factory=None, sleep=None):
+                 *, battery_callback=None, scanner=None, client_factory=None, sleep=None):
         if not all(callable(value) for value in (
                 get_params, motion_callback, status_callback)):
             raise TypeError("BLE transport callbacks must be callable")
+        if battery_callback is not None and not callable(battery_callback):
+            raise TypeError("BLE battery callback must be callable")
         self.get_params = get_params
         self.adapter_registry = adapter_registry
         self.motion_callback = motion_callback
         self.status_callback = status_callback
+        self.battery_callback = battery_callback or (lambda _level: None)
         self.stop_event = stop_event
         self.scanner = scanner or BleakScanner
         self.client_factory = client_factory or BleakClient
         self.sleep = sleep or asyncio.sleep
         self.diagnostic_callback = lambda message: logger.warning("%s", message)
         self._generation = 0
+
+    def _publish_battery_level(self, level):
+        try:
+            self.battery_callback(level)
+        except Exception as exc:
+            self.diagnostic_callback(f"BLE battery callback failed: {exc}")
+
+    def _handle_battery_level(self, _sender, data):
+        payload = bytes(data)
+        if len(payload) != 1 or payload[0] > 100:
+            self.diagnostic_callback(
+                f"ignored invalid BLE Battery Level payload: {payload.hex() or 'empty'}")
+            return
+        self._publish_battery_level(payload[0])
+
+    async def _subscribe_battery(self, client, inventory, subscribed):
+        if BATTERY_LEVEL_UUID not in inventory.characteristic_uuids:
+            self._publish_battery_level(None)
+            return
+        try:
+            self._handle_battery_level(
+                None, await client.read_gatt_char(BATTERY_LEVEL_UUID))
+        except Exception as exc:
+            self.diagnostic_callback(f"could not read BLE Battery Level: {exc}")
+        try:
+            await client.start_notify(BATTERY_LEVEL_UUID, self._handle_battery_level)
+            subscribed.append(BATTERY_LEVEL_UUID)
+        except Exception as exc:
+            self.diagnostic_callback(f"could not subscribe to BLE Battery Level: {exc}")
 
     async def run(self):
         while not self.stop_event.is_set():
@@ -128,9 +162,10 @@ class BleTransport:
                 address = str(getattr(client, "address", "") or getattr(target, "address", ""))
                 name = scanned_name or config.name
                 self._generation += 1
+                inventory = gatt_inventory(client)
                 session = DeviceSession(
                     f"{address or name}#{self._generation}", name, address,
-                    gatt_inventory(client))
+                    inventory)
                 self.status_callback(f"connected to {address or name}")
                 adapter = self.adapter_registry.select(
                     config, session, self.motion_callback, self.diagnostic_callback)
@@ -140,6 +175,7 @@ class BleTransport:
                         await client.start_notify(
                             subscription.characteristic_uuid, subscription.callback)
                         subscribed.append(subscription.characteristic_uuid)
+                    await self._subscribe_battery(client, inventory, subscribed)
                     self.status_callback(f"subscribed -- {adapter.label} is live")
                     while client.is_connected and not self.stop_event.is_set():
                         await self.sleep(0.3)
@@ -161,9 +197,11 @@ class BleTransport:
             self.status_callback("disconnected, reconnecting...")
 
 
-def start_ble_thread(get_params, adapter_registry, motion_callback, status_callback, stop_event):
+def start_ble_thread(get_params, adapter_registry, motion_callback, status_callback, stop_event,
+                     *, battery_callback=None):
     transport = BleTransport(
-        get_params, adapter_registry, motion_callback, status_callback, stop_event)
+        get_params, adapter_registry, motion_callback, status_callback, stop_event,
+        battery_callback=battery_callback)
 
     def runner():
         try:

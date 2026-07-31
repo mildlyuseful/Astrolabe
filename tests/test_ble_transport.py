@@ -24,6 +24,8 @@ from trackball_daemon.input import InputAggregator, ProviderStatus
 SERVICE = "2cad0001-6e64-0146-b139-9cf2a4cd57fc"
 ROTATION = "2cad0002-6e64-0146-b139-9cf2a4cd57fc"
 INPUT = "2cad0003-6e64-0146-b139-9cf2a4cd57fc"
+BATTERY_SERVICE = "0000180f-0000-1000-8000-00805f9b34fb"
+BATTERY_LEVEL = "00002a19-0000-1000-8000-00805f9b34fb"
 
 
 def _registry():
@@ -108,6 +110,14 @@ class _FakeServices:
         self.services = {SERVICE: _FakeService(SERVICE, (ROTATION, INPUT))}
 
 
+class _BatteryFakeServices:
+    def __init__(self):
+        self.services = {
+            SERVICE: _FakeService(SERVICE, (ROTATION, INPUT)),
+            BATTERY_SERVICE: _FakeService(BATTERY_SERVICE, (BATTERY_LEVEL,)),
+        }
+
+
 class _FakeDevice:
     name = "Trackball BLE"
     address = "AA:BB"
@@ -151,11 +161,29 @@ class _FakeClient:
         self.stopped.append(uuid)
 
 
+class _BatteryFakeClient(_FakeClient):
+    async def __aenter__(self):
+        self.services = _BatteryFakeServices()
+        return self
+
+    async def read_gatt_char(self, uuid):
+        assert uuid == BATTERY_LEVEL
+        return b"\x52"
+
+    async def start_notify(self, uuid, callback):
+        if uuid == BATTERY_LEVEL:
+            self.started.append(uuid)
+            callback(None, b"\x51")
+            return
+        await super().start_notify(uuid, callback)
+
+
 def test_transport_discovers_and_subscribes_all_adapter_characteristics_then_disconnects():
     registry, _providers, aggregator = _registry()
     stop = threading.Event()
     statuses = []
     samples = []
+    battery_levels = []
 
     async def sleep(_delay):
         stop.set()
@@ -166,6 +194,7 @@ def test_transport_discovers_and_subscribes_all_adapter_characteristics_then_dis
         samples.append,
         statuses.append,
         stop,
+        battery_callback=battery_levels.append,
         scanner=_FakeScanner,
         client_factory=_FakeClient,
         sleep=sleep,
@@ -175,8 +204,57 @@ def test_transport_discovers_and_subscribes_all_adapter_characteristics_then_dis
     assert _FakeClient.instance.started == [ROTATION, INPUT]
     assert _FakeClient.instance.stopped == [INPUT, ROTATION]
     assert samples and samples[0].source_id == "ble.xiao3389.motion"
+    assert battery_levels == [None]
     assert aggregator.snapshot().pressed_tokens == ()
     assert any("XIAO3389 three-button test bench is live" in text for text in statuses)
+
+
+def test_transport_reads_and_subscribes_optional_standard_battery_level():
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    levels = []
+
+    async def sleep(_delay):
+        stop.set()
+
+    transport = BleTransport(
+        lambda: ("Trackball BLE", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        lambda _status: None,
+        stop,
+        battery_callback=levels.append,
+        scanner=_FakeScanner,
+        client_factory=_BatteryFakeClient,
+        sleep=sleep,
+    )
+    asyncio.run(transport.run())
+
+    assert levels == [82, 81]
+    assert _BatteryFakeClient.instance.started == [ROTATION, INPUT, BATTERY_LEVEL]
+    assert _BatteryFakeClient.instance.stopped == [BATTERY_LEVEL, INPUT, ROTATION]
+
+
+def test_transport_ignores_invalid_battery_payloads():
+    registry, _providers, _aggregator = _registry()
+    levels = []
+    diagnostics = []
+    transport = BleTransport(
+        lambda: ("Trackball BLE", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        lambda _status: None,
+        threading.Event(),
+        battery_callback=levels.append,
+    )
+    transport.diagnostic_callback = diagnostics.append
+
+    transport._handle_battery_level(None, b"")
+    transport._handle_battery_level(None, b"\x65")
+    transport._handle_battery_level(None, b"\x32")
+
+    assert levels == [50]
+    assert len(diagnostics) == 2
 
 
 def test_transport_reports_scan_failure_without_constructing_a_client():

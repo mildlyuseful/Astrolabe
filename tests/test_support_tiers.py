@@ -199,6 +199,7 @@ def settings_ui(tmp_path_factory):
         binding_catalog=load_system_binding_profiles(),
         input_aggregator=InputAggregator(),
         status_text=lambda: "stopped",
+        battery_status_text=lambda: "Battery: unavailable",
         runtime_health_snapshot=lambda: {},
     )
     ui = SettingsWindow(root, app)

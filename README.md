@@ -72,7 +72,9 @@ startup, or project changes without the corresponding explicit action. The guide
 from the tray.
 
 Later starts show only the passive control panel. Use the tray icon to open Settings or the setup
-guide, show/hide the control panel, inspect connection status, enable **Start at login**, or quit.
+guide, show/hide the control panel, inspect connection and battery status, enable **Start at login**,
+or quit. Battery Level appears in the tray tooltip, the tray menu, and beside Connection at the
+bottom of Settings when the connected firmware publishes the standard BLE Battery Service.
 Input and navigation modes are changed by the declarative bindings shown under **Keybindings**.
 One binding may target any selected set of registered apps, all non-integrated applications, or a
 combination of both. Setting cycles accept a comma-separated sequence of two or more enum or numeric

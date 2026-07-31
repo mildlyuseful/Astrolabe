@@ -83,6 +83,12 @@ The registration boundary is deliberately small:
    characteristic match. Otherwise it uses the rotation-only legacy adapter and never guesses a
    bit mapping.
 
+Battery status remains outside this device-specific adapter selection. When the standard Battery
+Level characteristic (`0x2A19`) exists, `BleTransport` validates its one-byte 0–100 value, reads it
+at connection, and subscribes for changes. The daemon presents the same current or last-known value
+in Settings and the tray. A connected device without that optional characteristic reports Battery
+as unavailable.
+
 This is an API for trusted application composition and open-source contributions, not automatic
 execution of files found on disk. Third-party Python adapter loading is intentionally unsupported.
 A device with a different wire protocol requires reviewed code; a device using this snapshot wire

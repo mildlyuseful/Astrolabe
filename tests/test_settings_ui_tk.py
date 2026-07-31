@@ -47,12 +47,17 @@ def test_generated_tabs_and_linked_value_refresh_after_global_edit(tmp_path):
         binding_catalog=load_system_binding_profiles(),
         input_aggregator=InputAggregator(),
         status_text=lambda: "stopped",
+        battery_status_text=lambda: "Battery: 64% (last known)",
         runtime_health_snapshot=lambda: {},
     )
     ui = SettingsWindow(root, app)
     try:
         ui._build()
         root.update()
+        assert ui.status_var.get() == "Connection: stopped"
+        assert ui.battery_var.get() == "Battery: 64% (last known)"
+        ui.update_battery_status("Battery: 63%")
+        assert ui.battery_var.get() == "Battery: 63%"
         notebook = next(widget for widget in ui.win.winfo_children()
                         if isinstance(widget, ttk.Notebook))
         assert [notebook.tab(tab_id, "text") for tab_id in notebook.tabs()] == [

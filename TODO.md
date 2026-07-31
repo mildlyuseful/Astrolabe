@@ -39,9 +39,10 @@ already-supported contract.
   absence of a cursor jerk.
 - Verify the SuperMini prototype's BLE battery estimate against a multimeter across a representative
   discharge, confirm that USB insertion preserves the last battery-only value and USB removal
-  refreshes it, and confirm Battery Level appears after a clean Windows re-pair. The standard service
-  and voltage mapping are covered statically; this does not establish calibration for the installed
-  cell or the board's ADC tolerance.
+  refreshes it, and confirm Battery Level appears after a clean Windows re-pair and agrees across the
+  daemon's tray tooltip, tray menu, and Settings footer. The standard service, daemon transport, and
+  voltage mapping are covered automatically; this does not establish calibration for the installed
+  cell, the board's ADC tolerance, or live Windows GATT behavior.
 
 ### Release qualification
 

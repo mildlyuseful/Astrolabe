@@ -20,6 +20,7 @@ from trackball_daemon.navbroker import NavBroker
 from trackball_daemon.output import OutputEngine
 from trackball_daemon import tray as tray_mod
 from trackball_daemon.tray import TrayController
+from trackball_daemon.ui import SettingsWindow
 
 
 def _packet(rx=0.01, ry=0.02, rz=0.03):
@@ -70,8 +71,11 @@ def test_tray_does_not_duplicate_declarative_mode_controls(monkeypatch):
         config=SimpleNamespace(snapshot=lambda: SimpleNamespace(
             global_value=lambda _setting_id: True)),
         is_connected=lambda: False,
+        battery_status_text=lambda: "Battery: unavailable",
         app_connection_summary=lambda: "none",
+        runtime_health_summary=lambda: "disabled",
         open_settings=lambda: None,
+        open_onboarding=lambda: None,
         set_control_hud_visible=lambda _visible: None,
         quit=lambda: None,
     )
@@ -92,6 +96,47 @@ def test_tray_does_not_duplicate_declarative_mode_controls(monkeypatch):
     labels = [item.text for item in menu if item is not _Menu.SEPARATOR]
     assert "Show control panel" in labels
     assert not any(isinstance(label, str) and label.startswith("Mode:") for label in labels)
+    dynamic_labels = [
+        item.text(None) for item in menu
+        if item is not _Menu.SEPARATOR and callable(item.text) and item.action is None
+    ]
+    assert "Battery: unavailable" in dynamic_labels
+    assert controller._title_text() == (
+        "Astrolabe — Disconnected — Battery: unavailable")
+    controller.icon = SimpleNamespace(title="", update_menu=lambda: None)
+    controller.refresh()
+    assert controller.icon.title == (
+        "Astrolabe — Disconnected — Battery: unavailable")
+
+
+def test_app_battery_status_preserves_last_known_value_across_disconnect():
+    app = App.__new__(App)
+    app._status = "subscribed -- Astrolabe is live"
+    app._battery_state = (None, False)
+    app.log = SimpleNamespace(info=lambda *_args: None)
+
+    assert app.battery_status_text() == "Battery: unavailable"
+    app.set_battery_level(73)
+    assert app.battery_level() == 73
+    assert app.battery_status_text() == "Battery: 73%"
+
+    app.set_status("disconnected, reconnecting...")
+    assert app.battery_status_text() == "Battery: 73% (last known)"
+    app.set_status("subscribed -- Astrolabe is live")
+    assert app.battery_status_text() == "Battery: 73% (last known)"
+    app.set_battery_level(73)
+    assert app.battery_status_text() == "Battery: 73%"
+
+
+def test_settings_battery_status_update_is_tk_thread_projection():
+    values = []
+    ui = SettingsWindow.__new__(SettingsWindow)
+    ui.win = SimpleNamespace(winfo_exists=lambda: True)
+    ui.battery_var = SimpleNamespace(set=values.append)
+
+    ui.update_battery_status("Battery: 42%")
+
+    assert values == ["Battery: 42%"]
 
 
 def test_scheme_inheritance_uses_only_the_explicit_default_sentinel():
