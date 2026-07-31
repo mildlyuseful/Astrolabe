@@ -128,10 +128,10 @@ def test_object_translation_maps_planar_motion_to_screen_and_twist_to_depth():
     assert vclose(delta, (40.0, 20.0, 30.0))
 
 
-def test_object_ground_translation_preserves_xyz_roles_in_level_basis():
+def test_object_ground_translation_matches_walk_controls():
     view = cam.Camera.from_rotator((0.0, 0.0, 1000.0), 30.0, 0.0, 0.0)
     delta = cam.object_translation((2.0, 3.0), 4.0, view, 10.0, "ground")
-    assert vclose(delta, (40.0, 20.0, 30.0))
+    assert vclose(delta, (30.0, 20.0, 40.0))
 
 
 def test_level_horizon_removes_only_roll_and_is_idempotent():

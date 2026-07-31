@@ -175,8 +175,8 @@ cursor"). Two halves, like the other apps:
 - **walk**: like fly but horizon-locked look (no bank) and horizontal-plane movement.
 - **object**: primary motion rotates selected root objects as one group around their shared origin
   center using the current view's right/up/forward axes. The secondary layer uses either **View**
-  translation (viewport right/up plus twist depth) or **Ground** translation (horizontal right,
-  world Z up, and twist along horizontal view depth). Empty selection is a no-op; selected
+  translation (viewport right/up plus twist depth) or **Ground** translation matching Walk
+  (planar sideways/forward on horizontal view axes, with twist along world Z). Empty selection is a no-op; selected
   descendants of another selected object are excluded so parenting cannot apply motion twice. One
   short-lived modal operator owns each physical transform gesture: it closes after 150 ms without
   motion or before Blender handles another command, making the whole gesture one immediately

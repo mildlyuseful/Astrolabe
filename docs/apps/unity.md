@@ -52,7 +52,8 @@ forward.
 In **Object mode**, primary motion rotates selected root transforms as one group around their shared
 position center in Scene-view axes. Object Pitch/Yaw/Roll and Translate X/Y/Z route independently.
 The secondary layer's **View** frame translates in Scene-view right/up with twist for depth; its
-**Ground** frame uses horizontal right, world Y up, and twist along horizontal view depth. Empty
+**Ground** frame matches Walk movement: planar sideways/forward on horizontal Scene-view axes, with
+twist along world Y. Empty
 selection does nothing, selected descendants of another selected transform are filtered out, and
 `Undo.RecordObjects` plus a collapsed undo group makes a continuous gesture one Unity undo action.
 Scene-view camera and Dynamic Clipping state are not changed.

@@ -107,13 +107,13 @@ def rotate_object(frame, o, view, pivot):
 
 
 def object_translation(p, z, view, dist, frame="view"):
-    """Translate X/Y/Z in a view-aligned or horizon-aligned right/up/depth basis."""
+    """Translate in either the view basis or the Walk-style ground basis."""
     scale = MOVE_SCALE * _clamp_dist(dist)
     if frame == "ground":
         return v_add(
             v_add(v_scale(horizontal(view.right), p[0] * scale),
-                  v_scale(WORLD_UP, p[1] * scale)),
-            v_scale(horizontal(view.forward), z * scale),
+                  v_scale(horizontal(view.forward), p[1] * scale)),
+            v_scale(WORLD_UP, z * scale),
         )
     return v_add(
         v_add(v_scale(view.right, p[0] * scale), v_scale(view.up, p[1] * scale)),

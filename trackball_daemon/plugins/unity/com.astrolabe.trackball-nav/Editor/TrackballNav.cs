@@ -18,7 +18,7 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.19";  // keep in sync with package and version metadata
+        const string AddinVersion = "0.1.20";  // keep in sync with package and version metadata
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.5f;
         const float ObjectGestureIdle = 0.5f;

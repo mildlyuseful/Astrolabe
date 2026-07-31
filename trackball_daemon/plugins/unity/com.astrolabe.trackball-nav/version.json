@@ -1,4 +1,4 @@
 {
-  "version": "0.1.19",
-  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.19: preserve Object X/Y/Z roles in the Ground movement basis."
+  "version": "0.1.20",
+  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.20: make Ground Object translation use Walk-style planar movement with twist for world up."
 }

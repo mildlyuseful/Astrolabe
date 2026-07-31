@@ -31,7 +31,7 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.17"         # keep in sync with version.json and TrackballNav.uplugin
+ADDIN_VERSION = "0.2.18"         # keep in sync with version.json and TrackballNav.uplugin
 _DEFAULT_PORT = 47900
 PIVOT_HOLD_IDLE = 0.5            # fallback for adv.orbit_hold_sec / adv.zoom_hold_sec
 OBJECT_GESTURE_IDLE = 0.5        # coalesce one continuous actor transform into one undo step

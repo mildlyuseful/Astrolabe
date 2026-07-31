@@ -28,7 +28,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Mildly Useful",
-    "version": (0, 1, 28),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 29),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Navigate the 3D viewport or transform selected objects from Astrolabe.",
@@ -46,7 +46,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.28"                   # keep in sync with bl_info and version.json
+ADDIN_VERSION = "0.1.29"                   # keep in sync with bl_info and version.json
 
 # Host correction arrives in ``adv.host_baseline`` from the daemon's immutable profile registry.
 # Camera math stays neutral so corrections cannot be double-applied here and in the daemon.
@@ -689,11 +689,13 @@ def _apply_walk(rv, o, p, z, adv):
 
 
 def _object_translation(rv, p, z, frame):
-    """Translate X/Y/Z in a view-aligned or horizon-aligned right/up/depth basis."""
+    """Translate in either the view basis or the Walk-style ground basis."""
     right, up, fwd, _back = _view_axes(rv)
     if frame == "ground":
         right, up, fwd = _horizontal(right), Vector((0.0, 0.0, 1.0)), _horizontal(fwd)
     scale = FLY_MOVE * max(float(rv.view_distance), 1.0)
+    if frame == "ground":
+        return right * (p[0] * scale) + fwd * (p[1] * scale) + up * (z * scale)
     return right * (p[0] * scale) + up * (p[1] * scale) + fwd * (z * scale)
 
 

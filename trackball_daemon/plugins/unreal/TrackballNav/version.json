@@ -1,4 +1,4 @@
 {
-  "version": "0.2.17",
-  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.17: preserve Object X/Y/Z roles in the Ground movement basis."
+  "version": "0.2.18",
+  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.18: make Ground Object translation use Walk-style planar movement with twist for world up."
 }

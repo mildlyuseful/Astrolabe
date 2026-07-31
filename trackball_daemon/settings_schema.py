@@ -356,7 +356,7 @@ _SPECS = [
          choices=("view", "ground"),
          extra_capabilities=("object_manipulation",),
          help_text=("View moves in the viewport plane with twist for depth; Ground moves "
-                    "right/world-up with twist for horizontal depth.")),
+                    "sideways/forward in the ground plane with twist for up/down.")),
     _app("navigation.orbit.lock_horizon", ("advanced", "lock_horizon"), ValueKind.BOOLEAN,
          "Lock horizon", "lock_horizon", category="orbit"),
     _app("navigation.pan.scales_with_distance", ("advanced", "pan_scales_with_distance"),

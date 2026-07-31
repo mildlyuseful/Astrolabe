@@ -244,8 +244,8 @@ agree so the baseline has exactly one owner.
 
 Object mode is capability-gated to Blender, Unity, and Unreal. Object Pitch/Yaw/Roll and Translate
 X/Y/Z have independent source-axis and inversion routes. The View translation frame maps planar
-motion to viewport right/up and twist to viewport depth; Ground preserves those action roles while
-mapping them to horizontal view-right, world up, and horizontal view-forward. The immutable
+motion to viewport right/up and twist to viewport depth; Ground matches Walk movement by mapping
+planar motion to horizontal view-right/forward and twist to world up. The immutable
 object-rotation baseline is the perceptual inverse of the corresponding camera baseline, while saved
 user inversion remains neutral.
 Hosts transform selected roots only, rotate multiple objects about one shared selection center,

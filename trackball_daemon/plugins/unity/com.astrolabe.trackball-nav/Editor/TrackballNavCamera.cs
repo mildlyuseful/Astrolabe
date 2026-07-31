@@ -161,7 +161,7 @@ namespace Astrolabe.TrackballNav
             float k = MoveScale * ClampDist(dist);
             if (frame == "ground")
                 return Horizontal(view.Right) * (p.x * k) +
-                    WorldUp * (p.y * k) + Horizontal(view.Forward) * (z * k);
+                    Horizontal(view.Forward) * (p.y * k) + WorldUp * (z * k);
             return view.Right * (p.x * k) + view.Up * (p.y * k) + view.Forward * (z * k);
         }
 
