@@ -134,7 +134,10 @@ def _control_help(input_mode, navigation_mode, navigation_layer, settings):
         secondary_label = "Move"
     elif navigation_mode == "object":
         primary = "Ball: rotate selected objects in view axes"
-        secondary = "Ball: move selection right / up · twist = depth"
+        if settings.get("navigation.object.translation_frame", "view") == "ground":
+            secondary = "Ball: move selection right / forward · twist = world up / down"
+        else:
+            secondary = "Ball: move selection right / up · twist = depth"
         secondary_label = "Move Selection"
     else:
         twist = str(settings.get("navigation.orbit.twist_action", "roll"))
@@ -231,6 +234,7 @@ DEFAULT_DEPENDENCY_GRAPH = DependencyGraph((
     StateNode("navigation.fly", {"navigation.mode": "fly"}, ("input.3d",)),
     StateNode("navigation.walk", {"navigation.mode": "walk"}, ("input.3d",)),
     StateNode("navigation.object", {"navigation.mode": "object"}, ("input.3d",)),
+    StateNode("navigation.secondary", {"navigation.layer": "secondary"}, ("input.3d",)),
     StateNode("orbit.primary", {"navigation.layer": "primary"}, ("navigation.orbit",)),
     StateNode("orbit.secondary", {"navigation.layer": "secondary"}, ("navigation.orbit",)),
     StateNode("fly.primary", {"navigation.layer": "primary"}, ("navigation.fly",)),

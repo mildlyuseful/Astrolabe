@@ -57,6 +57,13 @@ def test_snapshot_help_explains_object_rotation_and_translation():
     assert snapshot.control_help.current_help == \
         "Ball: rotate selected objects in view axes"
 
+    ground = RuntimeStore(lambda _context: RuntimeBaseState(
+        "3d", navigation_mode="object",
+        settings={"navigation.object.translation_frame": "ground"},
+        supported_navigation_modes=("orbit", "fly", "walk", "object"))).snapshot()
+    assert ground.control_help.secondary_help == \
+        "Ball: move selection right / forward · twist = world up / down"
+
 
 def test_pure_projection_uses_registered_and_plain_executable_contexts():
     runtime = _runtime("3d")

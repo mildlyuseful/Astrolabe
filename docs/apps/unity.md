@@ -44,16 +44,18 @@ point on the cursor ray at the tracked focus depth. Orbit and cursor-zoom target
 hold settings: pan invalidates the orbit pivot but preserves the zoom target, and view rotation
 invalidates the zoom target.
 
-Per-mode `advanced.axis_source` and `advanced.invert` route every Orbit/Camera/Fly/Walk action from
+Per-mode `advanced.axis_source` and `advanced.invert` route every Orbit/Camera/Fly/Walk/Object action from
 X/Y/Z independently. Rotation actions use `o`; shifted movement actions use `(p.x,p.y,z)`. The
 identity/default map is behavior-neutral, while mappings such as Walk Forward ← Z make twist drive
 forward.
 
 In **Object mode**, primary motion rotates selected root transforms as one group around their shared
-position center in Scene-view axes. The secondary layer translates the group in Scene-view right/up
-and uses twist for depth. Empty selection does nothing, selected descendants of another selected
-transform are filtered out, and `Undo.RecordObjects` plus a collapsed undo group makes a continuous
-gesture one Unity undo action. Scene-view camera and Dynamic Clipping state are not changed.
+position center in Scene-view axes. Object Pitch/Yaw/Roll and Translate X/Y/Z route independently.
+The secondary layer's **View** frame translates in Scene-view right/up with twist for depth; its
+**Ground** frame uses horizontal right/forward with twist along world Y. Empty selection does
+nothing, selected descendants of another selected transform are filtered out, and
+`Undo.RecordObjects` plus a collapsed undo group makes a continuous gesture one Unity undo action.
+Scene-view camera and Dynamic Clipping state are not changed.
 
 **Pan-mode zoom:** Zoom changes `SceneView.CameraSettings.fieldOfView` in perspective or
 `SceneView.size` in orthographic mode. Dolly changes the eye-to-pivot distance. An object/cursor

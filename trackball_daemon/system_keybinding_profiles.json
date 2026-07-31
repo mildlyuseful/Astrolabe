@@ -18,25 +18,25 @@
         },
         {
           "id": "keyboard.shift.pan",
-          "label": "Shift: Pan / Zoom",
+          "label": "Shift: Secondary controls",
           "enabled": true,
           "chord": ["keyboard:shift"],
           "match": "allow_extra_modifiers",
           "activation": "hold",
           "priority": 0,
-          "press": [{"command": "state.request", "target": "pan"}],
-          "release": [{"command": "state.release", "target": "pan"}]
+          "press": [{"command": "state.request", "target": "navigation.secondary"}],
+          "release": [{"command": "state.release", "target": "navigation.secondary"}]
         },
         {
           "id": "keyboard.ctrl_shift.pan",
-          "label": "Ctrl + Shift: Pan / Zoom",
+          "label": "Ctrl + Shift: Secondary controls",
           "enabled": true,
           "chord": ["keyboard:ctrl", "keyboard:shift"],
           "match": "exact",
           "activation": "hold",
           "priority": 0,
-          "press": [{"command": "state.request", "target": "pan"}],
-          "release": [{"command": "state.release", "target": "pan"}]
+          "press": [{"command": "state.request", "target": "navigation.secondary"}],
+          "release": [{"command": "state.release", "target": "navigation.secondary"}]
         },
         {
           "id": "astrolabe.center.toggle_mode",
@@ -90,8 +90,8 @@
           "match": "exact",
           "activation": "hold",
           "priority": 0,
-          "press": [{"command": "state.request", "target": "orbit.secondary"}],
-          "release": [{"command": "state.release", "target": "orbit.secondary"}]
+          "press": [{"command": "state.request", "target": "navigation.secondary"}],
+          "release": [{"command": "state.release", "target": "navigation.secondary"}]
         },
         {
           "id": "xiao.left.pointer_button",
@@ -145,25 +145,25 @@
         },
         {
           "id": "keyboard.shift.pan",
-          "label": "Shift: Pan / Zoom",
+          "label": "Shift: Secondary controls",
           "enabled": true,
           "chord": ["keyboard:shift"],
           "match": "allow_extra_modifiers",
           "activation": "hold",
           "priority": 0,
-          "press": [{"command": "state.request", "target": "pan"}],
-          "release": [{"command": "state.release", "target": "pan"}]
+          "press": [{"command": "state.request", "target": "navigation.secondary"}],
+          "release": [{"command": "state.release", "target": "navigation.secondary"}]
         },
         {
           "id": "keyboard.ctrl_shift.pan",
-          "label": "Ctrl + Shift: Pan / Zoom",
+          "label": "Ctrl + Shift: Secondary controls",
           "enabled": true,
           "chord": ["keyboard:ctrl", "keyboard:shift"],
           "match": "exact",
           "activation": "hold",
           "priority": 0,
-          "press": [{"command": "state.request", "target": "pan"}],
-          "release": [{"command": "state.release", "target": "pan"}]
+          "press": [{"command": "state.request", "target": "navigation.secondary"}],
+          "release": [{"command": "state.release", "target": "navigation.secondary"}]
         },
         {
           "id": "keyboard.f12.toggle_mode",

@@ -174,10 +174,12 @@ cursor"). Two halves, like the other apps:
   (ball-forward = thrust, ball-sideways = strafe, twist = rise/fall).
 - **walk**: like fly but horizon-locked look (no bank) and horizontal-plane movement.
 - **object**: primary motion rotates selected root objects as one group around their shared origin
-  center using the current view's right/up/forward axes. The secondary layer translates the group
-  in view right/up and uses twist for view depth. Empty selection is a no-op; selected descendants
-  of another selected object are excluded so parenting cannot apply motion twice. A gesture creates
-  one Blender undo checkpoint and never moves the viewport.
+  center using the current view's right/up/forward axes. The secondary layer uses either **View**
+  translation (viewport right/up plus twist depth) or **Ground** translation (horizontal
+  right/forward plus twist on world Z). Empty selection is a no-op; selected descendants of another
+  selected object are excluded so parenting cannot apply motion twice. Consecutive transform frames
+  use Blender `UNDO_GROUPED` operators, with alternating operator slots separating gestures, so one
+  gesture is one undo action and never moves the viewport.
 
 Entering Turntable, Lock Horizon, or Walk from a free-roll state optionally calls `_level_horizon`
 once. It removes roll while keeping the forward direction, location, distance, and active pivot.
@@ -207,16 +209,17 @@ copy the numeric profile into this document; inspect the packaged JSON or
 | `_DEFAULT_PORT=47900` | broker port fallback if `bridge.json` is missing. |
 
 ### 5.4 Per-mode action routing (`advanced.axis_source` + `advanced.invert`)
-Each action under `{orbit,camera,fly,walk}` selects source X/Y/Z and has its own invert. Object
-rotation deliberately reuses Orbit pitch/yaw/twist routing; its secondary translation reuses Orbit
-pan X/pan Y/zoom routing. Routing is
+Each action under `{orbit,camera,fly,walk,object}` selects source X/Y/Z and has its own invert.
+Object owns Pitch/Yaw/Roll and Translate X/Y/Z routes; changing one does not affect Orbit or another
+navigation mode. Routing is
 applied **in the add-on**, in `_apply_action_routing`, just before dispatch because the daemon's
 effective navigation mode determines which action each channel means. Rotation actions select from
 `o`; secondary-layer movement actions select from `(p.x,p.y,z)`. Thus Walk Forward can select Z
 (twist) without changing Orbit.
-Defaults reproduce the old fixed wiring. The immutable host baseline bakes in the "inside-out" fix
-for `camera.roll` and `fly.bank`; the saved user defaults are neutral/off, and the wire value is
-baseline XOR user preference.
+Defaults reproduce the physical wiring. The immutable host baseline bakes in the "inside-out" fix
+for `camera.roll` and `fly.bank`, and object rotation receives the perceptual inverse of camera
+rotation. Saved user defaults remain neutral/off, and the wire value composes baseline with user
+preference.
 `camera` shares orbit's pan/zoom routes. This **replaced** the old single `invert_camera_roll`
 flag — that key is now ignored if present in an old config.
 

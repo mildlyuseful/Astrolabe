@@ -28,7 +28,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Mildly Useful",
-    "version": (0, 1, 25),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 26),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Navigate the 3D viewport or transform selected objects from Astrolabe.",
@@ -46,7 +46,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.25"                   # keep in sync with bl_info and version.json
+ADDIN_VERSION = "0.1.26"                   # keep in sync with bl_info and version.json
 
 # Host correction arrives in ``adv.host_baseline`` from the daemon's immutable profile registry.
 # Camera math stays neutral so corrections cannot be double-applied here and in the daemon.
@@ -76,6 +76,7 @@ _TIMER_INTERVAL = 1.0 / 90.0    # main-thread poll rate (cheap queue drain)
 # The under-mouse "cursor" pivot shares this hold slot (only one pivot is active at a time).
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
 _zoom_gesture = {"pivot": None, "resolved": False}
+_object_undo = {"slot": 0}
 # Fixed-horizon transition tracker: None until the first frame so startup in a fixed mode does not
 # level the view; only a real free->fixed switch does.
 _horizon = {"fixed": None}
@@ -615,6 +616,14 @@ def _apply_action_routing(nav_mode, op, o, p, z, adv):
         p = [_routed(movement, a, w, "strafe", 0),
              _routed(movement, a, w, "forward", 1)]
         z = _routed(movement, a, w, "vertical", 2)
+    elif nav_mode == "object":
+        ob, a = inv.get("object", {}), axes.get("object", {})
+        o = [_routed(rotation, a, ob, "pitch", 0),
+             _routed(rotation, a, ob, "yaw", 1),
+             _routed(rotation, a, ob, "roll", 2)]
+        p = [_routed(movement, a, ob, "translate_x", 0),
+             _routed(movement, a, ob, "translate_y", 1)]
+        z = _routed(movement, a, ob, "translate_z", 2)
     else:
         ob, oa = inv.get("orbit", {}), axes.get("orbit", {})
         if nav_mode == "orbit" and op == "camera":
@@ -638,7 +647,9 @@ def _apply_host_baseline(nav_mode, o, p, z, adv):
     pan = baseline.get("pan", [1.0, 1.0])
     zoom = float(baseline.get("zoom", 1.0))
     move = float(baseline.get("move", 1.0))
-    o = [o[i] * float(orbit[i]) for i in range(3)]
+    rotation = baseline.get("object_rotation", [-float(value) for value in orbit]) \
+        if nav_mode == "object" else orbit
+    o = [o[i] * float(rotation[i]) for i in range(3)]
     if nav_mode == "orbit":
         p = [p[i] * float(pan[i]) for i in range(2)]
         z *= zoom
@@ -677,7 +688,7 @@ def _apply_walk(rv, o, p, z, adv):
         rv.view_location = rv.view_location + move
 
 
-def _apply_object(rv, o, p, z, idle):
+def _apply_object(rv, o, p, z, idle, adv):
     """Rotate or translate selected object roots as one view-relative group."""
     if not (o[0] or o[1] or o[2] or p[0] or p[1] or z):
         return False
@@ -686,10 +697,9 @@ def _apply_object(rv, o, p, z, idle):
         _log_rl("object_selection", "Object mode input ignored: no objects are selected")
         return False
     if idle > OBJECT_GESTURE_IDLE:
-        try:
-            bpy.ops.ed.undo_push(message="Astrolabe Object Transform")
-        except Exception:
-            _log_rl("object_undo", "Object transform undo checkpoint is unavailable")
+        # UNDO_GROUPED coalesces consecutive calls of one operator type. Alternating between two
+        # identical types at gesture boundaries keeps each gesture to exactly one undo step.
+        _object_undo["slot"] ^= 1
 
     if o[0] or o[1] or o[2]:
         pivot = _selection_median_from(
@@ -702,11 +712,23 @@ def _apply_object(rv, o, p, z, idle):
     else:
         right, up, fwd, _back = _view_axes(rv)
         scale = FLY_MOVE * max(float(rv.view_distance), 1.0)
-        delta = right * (p[0] * scale) + up * (p[1] * scale) + fwd * (z * scale)
+        if adv.get("object_translation_frame", "view") == "ground":
+            delta = (_horizontal(right) * (p[0] * scale) +
+                     _horizontal(fwd) * (p[1] * scale) +
+                     Vector((0.0, 0.0, z * scale)))
+        else:
+            delta = right * (p[0] * scale) + up * (p[1] * scale) + fwd * (z * scale)
         transform = Matrix.Translation(delta)
-    for ob in objects:
-        ob.matrix_world = transform @ ob.matrix_world
-    return True
+    values = tuple(float(transform[row][column]) for row in range(4) for column in range(4))
+    try:
+        operator = (bpy.ops.trackball_nav.object_transform_a
+                    if _object_undo["slot"] == 0 else
+                    bpy.ops.trackball_nav.object_transform_b)
+        return 'FINISHED' in operator(transform=values)
+    except Exception:
+        _log_rl("object_transform", "Object transform FAILED: " +
+                traceback.format_exc().strip().replace("\n", " | "))
+        return False
 
 
 def _apply(target, frame, idle):
@@ -759,7 +781,7 @@ def _apply(target, frame, idle):
     zoom_hold_sec = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
 
     if nav_mode == "object":
-        _apply_object(rv, o, p, z, idle)
+        _apply_object(rv, o, p, z, idle, adv)
     elif nav_mode == "fly":
         _apply_fly(rv, o, p, z, adv)
         if p[0] or p[1] or z:
@@ -885,6 +907,42 @@ def _reader():
 # the timer pump -- both run on Blender's main thread, never concurrently, sharing only the _cursor
 # dict (modal writes, timer reads).
 # ======================================================================================
+def _execute_object_transform(operator):
+    values = tuple(operator.transform)
+    transform = Matrix(tuple(
+        tuple(values[row * 4 + column] for column in range(4)) for row in range(4)))
+    objects = _selected_transform_roots()
+    if not objects:
+        return {'CANCELLED'}
+    for ob in objects:
+        ob.matrix_world = transform @ ob.matrix_world
+    return {'FINISHED'}
+
+
+class TRACKBALL_NAV_OT_object_transform_a(bpy.types.Operator):
+    """Internal undoable selected-object transform; alternates with slot B between gestures."""
+    bl_idname = "trackball_nav.object_transform_a"
+    bl_label = "Astrolabe Object Transform"
+    bl_options = {'INTERNAL', 'UNDO', 'UNDO_GROUPED'}
+
+    transform: bpy.props.FloatVectorProperty(size=16, options={'HIDDEN'})
+
+    def execute(self, _context):
+        return _execute_object_transform(self)
+
+
+class TRACKBALL_NAV_OT_object_transform_b(bpy.types.Operator):
+    """Internal undoable selected-object transform; alternates with slot A between gestures."""
+    bl_idname = "trackball_nav.object_transform_b"
+    bl_label = "Astrolabe Object Transform"
+    bl_options = {'INTERNAL', 'UNDO', 'UNDO_GROUPED'}
+
+    transform: bpy.props.FloatVectorProperty(size=16, options={'HIDDEN'})
+
+    def execute(self, _context):
+        return _execute_object_transform(self)
+
+
 class TRACKBALL_NAV_OT_mouse_tracker(bpy.types.Operator):
     """Internal: passively cache the cursor's window-space position for the under-mouse orbit pivot.
     Always PASS_THROUGH -- never consumes events."""
@@ -959,12 +1017,17 @@ def register():
         pass
     _gesture.update({"t": 0.0, "pivot": None, "invalid": True})
     _zoom_gesture.update({"pivot": None, "resolved": False})
+    _object_undo["slot"] = 0
     _horizon["fixed"] = None
     _cursor.update({"win": None, "x": 0.0, "y": 0.0, "t": 0.0, "ok": False})
-    try:
-        bpy.utils.register_class(TRACKBALL_NAV_OT_mouse_tracker)
-    except Exception:                        # already registered (e.g. reload) -> ignore
-        pass
+    for operator_class in (
+            TRACKBALL_NAV_OT_object_transform_a,
+            TRACKBALL_NAV_OT_object_transform_b,
+            TRACKBALL_NAV_OT_mouse_tracker):
+        try:
+            bpy.utils.register_class(operator_class)
+        except Exception:                    # already registered (e.g. reload) -> ignore
+            pass
     if _on_load_post not in bpy.app.handlers.load_post:
         bpy.app.handlers.load_post.append(_on_load_post)   # restart the tracker after a file load
     _reader_thread = threading.Thread(target=_reader, name="trackball-nav-reader", daemon=True)
@@ -992,10 +1055,14 @@ def unregister():
             bpy.app.handlers.load_post.remove(_on_load_post)
     except Exception:
         pass
-    try:
-        bpy.utils.unregister_class(TRACKBALL_NAV_OT_mouse_tracker)
-    except Exception:
-        pass
+    for operator_class in (
+            TRACKBALL_NAV_OT_mouse_tracker,
+            TRACKBALL_NAV_OT_object_transform_b,
+            TRACKBALL_NAV_OT_object_transform_a):
+        try:
+            bpy.utils.unregister_class(operator_class)
+        except Exception:
+            pass
     _log("unregister: Trackball Nav v%s" % ADDIN_VERSION)
 
 

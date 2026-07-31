@@ -117,8 +117,11 @@ def test_blender_object_mode_transforms_selected_roots_with_undo():
               "trackball_daemon/plugins/blender/trackball_nav/__init__.py").read_text(
                   encoding="utf-8")
     assert "def _selected_transform_roots():" in source
-    assert "def _apply_object(rv, o, p, z, idle):" in source
-    assert 'bpy.ops.ed.undo_push(message="Astrolabe Object Transform")' in source
+    assert "def _apply_object(rv, o, p, z, idle, adv):" in source
+    assert "'UNDO_GROUPED'" in source
+    assert "TRACKBALL_NAV_OT_object_transform_a" in source
+    assert "TRACKBALL_NAV_OT_object_transform_b" in source
+    assert "bpy.ops.ed.undo_push" not in source
     assert "ob.matrix_world = transform @ ob.matrix_world" in source
 
 

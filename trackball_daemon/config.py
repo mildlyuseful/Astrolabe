@@ -168,8 +168,12 @@ def host_baseline(app_key):
 def host_baseline_payload(app_key):
     """JSON-safe factors consumed inside rich mode-aware add-ons."""
     baseline = host_baseline(app_key)
+    orbit = [baseline.orbit_sign[i] * baseline.orbit_scale[i] for i in range(3)]
     return {
-        "orbit": [baseline.orbit_sign[i] * baseline.orbit_scale[i] for i in range(3)],
+        "orbit": orbit,
+        # Moving the camera and turning an object under a fixed camera have opposite perceived
+        # directions. Keep that host-independent relationship out of user inversion settings.
+        "object_rotation": [-factor for factor in orbit],
         "pan": [baseline.pan_sign[i] * baseline.pan_scale for i in range(2)],
         "zoom": baseline.zoom_sign * baseline.zoom_scale,
         "move": baseline.move_scale,

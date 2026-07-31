@@ -188,7 +188,9 @@ publishes one coherent immutable `RuntimeSnapshot` with a monotonic revision.
 State dependencies and precedence are resolved in the runtime layer. A dependent request carries its
 prerequisites; if a prerequisite loses a conflict, the dependent leaf is suppressed rather than
 creating an unreachable mixed state. A held navigation mode unsupported by the focused app is inert
-there and may resume when focus returns to a compatible app.
+there and may resume when focus returns to a compatible app. The generic secondary-layer request
+requires 3D input but deliberately does not assign a navigation mode, so Shift cannot replace Object,
+Fly, or Walk with Orbit.
 
 `OutputEngine` derives its mode from `RuntimeSnapshot`; it does not own an independent mutable mode.
 The HUD is a passive snapshot consumer and never becomes a state authority.
@@ -240,11 +242,14 @@ the host baseline in the additive transport profile and apply it after choosing 
 Orbit/Fly/Walk/Object action. `AppSpec` capability data and `host_profiles.json:apply_in_daemon` must
 agree so the baseline has exactly one owner.
 
-Object mode is capability-gated to Blender, Unity, and Unreal. It reuses Orbit rotation routing for
-primary motion and the secondary movement vector for translation: planar motion maps to viewport
-right/up and twist maps to viewport depth. Hosts transform selected roots only, rotate multiple
-objects about one shared selection center, ignore input when the selection is empty, and group a
-continuous gesture into one host undo operation. The viewport camera remains unchanged.
+Object mode is capability-gated to Blender, Unity, and Unreal. Object Pitch/Yaw/Roll and Translate
+X/Y/Z have independent source-axis and inversion routes. The View translation frame maps planar
+motion to viewport right/up and twist to viewport depth; Ground maps planar motion to horizontal
+view-right/view-forward and twist to world up. The immutable object-rotation baseline is the
+perceptual inverse of the corresponding camera baseline, while saved user inversion remains neutral.
+Hosts transform selected roots only, rotate multiple objects about one shared selection center,
+ignore input when the selection is empty, and group a continuous gesture into one host undo
+operation. The viewport camera remains unchanged.
 
 Do not move host-specific signs or scales into firmware fusion, global physical orientation, pointer
 math, or the debug cube. Do not compensate in both daemon and add-on code.

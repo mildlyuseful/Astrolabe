@@ -1,4 +1,4 @@
 {
-  "version": "0.1.17",
-  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.17: add undoable view-relative Object mode."
+  "version": "0.1.18",
+  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.18: add independent Object routing and movement frames."
 }

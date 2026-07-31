@@ -23,6 +23,7 @@ from trackball_daemon.config import (
     default_app_profile,
     effective_level_horizon,
     host_baseline,
+    host_baseline_payload,
     load_host_baseline_profiles,
     load_default_profiles,
 )
@@ -51,6 +52,12 @@ def test_host_alignment_has_exactly_one_owner_for_every_app():
     assert set(APP_BINDING_PROFILES) == set(HOST_BASELINE_PROFILES)
     for app_key, binding in APP_BINDING_PROFILES.items():
         assert binding.rich_actions is not HOST_BASELINE_PROFILES[app_key].apply_in_daemon, app_key
+
+
+def test_object_rotation_baseline_is_opposite_camera_rotation():
+    for app_key in ("blender", "unreal", "unity"):
+        payload = host_baseline_payload(app_key)
+        assert payload["object_rotation"] == [-value for value in payload["orbit"]]
 
 
 def test_shipped_user_defaults_are_loaded_from_separate_packaged_file():
@@ -106,6 +113,11 @@ def test_shipped_user_profiles_start_with_every_inversion_unchecked():
         assert generic == {"orbit": [False, False, False], "pan": [False, False], "zoom": False}
         advanced = profile.get("advanced", {}).get("invert", {})
         assert all(value is False for mode in advanced.values() for value in mode.values())
+    for app_key in ("blender", "unreal", "unity"):
+        advanced = default_app_profile(app_key)["advanced"]
+        assert advanced["object_translation_frame"] == "view"
+        assert tuple(advanced["axis_source"]["object"]) == (
+            "pitch", "yaw", "roll", "translate_x", "translate_y", "translate_z")
 
 
 def test_user_config_never_serializes_developer_host_alignment(isolated_config):

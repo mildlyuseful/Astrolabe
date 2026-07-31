@@ -330,6 +330,20 @@ def test_object_mode_hold_requires_host_support_and_restores_on_release():
     assert runtime.snapshot().effective_navigation_mode == "orbit"
 
 
+def test_generic_secondary_layer_preserves_object_navigation_mode():
+    runtime = RuntimeStore(lambda _context: RuntimeBaseState(
+        "3d", navigation_mode="object",
+        supported_navigation_modes=("orbit", "fly", "walk", "object")))
+    commands = SerializedCommandQueue(runtime)
+
+    snapshot = commands.dispatch(_request(
+        "secondary", "secondary-1", "navigation.secondary"))
+
+    assert snapshot.effective_input_mode == "3d"
+    assert snapshot.effective_navigation_mode == "object"
+    assert snapshot.effective_navigation_layer == "secondary"
+
+
 def test_release_all_can_reconcile_one_provider_without_touching_another():
     runtime = RuntimeStore(_base)
     commands = SerializedCommandQueue(runtime)

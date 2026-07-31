@@ -18,7 +18,7 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.17";  // keep in sync with package and version metadata
+        const string AddinVersion = "0.1.18";  // keep in sync with package and version metadata
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.5f;
         const float ObjectGestureIdle = 0.5f;
@@ -544,7 +544,7 @@ namespace Astrolabe.TrackballNav
 
             if (navMode == "object")
             {
-                if (ApplyObject(sv, o, p, z, idle)) sv.Repaint();
+                if (ApplyObject(sv, o, p, z, idle, adv)) sv.Repaint();
                 return;
             }
             EndObjectUndo();
@@ -886,7 +886,8 @@ namespace Astrolabe.TrackballNav
             _objectUndoGroup = -1;
         }
 
-        static bool ApplyObject(SceneView sv, Vector3 o, Vector2 p, float z, float idle)
+        static bool ApplyObject(SceneView sv, Vector3 o, Vector2 p, float z, float idle,
+            System.Collections.Generic.Dictionary<string, object> adv)
         {
             if (o == Vector3.zero && p == Vector2.zero && Mathf.Abs(z) < 1e-15f) return false;
             var transforms = SelectedTransformRoots();
@@ -921,7 +922,8 @@ namespace Astrolabe.TrackballNav
             }
             else
             {
-                var delta = TrackballNavCamera.ObjectTranslation(p, z, view, eyeDist);
+                var delta = TrackballNavCamera.ObjectTranslation(
+                    p, z, view, eyeDist, MiniJson.Str(adv, "object_translation_frame", "view"));
                 foreach (var transform in transforms)
                 {
                     transform.position += delta;
@@ -1128,6 +1130,16 @@ namespace Astrolabe.TrackballNav
                     Routed(movement, a, w, "forward", 1));
                 z = Routed(movement, a, w, "vertical", 2);
             }
+            else if (navMode == "object")
+            {
+                var obj = MiniJson.Obj(inv, "object") ?? new System.Collections.Generic.Dictionary<string, object>();
+                var a = MiniJson.Obj(axes, "object") ?? new System.Collections.Generic.Dictionary<string, object>();
+                o = new Vector3(Routed(rotation, a, obj, "pitch", 0),
+                    Routed(rotation, a, obj, "yaw", 1), Routed(rotation, a, obj, "roll", 2));
+                p = new Vector2(Routed(movement, a, obj, "translate_x", 0),
+                    Routed(movement, a, obj, "translate_y", 1));
+                z = Routed(movement, a, obj, "translate_z", 2);
+            }
             else
             {
                 var ob = MiniJson.Obj(inv, "orbit") ?? new System.Collections.Generic.Dictionary<string, object>();
@@ -1155,10 +1167,12 @@ namespace Astrolabe.TrackballNav
         {
             var baseline = MiniJson.Obj(adv, "host_baseline") ?? new System.Collections.Generic.Dictionary<string, object>();
             Vector3 orbit = MiniJson.Vec3(baseline, "orbit");
+            Vector3 objectRotation = MiniJson.Vec3(baseline, "object_rotation");
             Vector2 pan = MiniJson.Vec2(baseline, "pan");
             float zoom = MiniJson.Float(baseline, "zoom", 1f);
             float move = MiniJson.Float(baseline, "move", 1f);
             if (orbit == Vector3.zero) orbit = Vector3.one;
+            if (objectRotation == Vector3.zero) objectRotation = -orbit;
             if (pan == Vector2.zero) pan = Vector2.one;
             if (navMode == "orbit")
             {
@@ -1166,6 +1180,12 @@ namespace Astrolabe.TrackballNav
                 o = new Vector3(o.x * orbit.x, o.y * orbit.y, o.z * twistFactor);
                 p = new Vector2(p.x * pan.x, p.y * pan.y);
                 z *= zoom;
+            }
+            else if (navMode == "object")
+            {
+                o = Vector3.Scale(o, objectRotation);
+                p *= move;
+                z *= move;
             }
             else
             {

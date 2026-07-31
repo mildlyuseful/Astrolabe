@@ -30,6 +30,7 @@ from ..commands import (
     ToggleInputMode,
 )
 from ..settings_schema import SETTING_SPECS_BY_ID, SettingScope
+from ..runtime_state import NAVIGATION_MODES
 from .macros import DeclarativeAction, parse_actions
 from .windows_raw_input import KEYBOARD_CONTROLS
 
@@ -500,10 +501,11 @@ def _binding_compile_diagnostic(binding):
     if not app_ids:
         return None
     for action in binding.press_actions + binding.release_actions:
-        if (action.command_id == "navigation.mode.set" or
-                (action.command_id == "state.request" and
-                 action.target.startswith("navigation."))):
-            target = action.target.removeprefix("navigation.")
+        state_mode = (action.target.removeprefix("navigation.")
+                      if (action.command_id == "state.request" and
+                          action.target.startswith("navigation.")) else None)
+        if action.command_id == "navigation.mode.set" or state_mode in NAVIGATION_MODES:
+            target = action.target if action.command_id == "navigation.mode.set" else state_mode
             unsupported = [app_id for app_id in app_ids
                            if target not in APP_SPECS_BY_ID[app_id].supported_modes]
             if unsupported:
@@ -869,7 +871,8 @@ class BindingController:
         if action.command_id == "navigation.mode.set":
             navigation_target = action.target
         elif (action.command_id == "state.request" and
-              action.target.startswith("navigation.")):
+              action.target.startswith("navigation.") and
+              action.target.removeprefix("navigation.") in NAVIGATION_MODES):
             navigation_target = action.target.removeprefix("navigation.")
         if action.command_id.startswith("navigation.") or navigation_target is not None:
             if app_id is None:

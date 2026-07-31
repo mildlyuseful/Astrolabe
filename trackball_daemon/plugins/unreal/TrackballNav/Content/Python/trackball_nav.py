@@ -31,7 +31,7 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.15"         # keep in sync with version.json and TrackballNav.uplugin
+ADDIN_VERSION = "0.2.16"         # keep in sync with version.json and TrackballNav.uplugin
 _DEFAULT_PORT = 47900
 PIVOT_HOLD_IDLE = 0.5            # fallback for adv.orbit_hold_sec / adv.zoom_hold_sec
 OBJECT_GESTURE_IDLE = 0.5        # coalesce one continuous actor transform into one undo step
@@ -673,6 +673,15 @@ def _apply_action_routing(nav_mode, op, o, p, z, adv):
         p = [_routed(movement, a, w, "strafe", 0),
              _routed(movement, a, w, "forward", 1)]
         z = _routed(movement, a, w, "vertical", 2)
+    elif nav_mode == "object":
+        obj = inv.get("object", {})
+        a = axes.get("object", {})
+        o = [_routed(rotation, a, obj, "pitch", 0),
+             _routed(rotation, a, obj, "yaw", 1),
+             _routed(rotation, a, obj, "roll", 2)]
+        p = [_routed(movement, a, obj, "translate_x", 0),
+             _routed(movement, a, obj, "translate_y", 1)]
+        z = _routed(movement, a, obj, "translate_z", 2)
     else:                                            # orbit
         ob = inv.get("orbit", {})
         oa = axes.get("orbit", {})
@@ -701,6 +710,11 @@ def _apply_host_baseline(nav_mode, twist_action, o, p, z, adv):
         o = [o[0] * float(orbit[0]), o[1] * float(orbit[1]), o[2] * twist_factor]
         p = [p[i] * float(pan[i]) for i in range(2)]
         z *= zoom
+    elif nav_mode == "object":
+        rotation = baseline.get("object_rotation", [-float(value) for value in orbit])
+        o = [o[i] * float(rotation[i]) for i in range(3)]
+        p = [v * move for v in p]
+        z *= move
     else:
         o = [o[i] * float(orbit[i]) for i in range(3)]
         p = [v * move for v in p]
@@ -804,7 +818,7 @@ def _write_actor_frame(actor, frame):
     actor.set_actor_rotation(rotation, False)
 
 
-def _apply_object(cam, o, p, z, idle):
+def _apply_object(cam, o, p, z, idle, adv):
     """Rotate or translate the selected actor roots as one view-relative group."""
     if not (o[0] or o[1] or o[2] or p[0] or p[1] or z):
         return False
@@ -836,7 +850,8 @@ def _apply_object(cam, o, p, z, idle):
             cammath.rotate_object(frame, o, cam, pivot)
             _write_actor_frame(actor, frame)
     else:
-        delta = cammath.object_translation(p, z, cam, _focus["dist"])
+        delta = cammath.object_translation(
+            p, z, cam, _focus["dist"], adv.get("object_translation_frame", "view"))
         for actor, frame in frames:
             frame.location = list(cammath.v_add(tuple(frame.location), delta))
             _write_actor_frame(actor, frame)
@@ -893,7 +908,7 @@ def _apply(info, frame, idle):
                  % (nav_mode, style))
 
     if nav_mode == "object":
-        changed = _apply_object(cam, o, p, z, idle)
+        changed = _apply_object(cam, o, p, z, idle, adv)
         leveled = False
     elif nav_mode == "fly":
         _end_object_transaction()

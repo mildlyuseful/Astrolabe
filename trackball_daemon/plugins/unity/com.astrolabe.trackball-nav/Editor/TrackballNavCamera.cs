@@ -155,9 +155,13 @@ namespace Astrolabe.TrackballNav
                     RotateFrame(ref obj, axes[i], values[i], pivot);
         }
 
-        public static Vector3 ObjectTranslation(Vector2 p, float z, Cam view, float dist)
+        public static Vector3 ObjectTranslation(
+            Vector2 p, float z, Cam view, float dist, string frame = "view")
         {
             float k = MoveScale * ClampDist(dist);
+            if (frame == "ground")
+                return Horizontal(view.Right) * (p.x * k) +
+                    Horizontal(view.Forward) * (p.y * k) + WorldUp * (z * k);
             return view.Right * (p.x * k) + view.Up * (p.y * k) + view.Forward * (z * k);
         }
 

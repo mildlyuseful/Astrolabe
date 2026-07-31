@@ -138,6 +138,10 @@ def test_per_app_choices_reject_unsupported_modes_and_options():
 
     blender = APP_SPECS_BY_ID["blender"]
     assert setting_value_valid_for_app(mode, blender, "object")
+    object_frame = SETTING_SPECS_BY_ID["navigation.object.translation_frame"]
+    assert object_frame.applies_to(blender)
+    assert object_frame.choices == ("view", "ground")
+    assert not object_frame.applies_to(godot)
 
     fusion = APP_SPECS_BY_ID["fusion360"]
     assert not setting_value_valid_for_app(mode, fusion, "fly")

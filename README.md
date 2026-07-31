@@ -19,8 +19,8 @@ released yet.
 - Cursor movement and wheel scrolling without a vendor driver.
 - Orbit, pan, zoom, and dolly controls routed to the supported app that has focus.
 - Free-orbit, turntable, fly, and walk navigation where the host camera supports them.
-- View-relative selected-object rotation and translation in Blender, Unity, and Unreal, with
-  multi-selection grouping and host undo.
+- Selected-object rotation and View/Ground translation in Blender, Unity, and Unreal, with
+  independent object-axis routing, multi-selection grouping, and host undo.
 - Screen-center, under-cursor, selection, model-center, world-origin, camera, and Blender 3D-cursor
   orbit targets, exposed only where each host has a real implementation.
 - A configurable fallback chain when a requested orbit target is unavailable.
@@ -98,8 +98,8 @@ manual path remains:
    manual path, and a health check before it acts.
 3. Complete the host-side step shown by the panel, if any, then restart or reload that host.
 4. Select the hardware or keyboard-only input profile under **Keybindings**. Switch to **3D mode**,
-   focus the host's 3D viewport, and move the ball. Hold **Shift** for pan/zoom with the shipped
-   bindings; the keyboard-only profile uses **F12** to toggle Pointer/3D.
+   focus the host's 3D viewport, and move the ball. Hold **Shift** for the active mode's secondary
+   controls (pan/zoom in Orbit); the keyboard-only profile uses **F12** to toggle Pointer/3D.
 5. Tune the app under **Per-App**. **Reset app** pins that app's concrete System values and breaks
    its Global links; **Link all to Global** removes app overrides. Neither action disables the
    integration or forgets its installed add-on version.
@@ -189,12 +189,15 @@ than being carried across.
 - Pointer sensitivity is constant by default. Under **Global → Pointer**, an optional Linear or
   Smooth acceleration curve can increase cursor speed from a configurable ball-speed onset to a
   bounded maximum multiplier. Acceleration affects cursor movement only, never wheel or 3D motion.
-- **3D mode** sends orbit input by default. With the shipped binding, holding **Shift** switches the
-  same motion to pan and zoom.
+- **3D mode** sends primary input for the active navigation mode. With the shipped binding, holding
+  **Shift** selects that mode's secondary controls without changing the mode itself (pan/zoom in
+  Orbit, movement in Fly/Walk/Object).
 - Blender, Unity, and Unreal also offer **Object mode**. Primary motion rotates selected root objects
-  as a group around their shared center. The secondary layer moves the group right/up in the view
-  plane and uses twist for view depth. An empty selection is a no-op. Choose Object under the app's
-  Mode setting, or assign **Switch navigation to Object** / **Hold Object mode** in Keybindings.
+  as a group around their shared center. The secondary layer translates the group: **View** moves
+  right/up in the viewport plane with twist for depth, while **Ground** moves horizontally with
+  twist along world up. Object Pitch/Yaw/Roll and Translate X/Y/Z each have an independent source
+  axis and invert switch. An empty selection is a no-op. Choose Object under the app's Mode setting,
+  or assign **Switch navigation to Object** / **Hold Object mode** in Keybindings.
 - The mode switch is global and manual. Navigation is otherwise selected by the foreground app.
 
 ### Physical orientation and action routing

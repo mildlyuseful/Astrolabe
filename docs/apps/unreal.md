@@ -165,10 +165,11 @@ the daemon-authoritative effective navigation mode.
   - **walk**: un-shifted ball = **horizon-locked look** (no bank, twist dropped); Shift+ball = **move
     in the ground plane** (forward stays level) + rise/fall along **world Z**. `advanced.walk_speed`.
   - **object**: primary motion rotates selected root actors as one group around their shared
-    location center using the current viewport axes. The secondary layer translates the group in
-    viewport right/up and uses twist for depth. Empty selection is a no-op, selected attached
-    descendants are filtered out, and one `ScopedEditorTransaction` is retained per gesture so Undo
-    restores the whole move. The level viewport camera is not written.
+    location center using the current viewport axes. The secondary layer's **View** frame translates
+    in viewport right/up with twist for depth; **Ground** uses horizontal right/forward with twist
+    along world Z. Empty selection is a no-op, selected attached descendants are filtered out, and
+    one `ScopedEditorTransaction` is retained per gesture so Undo restores the whole move. The level
+    viewport camera is not written.
   - **fly ≠ walk** (verified): they only coincide when the camera is level and you don't twist. The
     two real differences are (a) banking on look, (b) 3D-along-look vs horizontal-plane movement. Kept
     as separate modes for Blender parity.
@@ -193,11 +194,11 @@ the daemon-authoritative effective navigation mode.
   point. **Pan-mode zoom** (`advanced.zoom_style`) selects native level-viewport FOV Zoom or camera
   Dolly. Under Cursor uses the same Geo ray and an independent held target; an empty-space miss
   synthesizes a point on that ray at the tracked focus depth.
-- **Per-mode action routes** (`advanced.axis_source` + `advanced.invert`): every camera action selects
+- **Per-mode action routes** (`advanced.axis_source` + `advanced.invert`): every camera or object action selects
   X/Y/Z and can invert independently in the add-on, where the active mode is known. Rotation uses
   `o`; shifted movement uses `(p.x,p.y,z)`, so twist can drive Walk Forward. Defaults preserve the
-  old wiring. Object rotation reuses Orbit pitch/yaw/twist and Object translation reuses Orbit pan
-  X/pan Y/zoom. Unlike Blender, no roll/bank inversion is baked in.
+  physical wiring. Object owns Pitch/Yaw/Roll and Translate X/Y/Z routes, and its immutable
+  rotation baseline is the perceptual inverse of camera rotation.
 - **`advanced.pan_scales_with_distance`**: pan scaled by the focus distance (zoom-stable) vs a fixed
   reference distance.
 

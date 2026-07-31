@@ -95,6 +95,19 @@ def test_cascading_dependencies_work_in_every_ctrl_shift_order():
         assert runtime.snapshot().effective_input_mode == "pointer"
 
 
+def test_shipped_shift_binding_preserves_object_mode_while_selecting_secondary_layer():
+    runtime = RuntimeStore(lambda _context: RuntimeBaseState(
+        "3d", navigation_mode="object",
+        supported_navigation_modes=("orbit", "fly", "walk", "object")))
+    controller, runtime, _catalog = _controller(runtime=runtime)
+
+    controller.update_pressed(("keyboard:shift.left",))
+    snapshot = runtime.snapshot()
+
+    assert snapshot.effective_navigation_mode == "object"
+    assert snapshot.effective_navigation_layer == "secondary"
+
+
 def test_exact_modifier_policy_and_generic_left_right_matching():
     controller, runtime, _catalog = _controller(overrides={
         "keyboard.ctrl.3d": {"match": "exact"},

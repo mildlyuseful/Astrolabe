@@ -162,6 +162,7 @@ BINDING_SECTIONS = (
     BindingSection("sensitivity", "Sensitivity & rate", (
         "rate", "orbit_sensitivity", "pan_gain", "zoom_gain", "zoom_dominance")),
     BindingSection("navigation", "Navigation mode", ("nav_mode", "fly_speed", "walk_speed")),
+    BindingSection("object", "Object", ("object_translation_frame",)),
     BindingSection("orbit", "Orbit", (
         "orbit_style", "orbit_pivot", "orbit_hold", "twist_action", "lock_horizon",
         "level_horizon", "selection_override")),
@@ -350,6 +351,12 @@ _SPECS = [
          "fly_speed", category="navigation", minimum=0.0),
     _app("navigation.walk.speed", ("advanced", "walk_speed"), ValueKind.NUMBER, "Walk speed",
          "walk_speed", category="navigation", minimum=0.0),
+    _app("navigation.object.translation_frame", ("advanced", "object_translation_frame"),
+         ValueKind.ENUM, "Object movement frame", "object_translation_frame", category="object",
+         choices=("view", "ground"),
+         extra_capabilities=("object_manipulation",),
+         help_text=("View moves in the viewport plane with twist for depth; Ground moves "
+                    "horizontally with twist along world up.")),
     _app("navigation.orbit.lock_horizon", ("advanced", "lock_horizon"), ValueKind.BOOLEAN,
          "Lock horizon", "lock_horizon", category="orbit"),
     _app("navigation.pan.scales_with_distance", ("advanced", "pan_scales_with_distance"),
@@ -412,11 +419,13 @@ _RICH_ACTIONS = {
     "camera": ("pitch", "yaw", "roll"),
     "fly": ("pitch", "yaw", "bank", "forward", "strafe", "vertical"),
     "walk": ("pitch", "yaw", "forward", "strafe", "vertical"),
+    "object": ("pitch", "yaw", "roll", "translate_x", "translate_y", "translate_z"),
 }
 for mode, actions in _RICH_ACTIONS.items():
     for action in actions:
         requires_roll = (mode, action) in {("camera", "roll"), ("fly", "bank")}
-        extras = ("rich_actions", "roll") if requires_roll else ("rich_actions",)
+        extras = (("rich_actions", "object_manipulation") if mode == "object" else
+                  ("rich_actions", "roll") if requires_roll else ("rich_actions",))
         label = f"{mode.title()} {action.replace('_', ' ').title()}"
         _SPECS.append(_app(
             f"navigation.routing.{mode}.{action}.source",

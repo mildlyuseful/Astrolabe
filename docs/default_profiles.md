@@ -91,6 +91,11 @@ calibration changes.
 Blender and SketchUp also have immutable `camera.roll` and `fly.bank` direction corrections. The
 wire value is baseline XOR saved user preference.
 
+Rich Object integrations derive `host_baseline.object_rotation` as the negative of the host's
+camera/orbit rotation factors. Turning an object under a fixed camera has the opposite perceived
+direction from turning the camera around the object; user Object inversion settings remain neutral
+and compose after this correction.
+
 ## v8 migration compatibility
 
 `default_profiles.json` exists only to reconstruct the exact value visible under v8 inheritance:

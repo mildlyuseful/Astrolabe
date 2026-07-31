@@ -123,8 +123,9 @@ For every applicable host:
 - Test setup, reinstall/update, restart/reload, connection status, and a supported-versus-experimental
   host version.
 - In Blender, Unity, and Unreal, test Object mode with one object, unrelated multi-selection, and a
-  selected parent plus selected child. Verify view-relative three-axis rotation, right/up/depth
-  translation, empty-selection no-op, an unchanged camera, and one Undo restoring the whole gesture.
+  selected parent plus selected child. Verify independently routed three-axis rotation, both
+  View right/up/depth and Ground horizontal/world-up translation, empty-selection no-op, an
+  unchanged camera, and one Undo restoring the whole gesture.
 
 ### Host-specific deltas
 
