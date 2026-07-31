@@ -231,6 +231,19 @@ jobs:
         with:
           version: "1.5.0"
 
+      # Seeed's nRF52 core bundles adafruit-nrfutil for Windows and macOS, but its Linux
+      # recipe invokes the PyPI command by name. Keep that build-only tool isolated from
+      # the daemon's locked runtime and verify it before spending time on the core compile.
+      - name: Set up Python for the nRF packaging tool
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned Adafruit nRF utility
+        run: |
+          python -m pip install "adafruit-nrfutil==0.5.3.post16"
+          adafruit-nrfutil version
+
       - name: Install pinned validation board cores
         env:
           SEEED_INDEX: https://files.seeedstudio.com/arduino/package_seeeduino_boards_index.json
