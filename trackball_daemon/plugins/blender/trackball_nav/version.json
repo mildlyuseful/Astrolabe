@@ -1,4 +1,4 @@
 {
-  "version": "0.1.27",
-  "_comment": "Kept in sync with bl_info['version'] and ADDIN_VERSION in __init__.py. The daemon's integrations._ADDINS['blender'] reads this (like Fusion's TrackballNav.manifest) to drive auto_update. 0.1.27: commit each Object motion as one promptly closed modal undo gesture."
+  "version": "0.1.28",
+  "_comment": "Kept in sync with bl_info['version'] and ADDIN_VERSION in __init__.py. The daemon's integrations._ADDINS['blender'] reads this (like Fusion's TrackballNav.manifest) to drive auto_update. 0.1.28: avoid unsupported Event.timer access in Blender 5.1 modal gesture handling."
 }

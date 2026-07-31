@@ -123,6 +123,7 @@ def test_blender_object_mode_transforms_selected_roots_with_undo():
     assert "TRACKBALL_NAV_OT_object_gesture" in source
     assert "bl_options = {'INTERNAL', 'UNDO'}" in source
     assert "event_timer_add(" in source
+    assert "event.timer" not in source
     assert "if bpy.app.background:" in source
     assert "return {'FINISHED', 'PASS_THROUGH'}" in source
     assert "'UNDO_GROUPED'" not in source
