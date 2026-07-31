@@ -29,8 +29,6 @@ def test_every_advertised_model_center_has_a_non_selection_runtime_path():
                    'elif method == "object":\n            point = _scene_center()'),
         "unity": ("trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs",
                   'method == "object") point = SceneCenter()'),
-        "godot": ("trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd",
-                  'elif method == "object":\n\t\t\tpoint = _scene_center()'),
         "rhino": ("trackball_daemon/plugins/rhino/TrackballNav/tbnav_rhino.py",
                   'elif method == "object":\n            point = _document_center()'),
         "autocad": ("plugin_src/autocad/TrackballNavAcad/Plugin.cs",
@@ -54,7 +52,6 @@ def test_every_advertised_to_object_zoom_has_a_model_bounds_consumer():
         "sketchup": ("trackball_daemon/plugins/sketchup/trackball_nav/camera.rb", "elsif zoom_mode == 'to_object'"),
         "unreal": ("trackball_daemon/plugins/unreal/TrackballNav/Content/Python/trackball_nav.py", "return _scene_center()"),
         "unity": ("trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs", 'zm == "to_object") return SceneCenter()'),
-        "godot": ("trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd", "return _scene_center()"),
         "rhino": ("trackball_daemon/plugins/rhino/TrackballNav/tbnav_rhino.py", "return _document_center()"),
         "autocad": ("plugin_src/autocad/TrackballNavAcad/Plugin.cs", "_heldZoomPivot = CaptureDrawingCenter()"),
         "solidworks": ("trackball_daemon/solidworks_driver.py", "center = self._object_center(model)"),
@@ -67,7 +64,7 @@ def test_every_advertised_to_object_zoom_has_a_model_bounds_consumer():
 
 def test_zoom_dolly_selector_exists_only_where_both_paths_are_distinct():
     assert {key for key, profile in APP_BINDING_PROFILES.items() if profile.zoom_behaviors} == {
-        "blender", "fusion360", "sketchup", "unreal", "unity", "godot", "rhino", "autocad"
+        "blender", "fusion360", "sketchup", "unreal", "unity", "rhino", "autocad"
     }
     checks = {
         "blender": "trackball_daemon/plugins/blender/trackball_nav/__init__.py",
@@ -75,7 +72,6 @@ def test_zoom_dolly_selector_exists_only_where_both_paths_are_distinct():
         "sketchup": "trackball_daemon/plugins/sketchup/trackball_nav/camera.rb",
         "unreal": "trackball_daemon/plugins/unreal/TrackballNav/Content/Python/trackball_nav.py",
         "unity": "trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs",
-        "godot": "trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd",
         "rhino": "trackball_daemon/plugins/rhino/TrackballNav/tbnav_rhino.py",
         "autocad": "plugin_src/autocad/TrackballNavAcad/Plugin.cs",
     }
@@ -91,7 +87,6 @@ def test_every_app_consumes_independent_orbit_and_cursor_zoom_holds():
         "sketchup": ("trackball_daemon/plugins/sketchup/trackball_nav/camera.rb", "orbit_hold_sec", "zoom_hold_sec"),
         "unreal": ("trackball_daemon/plugins/unreal/TrackballNav/Content/Python/trackball_nav.py", "orbit_hold_sec", "zoom_hold_sec"),
         "unity": ("trackball_daemon/plugins/unity/com.astrolabe.trackball-nav/Editor/TrackballNav.cs", "orbit_hold_sec", "zoom_hold_sec"),
-        "godot": ("trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd", "orbit_hold_sec", "zoom_hold_sec"),
         "rhino": ("trackball_daemon/plugins/rhino/TrackballNav/tbnav_rhino.py", "orbit_hold_sec", "zoom_hold_sec"),
         "autocad": ("plugin_src/autocad/TrackballNavAcad/Plugin.cs", "orbit_hold_sec", "zoom_hold_sec"),
         "solidworks": ("trackball_daemon/solidworks_driver.py", "set_pivot_hold", "set_zoom_hold"),
@@ -119,9 +114,3 @@ def test_free_orbit_warns_without_overwriting_twist_action():
     assert _free_orbit_needs_roll_warning("free", "free", "roll") is False
     assert _free_orbit_needs_roll_warning("turntable", "free", "zoom") is False
     assert _free_orbit_needs_roll_warning("free", "free", "zoom", supports_roll=False) is False
-
-
-def test_godot_holds_resolved_zoom_target_including_synthetic_depth():
-    source = _source("trackball_daemon/plugins/godot/trackball_nav/trackball_nav.gd")
-    assert "if not _zoom_gesture_resolved or idle > hold_sec" in source
-    assert "_cursor_depth_point(camera, cam)" in source

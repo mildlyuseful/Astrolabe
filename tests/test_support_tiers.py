@@ -51,7 +51,6 @@ EXPECTED_TIERS = {
     "sketchup": SupportTier.EXPERIMENTAL,
     "unreal": SupportTier.EXPERIMENTAL,
     "unity": SupportTier.EXPERIMENTAL,
-    "godot": SupportTier.EXPERIMENTAL,
     "rhino": SupportTier.EXPERIMENTAL,
     "autocad": SupportTier.EXPERIMENTAL,
 }

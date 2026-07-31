@@ -44,7 +44,7 @@ def test_process_selectors_and_transports_match_existing_routing_contract():
         "fusion360": ("fusion360.exe",), "blender": ("blender.exe",),
         "freecad": ("freecad.exe",), "sketchup": ("sketchup.exe",),
         "unreal": ("unrealeditor.exe", "ue4editor.exe"), "unity": ("unity.exe",),
-        "godot": ("godot.exe",), "rhino": ("rhino.exe",),
+        "rhino": ("rhino.exe",),
         "solidworks": ("sldworks.exe",), "autocad": ("acad.exe",),
         "onshape": ("chrome.exe", "msedge.exe", "firefox.exe", "brave.exe", "opera.exe",
                     "vivaldi.exe"),
@@ -82,11 +82,6 @@ def test_similarly_named_desktop_processes_do_not_route(process_name):
     assert resolve_foreground_context(process_name).app_id is None
 
 
-def test_portable_godot_editor_family_is_explicit_and_console_is_excluded():
-    assert resolve_foreground_context("Godot_v4.3-stable_win64.exe").app_id == "godot"
-    assert resolve_foreground_context("Godot_v4.3-stable_win64_console.exe").app_id is None
-
-
 def test_onshape_connection_and_foreground_are_explicit_independent_states():
     disconnected = resolve_foreground_context("chrome.exe", onshape_connected=False)
     assert disconnected.app_id is None
@@ -119,7 +114,7 @@ def test_onshape_connection_and_foreground_are_explicit_independent_states():
 
 
 def test_supported_navigation_modes_are_capability_owned():
-    rich = {"blender", "sketchup", "unreal", "unity", "godot"}
+    rich = {"blender", "sketchup", "unreal", "unity"}
     object_hosts = {"blender", "unreal", "unity"}
     for spec in APP_SPECS:
         expected = (("orbit", "fly", "walk", "object")

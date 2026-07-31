@@ -29,7 +29,7 @@ def test_every_app_has_complete_copyable_setup_metadata():
 
 
 def test_sensitive_setups_have_explicit_preflight_confirmations():
-    sensitive = {"unreal", "godot", "rhino", "onshape", "autocad"}
+    sensitive = {"unreal", "rhino", "onshape", "autocad"}
     assert sensitive <= {app.key for app in integrations.APPS if app.security_confirmation}
 
 
@@ -104,7 +104,6 @@ def test_rolling_web_apps_have_a_supported_policy_without_a_local_version():
     ("solidworks", r"C:\fake\SLDWORKS.exe"),
     ("autocad", r"C:\fake\acad.exe"),
     ("sketchup", r"C:\Program Files\SketchUp\SketchUp 2026\SketchUp.exe"),
-    ("godot", r"C:\Godot\Godot_v4.3-stable_win64.exe"),
     ("rhino", r"C:\Program Files\Rhino 8\System\Rhino.exe"),
     ("unity", r"C:\Program Files\Unity\Hub\Editor\6000.0.0f1\Editor\Unity.exe"),
     ("unreal", r"C:\Program Files\Epic Games\UE_5.8\Engine\Binaries\Win64\UnrealEditor.exe"),

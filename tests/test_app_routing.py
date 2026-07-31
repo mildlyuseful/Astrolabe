@@ -226,14 +226,6 @@ def test_unity_routes_to_broker():
     assert app.engine.bound == ["unity"]
 
 
-def test_godot_routes_to_broker():
-    app = _bare_app()
-    app._active_app_key = lambda: "godot"
-    app._nav_sink(1, 2, 3, 4, 5, 6)
-    assert app.broker.calls == [(1, 2, 3, 4, 5, 6)]
-    assert app.engine.bound == ["godot"]
-
-
 def test_rhino_routes_to_broker():
     app = _bare_app()
     app._active_app_key = lambda: "rhino"
@@ -242,9 +234,8 @@ def test_rhino_routes_to_broker():
     assert app.engine.bound == ["rhino"]
 
 
-def test_unity_godot_rhino_process_hints_registered():
+def test_unity_and_rhino_process_hints_registered():
     assert APP_SPECS_BY_ID["unity"].matches_process("unity.exe")
-    assert APP_SPECS_BY_ID["godot"].matches_process("godot.exe")
     assert APP_SPECS_BY_ID["rhino"].matches_process("rhino.exe")
 
 

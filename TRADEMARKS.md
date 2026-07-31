@@ -46,7 +46,7 @@ contact address will be listed here once the Mildly Useful domain exists.
 
 ## Third-party names
 
-Autodesk, AutoCAD, Fusion, Blender, FreeCAD, Onshape, SketchUp, Unreal Engine, Unity, Godot, Rhino,
+Autodesk, AutoCAD, Fusion, Blender, FreeCAD, Onshape, SketchUp, Unreal Engine, Unity, Rhino,
 SOLIDWORKS, Windows, Bluetooth, and other product names used in this project belong to their
 respective owners. They are used only to describe compatibility and integration, which is nominative
 use, and they do not imply any affiliation with or endorsement by those owners.

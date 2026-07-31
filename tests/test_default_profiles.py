@@ -67,7 +67,6 @@ def test_shipped_user_defaults_are_loaded_from_separate_packaged_file():
     assert tuple(raw["profiles"]) == DEFAULT_PROFILE_KEYS
     general, profiles = load_default_profiles()
     assert general["scheme"]["orbit_style"] == "free"
-    assert profiles["godot"]["bindings"]["scheme"]["orbit_style"] == "turntable"
     assert profiles["blender"]["orbit_pivot_hold_sec"] == 0.5
     assert profiles["blender"]["zoom_cursor_hold_sec"] == 0.5
 

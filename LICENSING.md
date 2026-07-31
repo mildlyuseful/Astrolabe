@@ -53,7 +53,7 @@ requires to come first — a shebang, a Python encoding declaration, a Ruby magi
 ```
 
 This matters most for the add-on payloads under `trackball_daemon/plugins/`, because setup copies
-them into Blender, FreeCAD, Fusion, Rhino, SketchUp, Unity, Godot, and Unreal, where they live
+them into Blender, FreeCAD, Fusion, Rhino, SketchUp, Unity, and Unreal, where they live
 detached from this repository and its `LICENSE` file.
 
 Files that cannot carry a comment, and the two directories that are deliberately exempt, take their
@@ -75,7 +75,7 @@ The automated suite verifies the result independently rather than trusting that 
 
 Each add-on payload directory under `trackball_daemon/plugins/` also holds a verbatim copy of
 [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE). Setup copies those directories into Blender, FreeCAD,
-Fusion, Godot, Rhino, SketchUp, Unity, and Unreal, where they live detached from this repository,
+Fusion, Rhino, SketchUp, Unity, and Unreal, where they live detached from this repository,
 and the AutoCAD runtime folder receives the same two files alongside its compiled DLL — which
 cannot carry a header at all. The copies are byte-identical to the originals and the automated
 suite fails if one drifts. The single-file Blender startup shim is the one exception: it lands

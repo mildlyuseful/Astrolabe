@@ -879,7 +879,7 @@ function transformExtra() {
 /* -------------------------------------------------------------- panel: perapp */
 
 const APP_GLYPHS = {
-  blender: "BL", freecad: "FC", sketchup: "SU", unreal: "UE", unity: "UY", godot: "GD",
+  blender: "BL", freecad: "FC", sketchup: "SU", unreal: "UE", unity: "UY",
   rhino: "RH", fusion360: "F3", solidworks: "SW", onshape: "OS", autocad: "AC",
 };
 

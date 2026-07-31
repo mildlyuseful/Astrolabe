@@ -159,7 +159,7 @@ profile, and results for:
 - setup/update/reload and current-versus-stale connected add-on reporting;
 - host-specific camera/pivot checks listed in `TODO.md` and the relevant `docs/apps` guide.
 
-Cover Blender, SketchUp, Unreal, Unity, Godot, and Onshape when available, plus every other supported
+Cover Blender, SketchUp, Unreal, Unity, and Onshape when available, plus every other supported
 installed host. Onshape additionally needs connected-but-unfocused and focused-browser behavior.
 Unavailable commercial hosts are recorded as unavailable with release impact, not passed.
 

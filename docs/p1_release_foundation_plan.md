@@ -34,7 +34,7 @@ finished phase plan among current documentation.
 | First alpha | Private daily-driver build for the project owner |
 | Public launch | V1 with a signed installer and polished onboarding |
 | Supported integration tier | FreeCAD, Onshape, Fusion 360, Blender, and SolidWorks |
-| Experimental integration tier | SketchUp, Unreal, Unity, Godot, Rhino, and AutoCAD |
+| Experimental integration tier | SketchUp, Unreal, Unity, Rhino, and AutoCAD |
 | AutoCAD | Experimental because the host has not been stable enough for a support commitment |
 | Product strategy | Build audience goodwill and a catalog of interesting products; do not optimize Astrolabe as the sole permanent flagship |
 
@@ -221,7 +221,6 @@ Experimental:
 - SketchUp Desktop
 - Unreal Engine
 - Unity
-- Godot
 - Rhino
 - AutoCAD
 

@@ -29,11 +29,11 @@ def test_all_apps_have_twist_config_and_zoom_target_config(isolated_config):
 
 
 def test_rich_profiles_get_shared_zoom_mode_and_capability_specific_fields():
-    for key in ("blender", "sketchup", "unreal", "unity", "godot"):
+    for key in ("blender", "sketchup", "unreal", "unity"):
         profile = APP_BINDING_PROFILES[key]
         assert profile.rich_actions
         assert profile.zoom_targets == ("default", "to_center", "to_object", "to_cursor")
-    for key in ("blender", "fusion360", "sketchup", "unreal", "unity", "godot",
+    for key in ("blender", "fusion360", "sketchup", "unreal", "unity",
                 "rhino", "autocad"):
         assert APP_BINDING_PROFILES[key].zoom_behaviors == ("zoom", "dolly")
 
@@ -63,9 +63,6 @@ def test_every_advanced_control_has_a_shipped_config_value(isolated_config):
 def test_capabilities_do_not_expose_controls_without_distinct_runtime_behavior():
     assert all(profile.supports("orbit_hold") for profile in APP_BINDING_PROFILES.values())
     assert all(profile.supports("zoom_hold") for profile in APP_BINDING_PROFILES.values())
-    # Godot remains turntable-only even though it now has distinct projection Zoom and Dolly.
-    assert APP_BINDING_PROFILES["godot"].orbit_styles == ("turntable",)
-    assert APP_BINDING_PROFILES["godot"].twist_actions == ("zoom", "dolly", "none")
     assert "dolly" not in APP_BINDING_PROFILES["fusion360"].twist_actions
 
 

@@ -138,30 +138,6 @@
         "pivot_extent_mult": 8.0
       }
     },
-    "godot": {
-      "bindings": {"scheme": {"orbit_style": "turntable"}},
-      "advanced": {
-        "nav_mode": "orbit",
-        "lock_horizon": true,
-        "twist_action": "zoom",
-        "zoom_style": "dolly",
-        "pan_scales_with_distance": true,
-        "fly_speed": 1.0,
-        "walk_speed": 1.0,
-        "invert": {
-          "orbit": {"pitch": false, "yaw": false, "twist": false, "pan_x": false, "pan_y": false, "zoom": false},
-          "camera": {"pitch": false, "yaw": false, "roll": false},
-          "fly": {"pitch": false, "yaw": false, "bank": false, "forward": false, "strafe": false, "vertical": false},
-          "walk": {"pitch": false, "yaw": false, "forward": false, "strafe": false, "vertical": false}
-        },
-        "axis_source": {
-          "orbit": {"pitch": 0, "yaw": 1, "twist": 2, "pan_x": 0, "pan_y": 1, "zoom": 2},
-          "camera": {"pitch": 0, "yaw": 1, "roll": 2},
-          "fly": {"pitch": 0, "yaw": 1, "bank": 2, "forward": 1, "strafe": 0, "vertical": 2},
-          "walk": {"pitch": 0, "yaw": 1, "forward": 1, "strafe": 0, "vertical": 2}
-        }
-      }
-    },
     "rhino": {"advanced": {"zoom_style": "dolly"}},
     "fusion360": {"advanced": {"zoom_style": "zoom"}},
     "solidworks": {},

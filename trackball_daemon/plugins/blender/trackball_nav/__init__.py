@@ -483,7 +483,7 @@ def _orbit_pivot(op, rv, region, idle, win=None, sel_override=True, candidates=N
       selection -> selection median   object -> scene bounds center
       cursor_3d -> 3D cursor   origin -> world origin
     When ``sel_override`` is enabled, a non-empty selection wins over every external pivot. The
-    camera mode remains a true turn-in-place operation, matching Unity/Godot/Rhino. Unavailable
+    camera mode remains a true turn-in-place operation, matching Unity/Rhino. Unavailable
     methods are skipped; None means the configured chain was exhausted."""
     if sel_override and op != "camera":
         selected = _selection_median()

@@ -7,8 +7,8 @@ three-axis controller for 3D applications.
   mouse input and a custom rotation stream.
 - The Windows **Trackball Daemon** consumes that stream, runs from the system tray, and switches
   between pointer input and focus-routed 3D navigation.
-- Eleven integrations are included: Fusion 360, SolidWorks, AutoCAD, Onshape, Blender, FreeCAD,
-  SketchUp Desktop, Unreal Engine, Unity, Godot, and Rhino.
+- Ten integrations are included: Fusion 360, SolidWorks, AutoCAD, Onshape, Blender, FreeCAD,
+  SketchUp Desktop, Unreal Engine, Unity, and Rhino.
 
 The daemon is currently internal-alpha software. It is usable from source, and the repository can
 build private onedir and per-user installer artifacts, but signed end-user builds have not been
@@ -158,7 +158,6 @@ lifecycle defect still does.
 | SketchUp Desktop | Ruby extension copied into detected annual Plugins folders; restart SketchUp. | [SketchUp](docs/apps/sketchup.md) |
 | Unreal Engine | Editor Python plugin; enable it once. A project-local install avoids administrator rights. | [Unreal Engine](docs/apps/unreal.md) |
 | Unity | Editor package copied into a selected project's `Packages` folder. | [Unity](docs/apps/unity.md) |
-| Godot | EditorPlugin copied into a selected project and enabled in `project.godot`. | [Godot](docs/apps/godot.md) |
 | Rhino 8 | Per-user Python scripts plus a startup command; restart Rhino. | [Rhino](docs/apps/rhino.md) |
 | AutoCAD | Bundled .NET plugin, staged per user and automatically `NETLOAD`ed after explicit setup. | [AutoCAD](docs/apps/autocad.md) |
 
@@ -224,8 +223,7 @@ operation.
 ### Horizon entry and gesture holds
 
 **Level horizon when entering Turntable/Walk** removes existing camera roll once when entering a
-fixed-horizon mode. Each applicable app can inherit or override the Global value. Godot does not
-show the setting because its editor camera cannot retain roll.
+fixed-horizon mode. Each applicable app can inherit or override the Global value.
 
 **Pivot hold** controls when a ray-derived orbit target is recaptured. **Zoom hold** is independent
 and applies only to To Cursor zoom. Panning or zooming invalidates the orbit target; panning

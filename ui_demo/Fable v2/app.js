@@ -68,8 +68,6 @@ const PROFILES = {
   unity:      { rich: true, pivots: PIVOTS_CAMERA, styles: ['free', 'turntable'],
                 twist: ['roll', 'zoom', 'dolly', 'none'], zb: ['zoom', 'dolly'],
                 dynamicClip: true, pivotExtent: true },
-  godot:      { rich: true, noRoll: true, noHorizon: true, pivots: PIVOTS_CAMERA,
-                styles: ['turntable'], twist: ['zoom', 'dolly', 'none'], zb: ['zoom', 'dolly'] },
   freecad:    { pivots: PIVOTS_DEFAULT, styles: ['free', 'turntable'],
                 twist: ['roll', 'zoom', 'none'], zb: [] },
   fusion360:  { pivots: PIVOTS_DEFAULT, styles: ['free', 'turntable'],
@@ -83,7 +81,7 @@ const PROFILES = {
   rhino:      { pivots: PIVOTS_CAMERA, styles: ['free', 'turntable'],
                 twist: ['roll', 'zoom', 'none'], zb: ['zoom', 'dolly'] },
 };
-const APP_ORDER = ['blender', 'freecad', 'sketchup', 'unreal', 'unity', 'godot',
+const APP_ORDER = ['blender', 'freecad', 'sketchup', 'unreal', 'unity',
   'rhino', 'fusion360', 'solidworks', 'onshape', 'autocad'];
 
 /* ---------------------------------------------------------- shared tip text */
@@ -161,7 +159,6 @@ const APP_SYS = {
   blender: { 'orbit.pivot': 'camera' },
   sketchup: { 'zoom.behavior': 'dolly' }, unreal: { 'zoom.behavior': 'dolly' },
   unity: { 'zoom.behavior': 'dolly' }, rhino: { 'zoom.behavior': 'dolly' },
-  godot: { 'orbit.style': 'turntable', 'twist': 'zoom', 'zoom.behavior': 'dolly' },
 };
 
 const DEFAULT_ACTION_AXIS_SOURCE = {
@@ -246,16 +243,6 @@ const APPS = [
       auto: 'Set up finds running/recent projects and copies the package into each project\'s Packages folder; Unity recompiles it automatically.',
       manual: 'Copy trackball_daemon\\plugins\\unity\\com.astrolabe.trackball-nav to <YourProject>\\Packages\\com.astrolabe.trackball-nav. If Set up found no project, the same package is staged under %APPDATA%\\TrackballDaemon\\unity.',
       health: 'Open and focus a Scene view; the row should show connected. Check the Unity Console and %APPDATA%\\TrackballDaemon\\unity_addin.log.' } },
-  { key: 'godot', name: 'Godot',
-    status: { chip: 'off', text: 'not detected', short: '—' },
-    detected: 'not detected', versions: 'Godot 4.4 through 4.7',
-    installModel: 'Godot EditorPlugin copied and enabled per project.',
-    security: 'Copies unsigned GDScript into each detected project and edits that project\'s project.godot to enable the plugin. No elevation or machine-wide change.',
-    setupRequired: true, action: 'Set up',
-    instructions: {
-      auto: 'Set up finds running/recent projects, copies addons/trackball_nav, and enables res://addons/trackball_nav/plugin.cfg.',
-      manual: 'Copy trackball_daemon\\plugins\\godot\\trackball_nav to <YourProject>\\addons\\trackball_nav, then enable Trackball Nav under Project > Project Settings > Plugins. A staged copy is also placed under %APPDATA%\\TrackballDaemon\\godot when no project is found.',
-      health: 'Reload the project, focus a 3D editor viewport, and look for connected. Check %APPDATA%\\TrackballDaemon\\godot_addin.log on failure.' } },
   { key: 'rhino', name: 'Rhino',
     status: { chip: 'idle', text: 'installed · v0.1.2', short: 'installed' },
     detected: 'v8.19 — C:\\Program Files\\Rhino 8\\System\\Rhino.exe', versions: 'Rhino 8',
@@ -417,7 +404,7 @@ const S = {
 };
 const DEFAULT_ENABLED = {
   blender: true, freecad: true, sketchup: true, unreal: true, unity: false,
-  godot: false, rhino: true, fusion360: true, solidworks: true, onshape: false, autocad: false,
+  rhino: true, fusion360: true, solidworks: true, onshape: false, autocad: false,
 };
 for (const key of APP_ORDER) {
   S.apps[key] = { enabled: DEFAULT_ENABLED[key], mode: 'orbit', ov: {}, route: freshRoute(key) };
@@ -675,13 +662,10 @@ const MODE_TITLES = {
   fly: 'Fly — free 6DOF flight: banks on twist, forward follows pitch; secondary hold strafes and rises',
   walk: 'Walk — horizon-locked look, movement stays on the ground plane',
 };
-const MODE_TITLES_GODOT = Object.assign({}, MODE_TITLES,
-  { fly: 'Fly — horizon-locked flight (no roll); movement follows the view forward' });
-
 function modeSlider(key) {
   const p = PROFILES[key], cur = appMode(key);
   const opts = p.rich ? ['off', 'orbit', 'fly', 'walk'] : ['off', 'orbit'];
-  const titles = p.noRoll ? MODE_TITLES_GODOT : MODE_TITLES;
+  const titles = MODE_TITLES;
   return `<span class="seg mode-slider ms-${cur}" data-mslider="${key}"
     title="Active control mode while ${esc(APPS_BY_KEY[key].name)} has focus in 3D mode. Off also disables the integration.">
     <span class="seg-thumb"></span>
@@ -1230,10 +1214,6 @@ function runSetup(key) {
         const a = APPS_BY_KEY.unity;
         a.status = { chip: 'idle', text: 'installed · v0.1.6', short: 'installed' };
         a.action = 'Reinstall'; S.apps.unity.enabled = true; refreshAppsPage(); } }] }),
-    godot: () => openModal({
-      title: 'Integration',
-      body: 'Godot was not found on this machine — install it first.\n\nA staged copy of the add-on is available under %APPDATA%\\TrackballDaemon\\godot for a manual install into <YourProject>\\addons\\trackball_nav.',
-      copyables: [['Copy add-on path', '<YourProject>\\addons\\trackball_nav']] }),
     onshape: () => openModal({
       title: 'Onshape — Set up',
       body: 'Bridge certificate generated at %APPDATA%\\TrackballDaemon\\onshape_cert.pem (no trust store was touched).\n\n1. Trust the cert (no admin): run the certutil command below and click Yes.\n2. Enable SpaceMouse / 3Dconnexion in Onshape → Account → Preferences.\n3. Optional: install the pointer userscript if you want Under Cursor orbit.\n\n' + USERSCRIPT_STEPS,
