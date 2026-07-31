@@ -1914,7 +1914,7 @@ class SettingsWindow:
                 parent, "Movement frame", adv + ("object_translation_frame",),
                 [("View", "view"), ("Ground", "ground")],
                 hint=("View moves in the viewport plane with twist for depth. Ground moves "
-                      "horizontally with twist along world up."))
+                      "right/world-up with twist for horizontal depth."))
         elif field == "orbit_style":
             controls["orbit_style"] = self._mapped_combo_row(
                 parent, "Orbit style", base + ("scheme", "orbit_style"),

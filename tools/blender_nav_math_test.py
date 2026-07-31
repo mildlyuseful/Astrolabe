@@ -160,6 +160,18 @@ h = tn._horizontal(Vector((3, 4, 5)))
 check("horizontal.projects_and_normalizes", vclose(h, (0.6, 0.8, 0)) and abs(h.length - 1.0) < 1e-6)
 check("horizontal.degenerate_is_zero", vclose(tn._horizontal(Vector((0, 0, 9))), (0, 0, 0)))
 
+# Object translation keeps X/Y/Z action roles in both frames. Ground changes the basis, not which
+# physical action means up versus depth.
+rv = RV(rot=Quaternion(Vector((1, 0, 0)), -math.pi / 3), dist=10.0)
+_right, _up, fwd, _back = tn._view_axes(rv)
+view_depth = tn._object_translation(rv, (0.0, 0.0), 1.0, "view")
+ground_up = tn._object_translation(rv, (0.0, 1.0), 0.0, "ground")
+ground_depth = tn._object_translation(rv, (0.0, 0.0), 1.0, "ground")
+check("object.view_twist_is_view_depth", vclose(view_depth, fwd * 10.0))
+check("object.ground_planar_y_is_world_up", vclose(ground_up, (0.0, 0.0, 10.0)))
+check("object.ground_twist_is_horizontal_depth",
+      vclose(ground_depth, tn._horizontal(fwd) * 10.0) and abs(ground_depth.z) < 1e-6)
+
 # --- look (fly): rotates about the eye, which stays put -------------------------------
 rv = RV(loc=(1, 2, 3), dist=5.0)
 eye0 = tn._eye(rv)

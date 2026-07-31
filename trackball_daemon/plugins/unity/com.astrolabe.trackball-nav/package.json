@@ -1,7 +1,7 @@
 {
   "name": "com.astrolabe.trackball-nav",
   "displayName": "Trackball Nav",
-  "version": "0.1.18",
+  "version": "0.1.19",
   "unity": "2021.3",
   "description": "Astrolabe Scene view navigation and selected-object transforms over the local nav broker.",
   "keywords": ["trackball", "navigation", "astrolabe", "spacemouse"],

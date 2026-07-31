@@ -31,7 +31,7 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.16"         # keep in sync with version.json and TrackballNav.uplugin
+ADDIN_VERSION = "0.2.17"         # keep in sync with version.json and TrackballNav.uplugin
 _DEFAULT_PORT = 47900
 PIVOT_HOLD_IDLE = 0.5            # fallback for adv.orbit_hold_sec / adv.zoom_hold_sec
 OBJECT_GESTURE_IDLE = 0.5        # coalesce one continuous actor transform into one undo step
@@ -878,15 +878,17 @@ def _apply(info, frame, idle):
     lock = bool(adv.get("lock_horizon", False))
     twist_action = adv.get("twist_action", "roll")
     zoom_style = adv.get("zoom_style", "dolly")
+    object_frame = adv.get("object_translation_frame", "view")
     pan_scales = bool(adv.get("pan_scales_with_distance", True))
     sel_override = bool(adv.get("selection_overrides_pivot", True))
     orbit_hold = max(0.0, min(10.0, float(adv.get("orbit_hold_sec", PIVOT_HOLD_IDLE))))
     zoom_hold = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
 
-    sig = (nav_mode, op, style, zm, twist_action, zoom_style, lock, sel_override)
+    sig = (nav_mode, op, style, zm, twist_action, zoom_style, object_frame, lock, sel_override)
     if sig != _last_scheme["v"]:
         _last_scheme["v"] = sig
-        _log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s pan_zoom=%s horizon=%s sel_override=%s" % sig)
+        _log("scheme: nav=%s pivot=%s style=%s zoom=%s twist=%s pan_zoom=%s "
+             "object_frame=%s horizon=%s sel_override=%s" % sig)
 
     o, p, z = _apply_action_routing(nav_mode, op, o, p, z, adv)
     o, p, z = _apply_host_baseline(nav_mode, twist_action, o, p, z, adv)

@@ -117,10 +117,15 @@ def test_blender_object_mode_transforms_selected_roots_with_undo():
               "trackball_daemon/plugins/blender/trackball_nav/__init__.py").read_text(
                   encoding="utf-8")
     assert "def _selected_transform_roots():" in source
-    assert "def _apply_object(rv, o, p, z, idle, adv):" in source
-    assert "'UNDO_GROUPED'" in source
-    assert "TRACKBALL_NAV_OT_object_transform_a" in source
-    assert "TRACKBALL_NAV_OT_object_transform_b" in source
+    assert "def _object_translation(rv, p, z, frame):" in source
+    assert 'right, up, fwd = _horizontal(right), Vector((0.0, 0.0, 1.0)), _horizontal(fwd)' in source
+    assert "def _apply_object(window, area, region, rv, o, p, z, adv):" in source
+    assert "TRACKBALL_NAV_OT_object_gesture" in source
+    assert "bl_options = {'INTERNAL', 'UNDO'}" in source
+    assert "event_timer_add(" in source
+    assert "if bpy.app.background:" in source
+    assert "return {'FINISHED', 'PASS_THROUGH'}" in source
+    assert "'UNDO_GROUPED'" not in source
     assert "bpy.ops.ed.undo_push" not in source
     assert "ob.matrix_world = transform @ ob.matrix_world" in source
 

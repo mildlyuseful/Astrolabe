@@ -28,7 +28,7 @@ so they can be unit-tested headless (`blender --background --python`) without a 
 bl_info = {
     "name": "Trackball Nav",
     "author": "Mildly Useful",
-    "version": (0, 1, 26),                # keep in sync with version.json + ADDIN_VERSION
+    "version": (0, 1, 27),                # keep in sync with version.json + ADDIN_VERSION
     "blender": (4, 2, 0),
     "location": "View3D (driven by the Trackball Daemon)",
     "description": "Navigate the 3D viewport or transform selected objects from Astrolabe.",
@@ -46,7 +46,7 @@ import traceback
 import bpy
 from mathutils import Quaternion, Vector, Matrix
 
-ADDIN_VERSION = "0.1.26"                   # keep in sync with bl_info and version.json
+ADDIN_VERSION = "0.1.27"                   # keep in sync with bl_info and version.json
 
 # Host correction arrives in ``adv.host_baseline`` from the daemon's immutable profile registry.
 # Camera math stays neutral so corrections cannot be double-applied here and in the daemon.
@@ -61,7 +61,7 @@ WALK_MOVE = 1.0
 
 DIST_MIN, DIST_MAX = 1e-3, 1e6  # view_distance clamp (Blender's own range is wide)
 PIVOT_HOLD_IDLE = 0.5           # fallback for adv.orbit_hold_sec / adv.zoom_hold_sec
-OBJECT_GESTURE_IDLE = 0.5       # coalesce one continuous object transform into one undo step
+OBJECT_GESTURE_IDLE = 0.15      # quiet period that closes one undoable object gesture
 
 _DEFAULT_PORT = 47900
 
@@ -76,7 +76,7 @@ _TIMER_INTERVAL = 1.0 / 90.0    # main-thread poll rate (cheap queue drain)
 # The under-mouse "cursor" pivot shares this hold slot (only one pivot is active at a time).
 _gesture = {"t": 0.0, "pivot": None, "invalid": True}
 _zoom_gesture = {"pivot": None, "resolved": False}
-_object_undo = {"slot": 0}
+_object_gesture = {"active": False, "generation": 0, "last_input": 0.0}
 # Fixed-horizon transition tracker: None until the first frame so startup in a fixed mode does not
 # level the view; only a real free->fixed switch does.
 _horizon = {"fixed": None}
@@ -688,7 +688,34 @@ def _apply_walk(rv, o, p, z, adv):
         rv.view_location = rv.view_location + move
 
 
-def _apply_object(rv, o, p, z, idle, adv):
+def _object_translation(rv, p, z, frame):
+    """Translate X/Y/Z in a view-aligned or horizon-aligned right/up/depth basis."""
+    right, up, fwd, _back = _view_axes(rv)
+    if frame == "ground":
+        right, up, fwd = _horizontal(right), Vector((0.0, 0.0, 1.0)), _horizontal(fwd)
+    scale = FLY_MOVE * max(float(rv.view_distance), 1.0)
+    return right * (p[0] * scale) + up * (p[1] * scale) + fwd * (z * scale)
+
+
+def _begin_object_gesture(window, area, region):
+    """Open the one undoable modal operator that owns this physical motion gesture."""
+    if bpy.app.background:
+        return True                                # headless probe: transform path only, no GUI undo
+    if _object_gesture["active"]:
+        return True
+    try:
+        with bpy.context.temp_override(window=window, area=area, region=region):
+            result = bpy.ops.trackball_nav.object_gesture('INVOKE_DEFAULT')
+        if 'RUNNING_MODAL' not in result:
+            _log_rl("object_undo", "Object gesture start was rejected by Blender")
+        return 'RUNNING_MODAL' in result
+    except Exception:
+        _log_rl("object_undo", "Object gesture start FAILED: " +
+                traceback.format_exc().strip().replace("\n", " | "))
+        return False
+
+
+def _apply_object(window, area, region, rv, o, p, z, adv):
     """Rotate or translate selected object roots as one view-relative group."""
     if not (o[0] or o[1] or o[2] or p[0] or p[1] or z):
         return False
@@ -696,10 +723,8 @@ def _apply_object(rv, o, p, z, idle, adv):
     if not objects:
         _log_rl("object_selection", "Object mode input ignored: no objects are selected")
         return False
-    if idle > OBJECT_GESTURE_IDLE:
-        # UNDO_GROUPED coalesces consecutive calls of one operator type. Alternating between two
-        # identical types at gesture boundaries keeps each gesture to exactly one undo step.
-        _object_undo["slot"] ^= 1
+    if not _begin_object_gesture(window, area, region):
+        return False
 
     if o[0] or o[1] or o[2]:
         pivot = _selection_median_from(
@@ -710,25 +735,12 @@ def _apply_object(rv, o, p, z, idle, adv):
         transform = (Matrix.Translation(pivot) @ rotation.to_matrix().to_4x4() @
                      Matrix.Translation(-pivot))
     else:
-        right, up, fwd, _back = _view_axes(rv)
-        scale = FLY_MOVE * max(float(rv.view_distance), 1.0)
-        if adv.get("object_translation_frame", "view") == "ground":
-            delta = (_horizontal(right) * (p[0] * scale) +
-                     _horizontal(fwd) * (p[1] * scale) +
-                     Vector((0.0, 0.0, z * scale)))
-        else:
-            delta = right * (p[0] * scale) + up * (p[1] * scale) + fwd * (z * scale)
-        transform = Matrix.Translation(delta)
-    values = tuple(float(transform[row][column]) for row in range(4) for column in range(4))
-    try:
-        operator = (bpy.ops.trackball_nav.object_transform_a
-                    if _object_undo["slot"] == 0 else
-                    bpy.ops.trackball_nav.object_transform_b)
-        return 'FINISHED' in operator(transform=values)
-    except Exception:
-        _log_rl("object_transform", "Object transform FAILED: " +
-                traceback.format_exc().strip().replace("\n", " | "))
-        return False
+        transform = Matrix.Translation(_object_translation(
+            rv, p, z, adv.get("object_translation_frame", "view")))
+    for ob in objects:
+        ob.matrix_world = transform @ ob.matrix_world
+    _object_gesture["last_input"] = time.time()
+    return True
 
 
 def _apply(target, frame, idle):
@@ -750,11 +762,14 @@ def _apply(target, frame, idle):
     _maybe_level_horizon(rv, nav_mode, style, adv)
 
     sig = (nav_mode, op, style, zm, adv.get("twist_action"), adv.get("zoom_style"),
-           adv.get("lock_horizon"), adv.get("lock_camera_to_view"))
+           adv.get("object_translation_frame"), adv.get("lock_horizon"),
+           adv.get("lock_camera_to_view"))
     if sig != _last_scheme["v"]:                    # confirm live scheme changes are received
         _last_scheme["v"] = sig
-        _log("scheme: nav=%s pivot=%s style=%s twist=%s zoom=%s horizon=%s camlock=%s"
+        _log("scheme: nav=%s pivot=%s style=%s twist=%s zoom=%s object_frame=%s "
+             "horizon=%s camlock=%s"
              % (nav_mode, op, style, adv.get("twist_action"), adv.get("zoom_style"),
+                adv.get("object_translation_frame"),
                 adv.get("lock_horizon"), adv.get("lock_camera_to_view")))
 
     # Diagnostic (rate-limited): confirm which gesture channel is arriving. If holding Shift to
@@ -781,7 +796,7 @@ def _apply(target, frame, idle):
     zoom_hold_sec = max(0.0, min(10.0, float(adv.get("zoom_hold_sec", PIVOT_HOLD_IDLE))))
 
     if nav_mode == "object":
-        _apply_object(rv, o, p, z, idle, adv)
+        _apply_object(_win, area, region, rv, o, p, z, adv)
     elif nav_mode == "fly":
         _apply_fly(rv, o, p, z, adv)
         if p[0] or p[1] or z:
@@ -898,6 +913,58 @@ def _reader():
 
 
 # ======================================================================================
+# Object gesture undo owner. Blender defers an operator's undo push until its modal lifetime ends,
+# so the app-timer transform frames remain one action without keeping an UNDO_GROUPED operator open
+# after motion. The event timer closes it promptly even if the user provides no other input.
+# ======================================================================================
+class TRACKBALL_NAV_OT_object_gesture(bpy.types.Operator):
+    """Own one physical object gesture so Blender commits it as one immediate undo action."""
+    bl_idname = "trackball_nav.object_gesture"
+    bl_label = "Astrolabe Object Transform"
+    bl_options = {'INTERNAL', 'UNDO'}
+
+    _timer = None
+    _generation = 0
+
+    def invoke(self, context, _event):
+        if context.window is None:
+            return {'CANCELLED'}
+        _object_gesture["generation"] += 1
+        self._generation = _object_gesture["generation"]
+        _object_gesture.update({"active": True, "last_input": time.time()})
+        self._timer = context.window_manager.event_timer_add(
+            _TIMER_INTERVAL, window=context.window)
+        context.window_manager.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def _finish(self, context):
+        if self._timer is not None:
+            context.window_manager.event_timer_remove(self._timer)
+            self._timer = None
+        if self._generation == _object_gesture["generation"]:
+            _object_gesture["active"] = False
+
+    def modal(self, context, event):
+        if self._generation != _object_gesture["generation"] or _stop.is_set():
+            self._finish(context)
+            return {'CANCELLED'}
+        if event.type == 'TIMER':
+            if (event.timer == self._timer and
+                    time.time() - _object_gesture["last_input"] >= OBJECT_GESTURE_IDLE):
+                self._finish(context)
+                return {'FINISHED'}
+            return {'PASS_THROUGH'}
+        if event.type not in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
+            # Finish before Blender handles Ctrl+Z, a selection click, or another command.
+            self._finish(context)
+            return {'FINISHED', 'PASS_THROUGH'}
+        return {'PASS_THROUGH'}
+
+    def cancel(self, context):
+        self._finish(context)
+
+
+# ======================================================================================
 # Passive mouse tracker (Half A of the under-mouse "cursor" pivot). Blender has no on-demand mouse
 # getter, so a window-wide modal operator caches the cursor's window-space position on each
 # MOUSEMOVE; it returns {'PASS_THROUGH'} so it never consumes events or blocks normal interaction.
@@ -907,42 +974,6 @@ def _reader():
 # the timer pump -- both run on Blender's main thread, never concurrently, sharing only the _cursor
 # dict (modal writes, timer reads).
 # ======================================================================================
-def _execute_object_transform(operator):
-    values = tuple(operator.transform)
-    transform = Matrix(tuple(
-        tuple(values[row * 4 + column] for column in range(4)) for row in range(4)))
-    objects = _selected_transform_roots()
-    if not objects:
-        return {'CANCELLED'}
-    for ob in objects:
-        ob.matrix_world = transform @ ob.matrix_world
-    return {'FINISHED'}
-
-
-class TRACKBALL_NAV_OT_object_transform_a(bpy.types.Operator):
-    """Internal undoable selected-object transform; alternates with slot B between gestures."""
-    bl_idname = "trackball_nav.object_transform_a"
-    bl_label = "Astrolabe Object Transform"
-    bl_options = {'INTERNAL', 'UNDO', 'UNDO_GROUPED'}
-
-    transform: bpy.props.FloatVectorProperty(size=16, options={'HIDDEN'})
-
-    def execute(self, _context):
-        return _execute_object_transform(self)
-
-
-class TRACKBALL_NAV_OT_object_transform_b(bpy.types.Operator):
-    """Internal undoable selected-object transform; alternates with slot A between gestures."""
-    bl_idname = "trackball_nav.object_transform_b"
-    bl_label = "Astrolabe Object Transform"
-    bl_options = {'INTERNAL', 'UNDO', 'UNDO_GROUPED'}
-
-    transform: bpy.props.FloatVectorProperty(size=16, options={'HIDDEN'})
-
-    def execute(self, _context):
-        return _execute_object_transform(self)
-
-
 class TRACKBALL_NAV_OT_mouse_tracker(bpy.types.Operator):
     """Internal: passively cache the cursor's window-space position for the under-mouse orbit pivot.
     Always PASS_THROUGH -- never consumes events."""
@@ -1017,12 +1048,12 @@ def register():
         pass
     _gesture.update({"t": 0.0, "pivot": None, "invalid": True})
     _zoom_gesture.update({"pivot": None, "resolved": False})
-    _object_undo["slot"] = 0
+    _object_gesture.update({"active": False, "last_input": 0.0})
+    _object_gesture["generation"] += 1
     _horizon["fixed"] = None
     _cursor.update({"win": None, "x": 0.0, "y": 0.0, "t": 0.0, "ok": False})
     for operator_class in (
-            TRACKBALL_NAV_OT_object_transform_a,
-            TRACKBALL_NAV_OT_object_transform_b,
+            TRACKBALL_NAV_OT_object_gesture,
             TRACKBALL_NAV_OT_mouse_tracker):
         try:
             bpy.utils.register_class(operator_class)
@@ -1044,6 +1075,8 @@ def register():
 
 def unregister():
     _stop.set()
+    _object_gesture["generation"] += 1        # supersede any active undo gesture
+    _object_gesture["active"] = False
     _tracker["gen"] += 1                     # supersede the running mouse tracker (self-cancels next event)
     try:
         if bpy.app.timers.is_registered(_on_timer):
@@ -1057,8 +1090,7 @@ def unregister():
         pass
     for operator_class in (
             TRACKBALL_NAV_OT_mouse_tracker,
-            TRACKBALL_NAV_OT_object_transform_b,
-            TRACKBALL_NAV_OT_object_transform_a):
+            TRACKBALL_NAV_OT_object_gesture):
         try:
             bpy.utils.unregister_class(operator_class)
         except Exception:

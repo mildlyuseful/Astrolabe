@@ -18,7 +18,7 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.18";  // keep in sync with package and version metadata
+        const string AddinVersion = "0.1.19";  // keep in sync with package and version metadata
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.5f;
         const float ObjectGestureIdle = 0.5f;
@@ -524,6 +524,7 @@ namespace Astrolabe.TrackballNav
             bool lockHorizon = MiniJson.Bool(adv, "lock_horizon");
             string twistAction = MiniJson.Str(adv, "twist_action", "roll");
             string zoomStyle = MiniJson.Str(adv, "zoom_style", "dolly");
+            string objectFrame = MiniJson.Str(adv, "object_translation_frame", "view");
             bool panScales = MiniJson.Bool(adv, "pan_scales_with_distance", true);
             bool selOverride = MiniJson.Bool(adv, "selection_overrides_pivot", true);
             var pivotCandidates = MiniJson.StringList(adv, "orbit_pivot_candidates", op);
@@ -532,11 +533,11 @@ namespace Astrolabe.TrackballNav
             float orbitHold = Mathf.Clamp(MiniJson.Float(adv, "orbit_hold_sec", PivotHoldIdle), 0f, 10f);
             float zoomHold = Mathf.Clamp(MiniJson.Float(adv, "zoom_hold_sec", PivotHoldIdle), 0f, 10f);
 
-            var sig = $"{navMode}|{op}|{style}|{zm}|{twistAction}|{zoomStyle}|{lockHorizon}|{selOverride}|{MiniJson.Bool(adv, "override_dynamic_clip", true)}";
+            var sig = $"{navMode}|{op}|{style}|{zm}|{twistAction}|{zoomStyle}|{objectFrame}|{lockHorizon}|{selOverride}|{MiniJson.Bool(adv, "override_dynamic_clip", true)}";
             if (sig != _lastScheme)
             {
                 _lastScheme = sig;
-                Log($"scheme: nav={navMode} pivot={op} style={style} zoom={zm} twist={twistAction} pan_zoom={zoomStyle} horizon={lockHorizon} sel_override={selOverride} override_dyn_clip={MiniJson.Bool(adv, "override_dynamic_clip", true)}");
+                Log($"scheme: nav={navMode} pivot={op} style={style} zoom={zm} twist={twistAction} pan_zoom={zoomStyle} object_frame={objectFrame} horizon={lockHorizon} sel_override={selOverride} override_dyn_clip={MiniJson.Bool(adv, "override_dynamic_clip", true)}");
             }
 
             ApplyActionRouting(navMode, op, ref o, ref p, ref z, adv);

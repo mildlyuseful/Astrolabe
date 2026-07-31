@@ -194,10 +194,11 @@ than being carried across.
   Orbit, movement in Fly/Walk/Object).
 - Blender, Unity, and Unreal also offer **Object mode**. Primary motion rotates selected root objects
   as a group around their shared center. The secondary layer translates the group: **View** moves
-  right/up in the viewport plane with twist for depth, while **Ground** moves horizontally with
-  twist along world up. Object Pitch/Yaw/Roll and Translate X/Y/Z each have an independent source
-  axis and invert switch. An empty selection is a no-op. Choose Object under the app's Mode setting,
-  or assign **Switch navigation to Object** / **Hold Object mode** in Keybindings.
+  right/up in the viewport plane with twist for depth, while **Ground** keeps those same X/Y/Z
+  action roles but uses horizontal right, world up, and horizontal depth. Object Pitch/Yaw/Roll and
+  Translate X/Y/Z each have an independent source axis and invert switch. An empty selection is a
+  no-op. Choose Object under the app's Mode setting, or assign **Switch navigation to Object** /
+  **Hold Object mode** in Keybindings.
 - The mode switch is global and manual. Navigation is otherwise selected by the foreground app.
 
 ### Physical orientation and action routing

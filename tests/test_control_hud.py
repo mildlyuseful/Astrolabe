@@ -62,7 +62,7 @@ def test_snapshot_help_explains_object_rotation_and_translation():
         settings={"navigation.object.translation_frame": "ground"},
         supported_navigation_modes=("orbit", "fly", "walk", "object"))).snapshot()
     assert ground.control_help.secondary_help == \
-        "Ball: move selection right / forward · twist = world up / down"
+        "Ball: move selection right / world up · twist = horizontal depth"
 
 
 def test_pure_projection_uses_registered_and_plain_executable_contexts():

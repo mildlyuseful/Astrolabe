@@ -1,4 +1,4 @@
 {
-  "version": "0.1.18",
-  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.18: add independent Object routing and movement frames."
+  "version": "0.1.19",
+  "_comment": "Kept in sync with package.json / AddinVersion. 0.1.19: preserve Object X/Y/Z roles in the Ground movement basis."
 }

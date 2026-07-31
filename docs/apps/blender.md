@@ -175,11 +175,12 @@ cursor"). Two halves, like the other apps:
 - **walk**: like fly but horizon-locked look (no bank) and horizontal-plane movement.
 - **object**: primary motion rotates selected root objects as one group around their shared origin
   center using the current view's right/up/forward axes. The secondary layer uses either **View**
-  translation (viewport right/up plus twist depth) or **Ground** translation (horizontal
-  right/forward plus twist on world Z). Empty selection is a no-op; selected descendants of another
-  selected object are excluded so parenting cannot apply motion twice. Consecutive transform frames
-  use Blender `UNDO_GROUPED` operators, with alternating operator slots separating gestures, so one
-  gesture is one undo action and never moves the viewport.
+  translation (viewport right/up plus twist depth) or **Ground** translation (horizontal right,
+  world Z up, and twist along horizontal view depth). Empty selection is a no-op; selected
+  descendants of another selected object are excluded so parenting cannot apply motion twice. One
+  short-lived modal operator owns each physical transform gesture: it closes after 150 ms without
+  motion or before Blender handles another command, making the whole gesture one immediately
+  available undo action without moving the viewport.
 
 Entering Turntable, Lock Horizon, or Walk from a free-roll state optionally calls `_level_horizon`
 once. It removes roll while keeping the forward direction, location, distance, and active pivot.

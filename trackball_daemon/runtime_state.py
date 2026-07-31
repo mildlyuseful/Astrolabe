@@ -135,7 +135,7 @@ def _control_help(input_mode, navigation_mode, navigation_layer, settings):
     elif navigation_mode == "object":
         primary = "Ball: rotate selected objects in view axes"
         if settings.get("navigation.object.translation_frame", "view") == "ground":
-            secondary = "Ball: move selection right / forward · twist = world up / down"
+            secondary = "Ball: move selection right / world up · twist = horizontal depth"
         else:
             secondary = "Ball: move selection right / up · twist = depth"
         secondary_label = "Move Selection"
