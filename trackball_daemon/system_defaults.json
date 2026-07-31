@@ -23,6 +23,7 @@
     "navigation.level_horizon_on_entry": true,
     "navigation.mode": "orbit",
     "navigation.object.translation_frame": "view",
+    "navigation.object.translation_sensitivity": 1.0,
     "navigation.orbit.lock_horizon": false,
     "navigation.orbit.pivot": "screen_center",
     "navigation.orbit.pivot_fallbacks": [

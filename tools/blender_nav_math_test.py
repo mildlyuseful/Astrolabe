@@ -167,10 +167,12 @@ _right, _up, fwd, _back = tn._view_axes(rv)
 view_depth = tn._object_translation(rv, (0.0, 0.0), 1.0, "view")
 ground_forward = tn._object_translation(rv, (0.0, 1.0), 0.0, "ground")
 ground_up = tn._object_translation(rv, (0.0, 0.0), 1.0, "ground")
+scaled_view_depth = tn._object_translation(rv, (0.0, 0.0), 1.0, "view", 2.5)
 check("object.view_twist_is_view_depth", vclose(view_depth, fwd * 10.0))
 check("object.ground_planar_y_is_horizontal_forward",
       vclose(ground_forward, tn._horizontal(fwd) * 10.0) and abs(ground_forward.z) < 1e-6)
 check("object.ground_twist_is_world_up", vclose(ground_up, (0.0, 0.0, 10.0)))
+check("object.sensitivity_scales_translation", vclose(scaled_view_depth, view_depth * 2.5))
 
 # --- look (fly): rotates about the eye, which stays put -------------------------------
 rv = RV(loc=(1, 2, 3), dist=5.0)

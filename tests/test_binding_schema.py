@@ -44,6 +44,7 @@ def test_every_advanced_control_has_a_shipped_config_value(isolated_config):
         "nav_mode": "nav_mode",
         "fly_speed": "fly_speed",
         "walk_speed": "walk_speed",
+        "object_translation_sensitivity": "object_translation_sensitivity",
         "object_translation_frame": "object_translation_frame",
         "lock_horizon": "lock_horizon",
         "pan_scales": "pan_scales_with_distance",

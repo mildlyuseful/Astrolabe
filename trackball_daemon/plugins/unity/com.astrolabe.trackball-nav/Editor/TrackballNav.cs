@@ -18,7 +18,7 @@ namespace Astrolabe.TrackballNav
     [InitializeOnLoad]
     internal static class TrackballNav
     {
-        const string AddinVersion = "0.1.20";  // keep in sync with package and version metadata
+        const string AddinVersion = "0.1.21";  // keep in sync with package and version metadata
         const int DefaultPort = 47900;
         const float PivotHoldIdle = 0.5f;
         const float ObjectGestureIdle = 0.5f;
@@ -924,7 +924,8 @@ namespace Astrolabe.TrackballNav
             else
             {
                 var delta = TrackballNavCamera.ObjectTranslation(
-                    p, z, view, eyeDist, MiniJson.Str(adv, "object_translation_frame", "view"));
+                    p, z, view, eyeDist, MiniJson.Str(adv, "object_translation_frame", "view"),
+                    MiniJson.Float(adv, "object_translation_sensitivity", 1f));
                 foreach (var transform in transforms)
                 {
                     transform.position += delta;

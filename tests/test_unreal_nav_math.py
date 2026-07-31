@@ -134,6 +134,13 @@ def test_object_ground_translation_matches_walk_controls():
     assert vclose(delta, (30.0, 20.0, 40.0))
 
 
+def test_object_translation_sensitivity_scales_only_translation():
+    view = _idcam(0.0)
+    base = cam.object_translation((2.0, 3.0), 4.0, view, 10.0)
+    assert vclose(cam.object_translation((2.0, 3.0), 4.0, view, 10.0, "view", 2.5),
+                  cam.v_scale(base, 2.5))
+
+
 def test_level_horizon_removes_only_roll_and_is_idempotent():
     c = cam.Camera.from_rotator((2.0, 3.0, 4.0), 25.0, -35.0, 48.0)
     location0, forward0 = tuple(c.location), c.forward

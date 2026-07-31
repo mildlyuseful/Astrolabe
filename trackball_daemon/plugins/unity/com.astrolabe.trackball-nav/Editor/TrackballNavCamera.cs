@@ -156,9 +156,10 @@ namespace Astrolabe.TrackballNav
         }
 
         public static Vector3 ObjectTranslation(
-            Vector2 p, float z, Cam view, float dist, string frame = "view")
+            Vector2 p, float z, Cam view, float dist, string frame = "view",
+            float sensitivity = 1f)
         {
-            float k = MoveScale * ClampDist(dist);
+            float k = MoveScale * ClampDist(dist) * sensitivity;
             if (frame == "ground")
                 return Horizontal(view.Right) * (p.x * k) +
                     Horizontal(view.Forward) * (p.y * k) + WorldUp * (z * k);

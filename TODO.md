@@ -125,8 +125,8 @@ For every applicable host:
 - In Blender, Unity, and Unreal, test Object mode with one object, unrelated multi-selection, and a
   selected parent plus selected child. Verify independently routed three-axis rotation, both
   View right/up/depth and Ground horizontal-right/horizontal-forward/world-up translation,
-  empty-selection no-op, an
-  unchanged camera, and one Undo restoring the whole gesture.
+  at least two Object movement sensitivity values, empty-selection no-op, an unchanged camera, and
+  one Undo restoring the whole gesture.
 
 ### Host-specific deltas
 

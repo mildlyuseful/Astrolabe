@@ -1909,6 +1909,10 @@ class SettingsWindow:
         elif field == "walk_speed":
             self._entry_row(parent, "Walk speed", adv + ("walk_speed",),
                             hint="Movement multiplier while Mode is Walk.")
+        elif field == "object_translation_sensitivity":
+            self._entry_row(
+                parent, "Movement sensitivity", adv + ("object_translation_sensitivity",),
+                hint="Multiplier for selected-object movement on Object's secondary layer.")
         elif field == "object_translation_frame":
             self._mapped_combo_row(
                 parent, "Movement frame", adv + ("object_translation_frame",),

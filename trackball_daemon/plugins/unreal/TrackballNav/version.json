@@ -1,4 +1,4 @@
 {
-  "version": "0.2.18",
-  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.18: make Ground Object translation use Walk-style planar movement with twist for world up."
+  "version": "0.2.19",
+  "_comment": "Kept in sync with ADDIN_VERSION and TrackballNav.uplugin. 0.2.19: apply the user-configurable Object movement sensitivity."
 }

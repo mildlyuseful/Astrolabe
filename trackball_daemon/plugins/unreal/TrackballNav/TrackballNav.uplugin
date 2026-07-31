@@ -1,7 +1,7 @@
 {
 	"FileVersion": 3,
 	"Version": 5,
-	"VersionName": "0.2.18",
+	"VersionName": "0.2.19",
 	"FriendlyName": "Trackball Nav",
 	"Description": "Drive the Unreal Editor viewport camera or transform selected actors from the Astrolabe daemon. Script-only (no C++): a bundled Python add-on connects to the daemon's local nav broker.",
 	"Category": "Input",

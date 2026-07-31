@@ -162,7 +162,8 @@ BINDING_SECTIONS = (
     BindingSection("sensitivity", "Sensitivity & rate", (
         "rate", "orbit_sensitivity", "pan_gain", "zoom_gain", "zoom_dominance")),
     BindingSection("navigation", "Navigation mode", ("nav_mode", "fly_speed", "walk_speed")),
-    BindingSection("object", "Object", ("object_translation_frame",)),
+    BindingSection("object", "Object", (
+        "object_translation_sensitivity", "object_translation_frame")),
     BindingSection("orbit", "Orbit", (
         "orbit_style", "orbit_pivot", "orbit_hold", "twist_action", "lock_horizon",
         "level_horizon", "selection_override")),
@@ -351,6 +352,11 @@ _SPECS = [
          "fly_speed", category="navigation", minimum=0.0),
     _app("navigation.walk.speed", ("advanced", "walk_speed"), ValueKind.NUMBER, "Walk speed",
          "walk_speed", category="navigation", minimum=0.0),
+    _app("navigation.object.translation_sensitivity",
+         ("advanced", "object_translation_sensitivity"),
+         ValueKind.NUMBER, "Object movement sensitivity", "object_translation_sensitivity",
+         category="object", minimum=0.0, extra_capabilities=("object_manipulation",),
+         help_text="Multiplier for selected-object movement on Object's secondary layer."),
     _app("navigation.object.translation_frame", ("advanced", "object_translation_frame"),
          ValueKind.ENUM, "Object movement frame", "object_translation_frame", category="object",
          choices=("view", "ground"),

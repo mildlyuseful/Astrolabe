@@ -167,9 +167,10 @@ the daemon-authoritative effective navigation mode.
   - **object**: primary motion rotates selected root actors as one group around their shared
     location center using the current viewport axes. The secondary layer's **View** frame translates
     in viewport right/up with twist for depth; **Ground** matches Walk movement with planar
-    sideways/forward on horizontal viewport axes and twist along world Z. Empty selection is a no-op, selected attached descendants are
-    filtered out, and one `ScopedEditorTransaction` is retained per gesture so Undo restores the
-    whole move. The level viewport camera is not written.
+    sideways/forward on horizontal viewport axes and twist along world Z. The per-app Object movement
+    sensitivity multiplies translation only. Empty selection is a no-op, selected attached
+    descendants are filtered out, and one `ScopedEditorTransaction` is retained per gesture so Undo
+    restores the whole move. The level viewport camera is not written.
   - **fly ≠ walk** (verified): they only coincide when the camera is level and you don't twist. The
     two real differences are (a) banking on look, (b) 3D-along-look vs horizontal-plane movement. Kept
     as separate modes for Blender parity.

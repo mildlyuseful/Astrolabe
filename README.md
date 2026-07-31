@@ -196,9 +196,9 @@ than being carried across.
   as a group around their shared center. The secondary layer translates the group: **View** moves
   right/up in the viewport plane with twist for depth, while **Ground** mirrors Walk movement:
   planar motion moves sideways/forward on the ground and twist moves up/down. Object Pitch/Yaw/Roll and
-  Translate X/Y/Z each have an independent source axis and invert switch. An empty selection is a
-  no-op. Choose Object under the app's Mode setting, or assign **Switch navigation to Object** /
-  **Hold Object mode** in Keybindings.
+  Translate X/Y/Z each have an independent source axis and invert switch, and **Movement sensitivity**
+  scales only the secondary translation layer. An empty selection is a no-op. Choose Object under the
+  app's Mode setting, or assign **Switch navigation to Object** / **Hold Object mode** in Keybindings.
 - The mode switch is global and manual. Navigation is otherwise selected by the foreground app.
 
 ### Physical orientation and action routing

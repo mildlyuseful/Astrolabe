@@ -176,8 +176,9 @@ cursor"). Two halves, like the other apps:
 - **object**: primary motion rotates selected root objects as one group around their shared origin
   center using the current view's right/up/forward axes. The secondary layer uses either **View**
   translation (viewport right/up plus twist depth) or **Ground** translation matching Walk
-  (planar sideways/forward on horizontal view axes, with twist along world Z). Empty selection is a no-op; selected
-  descendants of another selected object are excluded so parenting cannot apply motion twice. One
+  (planar sideways/forward on horizontal view axes, with twist along world Z). The per-app Object
+  movement sensitivity multiplies translation only. Empty selection is a no-op; selected descendants
+  of another selected object are excluded so parenting cannot apply motion twice. One
   short-lived modal operator owns each physical transform gesture: it closes after 150 ms without
   motion or before Blender handles another command, making the whole gesture one immediately
   available undo action without moving the viewport.

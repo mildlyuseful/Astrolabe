@@ -106,9 +106,9 @@ def rotate_object(frame, o, view, pivot):
         frame.location = list(v_add(pivot, rotate_about_axis(relative, axis, angle)))
 
 
-def object_translation(p, z, view, dist, frame="view"):
+def object_translation(p, z, view, dist, frame="view", sensitivity=1.0):
     """Translate in either the view basis or the Walk-style ground basis."""
-    scale = MOVE_SCALE * _clamp_dist(dist)
+    scale = MOVE_SCALE * _clamp_dist(dist) * float(sensitivity)
     if frame == "ground":
         return v_add(
             v_add(v_scale(horizontal(view.right), p[0] * scale),

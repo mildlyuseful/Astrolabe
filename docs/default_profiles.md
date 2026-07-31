@@ -57,6 +57,10 @@ Host sign/scale and user inversion/gain compose multiplicatively (baseline direc
 inversion). Global and per-action source routing remain user/device settings rather than host-profile
 calibration data.
 
+`navigation.object.translation_sensitivity` is a linked Global/app user multiplier with a System
+value of `1.0`. Only Object-capable hosts expose it, and their add-ons apply it to secondary-layer
+selected-object translation after routing; Object rotation is unaffected.
+
 Orbit-pivot and cursor-zoom gesture lifetimes are independent. `orbit_pivot_hold_sec` controls
 ray-derived orbit pivots; `zoom_cursor_hold_sec` controls only the target used by **To Cursor** zoom.
 Pan or zoom invalidates the orbit pivot. Pan preserves the cursor-zoom target; orbit invalidates it.

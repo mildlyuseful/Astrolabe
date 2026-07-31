@@ -31,7 +31,7 @@ import unreal
 
 import tbnav_unreal_camera as cammath
 
-ADDIN_VERSION = "0.2.18"         # keep in sync with version.json and TrackballNav.uplugin
+ADDIN_VERSION = "0.2.19"         # keep in sync with version.json and TrackballNav.uplugin
 _DEFAULT_PORT = 47900
 PIVOT_HOLD_IDLE = 0.5            # fallback for adv.orbit_hold_sec / adv.zoom_hold_sec
 OBJECT_GESTURE_IDLE = 0.5        # coalesce one continuous actor transform into one undo step
@@ -851,7 +851,8 @@ def _apply_object(cam, o, p, z, idle, adv):
             _write_actor_frame(actor, frame)
     else:
         delta = cammath.object_translation(
-            p, z, cam, _focus["dist"], adv.get("object_translation_frame", "view"))
+            p, z, cam, _focus["dist"], adv.get("object_translation_frame", "view"),
+            adv.get("object_translation_sensitivity", 1.0))
         for actor, frame in frames:
             frame.location = list(cammath.v_add(tuple(frame.location), delta))
             _write_actor_frame(actor, frame)

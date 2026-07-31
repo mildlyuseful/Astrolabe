@@ -1,4 +1,4 @@
 {
-  "version": "0.1.29",
-  "_comment": "Kept in sync with bl_info['version'] and ADDIN_VERSION in __init__.py. The daemon's integrations._ADDINS['blender'] reads this (like Fusion's TrackballNav.manifest) to drive auto_update. 0.1.29: make Ground Object translation use Walk-style planar movement with twist for world up."
+  "version": "0.1.30",
+  "_comment": "Kept in sync with bl_info['version'] and ADDIN_VERSION in __init__.py. The daemon's integrations._ADDINS['blender'] reads this (like Fusion's TrackballNav.manifest) to drive auto_update. 0.1.30: apply the user-configurable Object movement sensitivity."
 }

@@ -41,6 +41,7 @@ def test_system_defaults_cover_every_setting_and_app_and_are_packaged():
 def test_system_defaults_use_concrete_canonical_values():
     assert SYSTEM_DEFAULTS.global_value("input.mode.default") == "3d"
     assert SYSTEM_DEFAULTS.global_value("navigation.refresh_rate") == 30
+    assert SYSTEM_DEFAULTS.global_value("navigation.object.translation_sensitivity") == 1.0
     for app_id, values in SYSTEM_DEFAULTS.app_overrides.items():
         assert 0 not in values.values(), app_id
         assert "default" not in values.values(), app_id

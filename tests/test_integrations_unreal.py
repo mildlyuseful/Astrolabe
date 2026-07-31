@@ -32,7 +32,7 @@ def _patch_unreal(monkeypatch, exe):
 
 def test_unreal_is_a_bundled_addin():
     assert "unreal" in integrations.ADDIN_KEYS
-    assert integrations.bundled_addin_version("unreal") == "0.2.18"
+    assert integrations.bundled_addin_version("unreal") == "0.2.19"
 
 
 def test_unreal_object_mode_uses_selected_roots_and_editor_transaction():
@@ -41,6 +41,7 @@ def test_unreal_object_mode_uses_selected_roots_and_editor_transaction():
     assert "def _selected_actor_roots():" in source
     assert 'transaction_type("Astrolabe Object Transform")' in source
     assert "cammath.rotate_object(frame, o, cam, pivot)" in source
+    assert 'adv.get("object_translation_sensitivity", 1.0)' in source
     assert integrations.APPS_BY_KEY["unreal"].setup is integrations.install_unreal
 
 
@@ -62,7 +63,7 @@ def test_install_copies_plugin_and_enables(isolated_config, tmp_path, monkeypatc
     assert ok is True
     u = cfg.snapshot().app_operational["unreal"]
     assert u["installed"] is True and u["enabled"] is True
-    assert u["addin_version"] == "0.2.18"
+    assert u["addin_version"] == "0.2.19"
     dest = integrations.unreal_plugin_dir()
     # the whole plugin must be copied: the .uplugin descriptor, the version manifest the daemon
     # reads, and the Content/Python payload Unreal auto-runs.
@@ -72,7 +73,7 @@ def test_install_copies_plugin_and_enables(isolated_config, tmp_path, monkeypatc
         assert (dest / "Content" / "Python" / name).exists(), f"missing {name}"
     uplugin = (dest / "TrackballNav.uplugin").read_text(encoding="utf-8")
     assert "GeoReferencing" in uplugin          # under-cursor orbit Half A
-    assert integrations.installed_addin_version("unreal") == "0.2.18"
+    assert integrations.installed_addin_version("unreal") == "0.2.19"
 
 
 def test_install_fails_when_unreal_absent(isolated_config, monkeypatch):
