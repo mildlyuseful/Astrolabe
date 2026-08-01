@@ -117,6 +117,13 @@ try {
             "the pinned interpreter.")
     }
 
+    # Interpreter distributions use different valid OpenSSL DLL basenames. Resolve every semantic
+    # runtime dependency before dependency sync and C compilation so a bad host layout fails fast.
+    & $BuildPython tools/stage_python_runtime.py --python $BuildPython
+    if ($LASTEXITCODE -ne 0) {
+        throw "Pinned interpreter runtime preflight failed with exit code $LASTEXITCODE"
+    }
+
     & $Uv sync --locked --no-editable --extra release --extra onshape --python $BuildPython
     if ($LASTEXITCODE -ne 0) {
         throw "Locked release-environment sync failed with exit code $LASTEXITCODE"
@@ -200,28 +207,17 @@ try {
         throw "The release tree unexpectedly contains non-shipping ui_demo content."
     }
 
-    # Nuitka normally follows these native dependencies, but its dependency scanner does not
-    # recognize every valid CPython distribution flavor. In particular, a uv-managed standalone
-    # interpreter can otherwise produce an onedir that has _tkinter.pyd but omits Tcl/Tk and the
-    # stable-ABI/runtime DLLs it loads. Stage the pinned interpreter's known dynamic runtime
-    # dependencies explicitly, then let packaged smoke prove that the resulting tree starts.
-    $PythonBase = (& $ReleasePython -c "import sys; print(sys.base_prefix)").Trim()
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($PythonBase)) {
-        throw "Could not resolve the pinned interpreter base directory."
+    # Nuitka normally follows these dependencies, but not every CPython distribution flavor is
+    # recognized by its scanner. Stage the exact files accepted by the early preflight.
+    & $BuildPython tools/stage_python_runtime.py --python $BuildPython `
+        --destination $ReleaseDirectory
+    if ($LASTEXITCODE -ne 0) {
+        throw "Pinned interpreter runtime staging failed with exit code $LASTEXITCODE"
     }
-    foreach ($relativeRuntimePath in @(
-            "python3.dll",
-            "vcruntime140_1.dll",
-            "DLLs/tcl86t.dll",
-            "DLLs/tk86t.dll",
-            "DLLs/libcrypto-3-x64.dll",
-            "DLLs/libssl-3-x64.dll",
-            "DLLs/libffi-8.dll")) {
-        $sourceRuntimePath = Join-Path $PythonBase $relativeRuntimePath
-        if (-not (Test-Path -LiteralPath $sourceRuntimePath -PathType Leaf)) {
-            throw "Pinned interpreter runtime file is missing: $sourceRuntimePath"
-        }
-        Copy-Item -LiteralPath $sourceRuntimePath -Destination $ReleaseDirectory -Force
+
+    & $ReleasePython tools/audit_native_binaries.py --root $ReleaseDirectory
+    if ($LASTEXITCODE -ne 0) {
+        throw "Native binary attribution audit failed with exit code $LASTEXITCODE"
     }
 
     $SignatureReport = Join-Path $OutputRoot "signature-report.json"

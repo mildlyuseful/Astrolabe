@@ -129,8 +129,8 @@
 
   "_comment_runtime": [
     "Components the Nuitka onedir build embeds that are not Python distributions and therefore",
-    "cannot be enumerated from the lock. These are reviewed against a real onedir tree rather than",
-    "assumed; see TODO.md for the artifact-level audit that closes the remaining native libraries."
+    "cannot be enumerated from the lock. tools/audit_native_binaries.py reconciles every DLL, PYD,",
+    "and EXE in the completed onedir tree against the native_artifacts rules below."
   ],
   "bundled_runtime": [
     {
@@ -153,6 +153,98 @@
       "copyright": "Copyright Kay Hayen",
       "source": "https://github.com/Nuitka/Nuitka",
       "note": "Nuitka itself is a build tool, but its runtime support code is compiled into the produced executable."
+    },
+    {
+      "name": "OpenSSL",
+      "license": "Apache-2.0",
+      "copyright": "Copyright 1998-2025 The OpenSSL Project Authors. All Rights Reserved.",
+      "source": "https://openssl-library.org/source/license/",
+      "note": "The pinned CPython distribution carries OpenSSL 3 dynamic libraries for its standard-library TLS and hashing extensions."
+    },
+    {
+      "name": "libffi",
+      "license": "MIT",
+      "copyright": "Copyright (c) 1996-2008 Red Hat, Inc and others.",
+      "source": "https://docs.python.org/3.13/license.html#libffi",
+      "note": "The pinned CPython distribution carries libffi for the standard-library ctypes extension."
+    },
+    {
+      "name": "Microsoft Visual C++ Runtime",
+      "license": "LicenseRef-Microsoft-Visual-Cpp-Runtime",
+      "copyright": "Copyright Microsoft Corporation.",
+      "source": "https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files",
+      "note": "The pinned CPython distribution and compiled extensions carry application-local Visual C++ runtime libraries, subject to the Microsoft Software License Terms."
+    }
+  ],
+
+  "_comment_native_artifacts": [
+    "Patterns are repository-data authority for the completed Windows onedir tree. A basename-only",
+    "pattern matches only the onedir root; a slash makes it path-aware. Every DLL, PYD, and EXE must",
+    "match exactly one rule, and every rule must match at least one file."
+  ],
+  "native_artifacts": [
+    {
+      "component": "Astrolabe",
+      "first_party": true,
+      "include": ["trackball_daemon/plugins/autocad/TrackballNavAcad.dll"]
+    },
+    {
+      "component": "Nuitka",
+      "include": ["Astrolabe.exe"]
+    },
+    {
+      "component": "cffi",
+      "include": ["_cffi_backend.pyd"]
+    },
+    {
+      "component": "cryptography",
+      "include": ["cryptography/hazmat/bindings/*.pyd"]
+    },
+    {
+      "component": "pillow",
+      "include": ["PIL/*.pyd"]
+    },
+    {
+      "component": "pywin32",
+      "include": [
+        "_win32sysloader.pyd",
+        "_wmi.pyd",
+        "pythoncom*.dll",
+        "pywintypes*.dll",
+        "win32*.pyd"
+      ]
+    },
+    {
+      "component": "winrt-runtime",
+      "include": ["winrt/*.pyd"]
+    },
+    {
+      "component": "CPython",
+      "include": ["*.pyd", "python*.dll"],
+      "exclude": [
+        "_cffi_backend.pyd",
+        "_win32sysloader.pyd",
+        "_wmi.pyd",
+        "pythoncom*.dll",
+        "pywintypes*.dll",
+        "win32*.pyd"
+      ]
+    },
+    {
+      "component": "Tcl/Tk",
+      "include": ["tcl*.dll", "tk*.dll"]
+    },
+    {
+      "component": "OpenSSL",
+      "include": ["libcrypto-3*.dll", "libssl-3*.dll"]
+    },
+    {
+      "component": "libffi",
+      "include": ["libffi-*.dll"]
+    },
+    {
+      "component": "Microsoft Visual C++ Runtime",
+      "include": ["msvcp*.dll", "vcruntime*.dll"]
     }
   ]
 }

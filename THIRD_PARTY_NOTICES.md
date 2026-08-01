@@ -70,16 +70,23 @@ enumerated from the dependency lock:
 | CPython | PSF-2.0 | Copyright (c) 2001-2025 Python Software Foundation. All rights reserved. | <https://github.com/python/cpython> |
 | Tcl/Tk | TCL | Copyright (c) 1991-1994 The Regents of the University of California; 1994-1998 Sun Microsystems, Inc.; 1998-2000 Scriptics Corporation; and other parties | <https://www.tcl-lang.org/> |
 | Nuitka runtime support | Apache-2.0 | Copyright Kay Hayen | <https://github.com/Nuitka/Nuitka> |
+| OpenSSL 3 | Apache-2.0 | Copyright 1998-2025 The OpenSSL Project Authors. All Rights Reserved. | <https://openssl-library.org/source/license/> |
+| libffi | MIT | Copyright (c) 1996-2008 Red Hat, Inc and others. | <https://docs.python.org/3.13/license.html#libffi> |
+| Microsoft Visual C++ Runtime | Microsoft Software License Terms | Copyright Microsoft Corporation. | <https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files> |
 
 Tcl/Tk is embedded because the settings window and control panel are Tkinter. Nuitka is a build
-tool, but its runtime support code is compiled into the produced executable.
+tool, but its runtime support code is compiled into the produced executable. OpenSSL and libffi are
+the dynamic libraries carried by the pinned CPython distribution for its standard-library TLS,
+hashing, and `ctypes` extensions. The application-local Visual C++ runtime files remain subject to
+Microsoft's redistribution terms.
 
-These three are recorded from the build configuration. The native libraries their runtimes carry in
-turn are enumerated against a real onedir tree rather than assumed; `TODO.md` tracks that
-artifact-level audit as an open release item.
+`tools/audit_native_binaries.py` walks the completed onedir tree and requires every DLL, PYD, and EXE
+to match exactly one component rule in `third_party.json`. The release build runs that artifact-level
+audit after Nuitka and explicit interpreter-runtime staging.
 
 ## Keeping this current
 
 `tools/audit_notices.py` compares this file and `third_party.json` against the distributions
 actually installed into a release runtime environment. A dependency that starts shipping, or one
-that stops, fails the audit until both files are updated.
+that stops, fails the audit until both files are updated. `tools/audit_native_binaries.py`
+independently does the same for compiled files in the completed onedir artifact.

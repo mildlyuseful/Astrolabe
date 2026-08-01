@@ -28,8 +28,8 @@ FIRST_PARTY = {"trackball-daemon", "trackball_daemon", "astrolabe-daemon", "astr
 
 # Environment plumbing that a seeded virtualenv contains but no release artifact embeds: the
 # freezer includes the application's imported packages, not the installer that put them there.
-# What the onedir tree actually contains is confirmed by the artifact-level audit tracked in
-# TODO.md; this list only stops a seeded environment from producing a false failure here.
+# tools/audit_native_binaries.py confirms what the onedir actually contains; this list only stops a
+# seeded environment from producing a false failure in the distribution-level audit here.
 ENVIRONMENT_TOOLING = {"pip", "setuptools", "wheel", "pkg_resources", "uv"}
 
 _ENUMERATE = (
