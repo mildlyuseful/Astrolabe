@@ -73,12 +73,14 @@ enumerated from the dependency lock:
 | OpenSSL 3 | Apache-2.0 | Copyright 1998-2025 The OpenSSL Project Authors. All Rights Reserved. | <https://openssl-library.org/source/license/> |
 | libffi | MIT | Copyright (c) 1996-2008 Red Hat, Inc and others. | <https://docs.python.org/3.13/license.html#libffi> |
 | Microsoft Visual C++ Runtime | Microsoft Software License Terms | Copyright Microsoft Corporation. | <https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files> |
+| zlib | Zlib | Copyright (c) 1995-2011 Jean-loup Gailly and Mark Adler. | <https://docs.python.org/3.13/license.html#zlib> |
 
 Tcl/Tk is embedded because the settings window and control panel are Tkinter. Nuitka is a build
 tool, but its runtime support code is compiled into the produced executable. OpenSSL and libffi are
 the dynamic libraries carried by the pinned CPython distribution for its standard-library TLS,
 hashing, and `ctypes` extensions. The application-local Visual C++ runtime files remain subject to
-Microsoft's redistribution terms.
+Microsoft's redistribution terms. Official CPython also carries a dynamic zlib library; supported
+standalone interpreter layouts may link that component without a separate DLL.
 
 `tools/audit_native_binaries.py` walks the completed onedir tree and requires every DLL, PYD, and EXE
 to match exactly one component rule in `third_party.json`. The release build runs that artifact-level

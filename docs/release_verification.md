@@ -85,8 +85,9 @@ The audit reads installed distribution metadata, so it establishes that every *P
 the release runtime has a resolved disposition. After Nuitka and runtime staging,
 `tools/audit_native_binaries.py` separately walks every DLL, PYD, and EXE in the completed onedir
 tree. Each binary must match exactly one first- or third-party component rule in `third_party.json`,
-every third-party owner must have a notice, and stale rules that match nothing fail the build. Run it
-directly against an existing artifact with:
+every third-party owner must have a notice, and stale rules that match nothing fail the build unless
+the rule explicitly represents a dynamic library used by only one supported interpreter layout. Run
+it directly against an existing artifact with:
 
 ```powershell
 uv run --locked --all-extras python tools/audit_native_binaries.py --root build/release/nuitka/Astrolabe

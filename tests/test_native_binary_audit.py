@@ -12,6 +12,7 @@ def _records(tmp_path):
         "bundled_runtime": [
             {"name": "CPython"},
             {"name": "OpenSSL"},
+            {"name": "zlib"},
         ],
         "native_artifacts": [
             {"component": "Astrolabe", "first_party": True,
@@ -19,12 +20,13 @@ def _records(tmp_path):
             {"component": "CPython", "include": ["*.pyd", "python*.dll"],
              "exclude": ["special.pyd"]},
             {"component": "OpenSSL", "include": ["libcrypto-3*.dll", "special.pyd"]},
+            {"component": "zlib", "include": ["zlib*.dll"], "optional": True},
         ],
     }
     data_path = tmp_path / "third_party.json"
     data_path.write_text(json.dumps(data), encoding="utf-8")
     notices = tmp_path / "THIRD_PARTY_NOTICES.md"
-    notices.write_text("CPython\nOpenSSL\n", encoding="utf-8")
+    notices.write_text("CPython\nOpenSSL\nzlib\n", encoding="utf-8")
     return data_path, notices
 
 
@@ -80,3 +82,32 @@ def test_native_audit_rejects_overlapping_rules(tmp_path):
     _, problems = native.audit(root, data_path=data, notices_path=notices)
 
     assert any("ambiguous attribution" in problem for problem in problems)
+
+
+def test_optional_runtime_variant_rule_may_match_nothing(tmp_path):
+    data, notices = _records(tmp_path)
+    root = tmp_path / "onedir"
+    _binary(root, "plugins/owned.dll")
+    _binary(root, "_ssl.pyd")
+    _binary(root, "python313.dll")
+    _binary(root, "libcrypto-3.dll")
+    _binary(root, "special.pyd")
+
+    _, problems = native.audit(root, data_path=data, notices_path=notices)
+
+    assert not problems
+
+
+def test_official_cpython_only_runtime_files_have_explicit_owners():
+    records = json.loads(native.DATA.read_text(encoding="utf-8"))
+
+    for path, owner in {
+            "mfc140u.dll": "Microsoft Visual C++ Runtime",
+            "zlib1.dll": "zlib",
+    }.items():
+        matches = [
+            rule for rule in records["native_artifacts"]
+            if native._rule_matches(path, rule)
+        ]
+        assert [rule["component"] for rule in matches] == [owner]
+    assert matches[0]["optional"] is True

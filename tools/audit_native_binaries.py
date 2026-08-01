@@ -83,7 +83,7 @@ def audit(root, *, data_path=DATA, notices_path=NOTICES):
         attributions[relative] = component
 
     for index, rule in enumerate(rules):
-        if index not in used_rules:
+        if index not in used_rules and not rule.get("optional"):
             problems.append(
                 "native attribution rule matched nothing in the artifact: "
                 f"{rule.get('component', '<missing>')}")

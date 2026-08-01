@@ -173,14 +173,22 @@
       "license": "LicenseRef-Microsoft-Visual-Cpp-Runtime",
       "copyright": "Copyright Microsoft Corporation.",
       "source": "https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files",
-      "note": "The pinned CPython distribution and compiled extensions carry application-local Visual C++ runtime libraries, subject to the Microsoft Software License Terms."
+      "note": "The pinned CPython distribution and compiled extensions carry application-local Visual C++ and MFC runtime libraries, subject to the Microsoft Software License Terms."
+    },
+    {
+      "name": "zlib",
+      "license": "Zlib",
+      "copyright": "Copyright (c) 1995-2011 Jean-loup Gailly and Mark Adler.",
+      "source": "https://docs.python.org/3.13/license.html#zlib",
+      "note": "The official CPython distribution carries zlib as a dynamic library; the uv-managed standalone distribution links it without a separate DLL."
     }
   ],
 
   "_comment_native_artifacts": [
     "Patterns are repository-data authority for the completed Windows onedir tree. A basename-only",
     "pattern matches only the onedir root; a slash makes it path-aware. Every DLL, PYD, and EXE must",
-    "match exactly one rule, and every rule must match at least one file."
+    "match exactly one rule. A runtime-variant rule may be optional when another supported",
+    "interpreter layout links that component without a separate file."
   ],
   "native_artifacts": [
     {
@@ -244,7 +252,12 @@
     },
     {
       "component": "Microsoft Visual C++ Runtime",
-      "include": ["msvcp*.dll", "vcruntime*.dll"]
+      "include": ["mfc*.dll", "msvcp*.dll", "vcruntime*.dll"]
+    },
+    {
+      "component": "zlib",
+      "include": ["zlib*.dll"],
+      "optional": true
     }
   ]
 }
