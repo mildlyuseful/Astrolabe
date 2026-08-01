@@ -48,8 +48,11 @@ creates a Windows standalone onedir executable, normalizes its root to `Astrolab
 side-effect-free packaged-resource smoke. The Windows build explicitly includes PyWinRT's projection
 package because collection
 projections used by BLE advertisement callbacks are imported dynamically and are invisible to static
-freezer analysis. It also stages the pinned CPython build's dynamic runtime DLLs explicitly because
-not every valid interpreter distribution is recognized by Nuitka's dependency scanner. Packaged
+freezer analysis. It discovers the pinned CPython build's required dynamic runtime families from the
+actual interpreter layout because official and standalone distributions use different valid OpenSSL
+DLL basenames. That preflight runs before dependency synchronization and compilation; the same
+resolved families are staged after Nuitka because not every valid interpreter distribution is
+recognized by its dependency scanner. Packaged
 smoke waits for the GUI-subsystem process and checks its actual exit code; it is not an asynchronous
 launch. The smoke imports that runtime projection, validates the AutoCAD DLL, loads
 defaults, profiles, descriptors, schemas, and examples, then compiles both System profiles without
@@ -79,8 +82,16 @@ uv run --locked --all-extras python tools/audit_notices.py --environment <runtim
 ```
 
 The audit reads installed distribution metadata, so it establishes that every *Python* component in
-the release runtime has a resolved disposition. It does not enumerate native libraries inside a
-built onedir tree; `TODO.md` tracks that artifact-level audit separately.
+the release runtime has a resolved disposition. After Nuitka and runtime staging,
+`tools/audit_native_binaries.py` separately walks every DLL, PYD, and EXE in the completed onedir
+tree. Each binary must match exactly one first- or third-party component rule in `third_party.json`,
+every third-party owner must have a notice, and stale rules that match nothing fail the build unless
+the rule explicitly represents a dynamic library used by only one supported interpreter layout. Run
+it directly against an existing artifact with:
+
+```powershell
+uv run --locked --all-extras python tools/audit_native_binaries.py --root build/release/nuitka/Astrolabe
+```
 
 Notice placement is verified in each distributed form rather than assumed from the build
 configuration. The packaged smoke fails when any add-on payload directory lacks the `LICENSE` and
@@ -92,9 +103,12 @@ merely declared:
 <wheel-venv>\Scripts\python.exe tools/verify_installed_metadata.py
 ```
 
-CI also builds and installs the wheel outside the checkout before running its smoke and binding
-validation, runs that notice verification against the installed wheel, and runs the bundled
-component audit against a separately synchronized release runtime. A separate job compiles the
+Every pull request builds and installs the wheel outside the checkout before running its smoke and
+binding validation, runs that notice verification against the installed wheel, and runs the bundled
+component audit against a separately synchronized release runtime. When a pull request changes an
+artifact input, the unsigned onedir waits for those checks and then exercises runtime discovery,
+native attribution, packaged smoke, SBOM, archive, and manifest before merge. A manual CI run always
+builds it. A separate job compiles the
 retained XIAO protocol-bench sketch with pinned Arduino CLI and board-core inputs, reports binary
 sizes, and retains the firmware artifacts. Seeed's pinned nRF52 core bundles its packaging utility
 for Windows and macOS but calls `adafruit-nrfutil` from `PATH` on Linux, so that job installs and

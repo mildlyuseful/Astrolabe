@@ -59,12 +59,16 @@ def test_release_build_pins_python_and_normalizes_the_user_visible_onedir():
     assert "unexpectedly contains non-shipping ui_demo content" in RELEASE_BUILD
 
 
-def test_release_build_explicitly_stages_the_pinned_python_native_runtime():
-    for runtime_file in (
-            "python3.dll", "vcruntime140_1.dll", "DLLs/tcl86t.dll", "DLLs/tk86t.dll",
-            "DLLs/libcrypto-3-x64.dll", "DLLs/libssl-3-x64.dll", "DLLs/libffi-8.dll"):
-        assert f'"{runtime_file}"' in RELEASE_BUILD
-    assert 'Copy-Item -LiteralPath $sourceRuntimePath' in RELEASE_BUILD
+def test_release_build_preflights_and_stages_the_discovered_python_runtime():
+    preflight = "tools/stage_python_runtime.py --python $BuildPython"
+    compile_onedir = "$ReleasePython -m nuitka"
+    staging = "--destination $ReleaseDirectory"
+
+    assert RELEASE_BUILD.count(preflight) == 2
+    assert RELEASE_BUILD.index(preflight) < RELEASE_BUILD.index(compile_onedir)
+    assert RELEASE_BUILD.index(compile_onedir) < RELEASE_BUILD.index(staging)
+    assert "libcrypto-3-x64.dll" not in RELEASE_BUILD
+    assert "tools/audit_native_binaries.py --root $ReleaseDirectory" in RELEASE_BUILD
 
 
 def test_packaged_smoke_waits_for_the_gui_subsystem_process_exit_code():
@@ -130,10 +134,19 @@ def test_ordinary_ci_builds_and_verifies_the_unsigned_onedir():
     assert "claiming to be signed" in WORKFLOW
 
 
-def test_the_onedir_build_is_kept_off_pull_requests_but_stays_reachable():
-    """A ten-minute Windows job per proposal costs more than it finds; it gates entry to main instead."""
-    assert "if: github.event_name != 'pull_request'" in WORKFLOW
+def test_the_onedir_build_gates_packaging_changes_before_merge_and_stays_reachable():
+    assert "Detect packaging-relevant changes" in WORKFLOW
+    assert "needs: checks" in WORKFLOW
+    assert "needs.checks.outputs.build-onedir == 'true'" in WORKFLOW
+    assert "github.event_name == 'workflow_dispatch'" in WORKFLOW
     assert "workflow_dispatch:" in WORKFLOW, "it must still be runnable against a branch on demand"
+
+
+def test_ordinary_ci_is_not_duplicated_after_merge():
+    trigger = WORKFLOW.split("concurrency:", 1)[0]
+
+    assert "pull_request:" in trigger
+    assert "push:" not in trigger
 
 
 def test_superseded_runs_are_cancelled():

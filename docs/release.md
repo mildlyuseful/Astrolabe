@@ -121,18 +121,22 @@ them; a second copy of a gate list is a list that goes stale.
 
 | Workflow / job | Trigger | Produces | Credentials |
 |---|---|---|---|
-| `ci.yml` · `checks`, `firmware` | every pull request and push to `main` | wheel, sdist, installed-wheel smoke, SBOM, firmware | none |
-| `ci.yml` · `onedir` | push to `main`, or a manual run | **unsigned onedir**, SBOM, manifest | none |
+| `ci.yml` · `checks`, `firmware` | every pull request, or a manual run | wheel, sdist, installed-wheel smoke, SBOM, firmware | none |
+| `ci.yml` · `onedir` | packaging-relevant pull request, or a manual run | **unsigned onedir**, SBOM, manifest | none |
 | `release.yml` | a `v*` tag, or a manual run naming an exact revision | the same artifacts plus a **draft** GitHub release | signing secrets, scoped to the `release` environment |
 
 `ci.yml` references no secrets and declares no environment, and tests enforce both.
 
-The onedir build is deliberately not on pull requests. It is what a user actually runs, and its build
-path — Nuitka, data-file inclusion, the packaged smoke, the SBOM, the manifest — is exercised nowhere
-else, so it does need to run somewhere: on the way into `main`, before anything can be released from
-it. Per proposal it is a ten-plus-minute Windows job billed at twice the Linux rate, which spends the
-monthly budget faster than it finds anything. Use the `workflow_dispatch` trigger to run it against a
-branch when the packaging path is what changed.
+The onedir build is what a user actually runs, and its build path — interpreter-runtime discovery,
+Nuitka, data-file inclusion, native attribution, packaged smoke, SBOM, and manifest — is exercised
+nowhere else. Pull requests therefore build it when a release tool, dependency/packaging input,
+licensing payload, product identity, host payload, or packaged data file changes. Ordinary Python,
+test, firmware, and documentation changes keep the faster checks. The onedir waits for those checks
+to pass, and `workflow_dispatch` always runs it when a branch needs explicit artifact qualification.
+
+There is no second ordinary CI run after merge. A change passes its applicable gates on the pull
+request, avoiding duplicate Windows and firmware minutes and preventing packaging failures from
+first appearing on `main`.
 
 Superseded runs are cancelled, so a branch pushed several times in a row does not keep every
 intermediate run alive to completion.

@@ -3,9 +3,9 @@
 
 name: CI
 
-# Ordinary branch and pull-request CI, split by cost. Every pull request gets the fast checks; the
-# packaging path -- which needs a Windows runner for ten-plus minutes, billed at twice the Linux rate --
-# runs when something is about to become releasable rather than on every proposal.
+# Pull-request CI is split by cost. Every proposal gets the fast checks; the packaging path -- which
+# needs a Windows runner for ten-plus minutes, billed at twice the Linux rate -- runs before merge only
+# when artifact inputs change. A manual run always exercises it.
 #
 # This workflow never receives signing credentials. It references no secrets, and signing lives in
 # release.yml behind an approval environment. `tests/test_ci_contract.py` enforces both, because the
@@ -13,8 +13,6 @@ name: CI
 
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 # Supersede a run whose commit is no longer the tip. Without this, a branch pushed several times in a
@@ -31,10 +29,45 @@ jobs:
   checks:
     runs-on: windows-latest
     timeout-minutes: 20
+    outputs:
+      build-onedir: ${{ steps.packaging-scope.outputs.build-onedir }}
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Detect packaging-relevant changes
+        id: packaging-scope
+        shell: pwsh
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if ($env:EVENT_NAME -eq "workflow_dispatch") {
+            $BuildOnedir = $true
+          }
+          else {
+            $ChangedPaths = @(git diff --name-only $env:BASE_SHA $env:HEAD_SHA)
+            if ($LASTEXITCODE -ne 0) { throw "Could not determine pull-request changes." }
+            $ReleaseInputs = @(
+              '^\.github/workflows/ci\.yml$',
+              '^(pyproject\.toml|uv\.lock|MANIFEST\.in)$',
+              '^(LICENSE|NOTICE|THIRD_PARTY_NOTICES\.md|LICENSING\.md|licensing\.json|third_party\.json)$',
+              '^LICENSES/',
+              '^tools/(build_release|sign_windows_artifact)\.ps1$',
+              '^tools/(archive_release|audit_native_binaries|audit_notices|build_release_manifest|finalize_sbom|release_entry|release_identity|stage_python_runtime|verify_autocad_artifact|verify_release_manifest)\.py$',
+              '^trackball_daemon/(__init__|app_registry|integrations|product)\.py$',
+              '^trackball_daemon/.*\.(asmdef|cs|dll|gd|ico|json|md|png|rb|txt|uplugin|yaml|yml)$'
+            )
+            $BuildOnedir = [bool]($ChangedPaths | Where-Object {
+              $Path = $_
+              $ReleaseInputs | Where-Object { $Path -match $_ } | Select-Object -First 1
+            } | Select-Object -First 1)
+          }
+          "build-onedir=$($BuildOnedir.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -129,11 +162,11 @@ jobs:
     # (Nuitka, data-file inclusion, packaged smoke, SBOM, manifest) is exercised nowhere else. Unsigned
     # by construction: nothing here has access to a certificate.
     #
-    # Not on pull requests. It is a ten-plus-minute Windows job billed at twice the Linux rate, and
-    # running it per proposal spends the monthly budget faster than it finds anything -- a packaging
-    # break is caught here on the way into main, before any release can be cut from it. Run it against a
-    # branch on demand with the workflow_dispatch trigger.
-    if: github.event_name != 'pull_request'
+    # Run after fast checks only for a PR that changes an artifact input. This makes packaging failures
+    # pre-merge failures without paying for Nuitka on ordinary code, test, firmware, or documentation
+    # changes. workflow_dispatch remains the explicit full-build path for any branch.
+    needs: checks
+    if: github.event_name == 'workflow_dispatch' || needs.checks.outputs.build-onedir == 'true'
     name: Unsigned onedir artifact
     runs-on: windows-latest
     # A kill switch, not an estimate: the local build takes about five minutes and a hosted runner is
