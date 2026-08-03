@@ -20,6 +20,20 @@ config ASTROLABE_USB
     default y
     depends on ZMK_USB
 
+config ASTROLABE_DAEMON_LAYER
+    int "Keymap layer activated while a daemon owns the route"
+    default 1
+    help
+      Layer index activated when a daemon claims the route and deactivated when it releases.
+      It exists so standalone-only gestures -- recovery holds, HID mouse buttons -- cannot fire
+      while the daemon owns input, and so daemon control bits are reported with no arbitration
+      delay in front of them.
+
+      The route is the sole writer of this layer. Do not bind a layer behavior to it: the route
+      can change with no user action at all (cable pull, daemon crash, keepalive timeout), and
+      two writers would desynchronise with no way to recover. Must match the second layer
+      declared in the keymap.
+
 config ASTROLABE_LOG_LEVEL
     int "Astrolabe log level"
     range 0 4

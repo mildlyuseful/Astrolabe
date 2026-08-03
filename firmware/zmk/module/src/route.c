@@ -20,6 +20,7 @@
 
 #include <zmk/endpoints.h>
 #include <zmk/hid.h>
+#include <zmk/keymap.h>
 
 LOG_MODULE_REGISTER(astrolabe_route, CONFIG_ASTROLABE_LOG_LEVEL);
 
@@ -169,6 +170,22 @@ static struct k_work_q output_queue;
 static struct k_work output_work;
 
 static void submit_output(void);
+
+/* The route is the sole authority over the daemon layer, and the coupling is deliberately one
+ * way: a route change may move the layer, but a layer change never moves the route. The route
+ * can transition with no user action at all -- cable pull, daemon crash, keepalive timeout -- so
+ * the layer has to be able to snap back on its own. Two writers would drift apart with no
+ * defined way to reconcile.
+ *
+ * Called with no route lock held: zmk_keymap_layer_* raises a layer-state event synchronously,
+ * and running listeners under the lock would invert the ordering the output path relies on. */
+static void apply_route_layer(enum astrolabe_route route) {
+    if (route == ASTROLABE_ROUTE_STANDALONE) {
+        zmk_keymap_layer_deactivate(CONFIG_ASTROLABE_DAEMON_LAYER);
+    } else {
+        zmk_keymap_layer_activate(CONFIG_ASTROLABE_DAEMON_LAYER);
+    }
+}
 
 static int16_t clamp_report(float value) {
     if (value > 32767.0f) {
@@ -358,6 +375,7 @@ int astrolabe_route_claim(enum astrolabe_route route, astrolabe_route_lease_t *l
     clear_motion_locked();
     k_mutex_unlock(&state.lock);
     k_mutex_unlock(&state.output_lock);
+    apply_route_layer(route);
     return 0;
 }
 
@@ -392,6 +410,7 @@ void astrolabe_route_release(enum astrolabe_route route, astrolabe_route_lease_t
     clear_motion_locked();
     k_mutex_unlock(&state.lock);
     k_mutex_unlock(&state.output_lock);
+    apply_route_layer(ASTROLABE_ROUTE_STANDALONE);
 
     /* A lost USB attach ACK can leave the daemon's BLE link subscribed but unowned. */
     if (route == ASTROLABE_ROUTE_USB_DAEMON) {
@@ -421,6 +440,7 @@ void astrolabe_route_reset(void) {
     clear_motion_locked();
     k_mutex_unlock(&state.lock);
     k_mutex_unlock(&state.output_lock);
+    apply_route_layer(ASTROLABE_ROUTE_STANDALONE);
 }
 
 void astrolabe_route_motion(float wx, float wy, float wz, uint32_t now_ms) {

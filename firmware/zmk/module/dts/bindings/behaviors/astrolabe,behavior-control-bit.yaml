@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Single-parameter Astrolabe control behavior, taking only the protocol bit index and
+  reporting no standalone HID mouse button.
+
+  This exists because ZMK's hold-tap passes exactly one parameter to each of its bindings, so
+  the two-parameter astrolabe,behavior-control cannot be nested inside one. It is only useful
+  for positions whose standalone mouse-button mask is zero.
+
+compatible: "astrolabe,behavior-control-bit"
+
+include: one_param.yaml

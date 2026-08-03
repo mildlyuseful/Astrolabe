@@ -165,7 +165,11 @@ close these remaining gates:
 
 - Flash the candidate on the final electrical assembly. Verify both PMW3610 identities, shared-bus
   signal integrity, calibrated axes/signs, full-speed motion, standalone cursor/scroll feel, all five
-  switch positions, recovery chords, forced-standalone boot, and ordinary BLE/USB HID output.
+  switch positions, recovery gestures, forced-standalone boot, and ordinary BLE/USB HID output.
+- Verify the standalone/daemon layer split on hardware. Confirm the recovery and radio gestures are
+  reachable only in standalone, that daemon control bits report with no arbitration in front of
+  them, and that the layer follows the route with no manual step across cable pull, daemon
+  termination, and keepalive timeout — including a route change that happens mid-gesture.
 - Characterize automatic PMW3610 Run/Rest plus ZMK deep sleep on hardware: current draw, reliable
   MOTION/button wake, first-delta direction and magnitude, no reconnect dump, and surface-loss or
   illumination cases. SQUAL and shutter are diagnostics only; add no validity filter without this
@@ -187,6 +191,31 @@ close these remaining gates:
   and the custom service together.
 - Preserve the Arduino placeholder, PMW diagnostic sketch, and XIAO protocol-bench CI gate until the
   ZMK candidate passes every applicable live replacement gate above.
+
+### Route/keymap integration depth
+
+The route now drives a daemon keymap layer, one way: a route change may move the layer, a layer
+change never moves the route. That boundary is deliberately the whole of it for now. These extend
+it and are only worth building once the split above is confirmed on hardware:
+
+- Allow ZMK behaviors to express derived gestures to the daemon. `state.controls` is a byte with
+  five bits used, and `astrolabe_route_control` caps `bit_index` at 5, so a tap-dance today can
+  only reach the daemon by masquerading as a physical direction. Raising the cap and adding
+  descriptor entries for bits 5-7 gives eight sources with no wire change. Settle the semantics
+  first: control bits are levels and the daemon's chords use `"activation": "hold"`, so an
+  instantaneous gesture has no dwell to match against — either the daemon grows a tap activation
+  or the firmware holds synthetic bits for a defined duration.
+- Let the daemon push a layer. `queue_command` → `command_handler` is already an ACKed RPC over the
+  HID OUT endpoint, so `COMMAND_SET_LAYER` is the same dispatch path; `struct command_report`
+  carries only `{opcode, request_id}` and would need a payload byte. This is the direction with
+  real upside — the daemon knows which application has focus and can select a CAD layer on switch.
+- Report the active layer to the daemon. `zmk_keymap_highest_layer_active()` plus the existing
+  `zmk_layer_state_changed` event covers the firmware side; the snapshot is length-prefixed at
+  `output[4]`, so appending a layer byte is compatible for parsers that honor it. Costs a protocol
+  version bump and a descriptor update.
+- Give the daemon a contiguous owned layer range and tear the whole range down on release, so a
+  user-defined CAD sub-layer cannot be stranded over the standalone base when the daemon drops.
+  Required before user-defined layers within daemon mode are safe to encourage.
 
 ## P5 — Product, integration, and UI backlog
 

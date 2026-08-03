@@ -81,6 +81,14 @@
             #binding-cells = <2>;
             display-name = "Astrolabe Control";
         };
+
+        /* One parameter, so it can sit inside a hold-tap, which passes only one. Reports no
+         * standalone mouse button, so it suits Up and Left and nothing else. */
+        astro_bit: astrolabe_control_bit {
+            compatible = "astrolabe,behavior-control-bit";
+            #binding-cells = <1>;
+            display-name = "Astrolabe Control Bit";
+        };
     };
 
 };
