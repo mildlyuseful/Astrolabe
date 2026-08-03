@@ -42,6 +42,7 @@ struct route_state {
     struct k_mutex lock;
     struct k_mutex output_lock;
     uint8_t sent_buttons;
+    uint8_t button_latch;
     struct astrolabe_route_config config;
     enum astrolabe_route current;
     uint8_t controls;
@@ -167,6 +168,8 @@ static K_THREAD_STACK_DEFINE(output_stack, OUTPUT_STACK_SIZE);
 static struct k_work_q output_queue;
 static struct k_work output_work;
 
+static void submit_output(void);
+
 static int16_t clamp_report(float value) {
     if (value > 32767.0f) {
         return 32767;
@@ -178,7 +181,15 @@ static int16_t clamp_report(float value) {
 }
 
 /* One writer of ZMK's mouse report. Buttons are re-asserted from the desired mask every cycle
- * rather than tracked as edges, so a failed send self-heals on the next one. */
+ * rather than tracked as edges, so a failed send self-heals on the next one.
+ *
+ * Movement is a level and collapsing it across cycles is correct; a button is an edge and
+ * collapsing it loses the event outright. A press and its release can easily land in the same
+ * cycle -- ZMK's combo layer captures a candidate press and replays it only once the combo
+ * times out, so the release arrives immediately behind it -- and a second submit while this work
+ * is still pending is a no-op. Without the latch the handler would then see the mask back at
+ * sent_buttons and send nothing at all, discarding the click rather than shortening it. Latched
+ * bits are held until they have actually gone out, and the release follows on the next cycle. */
 static void output_handler(struct k_work *work) {
     ARG_UNUSED(work);
 
@@ -191,7 +202,8 @@ static void output_handler(struct k_work *work) {
     const int16_t dx = clamp_report(state.cursor_x);
     const int16_t dy = clamp_report(state.cursor_y);
     const int16_t wheel = clamp_report(state.scroll / state.config.scroll_divisor);
-    const uint8_t buttons = state.standalone_buttons;
+    const uint8_t latched = state.button_latch;
+    const uint8_t buttons = state.standalone_buttons | latched;
     const bool buttons_changed = buttons != state.sent_buttons;
     k_mutex_unlock(&state.lock);
 
@@ -218,14 +230,22 @@ static void output_handler(struct k_work *work) {
         return;
     }
 
+    bool more = false;
     k_mutex_lock(&state.lock, K_FOREVER);
     if (state.current == ASTROLABE_ROUTE_STANDALONE && state.epoch == epoch) {
         state.cursor_x -= (float)dx;
         state.cursor_y -= (float)dy;
         state.scroll -= (float)wheel * state.config.scroll_divisor;
         state.sent_buttons = buttons;
+        state.button_latch &= (uint8_t)~latched;
+        more = state.standalone_buttons != buttons;
     }
     k_mutex_unlock(&state.lock);
+
+    /* A latched button that is already released still owes the host its release. */
+    if (more) {
+        submit_output();
+    }
 }
 
 static void submit_output(void) { k_work_submit_to_queue(&output_queue, &output_work); }
@@ -250,6 +270,7 @@ int astrolabe_route_init(const struct astrolabe_route_config *config) {
     state.controls = 0U;
     state.suppressed_controls = 0U;
     state.standalone_buttons = 0U;
+    state.button_latch = 0U;
     state.sequence = 0U;
     clear_motion_locked();
     state.last_scroll_ms = 0U;
@@ -320,6 +341,8 @@ int astrolabe_route_claim(enum astrolabe_route route, astrolabe_route_lease_t *l
     if (state.current == ASTROLABE_ROUTE_STANDALONE) {
         released_buttons = state.standalone_buttons;
         state.standalone_buttons = 0U;
+        /* Dropped, not sent: a latched press the host never saw needs no release. */
+        state.button_latch = 0U;
     }
     k_mutex_unlock(&state.lock);
 
@@ -365,6 +388,7 @@ void astrolabe_route_release(enum astrolabe_route route, astrolabe_route_lease_t
     (void)next_epoch_locked();
     state.suppressed_controls = state.controls;
     state.standalone_buttons = 0U;
+    state.button_latch = 0U;
     clear_motion_locked();
     k_mutex_unlock(&state.lock);
     k_mutex_unlock(&state.output_lock);
@@ -392,6 +416,7 @@ void astrolabe_route_reset(void) {
     state.controls = 0U;
     state.suppressed_controls = 0U;
     state.standalone_buttons = 0U;
+    state.button_latch = 0U;
     state.sequence = 0U;
     clear_motion_locked();
     k_mutex_unlock(&state.lock);
@@ -562,6 +587,7 @@ void astrolabe_route_control(uint8_t bit_index, uint8_t standalone_buttons, bool
         if (pressed && (state.suppressed_controls & control) == 0U) {
             button_change = standalone_buttons & ~state.standalone_buttons;
             state.standalone_buttons |= standalone_buttons;
+            state.button_latch |= button_change;
         } else if (!pressed) {
             button_change = standalone_buttons & state.standalone_buttons;
             state.standalone_buttons &= ~standalone_buttons;
