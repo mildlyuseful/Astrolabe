@@ -331,8 +331,11 @@ static void output_ready(const struct device *dev) {
 static int get_report(const struct device *dev, struct usb_setup_packet *setup, int32_t *length,
                       uint8_t **data) {
     ARG_UNUSED(dev);
+    LOG_DBG("GET_REPORT wValue=0x%04x wIndex=0x%04x wLength=%u len=%d", setup->wValue,
+            setup->wIndex, setup->wLength, *length);
     if ((setup->wValue & 0xFFU) != REPORT_CAPABILITY ||
         (setup->wValue >> 8) != HID_REPORT_TYPE_FEATURE) {
+        LOG_DBG("GET_REPORT rejected: id=%u type=%u", setup->wValue & 0xFFU, setup->wValue >> 8);
         return -ENOTSUP;
     }
     capability[0] = REPORT_CAPABILITY;
@@ -344,7 +347,13 @@ static int get_report(const struct device *dev, struct usb_setup_packet *setup, 
     capability[7] = 1U;
     capability[8] = 0U;
     *data = capability;
-    *length = MIN(*length, (int32_t)sizeof(capability));
+    /* *length is an output here: the stack passes it in as 0 and the handler states how many
+     * bytes it is returning. Clamping against the incoming value instead answers every request
+     * with an empty report, which Windows surfaces as a failed HidD_GetFeature and which made the
+     * daemon's capability handshake -- and therefore the whole USB route -- unreachable. Bound by
+     * the host's wLength so a short request is honoured. */
+    *length = MIN((int32_t)sizeof(capability), (int32_t)setup->wLength);
+    LOG_DBG("GET_REPORT capability answered with %d bytes", *length);
     return 0;
 }
 
@@ -428,8 +437,10 @@ static int usb_init(void) {
      *   vendor interface after a ZMK bump, check those two values first. */
     hid_device = device_get_binding(CONFIG_USB_HID_DEVICE_NAME "_1");
     if (hid_device == NULL) {
+        LOG_ERR("second HID instance " CONFIG_USB_HID_DEVICE_NAME "_1 is not present");
         return -ENODEV;
     }
+    LOG_INF("bound vendor HID instance %s", hid_device->name);
     k_work_init(&tx_work, tx_handler);
     k_work_init(&command_work, command_handler);
     k_work_init_delayable(&ownership_work, ownership_handler);

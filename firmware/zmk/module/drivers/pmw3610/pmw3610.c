@@ -386,6 +386,11 @@ static int pmw_init(const struct device *dev) {
             LOG_WRN("PMW3610 sensor %u did not identify; continuing without it", sensor);
         }
     }
+    /* Fusion solves for three axes from four delta rows. A missing sensor zeroes two of them,
+     * which does not fail loudly -- it attenuates and cross-couples the solved rotation. Log the
+     * pair explicitly so a half-populated bus is not mistaken for a tuning problem. */
+    LOG_INF("PMW3610 sensors ready: left=%d right=%d", (int)data->sensor_ready[0],
+            (int)data->sensor_ready[1]);
     k_mutex_unlock(&data->bus_lock);
 
     for (uint8_t sensor = 0; sensor < SENSOR_COUNT; ++sensor) {
