@@ -355,3 +355,35 @@ def test_usb_interface_selection_requires_every_identity_field():
     selected_descriptor, selected_interface = transport._find_candidate()
     assert selected_descriptor is descriptor
     assert selected_interface["path"] == b"right"
+
+
+def test_windows_padded_reports_are_accepted_not_discarded():
+    # Verified against real hardware: Windows pads every interrupt-IN read to the interface's
+    # largest input report (13 bytes here), so a 7-byte ACK or snapshot arrives zero-padded.
+    # Requiring exact lengths discarded every report except rotation, which silently starved the
+    # attach handshake and sent the daemon to BLE.
+    from trackball_daemon.devices.usb_transport import _decode_ack
+
+    padded_ack = _ack(1, 0x1234).ljust(13, b"\x00")
+    assert len(padded_ack) == 13
+    ack = _decode_ack(padded_ack)
+    assert ack is not None and ack.opcode == 1
+    assert (ack.request_id, ack.result, ack.owner) == (0x1234, 0, 2)
+
+    log = []
+    provider = _Provider(log)
+    provider.lease = object()
+    transport = UsbTransport(
+        (_descriptor(),), {"ble.astrolabe": provider},
+        lambda _sample: None, lambda _status: None, threading.Event(),
+        enabled_event=_LoggedEvent([]), backend=_Backend((_interface(),), None), clock=_Clock())
+
+    padded_snapshot = (bytes((2,)) + encode_input_state_snapshot(4, b"\x02")).ljust(13, b"\x00")
+    transport._deliver_report(_descriptor(), provider, provider.lease, padded_snapshot)
+    assert "provider:snapshot" in log
+
+    samples = []
+    transport.motion_callback = samples.append
+    padded_rotation = bytes((1,)) + struct.pack("<fff", 1.0, -2.0, 0.5)
+    transport._deliver_report(_descriptor(), provider, provider.lease, padded_rotation)
+    assert samples[0].rotation == pytest.approx((1.0, -2.0, 0.5))

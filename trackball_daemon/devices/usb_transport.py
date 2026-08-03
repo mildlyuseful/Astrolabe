@@ -39,6 +39,12 @@ _REQUIRED_REPORT_MASK = (1 << 0) | (1 << 1)
 _REQUIRED_CAPABILITY_FLAGS = (1 << 0) | (1 << 1)
 
 
+# Report lengths below are lower bounds, never equalities. Windows pads every interrupt-IN read to
+# the interface's largest input report (here the 13-byte rotation report), so a 7-byte ACK or
+# snapshot arrives as 13 bytes with trailing zeros. Dispatch on the report ID and slice the known
+# payload; requiring exact lengths silently discards every report except rotation.
+
+
 class UsbProtocolError(RuntimeError):
     pass
 
@@ -91,9 +97,9 @@ class HidApiBackend:
 
 def _decode_capability(report):
     report = bytes(report)
-    if len(report) != _CAPABILITY_BYTES or report[0] != REPORT_CAPABILITY:
+    if len(report) < _CAPABILITY_BYTES or report[0] != REPORT_CAPABILITY:
         raise UsbProtocolError("invalid USB capability report length or ID")
-    payload = report[1:]
+    payload = report[1:_CAPABILITY_BYTES]
     if payload[0] != PROTOCOL_VERSION or payload[7] != 0:
         raise UsbProtocolError("unsupported USB capability version or reserved byte")
     capability = UsbCapability(
@@ -114,9 +120,9 @@ def _decode_capability(report):
 
 def _decode_ack(report):
     report = bytes(report)
-    if len(report) != _ACK_BYTES or report[0] != REPORT_ACK:
+    if len(report) < _ACK_BYTES or report[0] != REPORT_ACK:
         return None
-    payload = report[1:]
+    payload = report[1:_ACK_BYTES]
     if payload[0] != PROTOCOL_VERSION:
         raise UsbProtocolError("unsupported USB ACK protocol version")
     return UsbAck(
@@ -251,11 +257,11 @@ class UsbTransport:
             device.get_feature_report(REPORT_CAPABILITY, _CAPABILITY_BYTES))
 
     def _deliver_report(self, descriptor, provider, lease, report):
-        if len(report) == _ROTATION_BYTES and report[0] == REPORT_ROTATION:
+        if len(report) >= _ROTATION_BYTES and report[0] == REPORT_ROTATION:
             try:
                 sample = MotionSample(
                     f"{descriptor.source_id}.motion",
-                    report[1:],
+                    report[1:_ROTATION_BYTES],
                     timestamp=self.clock(),
                     metadata={"transport": "usb", "device_id": descriptor.device_id},
                 )
@@ -267,8 +273,8 @@ class UsbTransport:
             except Exception as exc:
                 self._diagnose(f"USB motion callback failed: {exc}")
             return
-        if len(report) == _SNAPSHOT_BYTES and report[0] == REPORT_SNAPSHOT:
-            provider.accept_snapshot(report[1:], lease=lease)
+        if len(report) >= _SNAPSHOT_BYTES and report[0] == REPORT_SNAPSHOT:
+            provider.accept_snapshot(report[1:_SNAPSHOT_BYTES], lease=lease)
             return
         if report and report[0] != REPORT_ACK:
             self._diagnose(
