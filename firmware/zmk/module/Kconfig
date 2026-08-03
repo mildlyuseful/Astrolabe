@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig ASTROLABE_FIRMWARE
+    bool "Astrolabe dual-sensor trackball firmware"
+    default y if SHIELD_ASTROLABE
+    select GPIO
+    select INPUT
+    select ZMK_POINTING
+
+if ASTROLABE_FIRMWARE
+
+config ASTROLABE_GATT
+    bool "Frozen Astrolabe BLE rotation and input service"
+    default y
+    depends on BT
+
+config ASTROLABE_USB
+    bool "Astrolabe USB vendor HID transport"
+    default y
+    depends on ZMK_USB
+
+config ASTROLABE_LOG_LEVEL
+    int "Astrolabe log level"
+    range 0 4
+    default 2
+
+endif

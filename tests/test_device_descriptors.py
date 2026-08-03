@@ -10,10 +10,17 @@ import pytest
 
 from trackball_daemon.devices import (
     BleConnectionConfig,
+    DeviceControl,
     MotionSample,
     builtin_device_descriptors,
     load_device_descriptor,
 )
+
+
+def test_control_bits_cannot_exceed_the_decoders_32_byte_snapshot_limit():
+    assert DeviceControl("edge", "Edge", 255).bit == 255
+    with pytest.raises(ValueError, match="supported snapshot payload"):
+        DeviceControl("outside", "Outside", 256)
 
 
 def test_builtin_descriptors_have_stable_distinct_control_namespaces():
@@ -34,6 +41,16 @@ def test_builtin_descriptors_have_stable_distinct_control_namespaces():
     assert astrolabe.metadata["debounce"] == "firmware_defined"
     assert astrolabe.metadata["simultaneous_controls"] == \
         "mechanically_exclusive_not_enforced"
+    assert astrolabe.schema_version == 1
+    assert astrolabe.usb_hid.vendor_id == 0x1D50
+    assert astrolabe.usb_hid.product_id == 0x615E
+    assert astrolabe.usb_hid.matches({
+        "vendor_id": 0x1D50,
+        "product_id": 0x615E,
+        "usage_page": 0xFF00,
+        "usage": 1,
+        "product_string": "Astrolabe",
+    })
 
     bench = descriptors["xiao3389_3button"]
     assert bench.matches_name("TRACKBALL BLE")
@@ -59,6 +76,44 @@ def test_descriptor_loader_rejects_code_or_unknown_schema_fields(tmp_path):
     path.write_text(json.dumps(source), encoding="utf-8")
 
     with pytest.raises(ValueError, match="unknown=.*python_module"):
+        load_device_descriptor(path)
+
+
+def test_usb_hid_is_optional_and_independent_of_the_schema_version(tmp_path):
+    # usb_hid is additive: a BLE-only descriptor stays valid, and the same schema version can
+    # describe a device that also has a wired route. The version tracks format, not capability.
+    source = {
+        "schema_version": 1,
+        "device_id": "legacy",
+        "source_id": "ble.legacy",
+        "label": "Legacy",
+        "match": {"advertised_names": ["Legacy"]},
+        "service_uuid": "2cad0001-6e64-0146-b139-9cf2a4cd57fc",
+        "motion_characteristic": "2cad0002-6e64-0146-b139-9cf2a4cd57fc",
+        "input_characteristic": None,
+        "controls": [],
+    }
+    path = tmp_path / "legacy.json"
+    path.write_text(json.dumps(source), encoding="utf-8")
+    assert load_device_descriptor(path).usb_hid is None
+
+    source["match"]["usb_hid"] = None
+    path.write_text(json.dumps(source), encoding="utf-8")
+    assert load_device_descriptor(path).usb_hid is None
+
+    source["match"]["usb_hid"] = {
+        "vendor_id": 0x1D50,
+        "product_id": 0x615E,
+        "usage_page": 0xFF00,
+        "usage": 1,
+        "product": "Astrolabe",
+    }
+    path.write_text(json.dumps(source), encoding="utf-8")
+    assert load_device_descriptor(path).usb_hid.vendor_id == 0x1D50
+
+    source["match"]["usb_hid"].pop("product")
+    path.write_text(json.dumps(source), encoding="utf-8")
+    with pytest.raises(ValueError, match="USB HID match keys"):
         load_device_descriptor(path)
 
 

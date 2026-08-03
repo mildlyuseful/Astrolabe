@@ -86,6 +86,13 @@ Distributed forms carry the full set. The wheel and source distribution get `LIC
 `THIRD_PARTY_NOTICES.md`, this file, and everything under `LICENSES/`; the onedir tree, and the ZIP
 made from it, get the same files beside the executable.
 
+The production-firmware CI artifact carries `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`,
+`third_party.json`, the complete `LICENSES/` tree (including the verbatim ZMK, Zephyr, nrfx,
+TinyCrypt/micro-ecc, CMSIS, Picolibc/Newlib, and GCC runtime texts), and Zephyr-generated SPDX
+documents beside the UF2 and ELF. Preserving the tree keeps every relative link in the full notices
+document valid. The generated SPDX inventory supplements the manual notices; it does not replace
+binary-redistribution notices that a build graph cannot resolve on its own.
+
 ## CERN-OHL-W-2.0 — hardware design source
 
 No hardware design source is present in this repository yet. The `CERN-OHL-W-2.0` text is added

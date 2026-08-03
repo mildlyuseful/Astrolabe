@@ -67,19 +67,21 @@ def test_unsigned_sequence_gate_handles_duplicate_stale_half_range_and_wraparoun
 
 def test_full_snapshots_repair_missed_edges_in_one_atomic_transition():
     provider, aggregator = _provider()
-    provider.begin_session("AA:BB#1", supports_input=True)
+    lease = provider.begin_session("AA:BB#1", supports_input=True)
     transitions = []
     aggregator.add_listener(transitions.append)
 
-    assert provider.accept_snapshot(encode_input_state_snapshot(10, b"\x11")) \
+    assert provider.accept_snapshot(
+        encode_input_state_snapshot(10, b"\x11"), lease=lease) \
         is SequenceDisposition.FIRST  # Up + Center
     assert aggregator.snapshot().pressed_tokens == (
         "ble.astrolabe:fiveway.center", "ble.astrolabe:fiveway.up")
 
-    assert provider.accept_snapshot(encode_input_state_snapshot(13, b"\x02")) \
+    assert provider.accept_snapshot(
+        encode_input_state_snapshot(13, b"\x02"), lease=lease) \
         is SequenceDisposition.NEWER  # missed 11/12; now Down only
     change = transitions[-1]
-    assert change.reason == "ble_input_snapshot"
+    assert change.reason == "device_input_snapshot"
     assert [(event.control_id, event.phase) for event in change.events] == [
         ("fiveway.center", InputPhase.RELEASED),
         ("fiveway.up", InputPhase.RELEASED),
@@ -90,9 +92,10 @@ def test_full_snapshots_repair_missed_edges_in_one_atomic_transition():
 
 def test_fiveway_mechanical_exclusivity_is_not_enforced_by_the_protocol():
     provider, aggregator = _provider()
-    provider.begin_session("device#1", supports_input=True)
+    lease = provider.begin_session("device#1", supports_input=True)
 
-    assert provider.accept_snapshot(encode_input_state_snapshot(1, b"\x0f")) \
+    assert provider.accept_snapshot(
+        encode_input_state_snapshot(1, b"\x0f"), lease=lease) \
         is SequenceDisposition.FIRST
     assert aggregator.snapshot().pressed_tokens == (
         "ble.astrolabe:fiveway.down",
@@ -104,35 +107,39 @@ def test_fiveway_mechanical_exclusivity_is_not_enforced_by_the_protocol():
 
 def test_duplicate_stale_malformed_and_undefined_bits_do_not_mutate_pressed_state():
     provider, aggregator = _provider()
-    provider.begin_session("device#1", supports_input=True)
-    provider.accept_snapshot(encode_input_state_snapshot(100, b"\x01"))
+    lease = provider.begin_session("device#1", supports_input=True)
+    provider.accept_snapshot(encode_input_state_snapshot(100, b"\x01"), lease=lease)
     revision = aggregator.snapshot().revision
 
-    assert provider.accept_snapshot(encode_input_state_snapshot(100, b"\x00")) \
+    assert provider.accept_snapshot(
+        encode_input_state_snapshot(100, b"\x00"), lease=lease) \
         is SequenceDisposition.DUPLICATE
-    assert provider.accept_snapshot(encode_input_state_snapshot(99, b"\x00")) \
+    assert provider.accept_snapshot(
+        encode_input_state_snapshot(99, b"\x00"), lease=lease) \
         is SequenceDisposition.STALE
-    assert provider.accept_snapshot(b"bad") is None
+    assert provider.accept_snapshot(b"bad", lease=lease) is None
     assert provider.health.status is ProviderStatus.DEGRADED
-    assert provider.accept_snapshot(encode_input_state_snapshot(101, b"\x80")) is None
+    assert provider.accept_snapshot(
+        encode_input_state_snapshot(101, b"\x80"), lease=lease) is None
     assert aggregator.snapshot().pressed_tokens == ("ble.astrolabe:fiveway.up",)
     assert aggregator.snapshot().revision > revision  # health is observable; input state is stable
 
     # The undefined-bits packet did not consume sequence 101, so a valid packet at 101 is accepted.
-    assert provider.accept_snapshot(encode_input_state_snapshot(101, b"\x00")) \
+    assert provider.accept_snapshot(
+        encode_input_state_snapshot(101, b"\x00"), lease=lease) \
         is SequenceDisposition.NEWER
     assert aggregator.snapshot().pressed_tokens == ()
 
 
 def test_reconnect_resets_sequence_baseline_and_disconnect_releases_every_hold():
     provider, aggregator = _provider()
-    provider.begin_session("device#1", supports_input=True)
-    provider.accept_snapshot(encode_input_state_snapshot(0xFFFE, b"\x05"))
+    lease = provider.begin_session("device#1", supports_input=True)
+    provider.accept_snapshot(encode_input_state_snapshot(0xFFFE, b"\x05"), lease=lease)
     assert len(aggregator.snapshot().pressed_tokens) == 2
     transitions = []
     aggregator.add_listener(transitions.append)
 
-    provider.disconnect()
+    provider.disconnect(lease=lease)
 
     disconnected = transitions[-2]
     assert [event.phase for event in disconnected.events] == [
@@ -140,22 +147,43 @@ def test_reconnect_resets_sequence_baseline_and_disconnect_releases_every_hold()
     assert aggregator.snapshot().pressed_tokens == ()
     assert provider.health.status is ProviderStatus.SUSPENDED
 
-    provider.begin_session("device#2", supports_input=True)
-    assert provider.accept_snapshot(encode_input_state_snapshot(3, b"\x02")) \
+    lease = provider.begin_session("device#2", supports_input=True)
+    assert provider.accept_snapshot(
+        encode_input_state_snapshot(3, b"\x02"), lease=lease) \
         is SequenceDisposition.FIRST
     assert aggregator.snapshot().pressed_tokens == ("ble.astrolabe:fiveway.down",)
 
 
 def test_required_control_filter_and_legacy_session_do_not_expose_phantom_presses():
     provider, aggregator = _provider(required=("fiveway.center",))
-    provider.begin_session("legacy#1", supports_input=False)
+    legacy_lease = provider.begin_session("legacy#1", supports_input=False)
     assert provider.health.status is ProviderStatus.SUSPENDED
-    assert provider.accept_snapshot(encode_input_state_snapshot(1, b"\x1f")) is None
+    assert provider.accept_snapshot(
+        encode_input_state_snapshot(1, b"\x1f"), lease=legacy_lease) is None
     assert aggregator.snapshot().pressed_tokens == ()
 
-    provider.begin_session("modern#1", supports_input=True)
-    provider.accept_snapshot(encode_input_state_snapshot(1, b"\x1f"))
+    modern_lease = provider.begin_session("modern#1", supports_input=True)
+    provider.accept_snapshot(
+        encode_input_state_snapshot(1, b"\x1f"), lease=modern_lease)
     assert aggregator.snapshot().pressed_tokens == ("ble.astrolabe:fiveway.center",)
+
+
+def test_replaced_session_rejects_late_snapshot_and_disconnect_callbacks():
+    provider, aggregator = _provider()
+    old_lease = provider.begin_session("device#old", supports_input=True)
+    provider.accept_snapshot(encode_input_state_snapshot(10, b"\x01"), lease=old_lease)
+
+    new_lease = provider.begin_session("device#new", supports_input=True)
+    provider.accept_snapshot(encode_input_state_snapshot(1, b"\x02"), lease=new_lease)
+    revision = aggregator.snapshot().revision
+
+    assert provider.accept_snapshot(
+        encode_input_state_snapshot(11, b"\x10"), lease=old_lease) is None
+    assert provider.disconnect("late_old_disconnect", lease=old_lease) is None
+    assert provider.session == "device#new"
+    assert provider.health.status is ProviderStatus.RUNNING
+    assert aggregator.snapshot().revision == revision
+    assert aggregator.snapshot().pressed_tokens == ("ble.astrolabe:fiveway.down",)
 
 
 def test_provider_rejects_unknown_control_configuration():

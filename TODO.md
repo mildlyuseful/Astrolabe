@@ -12,25 +12,27 @@ already-supported contract.
 
 ### Production hardware
 
-- Complete the production hardware contract around the fixed Seeed Studio XIAO nRF52840 controller
-  before replacing the honest `firmware/Astrolabe` placeholder. `firmware/PMW3610` is the completed
-  SuperMini dual-PMW3610 + five-way validation prototype, not the product controller or a finished
-  production claim. Freeze or deliberately change its remaining candidate choices against the final
-  XIAO assembly:
+- Complete the production hardware contract around the fixed SuperMini nRF52840 controller (a
+  nice!nano v2-compatible board, ZMK's `nice_nano_v2` target) before promoting the ZMK candidate to
+  production firmware. This retires the earlier Seeed Studio XIAO nRF52840 target and the controller
+  port it required: `firmware/PMW3610` already validates the production controller's electronics,
+  but it remains a validation prototype, not a finished production claim. Freeze or deliberately
+  change its remaining candidate choices against the final assembly:
   - confirm sensor model/count, mounting geometry, buses, chip selects, interrupt/power pins, and
     two-versus-three-sensor fusion expectations against the final assembly;
   - confirm Up/Down/Left/Right/Center pins, polarity, debounce timing, and simultaneous-input behavior;
   - battery/power design, USB/BLE expectations, host-profile behavior, and an always-reachable
     mode/recovery control.
-- Port the frozen contract to the final XIAO nRF52840 assembly and repeat the physical switch, sensor,
-  reconnect, held-input, sleep/wake, and mode-transition matrix there. The XIAO three-button bench
-  validates the protocol boundary and the completed SuperMini PMW3610 loop validates the five-way
-  prototype; neither qualifies the final product hardware.
-- Replace CI's `firmware/XIAO3389` protocol-bench compile with the official
-  `firmware/Astrolabe` XIAO nRF52840 target when that placeholder becomes the frozen production
-  firmware. The obsolete SuperMini compile gate was removed because a prototype controller is not a
-  public-V1 build target. Keep the PMW3610 sketch locally compilable for diagnosis, but do not
-  restore it as a required release job.
+- Repeat the physical switch, sensor, reconnect, held-input, sleep/wake, and mode-transition matrix
+  on the final production assembly under the ZMK production firmware. The XIAO three-button bench
+  validates the protocol boundary and the completed SuperMini PMW3610 loop validates the prototype
+  electronics on the production controller; neither qualifies the final assembly or the new
+  firmware stack.
+- The pinned ZMK candidate now builds alongside CI's `firmware/XIAO3389` protocol-bench compile.
+  Replace the bench as the release firmware gate, and delete the superseded `firmware/Astrolabe`
+  Arduino placeholder, only after the ZMK candidate passes its live replacement matrix
+  ([`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md)). Keep the PMW3610 sketch locally
+  compilable for diagnosis, but do not restore it as a required release job.
 - Verify the SuperMini prototype's BLE battery estimate against a multimeter across a representative
   discharge, confirm that USB insertion preserves the last battery-only value and USB removal
   refreshes it, and confirm Battery Level appears after a clean Windows re-pair and agrees across the
@@ -157,44 +159,34 @@ documentation, and live viewport evidence in one delivery.
 
 ## P4 — ZMK production-firmware epic
 
-Keep detailed design decisions in a dedicated current design or decision record; this section owns the
-open epic and acceptance gates only.
+The pinned, out-of-tree implementation and its critical design corrections live in
+[`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md). Automated builds and daemon tests do not
+close these remaining gates:
 
-### Feasibility and protocol decisions
-
-- Use pinned upstream ZMK/Zephyr plus a separately maintained, out-of-tree Astrolabe module. Carry an
-  isolated upstream patch only when module APIs cannot provide a required hook, and record an exit
-  condition for every patch.
-- Decide explicit, mutually exclusive Astrolabe and Standalone output-route state, physical mode and
-  recovery controls, reboot persistence, BLE host profiles, USB/BLE behavior, and ZMK Studio scope.
-- Keep the frozen v1 motion/input wire contract where possible. The current protocol has version/kind,
-  complete pressed-state snapshots, and wrap-aware sequence handling, but no capability negotiation,
-  transport epoch, or battery message. Specify backward compatibility before adding those features;
-  add daemon adapter code only when a protocol extension demonstrably requires it.
-- Preserve ownership: firmware handles device-local acquisition, normalization, power, bonding,
-  standalone HID, and keymaps; the daemon remains authoritative for app context, bindings,
-  dependencies, navigation state, settings, integrations, and HUD behavior.
-
-### Vertical slice
-
-- First deliver a reproducible module build with PMW motion, ordinary standalone HID pointer behavior,
-  stock five-way mappings, an always-reachable physical mode switch, existing rotation/snapshot
-  compatibility, and synthetic releases on mode change, disconnect, and transport loss.
-- Reuse the existing descriptor/provider boundary and stable `source_id:control.id` tokens. Do not add
-  a ZMK-specific binding engine or move application-aware rules into firmware.
-- Keep ZMK Studio limited to device-local standalone mappings and firmware behaviors. Astrolabe
-  Settings continues to own daemon bindings and app-dependent behavior.
-
-### Acceptance gates
-
-- Without the daemon, pointer motion, buttons, reboot persistence, host switching, sleep/wake, and
-  USB/BLE output work as a normal trackball.
-- With the daemon, the current motion, five-way, hold/toggle, dependency, foreground, reconnect, and
-  HUD matrices pass without changing binding/profile semantics.
-- Repeated mode changes during held inputs, daemon termination, BLE loss, sleep/resume, reboot, and
-  Studio connect/disconnect produce no stuck state, duplicate click, or unintended fallback action.
-- Measure flash/RAM, connection interval, throughput, motion latency, and battery behavior with Studio
-  and the custom data service enabled together before replacing the current firmware.
+- Flash the candidate on the final electrical assembly. Verify both PMW3610 identities, shared-bus
+  signal integrity, calibrated axes/signs, full-speed motion, standalone cursor/scroll feel, all five
+  switch positions, recovery chords, forced-standalone boot, and ordinary BLE/USB HID output.
+- Characterize automatic PMW3610 Run/Rest plus ZMK deep sleep on hardware: current draw, reliable
+  MOTION/button wake, first-delta direction and magnitude, no reconnect dump, and surface-loss or
+  illumination cases. SQUAL and shutter are diagnostics only; add no validity filter without this
+  evidence.
+- Run the frozen motion/input, hold/toggle, dependency, foreground, reconnect, and HUD matrices over
+  the ZMK BLE service without changing stored binding/profile semantics. Include persisted CCC,
+  re-pair, disconnect while held, malformed/stale packets, and owner replacement.
+- Run the same matrix over wired vendor HID on Windows. Include enumeration identity, attach/ACK,
+  lost attach ACK recovery, keepalive loss, daemon termination, suspend/resume, cable pull, stale
+  queued reports, rapid BLE-to-USB preference and USB-to-BLE fallback, and held inputs across every
+  transition.
+- Confirm charging and USB-powered battery presentation on the physical power path. BLE may publish a
+  measured percentage; an active USB daemon session must remain explicitly externally powered and
+  must not fabricate a fresh percentage.
+- Obtain a production USB VID/PID allocation and update firmware plus descriptor together; the
+  upstream ZMK IDs are development-only.
+- Measure flash/RAM, connection interval, throughput, motion latency, and battery behavior. Decide
+  whether to enable ZMK Studio only after repeating lifecycle and resource measurements with Studio
+  and the custom service together.
+- Preserve the Arduino placeholder, PMW diagnostic sketch, and XIAO protocol-bench CI gate until the
+  ZMK candidate passes every applicable live replacement gate above.
 
 ## P5 — Product, integration, and UI backlog
 

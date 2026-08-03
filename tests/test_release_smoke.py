@@ -13,7 +13,8 @@ def test_release_smoke_loads_profiles_devices_schemas_and_examples():
     assert result["status"] == "ok"
     assert result["profiles"] == {"astrolabe_5way": 11, "keyboard_only": 4}
     assert result["devices"] == ["astrolabe_5way", "xiao3389_3button"]
-    assert len(result["schemas"]) == len(result["examples"]) == 3
+    assert len(result["schemas"]) == 3
+    assert len(result["examples"]) == 3
     assert result["runtime_imports"] == (
         ["winrt.windows.foundation.collections"] if sys.platform == "win32" else [])
     assert result["autocad_plugin"]["version"]

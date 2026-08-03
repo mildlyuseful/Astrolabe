@@ -1,0 +1,90 @@
+// SPDX-FileCopyrightText: 2026 Dylan Lee
+// SPDX-License-Identifier: Apache-2.0
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/zmk/matrix_transform.h>
+#include "astrolabe-layouts.dtsi"
+
+/ {
+    chosen {
+        zmk,kscan = &astrolabe_kscan;
+        zmk,physical-layout = &astrolabe_layout;
+    };
+
+    astrolabe_transform: astrolabe_transform {
+        compatible = "zmk,matrix-transform";
+        rows = <1>;
+        columns = <5>;
+        map = <RC(0, 0) RC(0, 1) RC(0, 2) RC(0, 3) RC(0, 4)>;
+    };
+
+    astrolabe_kscan: astrolabe_kscan {
+        compatible = "zmk,kscan-gpio-direct";
+        debounce-press-ms = <8>;
+        debounce-release-ms = <8>;
+        wakeup-source;
+        input-gpios =
+            <&gpio0 29 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+            <&gpio1 13 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+            <&gpio0 2  (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+            <&gpio0 31 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+            <&gpio1 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    };
+
+    astrolabe_route: astrolabe_route {
+        compatible = "astrolabe,route";
+        // Intentionally the same pin as kscan input 4 (Center): holding Center through boot is the
+        // forced-standalone escape. Both drivers configure this pin, and that is safe only because
+        // the one-shot route probe runs at POST_KERNEL/40 while kscan runs at POST_KERNEL/90, so
+        // kscan configures it last and owns the interrupt. Keep that ordering if either moves.
+        force-standalone-gpios = <&gpio1 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    };
+
+    astrolabe_pmw: astrolabe_pmw {
+        compatible = "astrolabe,dual-pmw3610";
+        status = "okay";
+        wakeup-source;
+
+        sclk-gpios = <&gpio0 22 GPIO_ACTIVE_HIGH>;
+        sdio-gpios = <&gpio0 24 GPIO_ACTIVE_HIGH>;
+        cs-gpios = <&gpio1 0 GPIO_ACTIVE_LOW>, <&gpio0 20 GPIO_ACTIVE_LOW>;
+        motion-gpios = <&gpio0 11 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+                       <&gpio0 17 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+
+        cpi = <1600>;
+        ball-diameter-um = <50800>;
+        sensor-phi-mdeg = <145000 215000>;
+        sensor-theta-mdeg = <120000 120000>;
+        sensor-mount-mdeg = <270000 270000>;
+        sensor-flipped = <1 1>;
+        frame-tilt-mdeg = <(-20000)>;
+
+        poll-interval-us = <1000>;
+        active-window-ms = <2000>;
+        send-interval-ms = <7>;
+        cursor-gain-milli = <125>;
+        scroll-gain-milli = <250>;
+        scroll-divisor = <60>;
+        yaw-deadzone-milli = <1200>;
+        yaw-dominance-milli = <1700>;
+        scroll-hold-ms = <80>;
+    };
+
+    astrolabe_pointer_listener: astrolabe_pointer_listener {
+        compatible = "zmk,input-listener";
+        device = <&astrolabe_pmw>;
+    };
+
+    behaviors {
+        astro: astrolabe_control {
+            compatible = "astrolabe,behavior-control";
+            #binding-cells = <2>;
+            display-name = "Astrolabe Control";
+        };
+    };
+
+};
+
+&astrolabe_layout {
+    transform = <&astrolabe_transform>;
+};

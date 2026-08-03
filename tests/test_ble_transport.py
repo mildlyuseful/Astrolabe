@@ -41,9 +41,9 @@ def _registry():
     return DeviceAdapterRegistry(descriptors, providers), providers, aggregator
 
 
-def _session(name, characteristics=(ROTATION, INPUT)):
+def _session(name, characteristics=(ROTATION, INPUT), instance_id="AA:BB#1"):
     return DeviceSession(
-        "AA:BB#1", name, "AA:BB",
+        instance_id, name, "AA:BB",
         GattInventory(frozenset((SERVICE,)), frozenset(characteristics)))
 
 
@@ -53,11 +53,11 @@ def test_registry_selects_fiveway_by_data_descriptor_and_legacy_without_input_ch
     config = BleConnectionConfig("Trackball BLE", "", ROTATION)
 
     modern = registry.select(config, _session("Trackball BLE"), samples.append)
-    modern.connected(_session("Trackball BLE"))
+    modern_lease = modern.connected(_session("Trackball BLE"))
     assert modern.label == "XIAO3389 three-button test bench"
     assert [item.characteristic_uuid for item in modern.subscriptions] == [ROTATION, INPUT]
     assert providers["ble.xiao3389"].health.status is ProviderStatus.STARTING
-    modern.disconnected()
+    modern.disconnected(lease=modern_lease)
 
     legacy_session = _session("Trackball BLE", (ROTATION,))
     legacy = registry.select(config, legacy_session, samples.append)
@@ -96,7 +96,39 @@ def test_fiveway_adapter_emits_exact_motion_and_normalized_input_events():
     assert samples[0].rotation == (1.0, -2.0, 0.5)
     assert aggregator.snapshot().pressed_tokens == (
         "ble.astrolabe:fiveway.center", "ble.astrolabe:fiveway.up")
-    assert transitions[-1].reason == "ble_input_snapshot"
+    assert transitions[-1].reason == "device_input_snapshot"
+
+
+def test_replaced_adapter_ignores_old_notifications_and_late_disconnect():
+    registry, providers, aggregator = _registry()
+    samples = []
+    config = BleConnectionConfig("Astrolabe", "", ROTATION)
+
+    old_session = _session("Astrolabe", instance_id="AA:BB#old")
+    old_adapter = registry.select(config, old_session, samples.append)
+    old_lease = old_adapter.connected(old_session)
+    old_callbacks = {
+        item.characteristic_uuid: item.callback for item in old_adapter.subscriptions}
+
+    new_session = _session("Astrolabe", instance_id="AA:BB#new")
+    new_adapter = registry.select(config, new_session, samples.append)
+    new_lease = new_adapter.connected(new_session)
+    new_callbacks = {
+        item.characteristic_uuid: item.callback for item in new_adapter.subscriptions}
+    new_callbacks[ROTATION](None, struct.pack("<fff", 1.0, 2.0, 3.0))
+    new_callbacks[INPUT](None, encode_input_state_snapshot(1, b"\x02"))
+    revision = aggregator.snapshot().revision
+
+    old_callbacks[ROTATION](None, struct.pack("<fff", 9.0, 9.0, 9.0))
+    old_callbacks[INPUT](None, encode_input_state_snapshot(100, b"\x10"))
+    assert old_adapter.disconnected("late_old_disconnect", lease=old_lease) is False
+
+    assert [sample.rotation for sample in samples] == [(1.0, 2.0, 3.0)]
+    assert providers["ble.astrolabe"].session == "AA:BB#new"
+    assert aggregator.snapshot().revision == revision
+    assert aggregator.snapshot().pressed_tokens == ("ble.astrolabe:fiveway.down",)
+
+    new_adapter.disconnected(lease=new_lease)
 
 
 class _FakeService:
@@ -207,6 +239,147 @@ def test_transport_discovers_and_subscribes_all_adapter_characteristics_then_dis
     assert battery_levels == [None]
     assert aggregator.snapshot().pressed_tokens == ()
     assert any("XIAO3389 three-button test bench is live" in text for text in statuses)
+
+
+def test_transport_does_not_scan_while_ble_is_paused():
+    class UnexpectedScanner:
+        @staticmethod
+        async def find_device_by_filter(_filterfunc, _timeout):
+            raise AssertionError("paused BLE transport must not scan")
+
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    enabled = threading.Event()
+    statuses = []
+
+    async def sleep(delay):
+        assert delay == 0.1
+        stop.set()
+
+    transport = BleTransport(
+        lambda: ("Trackball BLE", "", ROTATION), registry,
+        lambda _sample: None, statuses.append, stop,
+        enabled_event=enabled, scanner=UnexpectedScanner, sleep=sleep)
+    asyncio.run(transport.run())
+
+    assert statuses == []
+
+
+def test_inflight_ble_connection_cannot_replace_usb_session_after_gate_closes():
+    registry, providers, _aggregator = _registry()
+    stop = threading.Event()
+    enabled = threading.Event()
+    enabled.set()
+    statuses = []
+
+    class PausingClient(_FakeClient):
+        async def __aenter__(self):
+            enabled.clear()
+            return self
+
+    transport = BleTransport(
+        lambda: ("Trackball BLE", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        statuses.append,
+        stop,
+        enabled_event=enabled,
+        client_factory=PausingClient,
+    )
+    asyncio.run(transport._connect_once(
+        BleConnectionConfig("Trackball BLE", "", ROTATION),
+        _FakeDevice(),
+        "Trackball BLE",
+    ))
+
+    assert providers["ble.xiao3389"].session is None
+    assert PausingClient.instance.started == []
+    assert not any(status.startswith(("connected", "subscribed")) for status in statuses)
+
+
+def test_transport_closes_active_ble_session_without_reconnect_churn_when_paused():
+    registry, providers, aggregator = _registry()
+    stop = threading.Event()
+    enabled = threading.Event()
+    enabled.set()
+    statuses = []
+
+    async def sleep(_delay):
+        if enabled.is_set():
+            enabled.clear()
+        else:
+            stop.set()
+
+    transport = BleTransport(
+        lambda: ("Trackball BLE", "", ROTATION), registry,
+        lambda _sample: None, statuses.append, stop,
+        enabled_event=enabled,
+        scanner=_FakeScanner,
+        client_factory=_FakeClient,
+        sleep=sleep,
+    )
+    asyncio.run(transport.run())
+
+    assert _FakeClient.instance.stopped == [INPUT, ROTATION]
+    assert providers["ble.xiao3389"].session is None
+    assert aggregator.snapshot().pressed_tokens == ()
+    assert "disconnected, reconnecting..." not in statuses
+
+
+def test_transport_does_not_publish_live_status_after_usb_pauses_subscription_setup():
+    registry, providers, _aggregator = _registry()
+    stop = threading.Event()
+    enabled = threading.Event()
+    enabled.set()
+    statuses = []
+
+    class PausingSubscriptionClient(_FakeClient):
+        async def start_notify(self, uuid, callback):
+            await super().start_notify(uuid, callback)
+            if uuid == INPUT:
+                enabled.clear()
+
+    transport = BleTransport(
+        lambda: ("Trackball BLE", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        statuses.append,
+        stop,
+        enabled_event=enabled,
+        client_factory=PausingSubscriptionClient,
+    )
+    asyncio.run(transport._connect_once(
+        BleConnectionConfig("Trackball BLE", "", ROTATION),
+        _FakeDevice(),
+        "Trackball BLE",
+    ))
+
+    assert providers["ble.xiao3389"].session is None
+    assert not any(status.startswith("subscribed") for status in statuses)
+
+
+def test_transport_ignores_battery_callback_after_its_ble_lease_is_paused():
+    registry, _providers, _aggregator = _registry()
+    enabled = threading.Event()
+    enabled.set()
+    levels = []
+    transport = BleTransport(
+        lambda: ("Trackball BLE", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        lambda _status: None,
+        threading.Event(),
+        battery_callback=levels.append,
+        enabled_event=enabled,
+    )
+    lease = object()
+    transport._activate(lease)
+
+    transport._handle_battery_level(None, b"\x32", lease=lease)
+    enabled.clear()
+    transport._handle_battery_level(None, b"\x33", lease=lease)
+
+    assert levels == [50]
 
 
 def test_transport_reads_and_subscribes_optional_standard_battery_level():

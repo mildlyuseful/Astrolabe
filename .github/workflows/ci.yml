@@ -312,3 +312,150 @@ jobs:
           name: validation-firmware
           path: build/firmware
           if-no-files-found: error
+
+  zmk_firmware:
+    name: Pinned ZMK firmware
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    container:
+      # Immutable linux/amd64 child of zmkfirmware/zmk-build-arm:3.5.
+      image: docker.io/zmkfirmware/zmk-build-arm@sha256:ba4e851529ac9a5cf6b02e7dd3297b78bd1b0e75546b9f1bb22023437836373e
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      # Running from firmware/zmk makes that directory the west workspace root; the local manifest
+      # repository is its config/ child and upstream projects are checked out beside it.
+      - name: Initialize pinned ZMK workspace
+        working-directory: firmware/zmk
+        run: west init -l config
+
+      - name: Resolve pinned ZMK dependencies
+        working-directory: firmware/zmk
+        run: |
+          west update --fetch-opt=--filter=tree:0
+          west zephyr-export
+
+      # The SPDX command's CMake file-API query must exist before the configure/build. This is why
+      # the clean CI build does not use `-p always`, which would delete the query it just created.
+      - name: Initialize Zephyr SPDX inventory
+        working-directory: firmware/zmk
+        run: west spdx --init --build-dir=build/astrolabe
+
+      - name: Build Astrolabe for nice!nano v2
+        working-directory: firmware/zmk
+        run: |
+          west build -s zmk/app -d build/astrolabe -b nice_nano_v2 -- \
+            -DSHIELD=astrolabe \
+            -DZMK_CONFIG="$GITHUB_WORKSPACE/firmware/zmk/config" \
+            -DZMK_EXTRA_MODULES="$GITHUB_WORKSPACE/firmware/zmk/module"
+
+      # These are the descriptor-v2 development identifiers. A production VID allocation remains
+      # an explicit release gate, but the daemon and firmware must agree until it is completed.
+      - name: Assert development USB identity
+        working-directory: firmware/zmk
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Fx 'CONFIG_USB_DEVICE_VID=0x1D50' build/astrolabe/zephyr/.config
+          grep -Fx 'CONFIG_USB_DEVICE_PID=0x615E' build/astrolabe/zephyr/.config
+          grep -Fx 'CONFIG_USB_DEVICE_PRODUCT="Astrolabe"' build/astrolabe/zephyr/.config
+
+      - name: Generate Zephyr SPDX inventory
+        working-directory: firmware/zmk
+        run: west spdx --build-dir=build/astrolabe --analyze-includes --include-sdk
+
+      - name: Stage firmware notices and license texts
+        working-directory: firmware/zmk
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdk_dir="$(sed -n 's/^ZEPHYR_SDK_INSTALL_DIR:INTERNAL=//p' build/astrolabe/CMakeCache.txt)"
+          test -n "$sdk_dir"
+          # Only components that ship a single canonical upstream license file are compared here.
+          # nrfx and micro-ecc do not: their notices are extracted from source headers, so those
+          # texts are pinned by content hash in tests/test_zmk_contract.py instead. Adding them to
+          # this list would require inventing an upstream file to compare against.
+          cmp ../../LICENSES/third-party/zmk.txt zmk/LICENSE
+          cmp ../../LICENSES/third-party/zephyr.txt zephyr/LICENSE
+          cmp ../../LICENSES/third-party/cmsis.txt modules/hal/cmsis/LICENSE.txt
+          cmp ../../LICENSES/third-party/tinycrypt.txt modules/crypto/tinycrypt/README.zephyr
+          cmp ../../LICENSES/third-party/picolibc.txt \
+            "$sdk_dir/arm-zephyr-eabi/share/licenses/picolibc/COPYING.picolibc"
+          cmp ../../LICENSES/third-party/newlib.txt \
+            "$sdk_dir/arm-zephyr-eabi/share/licenses/picolibc/COPYING.NEWLIB"
+          cmp ../../LICENSES/third-party/gcc-gpl-3.0.txt \
+            "$sdk_dir/arm-zephyr-eabi/share/licenses/gcc/COPYING3"
+          cmp ../../LICENSES/third-party/gcc-runtime-library-exception-3.1.txt \
+            "$sdk_dir/arm-zephyr-eabi/share/licenses/gcc/COPYING.RUNTIME"
+          compliance=build/astrolabe/compliance
+          mkdir -p "$compliance"
+          cp \
+            ../../LICENSE \
+            ../../NOTICE \
+            ../../LICENSING.md \
+            ../../THIRD_PARTY_NOTICES.md \
+            ../../third_party.json \
+            "$compliance/"
+          cp -R ../../LICENSES "$compliance/LICENSES"
+
+      - name: Freeze ZMK build provenance
+        working-directory: firmware/zmk
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/astrolabe/provenance
+          west manifest --freeze > build/astrolabe/west-frozen.yml
+          west list -f $'{name}\t{revision}\t{path}' > build/astrolabe/provenance/west-projects.tsv
+          cp config/west.yml build/astrolabe/provenance/source-west.yml
+          printf '%s\n' \
+            "repository_revision=$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)" \
+            'container=docker.io/zmkfirmware/zmk-build-arm@sha256:ba4e851529ac9a5cf6b02e7dd3297b78bd1b0e75546b9f1bb22023437836373e' \
+            'board=nice_nano_v2' \
+            'shield=astrolabe' \
+            > build/astrolabe/provenance/build.txt
+          (
+            cd build/astrolabe
+            {
+              sha256sum \
+              zephyr/zmk.uf2 \
+              zephyr/zmk.elf \
+              zephyr/zmk.map \
+              zephyr/.config \
+              zephyr/zephyr.dts \
+              compile_commands.json \
+              west-frozen.yml \
+              spdx/app.spdx \
+              spdx/zephyr.spdx \
+              spdx/build.spdx \
+              spdx/sdk.spdx \
+              compliance/LICENSE \
+              compliance/NOTICE \
+              compliance/LICENSING.md \
+              compliance/THIRD_PARTY_NOTICES.md \
+              compliance/third_party.json \
+              provenance/source-west.yml \
+              provenance/west-projects.tsv \
+              provenance/build.txt
+              find compliance/LICENSES -type f -print0 | sort -z | xargs -0 sha256sum
+            } > provenance/sha256sums.txt
+          )
+
+      - name: Retain ZMK firmware and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: zmk-firmware
+          if-no-files-found: error
+          include-hidden-files: true
+          path: |
+            firmware/zmk/build/astrolabe/zephyr/zmk.uf2
+            firmware/zmk/build/astrolabe/zephyr/zmk.elf
+            firmware/zmk/build/astrolabe/zephyr/zmk.map
+            firmware/zmk/build/astrolabe/zephyr/.config
+            firmware/zmk/build/astrolabe/zephyr/zephyr.dts
+            firmware/zmk/build/astrolabe/compile_commands.json
+            firmware/zmk/build/astrolabe/west-frozen.yml
+            firmware/zmk/build/astrolabe/spdx/*.spdx
+            firmware/zmk/build/astrolabe/compliance/**
+            firmware/zmk/build/astrolabe/provenance/*

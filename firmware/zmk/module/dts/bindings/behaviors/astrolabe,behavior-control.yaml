@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+description: Route-aware Astrolabe five-way control behavior
+compatible: "astrolabe,behavior-control"
+
+include: two_param.yaml
+
