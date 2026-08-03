@@ -62,17 +62,17 @@
         poll-interval-us = <1000>;
         active-window-ms = <2000>;
         send-interval-ms = <7>;
-        cursor-gain-milli = <125>;
-        scroll-gain-milli = <250>;
+        /* Per radian of ball rotation, not per sensor count: independent of ball-diameter-um and
+         * cpi, and the same units the daemon's profile uses so standalone and daemon output can be
+         * compared directly. yaw-deadzone is the daemon's tuned 0.004 rad -- it was previously
+         * 1.2, which reads as 1.2 counts (0.00075 rad), five times more permissive than the
+         * reference, so noise-level yaw cleared it and scroll-hold-ms latched the false positive. */
+        cursor-gain-milli = <200000>;
+        scroll-gain-milli = <400000>;
         scroll-divisor = <60>;
-        yaw-deadzone-milli = <1200>;
+        yaw-deadzone-milli = <4>;
         yaw-dominance-milli = <1700>;
         scroll-hold-ms = <80>;
-    };
-
-    astrolabe_pointer_listener: astrolabe_pointer_listener {
-        compatible = "zmk,input-listener";
-        device = <&astrolabe_pmw>;
     };
 
     behaviors {

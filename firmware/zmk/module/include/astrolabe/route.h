@@ -31,8 +31,7 @@ struct astrolabe_route_config {
     uint32_t send_interval_ms;
 };
 
-int astrolabe_route_init(const struct device *pointer_device,
-                         const struct astrolabe_route_config *config);
+int astrolabe_route_init(const struct astrolabe_route_config *config);
 enum astrolabe_route astrolabe_route_current(void);
 bool astrolabe_route_forced_standalone(void);
 int astrolabe_route_claim(enum astrolabe_route route, astrolabe_route_lease_t *lease);

@@ -98,6 +98,7 @@ struct pmw_data {
     bool sensor_ready[SENSOR_COUNT];
     atomic_t wake_pending;
     atomic_t suspended;
+    atomic_t chain_running;
     uint32_t last_activity_ms;
 };
 
@@ -278,6 +279,13 @@ static void poll_work_handler(struct k_work *work) {
         pin_active || (uint32_t)(now - data->last_activity_ms) < config->active_window_ms;
     if (!active) {
         astrolabe_route_flush(now);
+        atomic_clear(&data->chain_running);
+        /* An edge that arrived while the chain was still marked running was dropped, and
+         * EDGE_TO_ACTIVE will not fire again for a level that is already asserted -- so without
+         * this re-check the pointer would stay dead until the next separate movement. */
+        if (atomic_get(&data->wake_pending) != 0 && atomic_cas(&data->chain_running, 0, 1)) {
+            k_work_reschedule(&data->poll_work, K_NO_WAIT);
+        }
         return;
     }
 
@@ -289,6 +297,31 @@ static void poll_work_handler(struct k_work *work) {
         }
     }
     k_mutex_unlock(&data->bus_lock);
+
+#if CONFIG_ASTROLABE_LOG_LEVEL >= 4
+    /* The solver takes four delta rows. A poll where only one sensor asserts MOTION contributes
+     * two zero rows, which is not a no-op: it constrains that sensor's axes to zero motion and
+     * biases the three-axis solve. Report how often the pair disagrees, plus the true poll rate,
+     * since astrolabe_route_motion only counts polls that carried motion. */
+    static uint32_t win_start, win_polls, win_both, win_left, win_right, win_none;
+    ++win_polls;
+    if (samples[0].motion && samples[1].motion) {
+        ++win_both;
+    } else if (samples[0].motion) {
+        ++win_left;
+    } else if (samples[1].motion) {
+        ++win_right;
+    } else {
+        ++win_none;
+    }
+    if ((uint32_t)(now - win_start) >= 500U) {
+        LOG_DBG("poll: %u/%ums both=%u left=%u right=%u none=%u squal=%u/%u",
+                win_polls, (unsigned)(now - win_start), win_both, win_left, win_right, win_none,
+                samples[0].squal, samples[1].squal);
+        win_start = now;
+        win_polls = win_both = win_left = win_right = win_none = 0U;
+    }
+#endif
 
     if (samples[0].motion || samples[1].motion) {
         const int16_t deltas[4] = {
@@ -316,7 +349,17 @@ static void motion_interrupt(const struct device *port, struct gpio_callback *ca
     struct pmw_motion_callback *motion =
         CONTAINER_OF(callback, struct pmw_motion_callback, callback);
     atomic_set(&motion->owner->wake_pending, 1);
-    k_work_reschedule(&motion->owner->poll_work, K_NO_WAIT);
+    /* Wake source only. A running chain already re-arms itself every poll-interval-us, and
+     * k_work_reschedule would cancel that pacing and re-enter the handler on the edge instead:
+     * each burst read clears MOTION, the sensor re-asserts within a millisecond, and with two
+     * sensors the handler free-runs back-to-back. The system workqueue is cooperative
+     * (CONFIG_SYSTEM_WORKQUEUE_PRIORITY=-1), so a saturated queue starves every preemptible
+     * thread behind it -- including the standalone output thread, which is the only pointer path
+     * that needs to be scheduled at all. The daemon path sends inline from this handler and so
+     * never showed the symptom. */
+    if (atomic_cas(&motion->owner->chain_running, 0, 1)) {
+        k_work_reschedule(&motion->owner->poll_work, K_NO_WAIT);
+    }
 }
 
 void astrolabe_pmw_activate(void) {
@@ -324,7 +367,9 @@ void astrolabe_pmw_activate(void) {
         return;
     }
     atomic_set(&active_instance->wake_pending, 1);
-    k_work_reschedule(&active_instance->poll_work, K_NO_WAIT);
+    if (atomic_cas(&active_instance->chain_running, 0, 1)) {
+        k_work_reschedule(&active_instance->poll_work, K_NO_WAIT);
+    }
 }
 
 static int pmw_init(const struct device *dev) {
@@ -370,7 +415,7 @@ static int pmw_init(const struct device *dev) {
     struct astrolabe_route_config route = config->route;
     route.radius_counts =
         ((float)config->ball_diameter_um / 2000.0f) * ((float)config->cpi / 25.4f);
-    err = astrolabe_route_init(dev, &route);
+    err = astrolabe_route_init(&route);
     if (err != 0) {
         return err;
     }
@@ -415,6 +460,7 @@ static int pmw_init(const struct device *dev) {
 
     data->last_activity_ms = k_uptime_get_32();
     active_instance = data;
+    atomic_set(&data->chain_running, 1);
     k_work_reschedule(&data->poll_work, K_NO_WAIT);
     return 0;
 }
@@ -425,10 +471,12 @@ static int pmw_pm_action(const struct device *dev, enum pm_device_action action)
     case PM_DEVICE_ACTION_SUSPEND:
         atomic_set(&data->suspended, 1);
         k_work_cancel_delayable(&data->poll_work);
+        atomic_clear(&data->chain_running);
         return 0;
     case PM_DEVICE_ACTION_RESUME:
         atomic_clear(&data->suspended);
         atomic_set(&data->wake_pending, 1);
+        atomic_set(&data->chain_running, 1);
         k_work_reschedule(&data->poll_work, K_NO_WAIT);
         return 0;
     default:

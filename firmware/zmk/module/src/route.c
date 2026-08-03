@@ -13,22 +13,35 @@
 
 #include <zephyr/devicetree.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/init.h>
-#include <zephyr/input/input.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
+#include <zmk/endpoints.h>
+#include <zmk/hid.h>
+
 LOG_MODULE_REGISTER(astrolabe_route, CONFIG_ASTROLABE_LOG_LEVEL);
 
 #define ROUTE_NODE DT_NODELABEL(astrolabe_route)
-#define HID_DRAIN_MAX 4U
+/* Standalone output runs on its own thread so a stalled HID endpoint cannot reach the sensor poll
+ * loop. ZMK's endpoint send waits on a binary semaphore with a 30 ms timeout; doing that inline in
+ * the poll handler stalls sampling, the sensors keep integrating, and the backlog later releases
+ * as a burst. The daemon routes send inline from the poll handler instead -- their transport call
+ * does not block -- which is why only this path needs a thread.
+ *
+ * Priority 0 is the highest preemptible priority, matching CONFIG_INPUT_THREAD_PRIORITY. Note that
+ * no preemptible priority can help if the system workqueue saturates: it is cooperative
+ * (CONFIG_SYSTEM_WORKQUEUE_PRIORITY=-1) and k_yield() only yields to equal-or-higher priority, so
+ * a busy queue starves this thread outright. Keeping the poll chain paced rather than
+ * interrupt-driven is what makes that not happen; see motion_interrupt() in the PMW3610 driver. */
+#define OUTPUT_STACK_SIZE 1024
+#define OUTPUT_THREAD_PRIORITY 0
 
 struct route_state {
     struct k_mutex lock;
     struct k_mutex output_lock;
-    const struct device *pointer_device;
+    uint8_t sent_buttons;
     struct astrolabe_route_config config;
     enum astrolabe_route current;
     uint8_t controls;
@@ -150,50 +163,88 @@ static void revoke_transport(enum astrolabe_route route, astrolabe_route_lease_t
     }
 }
 
-static int report_rel(uint16_t code, int32_t value, bool sync) {
-    if (value == 0) {
-        return 0;
+static K_THREAD_STACK_DEFINE(output_stack, OUTPUT_STACK_SIZE);
+static struct k_work_q output_queue;
+static struct k_work output_work;
+
+static int16_t clamp_report(float value) {
+    if (value > 32767.0f) {
+        return 32767;
     }
-    return input_report_rel(state.pointer_device, code, value, sync, K_FOREVER);
+    if (value < -32767.0f) {
+        return -32767;
+    }
+    return (int16_t)value;
 }
 
-static int report_button_mask(uint8_t mask, bool pressed) {
-    int err = 0;
+/* One writer of ZMK's mouse report. Buttons are re-asserted from the desired mask every cycle
+ * rather than tracked as edges, so a failed send self-heals on the next one. */
+static void output_handler(struct k_work *work) {
+    ARG_UNUSED(work);
+
+    k_mutex_lock(&state.lock, K_FOREVER);
+    if (!state.initialized || state.current != ASTROLABE_ROUTE_STANDALONE) {
+        k_mutex_unlock(&state.lock);
+        return;
+    }
+    const astrolabe_route_lease_t epoch = state.epoch;
+    const int16_t dx = clamp_report(state.cursor_x);
+    const int16_t dy = clamp_report(state.cursor_y);
+    const int16_t wheel = clamp_report(state.scroll / state.config.scroll_divisor);
+    const uint8_t buttons = state.standalone_buttons;
+    const bool buttons_changed = buttons != state.sent_buttons;
+    k_mutex_unlock(&state.lock);
+
+    if (dx == 0 && dy == 0 && wheel == 0 && !buttons_changed) {
+        return;
+    }
+
     for (uint8_t button = 0; button < 5U; ++button) {
-        if ((mask & BIT(button)) == 0U) {
-            continue;
-        }
-        const bool sync = (mask & ~GENMASK(button, 0)) == 0U;
-        const int next =
-            input_report_key(state.pointer_device, INPUT_BTN_0 + button, pressed, sync, K_FOREVER);
-        if (err == 0 && next != 0) {
-            err = next;
+        if ((buttons & BIT(button)) != 0U) {
+            zmk_hid_mouse_button_press(button);
+        } else {
+            zmk_hid_mouse_button_release(button);
         }
     }
-    return err;
+    zmk_hid_mouse_movement_set(dx, dy);
+    zmk_hid_mouse_scroll_set(0, wheel);
+    const int err = zmk_endpoints_send_mouse_report();
+    zmk_hid_mouse_movement_set(0, 0);
+    zmk_hid_mouse_scroll_set(0, 0);
+    if (err != 0) {
+        /* Retire nothing. Unlike ZMK's input listener, which zeroes its pending movement whether
+         * or not the send succeeded, the motion stays in the accumulator and the next cycle
+         * carries it. Delivery may be late; it is never silently dropped. */
+        return;
+    }
+
+    k_mutex_lock(&state.lock, K_FOREVER);
+    if (state.current == ASTROLABE_ROUTE_STANDALONE && state.epoch == epoch) {
+        state.cursor_x -= (float)dx;
+        state.cursor_y -= (float)dy;
+        state.scroll -= (float)wheel * state.config.scroll_divisor;
+        state.sent_buttons = buttons;
+    }
+    k_mutex_unlock(&state.lock);
 }
 
-static int clamp_hid(float value) {
-    if (value > 127.0f) {
-        return 127;
-    }
-    if (value < -127.0f) {
-        return -127;
-    }
-    return (int)value;
-}
+static void submit_output(void) { k_work_submit_to_queue(&output_queue, &output_work); }
 
-int astrolabe_route_init(const struct device *pointer_device,
-                         const struct astrolabe_route_config *config) {
-    if (pointer_device == NULL || config == NULL || config->radius_counts <= 0.0f ||
-        config->scroll_divisor <= 0.0f) {
+int astrolabe_route_init(const struct astrolabe_route_config *config) {
+    if (config == NULL || config->radius_counts <= 0.0f || config->scroll_divisor <= 0.0f) {
         return -EINVAL;
     }
+
+    static const struct k_work_queue_config output_queue_config = {.name = "astrolabe_out"};
+    k_work_queue_init(&output_queue);
+    k_work_queue_start(&output_queue, output_stack, K_THREAD_STACK_SIZEOF(output_stack),
+                       OUTPUT_THREAD_PRIORITY, &output_queue_config);
+    k_work_init(&output_work, output_handler);
 
     k_mutex_init(&state.lock);
     k_mutex_init(&state.output_lock);
     k_mutex_lock(&state.lock, K_FOREVER);
-    state.pointer_device = pointer_device;
+    state.sent_buttons = 0U;
     state.config = *config;
     state.current = ASTROLABE_ROUTE_STANDALONE;
     state.controls = 0U;
@@ -275,7 +326,7 @@ int astrolabe_route_claim(enum astrolabe_route route, astrolabe_route_lease_t *l
     /* Revoke the old transport and drain standalone buttons before publishing. */
     revoke_transport(previous, previous_lease);
     if (released_buttons != 0U) {
-        report_button_mask(released_buttons, false);
+        submit_output();
     }
 
     k_mutex_lock(&state.lock, K_FOREVER);
@@ -354,34 +405,37 @@ void astrolabe_route_motion(float wx, float wy, float wz, uint32_t now_ms) {
         return;
     }
 
-    if (state.current != ASTROLABE_ROUTE_STANDALONE) {
-        state.rotation[0] += wx / state.config.radius_counts;
-        state.rotation[1] += wy / state.config.radius_counts;
-        state.rotation[2] += wz / state.config.radius_counts;
-        k_mutex_unlock(&state.lock);
-        return;
-    }
+    /* Radians, for every route. Solved counts scale with ball diameter and sensor CPI, so a
+     * threshold expressed in them silently retunes itself whenever either changes; radians are the
+     * physical quantity the gesture actually has. This is also what makes the standalone constants
+     * directly comparable to the daemon's tuned values, which are already in radians -- the two
+     * classify the same gesture over the same window and should not disagree. */
+    state.rotation[0] += wx / state.config.radius_counts;
+    state.rotation[1] += wy / state.config.radius_counts;
+    state.rotation[2] += wz / state.config.radius_counts;
 
-    const float yaw = fabsf(wz);
-    const float horizontal = sqrtf(wx * wx + wy * wy);
-    const bool scroll_now =
-        yaw > state.config.yaw_deadzone && yaw > state.config.yaw_dominance * horizontal;
-    if (scroll_now) {
-        state.last_scroll_ms = now_ms;
+#if CONFIG_ASTROLABE_LOG_LEVEL >= 4
+    /* Per-sample yaw contamination: how far an individual poll's solved rotation is from the
+     * accumulated gesture it belongs to. A single-sensor poll is underdetermined, so this is
+     * expected to be large; it is logged to confirm the errors cancel across the window rather
+     * than to justify filtering any sample. */
+    static uint32_t window_start_ms;
+    static uint32_t window_samples;
+    static uint32_t window_yaw_dominant;
+    ++window_samples;
+    if (fabsf(wz) > state.config.yaw_dominance * sqrtf(wx * wx + wy * wy)) {
+        ++window_yaw_dominant;
     }
-    bool scrolling =
-        scroll_now || (uint32_t)(now_ms - state.last_scroll_ms) < state.config.scroll_hold_ms;
-    if (!scroll_now && horizontal > state.config.yaw_deadzone &&
-        horizontal > state.config.yaw_dominance * yaw) {
-        scrolling = false;
+    if ((uint32_t)(now_ms - window_start_ms) >= 500U) {
+        LOG_DBG("motion: %u samples/%ums yaw_dominant=%u accum mrad x=%d y=%d z=%d", window_samples,
+                (unsigned)(now_ms - window_start_ms), window_yaw_dominant,
+                (int)(state.rotation[0] * 1000.0f), (int)(state.rotation[1] * 1000.0f),
+                (int)(state.rotation[2] * 1000.0f));
+        window_start_ms = now_ms;
+        window_samples = 0U;
+        window_yaw_dominant = 0U;
     }
-
-    if (scrolling) {
-        state.scroll -= wz * state.config.scroll_gain;
-    } else {
-        state.cursor_x -= wy * state.config.cursor_gain;
-        state.cursor_y -= wx * state.config.cursor_gain;
-    }
+#endif
     k_mutex_unlock(&state.lock);
 }
 
@@ -402,47 +456,51 @@ void astrolabe_route_flush(uint32_t now_ms) {
     route = state.current;
     epoch = state.epoch;
     if (route == ASTROLABE_ROUTE_STANDALONE) {
-        float cursor_x = state.cursor_x;
-        float cursor_y = state.cursor_y;
-        const int wheel = clamp_hid(state.scroll / state.config.scroll_divisor);
-        const bool sendable = clamp_hid(cursor_x) != 0 || clamp_hid(cursor_y) != 0 || wheel != 0;
-        if (sendable) {
-            state.last_send_ms = now_ms;
+        /* The window closes here whether or not it produced a report. Classification latches
+         * (scroll_hold_ms), so pacing it off successful delivery is a trap: with nothing pending
+         * the gate above passes on every poll, classification degenerates to the single-sample
+         * case, and a latched false positive then suppresses the cursor that would have cleared
+         * it. Window pacing is about how much gesture to judge at once, not about delivery. */
+        state.last_send_ms = now_ms;
+
+        /* Classify the accumulated gesture, not one sample of it. A poll where only one sensor
+         * asserted MOTION is underdetermined, and the solver answers it with a large spurious yaw
+         * whose sign follows whichever sensor reported. Those errors are equal and opposite
+         * between left-only and right-only samples, so they cancel once summed -- but only if
+         * nothing branches on an individual sample first. */
+        const float wx = state.rotation[0];
+        const float wy = state.rotation[1];
+        const float wz = state.rotation[2];
+        if (wx != 0.0f || wy != 0.0f || wz != 0.0f) {
+            const float yaw = fabsf(wz);
+            const float horizontal = sqrtf(wx * wx + wy * wy);
+            const bool scroll_now =
+                yaw > state.config.yaw_deadzone && yaw > state.config.yaw_dominance * horizontal;
+            if (scroll_now) {
+                state.last_scroll_ms = now_ms;
+            }
+            bool scrolling = scroll_now || (uint32_t)(now_ms - state.last_scroll_ms) <
+                                               state.config.scroll_hold_ms;
+            if (!scroll_now && horizontal > state.config.yaw_deadzone &&
+                horizontal > state.config.yaw_dominance * yaw) {
+                scrolling = false;
+            }
+            if (scrolling) {
+                state.scroll -= wz * state.config.scroll_gain;
+            } else {
+                state.cursor_x -= wy * state.config.cursor_gain;
+                state.cursor_y -= wx * state.config.cursor_gain;
+            }
+            memset(state.rotation, 0, sizeof(state.rotation));
         }
+
+        const bool pending = clamp_report(state.cursor_x) != 0 ||
+                             clamp_report(state.cursor_y) != 0 ||
+                             clamp_report(state.scroll / state.config.scroll_divisor) != 0 ||
+                             state.standalone_buttons != state.sent_buttons;
         k_mutex_unlock(&state.lock);
-
-        for (uint8_t packet = 0; packet < HID_DRAIN_MAX; ++packet) {
-            const int x = clamp_hid(cursor_x);
-            const int y = clamp_hid(cursor_y);
-            if (x == 0 && y == 0) {
-                break;
-            }
-            int err = 0;
-            if (x != 0) {
-                err = report_rel(INPUT_REL_X, x, y == 0);
-            }
-            if (err == 0 && y != 0) {
-                err = report_rel(INPUT_REL_Y, y, true);
-            }
-            if (err != 0) {
-                break;
-            }
-            cursor_x -= (float)x;
-            cursor_y -= (float)y;
-            k_mutex_lock(&state.lock, K_FOREVER);
-            if (state.current == ASTROLABE_ROUTE_STANDALONE && state.epoch == epoch) {
-                state.cursor_x -= (float)x;
-                state.cursor_y -= (float)y;
-            }
-            k_mutex_unlock(&state.lock);
-        }
-
-        if (wheel != 0 && report_rel(INPUT_REL_WHEEL, wheel, true) == 0) {
-            k_mutex_lock(&state.lock, K_FOREVER);
-            if (state.current == ASTROLABE_ROUTE_STANDALONE && state.epoch == epoch) {
-                state.scroll -= (float)wheel * state.config.scroll_divisor;
-            }
-            k_mutex_unlock(&state.lock);
+        if (pending) {
+            submit_output();
         }
         k_mutex_unlock(&state.output_lock);
         return;
@@ -483,7 +541,6 @@ void astrolabe_route_control(uint8_t bit_index, uint8_t standalone_buttons, bool
     enum astrolabe_route route;
     astrolabe_route_lease_t epoch;
     uint8_t button_change = 0U;
-    bool button_pressed = false;
     bool publish_snapshot = false;
 
     k_mutex_lock(&state.lock, K_FOREVER);
@@ -505,7 +562,6 @@ void astrolabe_route_control(uint8_t bit_index, uint8_t standalone_buttons, bool
         if (pressed && (state.suppressed_controls & control) == 0U) {
             button_change = standalone_buttons & ~state.standalone_buttons;
             state.standalone_buttons |= standalone_buttons;
-            button_pressed = true;
         } else if (!pressed) {
             button_change = standalone_buttons & state.standalone_buttons;
             state.standalone_buttons &= ~standalone_buttons;
@@ -516,15 +572,8 @@ void astrolabe_route_control(uint8_t bit_index, uint8_t standalone_buttons, bool
     k_mutex_unlock(&state.lock);
 
     if (button_change != 0U) {
-        k_mutex_lock(&state.output_lock, K_FOREVER);
-        k_mutex_lock(&state.lock, K_FOREVER);
-        const bool still_standalone =
-            state.current == ASTROLABE_ROUTE_STANDALONE && state.epoch == epoch;
-        k_mutex_unlock(&state.lock);
-        if (still_standalone) {
-            report_button_mask(button_change, button_pressed);
-        }
-        k_mutex_unlock(&state.output_lock);
+        /* The output thread re-asserts the whole desired mask, so it only needs waking. */
+        submit_output();
     }
     if (publish_snapshot) {
         astrolabe_route_publish_snapshot(route, epoch);
