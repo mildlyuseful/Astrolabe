@@ -166,6 +166,13 @@ close these remaining gates:
 - Flash the candidate on the final electrical assembly. Verify both PMW3610 identities, shared-bus
   signal integrity, calibrated axes/signs, full-speed motion, standalone cursor/scroll feel, all five
   switch positions, recovery gestures, forced-standalone boot, and ordinary BLE/USB HID output.
+- Give BLE profile and output state some indication. The device has no display or LED binding, so
+  three of the four standalone gestures — profile switch, output toggle, bond clear — are
+  unobservable, and "nothing happened" is indistinguishable from "it worked". Only the bootloader
+  gesture confirms itself, by mounting. This is also what makes a wrong profile hard to diagnose:
+  ZMK accepts a pairing only onto an open slot, so a taken slot rejects the host with nothing but
+  a generic connect failure at the other end. Decide between an LED, a HID feature report the
+  daemon can read, or accepting it and documenting the recovery sequence.
 - Verify the standalone/daemon layer split on hardware. Confirm the recovery and radio gestures are
   reachable only in standalone, that daemon control bits report with no arbitration in front of
   them, and that the layer follows the route with no manual step across cable pull, daemon
