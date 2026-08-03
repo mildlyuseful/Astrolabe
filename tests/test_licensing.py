@@ -195,6 +195,12 @@ def test_no_file_declares_a_license_the_mapping_does_not_grant():
     for path in _tracked():
         if PurePosixPath(path).suffix in {".png", ".dll", ".svg"}:
             continue
+        # Verbatim upstream documents are copied, never authored here, and the policy says they
+        # must not be edited. An SPDX line inside one (nrfx and picolibc notices carry theirs
+        # inline) states the upstream component's license, not this repository's disposition of
+        # the file, which licensing.json already records as external-verbatim.
+        if _rule_for(policy, path)["license"] == "external-verbatim":
+            continue
         for line in _text(path).splitlines()[:10]:
             _, _, identifier = line.partition("SPDX-License-Identifier:")
             if identifier and identifier.strip() not in permitted:
