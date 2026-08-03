@@ -5,7 +5,6 @@ menuconfig ASTROLABE_FIRMWARE
     bool "Astrolabe dual-sensor trackball firmware"
     default y if SHIELD_ASTROLABE
     select GPIO
-    select INPUT
     select ZMK_POINTING
 
 if ASTROLABE_FIRMWARE

@@ -31,8 +31,8 @@ LOG_MODULE_REGISTER(astrolabe_route, CONFIG_ASTROLABE_LOG_LEVEL);
  * as a burst. The daemon routes send inline from the poll handler instead -- their transport call
  * does not block -- which is why only this path needs a thread.
  *
- * Priority 0 is the highest preemptible priority, matching CONFIG_INPUT_THREAD_PRIORITY. Note that
- * no preemptible priority can help if the system workqueue saturates: it is cooperative
+ * Priority 0 is the highest preemptible priority. Note that no preemptible priority can help if
+ * the system workqueue saturates: it is cooperative
  * (CONFIG_SYSTEM_WORKQUEUE_PRIORITY=-1) and k_yield() only yields to equal-or-higher priority, so
  * a busy queue starves this thread outright. Keeping the poll chain paced rather than
  * interrupt-driven is what makes that not happen; see motion_interrupt() in the PMW3610 driver. */
@@ -92,7 +92,7 @@ __weak void astrolabe_usb_route_revoked(astrolabe_route_lease_t lease) { ARG_UNU
 
 __weak void astrolabe_gatt_route_available(void) {}
 
-int astrolabe_transport_rotation(enum astrolabe_route route, const uint8_t payload[12]) {
+static int astrolabe_transport_rotation(enum astrolabe_route route, const uint8_t payload[12]) {
     switch (route) {
     case ASTROLABE_ROUTE_BLE_DAEMON:
         return astrolabe_gatt_rotation(payload);
@@ -103,7 +103,7 @@ int astrolabe_transport_rotation(enum astrolabe_route route, const uint8_t paylo
     }
 }
 
-int astrolabe_transport_snapshot(enum astrolabe_route route, const uint8_t payload[6]) {
+static int astrolabe_transport_snapshot(enum astrolabe_route route, const uint8_t payload[6]) {
     switch (route) {
     case ASTROLABE_ROUTE_BLE_DAEMON:
         return astrolabe_gatt_snapshot(payload);
@@ -418,31 +418,6 @@ void astrolabe_route_release(enum astrolabe_route route, astrolabe_route_lease_t
     }
 }
 
-void astrolabe_route_reset(void) {
-    enum astrolabe_route previous;
-    astrolabe_route_lease_t previous_lease;
-
-    k_mutex_lock(&state.output_lock, K_FOREVER);
-    k_mutex_lock(&state.lock, K_FOREVER);
-    previous = state.current;
-    previous_lease =
-        previous == ASTROLABE_ROUTE_STANDALONE ? ASTROLABE_ROUTE_LEASE_NONE : state.epoch;
-    k_mutex_unlock(&state.lock);
-    revoke_transport(previous, previous_lease);
-    k_mutex_lock(&state.lock, K_FOREVER);
-    state.current = ASTROLABE_ROUTE_STANDALONE;
-    (void)next_epoch_locked();
-    state.controls = 0U;
-    state.suppressed_controls = 0U;
-    state.standalone_buttons = 0U;
-    state.button_latch = 0U;
-    state.sequence = 0U;
-    clear_motion_locked();
-    k_mutex_unlock(&state.lock);
-    k_mutex_unlock(&state.output_lock);
-    apply_route_layer(ASTROLABE_ROUTE_STANDALONE);
-}
-
 void astrolabe_route_motion(float wx, float wy, float wz, uint32_t now_ms) {
     k_mutex_lock(&state.lock, K_FOREVER);
     if (!state.initialized) {
@@ -626,16 +601,3 @@ void astrolabe_route_control(uint8_t bit_index, uint8_t standalone_buttons, bool
     }
 }
 
-uint8_t astrolabe_route_controls(void) {
-    k_mutex_lock(&state.lock, K_FOREVER);
-    const uint8_t controls = state.controls;
-    k_mutex_unlock(&state.lock);
-    return controls;
-}
-
-uint16_t astrolabe_route_sequence(void) {
-    k_mutex_lock(&state.lock, K_FOREVER);
-    const uint16_t sequence = state.sequence;
-    k_mutex_unlock(&state.lock);
-    return sequence;
-}

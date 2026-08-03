@@ -8,8 +8,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <zephyr/device.h>
-
 enum astrolabe_route {
     ASTROLABE_ROUTE_STANDALONE = 0,
     ASTROLABE_ROUTE_BLE_DAEMON,
@@ -37,14 +35,11 @@ bool astrolabe_route_forced_standalone(void);
 int astrolabe_route_claim(enum astrolabe_route route, astrolabe_route_lease_t *lease);
 bool astrolabe_route_lease_is_current(enum astrolabe_route route, astrolabe_route_lease_t lease);
 void astrolabe_route_release(enum astrolabe_route route, astrolabe_route_lease_t lease);
-void astrolabe_route_reset(void);
 
 void astrolabe_route_motion(float wx, float wy, float wz, uint32_t now_ms);
 void astrolabe_route_flush(uint32_t now_ms);
 void astrolabe_route_control(uint8_t bit_index, uint8_t standalone_buttons, bool pressed);
 
-uint8_t astrolabe_route_controls(void);
-uint16_t astrolabe_route_sequence(void);
 int astrolabe_route_publish_snapshot(enum astrolabe_route route, astrolabe_route_lease_t lease);
 
 /* Called without the route state mutex before an exact transport lease is
@@ -52,6 +47,3 @@ int astrolabe_route_publish_snapshot(enum astrolabe_route route, astrolabe_route
 void astrolabe_gatt_route_revoked(astrolabe_route_lease_t lease);
 void astrolabe_usb_route_revoked(astrolabe_route_lease_t lease);
 void astrolabe_gatt_route_available(void);
-
-int astrolabe_transport_rotation(enum astrolabe_route route, const uint8_t payload[12]);
-int astrolabe_transport_snapshot(enum astrolabe_route route, const uint8_t payload[6]);
