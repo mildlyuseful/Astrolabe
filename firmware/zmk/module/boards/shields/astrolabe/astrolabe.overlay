@@ -119,6 +119,13 @@
             #binding-cells = <1>;
             display-name = "Astrolabe Control Bit";
         };
+
+        /* Replaces `&out OUT_TOG`, which is silent when the toggle cannot be applied. */
+        astro_out: astrolabe_output_toggle {
+            compatible = "astrolabe,behavior-output-toggle";
+            #binding-cells = <0>;
+            display-name = "Astrolabe Output Toggle";
+        };
     };
 
 };

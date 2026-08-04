@@ -168,19 +168,33 @@ Event-driven: dark at rest, blinking only when something changes. A repeating st
 cost battery during the time nobody is watching it, on a device whose discharge curve is not
 measured yet.
 
-| Change | Pattern |
+Three elements: a **leading long** means endpoint, a **leading short** means profile, and a
+**trailing long** means the thing you selected is not usable right now.
+
+| Pattern | Meaning |
 |---|---|
-| Endpoint selected | One long pulse, then **1 short** = USB, **2 short** = BLE |
-| BLE profile or bond state | **N short** = profile N (one-based), then **one long** if that profile has no bond |
+| long, 1 short | USB is the active output |
+| long, 2 short | BLE is the active output |
+| long, N short, long | Toggled, but still on that transport — the change could not be applied |
+| N short | Active BLE profile N (one-based), bonded |
+| N short, long | Active BLE profile N, no bond |
 
-A leading long means endpoint; a leading short means profile. That grammar is what keeps them
-readable apart, and it exists because ZMK raises the same `zmk_ble_active_profile_changed` event
-for a profile switch, a bond clear, and a connection — carrying only an index. Patterns named after
-actions would be ambiguous, so the vocabulary names the state the device ended up in instead.
+The vocabulary names the state the device ended up in rather than the action taken, because it has
+to: ZMK raises the same `zmk_ble_active_profile_changed` for a profile switch, a bond clear, and a
+connection, carrying only an index.
 
-One gap worth knowing before diagnosing a dead-looking device: clearing a bond on an
-already-unbonded profile emits nothing at all, because ZMK's `clear_profile_bond()` returns early
-when the peer is already unset and raises no event.
+Two behaviors of ZMK's that this has to work around, both worth knowing before diagnosing a
+dead-looking device:
+
+- **A profile switch also raises `zmk_endpoint_changed`.** The BLE endpoint instance embeds
+  `profile_index`, and ZMK's own endpoint listener subscribes to profile changes. The indicator
+  therefore gates endpoint patterns on the *transport* changing, not on the event firing.
+- **The output toggle is silent when it cannot take effect.** `get_selected_transport()` honours
+  the preference only while both transports are ready, so toggling with the cable out saves a
+  preference, changes nothing, and raises no event. That is why Up is bound to `&astro_out` rather
+  than stock `&out OUT_TOG` — it reports the "not applied" suffix instead of looking dead.
+- Clearing a bond on an already-unbonded profile emits nothing, because `clear_profile_bond()`
+  returns early when the peer is already unset.
 
 **The LED is safe to drive, and a prior comment claiming otherwise is wrong.** It was disabled during
 normal operation in the Arduino prototype on the theory that its light reached both sensors off the

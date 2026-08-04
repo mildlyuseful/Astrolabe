@@ -14,11 +14,18 @@
  * the event carries only an index. Patterns named after actions would be ambiguous; patterns naming
  * the state the device ended up in are not.
  *
- *   Endpoint change   long, then 1 short = USB, 2 short = BLE
- *   BLE state change  N short = profile N, then one long if that profile has no bond
+ *   Endpoint  long, then 1 short = USB, 2 short = BLE
+ *   Profile   N short = profile N
+ *   Suffix    one long = the thing you selected is not usable (no bond / request not applied)
  *
- * A leading long means "endpoint", a leading short means "profile". That is the whole grammar, and
- * it is what keeps the two readable apart at a glance.
+ * A leading long means "endpoint", a leading short means "profile", a trailing long means "not
+ * usable". That is the whole grammar, and it is what keeps them readable apart at a glance.
+ *
+ * Endpoint patterns are gated on the TRANSPORT changing, not on zmk_endpoint_changed firing. The
+ * BLE endpoint instance embeds profile_index and ZMK's own endpoint listener subscribes to
+ * zmk_ble_active_profile_changed, so switching profile while on BLE raises an endpoint event too.
+ * Reporting that verbatim made a profile switch blink the endpoint pattern whenever USB was
+ * unplugged, while looking correct whenever it was not.
  *
  * A bond clear on an already-unbonded profile emits nothing, because ZMK raises no event for it --
  * clear_profile_bond() returns early when the peer is already BT_ADDR_LE_ANY. Clearing twice
@@ -31,6 +38,8 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/logging/log.h>
 #include <string.h>
+
+#include <astrolabe/indicator.h>
 
 #include <zmk/ble.h>
 #include <zmk/endpoints_types.h>
@@ -108,13 +117,16 @@ static void blink_step(struct k_work *work) {
     k_work_reschedule(&blink_work, K_MSEC(ms));
 }
 
-static void show_endpoint(struct zmk_endpoint_instance endpoint) {
+void astrolabe_indicator_show_transport(enum zmk_transport transport, bool applied) {
     struct pattern p = {0};
-    uint8_t count = endpoint.transport == ZMK_TRANSPORT_USB ? 1 : 2;
+    uint8_t count = transport == ZMK_TRANSPORT_USB ? 1 : 2;
 
     add(&p, LONG_ON, LEAD_GAP);
     for (uint8_t i = 0; i < count; i++) {
         add(&p, SHORT_ON, SHORT_OFF);
+    }
+    if (!applied) {
+        add(&p, LONG_ON, LONG_OFF);
     }
 
     publish(&p);
@@ -135,10 +147,22 @@ static void show_profile(uint8_t index) {
     publish(&p);
 }
 
+static enum zmk_transport last_transport;
+static bool last_transport_valid;
+
 static int indicator_listener(const zmk_event_t *eh) {
     const struct zmk_endpoint_changed *ep = as_zmk_endpoint_changed(eh);
     if (ep != NULL) {
-        show_endpoint(ep->endpoint);
+        /* Ignore an instance change that kept the same transport: that is a BLE profile switch
+         * arriving through the endpoint event, and show_profile already reports it. */
+        bool changed = !last_transport_valid || ep->endpoint.transport != last_transport;
+
+        last_transport = ep->endpoint.transport;
+        last_transport_valid = true;
+
+        if (changed) {
+            astrolabe_indicator_show_transport(ep->endpoint.transport, true);
+        }
         return ZMK_EV_EVENT_BUBBLE;
     }
 

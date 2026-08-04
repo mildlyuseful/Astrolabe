@@ -184,8 +184,9 @@ remaining gates:
   (P0.15, the board's misleadingly named `blue_led` node); what is unverified is that each pattern
   fires when it should and is readable. Confirm: endpoint toggle shows long-then-one for USB and
   long-then-two for BLE; a profile switch shows the right count; a bond clear adds the trailing
-  long; and a bond clear on an already-unbonded profile shows nothing at all, which is ZMK raising
-  no event rather than a fault. Also confirm the LED does not measurably shorten runtime once the
+  long; a toggle that cannot be applied (cable out, or no BLE host) shows the trailing long instead
+  of nothing; and a bond clear on an already-unbonded profile shows nothing at all, which is ZMK
+  raising no event rather than a fault. Also confirm the LED does not measurably shorten runtime once the
   battery discharge curve exists, and that it does not disturb either sensor — the old interference
   claim was a misdiagnosis of the wake transient, but it has never been tested with the LED
   deliberately lit.

@@ -68,7 +68,7 @@
             compatible = "zmk,behavior-tap-dance";
             #binding-cells = <0>;
             tapping-term-ms = <400>;
-            bindings = <&up_recover 0 0>, <&out OUT_TOG>;
+            bindings = <&up_recover 0 0>, <&astro_out>;
         };
 
         left_gestures: left_gestures {
