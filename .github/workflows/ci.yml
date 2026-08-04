@@ -371,8 +371,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          sdk_dir="$(sed -n 's/^ZEPHYR_SDK_INSTALL_DIR:INTERNAL=//p' build/astrolabe/CMakeCache.txt)"
-          test -n "$sdk_dir"
+          # Zephyr's FindZephyr-sdk module caches this as :PATH when it discovers the SDK through
+          # the CMake package registry, which is how the build container provides it. It is only
+          # :INTERNAL when ZEPHYR_SDK_INSTALL_DIR came from the environment, which is what a local
+          # developer build usually does -- so matching :INTERNAL alone passed by hand and left
+          # sdk_dir empty here. Match whatever type CMake chose, and say so if it is missing
+          # rather than exiting silently on `test -n`.
+          sdk_dir="$(sed -n 's/^ZEPHYR_SDK_INSTALL_DIR:[^=]*=//p' build/astrolabe/CMakeCache.txt | head -n1)"
+          if [ -z "$sdk_dir" ]; then
+            echo "ZEPHYR_SDK_INSTALL_DIR is absent from build/astrolabe/CMakeCache.txt" >&2
+            grep -i 'ZEPHYR_SDK\|CMAKE_C_COMPILER:' build/astrolabe/CMakeCache.txt >&2 || true
+            exit 1
+          fi
           # Only components that ship a single canonical upstream license file are compared here.
           # nrfx and micro-ecc do not: their notices are extracted from source headers, so those
           # texts are pinned by content hash in tests/test_zmk_contract.py instead. Adding them to
