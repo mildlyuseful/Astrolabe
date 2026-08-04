@@ -22,7 +22,7 @@ and its keymap; when they disagree, the shield data is correct and this document
 | Bootloader | Adafruit nRF52 UF2 bundling SoftDevice S140 7.3.0; application at `0x27000`, `0xC5000` long |
 | Motion sensors | Two PMW3610, sharing one bit-banged three-wire bus |
 | Directional switch | ALPS SKRHADE010 five-way (four directions plus center push) |
-| Status indicator | The controller's red user LED (pin unconfirmed, probably P0.15 — see below) |
+| Status indicator | The controller's red user LED, P0.15 active-high (`blue_led` in the board definition — the label is the nice!nano's colour, not this board's) |
 | Firmware stack | Pinned ZMK and Zephyr commits plus one out-of-tree Astrolabe module; no ZMK patch |
 
 ## The SuperMini is not flash-compatible with nice!nano v2
@@ -156,12 +156,12 @@ The board carries two LEDs and only one of them is ours:
 - **Blue — not ours.** A battery-charge indicator, lit by the charging circuit rather than by
   firmware. Do not bind it.
 
-**The pin is not yet confirmed.** The upstream `nice_nano_v2` definition declares exactly one GPIO
-LED, `blue_led` at P0.15 active-high, named for the colour it happens to be on a real nice!nano. The
-SuperMini is a pin-compatible clone whose user LED is red, so P0.15 is very likely the red one here
-and the label is just inherited — but "very likely" is not a frozen contract. Confirm by driving
-P0.15 and observing which LED responds before the indicator is implemented. If it turns out to be a
-pin the board definition does not declare, the shield overlay needs its own `gpio-leds` node.
+**The pin is P0.15, confirmed on hardware.** The upstream `nice_nano_v2` definition declares exactly
+one GPIO LED, `blue_led` at P0.15 active-high, named for the colour it is on a real nice!nano. On
+this board that same pin drives the *red* LED — verified by blinking it with
+`CONFIG_ASTROLABE_LED_PIN_TEST` and observing which LED responded. The `blue_led` label is inherited
+and misleading here; the node is correct, the name is not. The shield needs no `gpio-leds` node of
+its own.
 
 **The LED is safe to drive, and a prior comment claiming otherwise is wrong.** It was disabled during
 normal operation in the Arduino prototype on the theory that its light reached both sensors off the

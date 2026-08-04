@@ -182,14 +182,16 @@ remaining gates:
   works. Re-run it whole regardless: the ball diameter, mounting, and harness all changed.
 - Implement the status indicator on the controller's red user LED. Decided in favor of an LED over a
   HID feature report because the gestures it reports are exactly the ones used when no host is
-  attached or when pairing is broken. Two steps:
-  - Confirm the pin. The `nice_nano_v2` definition declares one GPIO LED, `blue_led` at P0.15, named
-    for the nice!nano's colour; the SuperMini's user LED is red and is probably the same pin, but
-    that is inference. Drive P0.15 and see which LED lights. If it is not the red one, the shield
-    overlay needs its own `gpio-leds` node for the correct pin. Do not bind the blue LED — it is a
-    charge indicator owned by the charging circuit.
-  - Build the indicator: a blink vocabulary covering BLE connection state, active profile, and
-    selected endpoint, a ZMK listener on the profile/endpoint events, and a Kconfig switch.
+  attached or when pairing is broken. The pin is settled: P0.15, the board's `blue_led` node, whose
+  label is the nice!nano's colour rather than this board's. Do not bind the blue LED — it is a
+  charge indicator owned by the charging circuit.
+
+  What remains is the blink vocabulary covering BLE connection state, active profile, and selected
+  endpoint, a ZMK listener on the profile/endpoint events, and a Kconfig switch. Settle the duty
+  cycle against battery life first: this is a battery device with no measured discharge curve yet,
+  so a continuously blinking state display trades runtime for information nobody is reading most of
+  the time.
+
   Until it exists, three of the four gestures are unobservable and a wrong profile stays hard to
   diagnose: ZMK accepts a pairing only onto an open slot, so a taken slot rejects the host with
   nothing but a generic connect failure at the other end. The LED's suspected sensor interference
