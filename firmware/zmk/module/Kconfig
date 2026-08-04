@@ -33,6 +33,17 @@ config ASTROLABE_DAEMON_LAYER
       two writers would desynchronise with no way to recover. Must match the second layer
       declared in the keymap.
 
+config ASTROLABE_LED_PIN_TEST
+    bool "Blink the board's GPIO LED to identify which physical LED it is"
+    default n
+    help
+      Diagnostic. Blinks the one LED nice_nano_v2 declares (`blue_led`, P0.15) in three-pulse
+      groups so it cannot be confused with the charge indicator or the bootloader's reset flash.
+      The SuperMini's user LED is red, so this establishes whether the inherited `blue_led` label
+      names the right pin before the real status indicator is built against it.
+
+      Not part of any product build. Enable it on the command line for a throwaway image.
+
 config ASTROLABE_LOG_LEVEL
     int "Astrolabe log level"
     range 0 4

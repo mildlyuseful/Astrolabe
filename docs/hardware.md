@@ -19,7 +19,7 @@ and its keymap; when they disagree, the shield data is correct and this document
 |---|---|
 | Controller | SuperMini nRF52840 |
 | ZMK board target | Upstream `nice_nano_v2`; no in-tree board fork |
-| Bootloader | Adafruit nRF52 UF2 with SoftDevice S140 7.3.0, application at `0x27000` |
+| Bootloader | Adafruit nRF52 UF2. The board reserves `0x0`–`0x26000` for the SoftDevice and links the application at `0x26000`, `0xC6000` long |
 | Motion sensors | Two PMW3610, sharing one bit-banged three-wire bus |
 | Directional switch | ALPS SKRHADE010 five-way (four directions plus center push) |
 | Status indicator | The controller's red user LED (pin unconfirmed, probably P0.15 — see below) |
