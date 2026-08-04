@@ -12,6 +12,15 @@ nuitka-crash-report.xml
 venv/
 env/
 .uv-cache/
+.tmp/
+
+# Generated when west initializes from firmware/zmk/config/west.yml.
+/firmware/zmk/.west/
+/firmware/zmk/zmk/
+/firmware/zmk/zephyr/
+/firmware/zmk/modules/
+/firmware/zmk/tools/
+/firmware/zmk/bootloader/
 
 # .NET build outputs (plugin_src is source; the shipping DLL is bundled under
 # trackball_daemon/plugins/ and IS committed)

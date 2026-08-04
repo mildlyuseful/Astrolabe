@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+file_format: "1"
+id: astrolabe
+name: Astrolabe
+type: shield
+requires: [pro_micro]
+features:
+  - keys
+  - pointer
+

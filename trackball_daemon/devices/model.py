@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Dylan Lee
 # SPDX-License-Identifier: Apache-2.0
 
-"""Immutable device and BLE-session values with no Bleak dependency."""
+"""Immutable device and transport-session values with no backend dependency."""
 from __future__ import annotations
 
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 import math
 import struct
@@ -13,6 +14,7 @@ from types import MappingProxyType
 import uuid
 
 from ..input import InputControlDescriptor
+from .protocol import MAX_INPUT_PAYLOAD_BYTES
 
 
 def normalize_uuid(value):
@@ -45,11 +47,40 @@ class DeviceControl:
     def __post_init__(self):
         object.__setattr__(self, "control_id", _text(self.control_id, "control ID"))
         object.__setattr__(self, "label", _text(self.label, "control label"))
-        if type(self.bit) is not int or not 0 <= self.bit <= 255 * 8 - 1:
-            raise ValueError("control bit must fit the one-byte snapshot length protocol")
+        if (type(self.bit) is not int
+                or not 0 <= self.bit < MAX_INPUT_PAYLOAD_BYTES * 8):
+            raise ValueError("control bit must fit the supported snapshot payload")
         if self.kind not in {"button", "switch"}:
             raise ValueError("BLE discrete controls must be buttons or switches")
         object.__setattr__(self, "metadata", _freeze_mapping(self.metadata, "control metadata"))
+
+
+@dataclass(frozen=True)
+class UsbHidMatch:
+    vendor_id: int
+    product_id: int
+    usage_page: int
+    usage: int
+    product: str
+
+    def __post_init__(self):
+        for name in ("vendor_id", "product_id", "usage_page", "usage"):
+            value = getattr(self, name)
+            if type(value) is not int or not 0 <= value <= 0xffff:
+                raise ValueError(f"USB HID {name.replace('_', ' ')} must be a 16-bit integer")
+        object.__setattr__(self, "product", _text(self.product, "USB HID product"))
+
+    def matches(self, interface):
+        if not isinstance(interface, Mapping):
+            return False
+        return (
+            interface.get("vendor_id") == self.vendor_id
+            and interface.get("product_id") == self.product_id
+            and interface.get("usage_page") == self.usage_page
+            and interface.get("usage") == self.usage
+            and isinstance(interface.get("product_string"), str)
+            and interface["product_string"] == self.product
+        )
 
 
 @dataclass(frozen=True)
@@ -64,6 +95,7 @@ class DeviceDescriptor:
     input_characteristic: str | None
     controls: tuple
     metadata: object = field(default_factory=dict)
+    usb_hid: UsbHidMatch | None = None
 
     def __post_init__(self):
         if self.schema_version != 1:
@@ -93,6 +125,11 @@ class DeviceDescriptor:
         object.__setattr__(self, "controls", controls)
         object.__setattr__(
             self, "metadata", _freeze_mapping(self.metadata, "descriptor metadata"))
+        # usb_hid is optional and orthogonal to the schema version: a device may be BLE-only, and
+        # a BLE-only device may later gain a wired route without a format change. Tying the two
+        # together would make the version number a capability flag instead of a format version.
+        if self.usb_hid is not None and not isinstance(self.usb_hid, UsbHidMatch):
+            raise ValueError("device descriptor USB HID match must be a UsbHidMatch")
 
     @property
     def input_descriptors(self):

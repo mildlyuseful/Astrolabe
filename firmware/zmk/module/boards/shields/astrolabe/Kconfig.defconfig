@@ -1,0 +1,16 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+if SHIELD_ASTROLABE
+
+config ZMK_KEYBOARD_NAME
+    default "Astrolabe"
+
+config ZMK_POINTING
+    default y
+
+config ZMK_BATTERY_REPORTING
+    default y
+
+endif
+

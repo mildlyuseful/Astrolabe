@@ -28,10 +28,25 @@ def test_ci_builds_and_smokes_wheel_outside_checkout():
     assert "--name \"astrolabe-daemon\" --version $InstalledVersion" in WORKFLOW
 
 
-# The firmware compile target is deliberately unasserted while the hardware is in revision:
-# the board package, FQBN, and which sketch CI builds all move with the bench, and pinning
-# them here failed on hardware iteration rather than on a CI regression. ci.yml remains the
-# authority for what gets compiled.
+# The Arduino target remains a validation bench rather than the production target. During the ZMK
+# transition it is intentionally a separate gate, so a broken protocol bench cannot be hidden by a
+# successful production-candidate build (or vice versa).
+
+
+def test_xiao_validation_gate_remains_separate_during_the_zmk_transition():
+    import yaml
+
+    jobs = yaml.safe_load(WORKFLOW)["jobs"]
+    firmware_steps = {step["name"]: step for step in jobs["firmware"]["steps"]}
+
+    assert "zmk_firmware" in jobs
+    assert "Compile XIAO PMW3389 protocol-bench firmware" in firmware_steps
+    assert "firmware/XIAO3389" in firmware_steps[
+        "Compile XIAO PMW3389 protocol-bench firmware"
+    ]["run"]
+    assert firmware_steps["Retain validation firmware artifacts"]["with"]["name"] == (
+        "validation-firmware"
+    )
 
 
 def test_linux_firmware_job_installs_the_core_packaging_tool():

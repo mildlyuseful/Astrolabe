@@ -38,6 +38,13 @@
       ]
     },
     {
+      "name": "hidapi",
+      "license": "BSD-3-Clause",
+      "license_choice_note": "cython-hidapi offers GPL-3.0, BSD-3-Clause, or its original permissive license; Astrolabe takes the published BSD-3-Clause option.",
+      "copyright": "Copyright (c) 2011, Gary Bishop",
+      "source": "https://github.com/trezor/cython-hidapi"
+    },
+    {
       "name": "pillow",
       "license": "MIT-CMU",
       "copyright": "Copyright (c) 1997-2011 by Secret Labs AB, Copyright (c) 1995-2011 by Fredrik Lundh and contributors; Pillow is Copyright (c) 2010-2025 by Jeffrey A. Clark and contributors",
@@ -127,6 +134,88 @@
     }
   ],
 
+  "_comment_firmware": [
+    "Components compiled into the pinned ZMK UF2/ELF are separate from the Python release",
+    "runtime, so tools/audit_notices.py deliberately does not reconcile this section against an",
+    "installed Python environment. The set is derived from the firmware link map and compile",
+    "database; CI supplements these manual dispositions with Zephyr's generated SPDX inventory.",
+    "Projects fetched by the west manifest but absent from the linked image are not listed here."
+  ],
+  "firmware_components": [
+    {
+      "name": "ZMK",
+      "license": "MIT",
+      "copyright": "Copyright (c) 2020 The ZMK Contributors",
+      "source": "https://github.com/zmkfirmware/zmk",
+      "license_files": ["LICENSES/third-party/zmk.txt"],
+      "evidence": "ZMK application objects are linked into the Astrolabe ELF."
+    },
+    {
+      "name": "Zephyr",
+      "license": "Apache-2.0",
+      "copyright": "Copyright the Zephyr Project contributors and other file-level holders named in the linked source files",
+      "source": "https://github.com/zephyrproject-rtos/zephyr",
+      "license_files": ["LICENSES/third-party/zephyr.txt"],
+      "evidence": "Zephyr kernel, driver, Bluetooth, USB, and library objects are linked into the Astrolabe ELF."
+    },
+    {
+      "name": "nrfx",
+      "license": "BSD-3-Clause",
+      "copyright": "Copyright (c) 2017-2024, Nordic Semiconductor ASA",
+      "source": "https://github.com/NordicSemiconductor/nrfx/tree/v3.6.0",
+      "license_files": ["LICENSES/third-party/nrfx.txt"],
+      "evidence": "The link map contains the nrfx clock, GPIO, NVMC, power, and USB device objects."
+    },
+    {
+      "name": "TinyCrypt",
+      "license": "BSD-3-Clause",
+      "copyright": "Copyright (c) 2017, Intel Corporation. All rights reserved.",
+      "source": "https://github.com/intel/tinycrypt",
+      "license_files": ["LICENSES/third-party/tinycrypt.txt"],
+      "evidence": "TinyCrypt AES, CMAC, utility, and elliptic-curve objects are linked into the Astrolabe ELF."
+    },
+    {
+      "name": "micro-ecc",
+      "license": "BSD-2-Clause",
+      "copyright": "Copyright (c) 2013, Kenneth MacKay. All rights reserved.",
+      "source": "https://github.com/kmackay/micro-ecc",
+      "license_files": ["LICENSES/third-party/tinycrypt.txt"],
+      "evidence": "TinyCrypt's linked elliptic-curve implementation incorporates micro-ecc code; its two-clause notice is reproduced separately in README.zephyr."
+    },
+    {
+      "name": "CMSIS",
+      "license": "Apache-2.0",
+      "copyright": "Copyright (c) 2009-2021 Arm Limited. All rights reserved.",
+      "source": "https://github.com/ARM-software/CMSIS_5",
+      "license_files": ["LICENSES/third-party/cmsis.txt"],
+      "evidence": "CMSIS-Core headers are present in the compile include graph; no CMSIS prebuilt library is linked."
+    },
+    {
+      "name": "Picolibc/Newlib runtime",
+      "license": "LicenseRef-Picolibc-Newlib-per-file",
+      "copyright": "Copyright 2019 Keith Packard; Copyright 2020 The Newlib Project; additional holders are reproduced in the bundled texts",
+      "source": "https://github.com/picolibc/picolibc",
+      "license_files": [
+        "LICENSES/third-party/picolibc.txt",
+        "LICENSES/third-party/newlib.txt"
+      ],
+      "evidence": "The link map names the Zephyr SDK Picolibc libc/libm archive members included in the Astrolabe ELF.",
+      "note": "The linked runtime uses the permissive per-file Picolibc/Newlib license set. COPYING.picolibc also inventories copyleft build scripts and helpers that are not linked; they are reproduced for completeness but are not described as firmware runtime."
+    },
+    {
+      "name": "GCC libgcc runtime",
+      "license": "GPL-3.0-only WITH GCC-exception-3.1",
+      "copyright": "Copyright Free Software Foundation, Inc. and GCC contributors",
+      "source": "https://gcc.gnu.org/git/gcc.git",
+      "license_files": [
+        "LICENSES/third-party/gcc-gpl-3.0.txt",
+        "LICENSES/third-party/gcc-runtime-library-exception-3.1.txt"
+      ],
+      "evidence": "The link map names the Zephyr SDK libgcc archive members included in the Astrolabe ELF.",
+      "note": "The GCC Runtime Library Exception 3.1 grants the additional permission applicable to eligible target code linked with libgcc."
+    }
+  ],
+
   "_comment_runtime": [
     "Components the Nuitka onedir build embeds that are not Python distributions and therefore",
     "cannot be enumerated from the lock. tools/audit_native_binaries.py reconciles every DLL, PYD,",
@@ -209,6 +298,10 @@
       "include": ["cryptography/hazmat/bindings/*.pyd"]
     },
     {
+      "component": "hidapi",
+      "include": ["hid*.pyd"]
+    },
+    {
       "component": "pillow",
       "include": ["PIL/*.pyd"]
     },
@@ -231,6 +324,7 @@
       "include": ["*.pyd", "python*.dll"],
       "exclude": [
         "_cffi_backend.pyd",
+        "hid*.pyd",
         "_win32sysloader.pyd",
         "_wmi.pyd",
         "pythoncom*.dll",

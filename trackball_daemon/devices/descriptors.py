@@ -7,7 +7,7 @@ import importlib.resources
 import json
 from pathlib import Path
 
-from .model import DeviceControl, DeviceDescriptor
+from .model import DeviceControl, DeviceDescriptor, UsbHidMatch
 
 
 def _parse_descriptor(data):
@@ -23,8 +23,19 @@ def _parse_descriptor(data):
         raise ValueError(
             f"device descriptor keys invalid; missing={sorted(missing)}, unknown={sorted(unknown)}")
     match = data["match"]
-    if not isinstance(match, dict) or set(match) != {"advertised_names"}:
-        raise ValueError("descriptor match must contain only advertised_names")
+    if not isinstance(match, dict):
+        raise ValueError("descriptor match must be an object")
+    unknown_match = set(match) - {"advertised_names", "usb_hid"}
+    if "advertised_names" not in match or unknown_match:
+        raise ValueError(
+            "descriptor match must contain advertised_names and optional usb_hid")
+    usb_hid = match.get("usb_hid")
+    parsed_usb_hid = None
+    if usb_hid is not None:
+        required_usb = {"vendor_id", "product_id", "usage_page", "usage", "product"}
+        if not isinstance(usb_hid, dict) or set(usb_hid) != required_usb:
+            raise ValueError("descriptor USB HID match keys are invalid")
+        parsed_usb_hid = UsbHidMatch(**usb_hid)
     controls = data["controls"]
     if not isinstance(controls, list):
         raise ValueError("descriptor controls must be a list")
@@ -40,10 +51,18 @@ def _parse_descriptor(data):
             row["id"], row["label"], row["bit"], row.get("kind", "switch"),
             row.get("metadata", {})))
     return DeviceDescriptor(
-        data["schema_version"], data["device_id"], data["source_id"], data["label"],
-        tuple(match["advertised_names"]), data["service_uuid"],
-        data["motion_characteristic"], data["input_characteristic"],
-        tuple(parsed_controls), data.get("metadata", {}))
+        schema_version=data["schema_version"],
+        device_id=data["device_id"],
+        source_id=data["source_id"],
+        label=data["label"],
+        advertised_names=tuple(match["advertised_names"]),
+        service_uuid=data["service_uuid"],
+        motion_characteristic=data["motion_characteristic"],
+        input_characteristic=data["input_characteristic"],
+        controls=tuple(parsed_controls),
+        metadata=data.get("metadata", {}),
+        usb_hid=parsed_usb_hid,
+    )
 
 
 def load_device_descriptor(source):

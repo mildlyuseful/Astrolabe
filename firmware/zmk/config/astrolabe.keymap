@@ -1,0 +1,107 @@
+// SPDX-FileCopyrightText: 2026 Dylan Lee
+// SPDX-License-Identifier: Apache-2.0
+
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/bt.h>
+#include <dt-bindings/zmk/outputs.h>
+#include <dt-bindings/zmk/pointing.h>
+
+// Two layers, selected by the route rather than by any binding.
+//
+//   0 standalone -- the device is its own HID mouse. Up and Left carry no mouse button, so they
+//                   are free to host recovery and radio gestures.
+//   1 daemon     -- a daemon owns the route. Plain control-bit passthrough, no arbitration in
+//                   front of it, so host-side chords stay immediate.
+//
+// astrolabe_route_claim/release drive layer 1 (CONFIG_ASTROLABE_DAEMON_LAYER). Nothing here may
+// bind a layer behavior: the route moves on its own when a cable is pulled or a daemon dies, and
+// a second writer would leave the two permanently out of step.
+//
+// The gestures exist only on layer 0. That is the point of the split -- a tap-dance has to wait
+// out its term before it can know a tap was single, and paying that on a daemon control bit
+// would be the same mistake the combos made.
+//
+//   double-tap Up     toggle USB/BLE output
+//   double-tap Left   next BLE profile
+//   hold Up 3s        bootloader
+//   hold Left 3s      clear the active BLE profile's bond
+//
+// Only the bootloader gesture is observable without a host: the UF2 drive appears. The other
+// three change radio or endpoint state on a device with no indicator, so "nothing happened" and
+// "it worked" look identical. Reset is deliberately absent -- the hardware power switch covers
+// it, and BT_CLR has no hardware equivalent, so it is the one that needs the gesture. Without it
+// a bonded profile can never be freed: ZMK accepts a pairing only onto an open slot
+// (pairing_allowed_for_current_profile), so all five slots would eventually become unusable.
+
+/ {
+    behaviors {
+        // Held past the tap-dance term below, these resolve to recovery. The tap-dance is pressed
+        // by its own timer, so its 400 ms is charged before this one starts: 2600 + 400 is the
+        // 3 s the gesture advertises.
+        //
+        // A hold-tap hands exactly one parameter to each binding and zero-fills the other, which
+        // is why the hold side is invoked by command rather than written inline. BT_CLR is
+        // (BT_CLR_CMD, 0), so the zero fill happens to be the argument it wants; a command taking
+        // a real second parameter, such as BT_SEL, could not be bound this way.
+        up_recover: up_recover {
+            compatible = "zmk,behavior-hold-tap";
+            #binding-cells = <2>;
+            tapping-term-ms = <2600>;
+            flavor = "tap-preferred";
+            bindings = <&bootloader>, <&astro_bit>;
+        };
+
+        left_recover: left_recover {
+            compatible = "zmk,behavior-hold-tap";
+            #binding-cells = <2>;
+            tapping-term-ms = <2600>;
+            flavor = "tap-preferred";
+            bindings = <&bt>, <&astro_bit>;
+        };
+
+        // Second tap fires immediately on keydown -- tap-dance resolves at once when the counter
+        // reaches its binding count -- so only the single-tap path pays this term, and on Up and
+        // Left that path is a no-op in standalone. The window is measured from the first press,
+        // not from the release, so it has to cover a whole press-release-press: 250 ms was under
+        // Windows' own 500 ms double-click default and was unhittable on a stiff five-way.
+        up_gestures: up_gestures {
+            compatible = "zmk,behavior-tap-dance";
+            #binding-cells = <0>;
+            tapping-term-ms = <400>;
+            bindings = <&up_recover 0 0>, <&out OUT_TOG>;
+        };
+
+        left_gestures: left_gestures {
+            compatible = "zmk,behavior-tap-dance";
+            #binding-cells = <0>;
+            tapping-term-ms = <400>;
+            bindings = <&left_recover BT_CLR_CMD 2>, <&bt BT_NXT>;
+        };
+    };
+
+    keymap {
+        compatible = "zmk,keymap";
+
+        // Up, Down, Left, Right, Center. param1 is the frozen protocol bit;
+        // param2 is the standalone HID mouse-button mask (zero means reserved).
+        standalone_layer {
+            bindings = <
+                &up_gestures
+                &astro 1 MB1
+                &left_gestures
+                &astro 3 MB2
+                &astro 4 MB3
+            >;
+        };
+
+        daemon_layer {
+            bindings = <
+                &astro 0 0
+                &astro 1 MB1
+                &astro 2 0
+                &astro 3 MB2
+                &astro 4 MB3
+            >;
+        };
+    };
+};

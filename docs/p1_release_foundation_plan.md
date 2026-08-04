@@ -58,7 +58,8 @@ device-specific onboarding and acceptance rows.
 
 ### Milestone C - public V1 product
 
-Combine the V1 software candidate with the final Seeed Studio XIAO nRF52840 hardware, production
+Combine the V1 software candidate with the final SuperMini nRF52840 (nice!nano v2-compatible)
+hardware, production
 firmware, physical input/BLE qualification, supported-host live evidence, product marking, and the
 revision-specific hardware source release.
 
@@ -462,7 +463,7 @@ shared security, data-loss, configuration, or lifecycle defect.
 Do not attempt to close these with the current validation devices:
 
 - production sensor/count/geometry and electrical contract;
-- final XIAO pin, power, battery, recovery, USB/BLE, and switch behavior;
+- final controller pin, power, battery, recovery, USB/BLE, and switch behavior;
 - production firmware port and ZMK decisions;
 - final physical simultaneous-control, reconnect, sleep/wake, and mode-transition matrix;
 - battery and latency measurements;
@@ -470,7 +471,7 @@ Do not attempt to close these with the current validation devices:
 - hardware design source bundle, product source-location notice, and physical packaging/marking.
 
 The completed SuperMini PMW3610 loop and XIAO protocol bench remain useful development evidence but
-do not qualify the product assembly.
+do not qualify the product assembly; the SuperMini controller itself is now the production target.
 
 ## Documentation ownership during implementation
 

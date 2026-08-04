@@ -1,11 +1,11 @@
-# BLE device descriptors and input snapshots
+# BLE/USB device descriptors and input snapshots
 
-Astrolabe keeps Bluetooth transport, packet meaning, and binding semantics separate. The binding
+Astrolabe keeps transport, packet meaning, and binding semantics separate. The binding
 engine sees only normalized `InputEvent` and `MotionSample` values; it does not know GATT UUIDs or
-bit positions. Shared provider, state, and lifecycle ownership is defined in
+HID report IDs. Shared provider, state, and lifecycle ownership is defined in
 [`architecture.md`](architecture.md).
 
-## Built-in protocol
+## Frozen payload protocol
 
 The existing service and rotation characteristic are compatibility-frozen:
 
@@ -39,8 +39,10 @@ For sequence `incoming` after `previous`, compute
 - `0x8000..0xffff`: stale/out of order.
 
 A new connection/subscription session resets this comparison and accepts its first valid snapshot.
-The next accepted full snapshot repairs any missed intermediate transition. Disconnect emits a
-provider disconnect and releases every control still owned by that device namespace.
+The next accepted full snapshot repairs any missed intermediate transition. Each session has an
+opaque identity lease; a notification or disconnect captured by an older BLE or USB session cannot
+change its replacement. Exact-session disconnect releases every control still owned by that device
+namespace.
 
 ## Data descriptor format
 
@@ -63,11 +65,33 @@ Built-ins live in `trackball_daemon/devices/descriptor_data`. A descriptor conta
 }
 ```
 
-The packaged JSON Schema is
-`trackball_daemon/schemas/device-descriptor-v1.schema.json`; a parser-validated contributor example
-is `trackball_daemon/examples/device-descriptor.example.json`. JSON Schema checks portable shape,
+A device that also exposes a wired route adds an exact vendor-HID identity under
+`match.usb_hid`. The field is optional and does not change the schema version: it is additive, so
+every descriptor written before it existed stays valid, and a BLE-only device simply omits it.
+
+```json
+{
+  "schema_version": 1,
+  "match": {
+    "advertised_names": ["Astrolabe"],
+    "usb_hid": {
+      "vendor_id": 7504,
+      "product_id": 24926,
+      "usage_page": 65280,
+      "usage": 1,
+      "product": "Astrolabe"
+    }
+  }
+}
+```
+
+The packaged schema is `trackball_daemon/schemas/device-descriptor-v1.schema.json`; a
+parser-validated contributor example is
+`trackball_daemon/examples/device-descriptor.example.json`. JSON Schema checks portable shape,
 while `load_device_descriptor` remains authoritative for case-insensitive advertised-name
-uniqueness, UUID normalization, unique IDs/bits, and the control/input-characteristic relationship.
+uniqueness, exact USB identity, UUID normalization, unique IDs/bits, and the
+control/input-characteristic relationship. The schema version tracks the document format, not
+device capability: do not bump it to signal that a device gained a transport.
 
 Stable binding tokens are `source_id:control.id`, such as
 `ble.astrolabe:fiveway.center`. IDs, labels, bits, UUIDs, and advertised names are validated. Unknown
@@ -78,10 +102,14 @@ The registration boundary is deliberately small:
 1. Load JSON with `load_device_descriptor` (or `builtin_device_descriptors`).
 2. Construct one `SnapshotInputProvider` for its control namespace and register that provider with
    the daemon's `InputAggregator`.
-3. Pass the descriptors and source-ID-to-provider map to `DeviceAdapterRegistry`.
+3. Pass the descriptors and source-ID-to-provider map to `DeviceAdapterRegistry` and
+   `UsbTransport`.
 4. `BleTransport` selects an input-capable adapter only when name, service, rotation UUID, and input
    characteristic match. Otherwise it uses the rotation-only legacy adapter and never guesses a
    bit mapping.
+5. `UsbTransport` opens only an interface matching VID, PID, usage page, usage, and product string,
+   validates its feature capability, and completes an acknowledged attach before replacing the
+   provider session.
 
 Battery status remains outside this device-specific adapter selection. When the standard Battery
 Level characteristic (`0x2A19`) exists, `BleTransport` validates its one-byte 0–100 value, reads it
@@ -105,6 +133,42 @@ Seeing a descriptor-compatible service UUID without the configured name is diagn
 permission to connect. Built-in devices may share the same service and motion characteristic while
 publishing different input layouts, so the transport reports the observed address/name and asks for
 an explicit Device name or address instead of guessing a descriptor.
+
+USB discovery is deliberately stricter and never falls back to name alone. All five fields in the
+`usb_hid` match must agree with one enumerated HID collection. The current VID/PID are upstream
+ZMK development defaults; they are not a production allocation and must change before hardware is
+distributed.
+
+## USB vendor-HID framing
+
+The ZMK candidate exposes a second HID instance with vendor usage page `0xFF00`, usage `1`. Every
+host report begins with its report ID; the sizes below are payload sizes after that byte.
+
+| ID | Direction | Payload |
+|---:|---|---|
+| 1 | Input | frozen 12-byte rotation value |
+| 2 | Input | frozen 6-byte v1 input snapshot |
+| 3 | Output | `[version=1, opcode, request_id_le16]` |
+| 4 | Feature | `[version=1, firmware_revision, report_mask, flags, keepalive_ms_le16, usb_revision=1, reserved=0]` |
+| 5 | Input | `[version=1, opcode, request_id_le16, result, owner]` |
+
+Opcodes are attach=1, detach=2, and keepalive=3. Results are success=0,
+forced-standalone=1, and invalid=2. Owners are standalone=0, BLE=1, and USB=2. Attach is accepted
+only when the matching ACK names USB as owner. The daemon then installs the USB provider lease
+before pausing BLE. Keepalive runs within the firmware-advertised timeout; cable loss, endpoint
+failure, timeout, or detach releases the exact USB owner and restores BLE eligibility. Firmware
+also reconsiders a still-connected subscribed BLE client after USB release, covering an accepted
+attach whose ACK never reached the daemon. USB has priority if a new wired lease wins that race.
+
+The firmware checks the underlying USB status for suspend whenever ZMK publishes a connection-state
+event. Because ZMK represents suspend and configured HID with the same public connection state, a
+transient suspend may be coalesced; endpoint-write failure and the keepalive timeout are the safety
+fallback. Immediate suspend release remains a live Windows verification question, not an automated
+claim.
+
+The feature and ACK reports are transport framing, not extensions to the frozen values carried by
+reports 1 and 2. While USB is active the daemon reports external power explicitly and treats any
+battery percentage as last-known; it does not infer state of charge from the USB-powered voltage.
 
 ## Built-in mappings
 
@@ -142,8 +206,12 @@ normal operation, and records raw deltas, Motion bits, SQUAL, shutter, and obser
 exists to reproduce and classify the suspect transition; forced modes are not the production power
 policy. Restore `PMW_WAKE_STRESS` to `0` and reflash before ordinary testing.
 
-The prototype's protocol and input validation do not qualify the final Seeed Studio XIAO nRF52840
-product hardware. Prototype pins, 2.0 in ball diameter, and mount angles live only in that sketch.
+The ZMK production-firmware candidate is under [`../firmware/zmk/`](../firmware/zmk/). It currently
+ports this prototype's pins, 2.0 in ball diameter, mount angles, fusion, automatic Run/Rest policy,
+and cursor/scroll constants into shield data and first-party module code. Its exact source/toolchain
+build is automated, but no ZMK build has yet earned the prototype's physical evidence. The final
+assembly's electrical map, sensor geometry, switch mechanics, enclosure, sleep/wake behavior, and
+live BLE/USB routes remain unqualified as listed in [`../TODO.md`](../TODO.md).
 
 The five-way switch is active-low with internal pull-ups, with debounce owned by firmware. Its
 mechanism ordinarily permits only one direction at a time. That is descriptive hardware metadata,

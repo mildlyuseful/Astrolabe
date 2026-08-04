@@ -12,22 +12,31 @@ and [`apps/`](apps/) for host-specific implementation knowledge.
 Astrolabe has three responsibility layers:
 
 - The firmware owns sensor acquisition, geometric fusion, device-local controls, standalone HID
-  behavior, and the custom BLE motion/input stream.
+  behavior, route ownership, and the custom BLE/USB motion and input streams.
 - The daemon owns foreground context, binding semantics, persistent settings, live control state,
   pointer output, physical and per-app mapping, navigation target selection, and transport routing.
 - Host integrations translate the shared navigation contract into a host camera/view API. They do
   not own device bindings, foreground policy, user configuration, or global navigation state.
 
-The current validation firmware fuses two optical sensors into three-axis ball rotation; the product
-controller target is the Seeed Studio XIAO nRF52840, with remaining hardware choices tracked in
-[`../TODO.md`](../TODO.md). The custom motion value contains three little-endian `float32` rotation
-deltas in radians. Input-capable devices add sequenced full-state control snapshots; exact UUIDs,
-packet layouts, descriptor rules, and sequence handling are defined in
+The production-firmware candidate under [`../firmware/zmk/`](../firmware/zmk/) fuses two PMW3610
+sensors into three-axis ball rotation on the SuperMini nRF52840 (`nice_nano_v2` target). Its current
+pins and geometry come from the validation prototype; remaining final-assembly and live firmware
+qualification is tracked in [`../TODO.md`](../TODO.md). The implementation decisions and transition
+boundary are in [`zmk_migration_plan.md`](zmk_migration_plan.md).
+
+The custom motion value contains three little-endian `float32` rotation deltas in radians.
+Input-capable devices add sequenced full-state control snapshots. The same payloads travel over the
+frozen BLE characteristics or the vendor USB HID interface; exact UUIDs, packet layouts, descriptor
+rules, ownership commands, and sequence handling are defined in
 [`ble_device_adapters.md`](ble_device_adapters.md).
 
-Subscribing to the rotation stream transfers pointer ownership to the daemon: firmware suppresses
-its HID pointer/button output so the same physical action is not delivered twice. Unsubscribe or
-disconnect returns ownership to the standalone HID path.
+Subscribing to the BLE rotation stream or completing an acknowledged USB attach transfers pointer
+ownership to the daemon: firmware suppresses its standalone HID pointer/button output so the same
+physical action is not delivered twice. Exact-owner unsubscribe, disconnect, detach, keepalive loss,
+or transport loss returns ownership to the standalone HID path. Controls held at that boundary are
+suppressed from fallback clicks until physically released. USB has priority over BLE during
+handover; after USB releases, firmware reconsiders an already-subscribed BLE connection so a lost
+attach ACK cannot leave that connection subscribed but ownerless.
 
 The debug cube is a host-neutral math reference and diagnostic consumer. It is not a place for
 host-specific signs, scales, pivots, or camera conventions.
@@ -36,6 +45,7 @@ host-specific signs, scales, pivots, or camera conventions.
 
 | Concern | Authority |
 |---|---|
+| Production-candidate firmware pins, geometry, acquisition, fusion, route, and transport framing | [`../firmware/zmk/`](../firmware/zmk/) |
 | Supported app IDs, order, display identity, process selectors, transports, modes, and capabilities | [`../trackball_daemon/app_registry.py`](../trackball_daemon/app_registry.py) |
 | Stable setting and command IDs, validation, scope, capability predicates, operations, and UI metadata | [`../trackball_daemon/settings_schema.py`](../trackball_daemon/settings_schema.py) |
 | Setup, detection, installation, update, consent text, and health checks | [`../trackball_daemon/integrations.py`](../trackball_daemon/integrations.py), referencing canonical `AppSpec` records |
@@ -45,7 +55,7 @@ host-specific signs, scales, pivots, or camera conventions.
 | Persistent user state and transactional mutation | [`../trackball_daemon/config_store.py`](../trackball_daemon/config_store.py) |
 | Pure setting inheritance | [`../trackball_daemon/config_resolver.py`](../trackball_daemon/config_resolver.py) |
 | Legacy migration compatibility | `config.py` and frozen `default_profiles.json`; new defaults do not belong there |
-| Device control namespaces and BLE snapshot mappings | `trackball_daemon/devices/descriptor_data/` |
+| Device control namespaces and BLE/USB device mappings | `trackball_daemon/devices/descriptor_data/` |
 | Portable contributor data shapes | `trackball_daemon/schemas/`; daemon parsers remain authoritative |
 | Python dependency resolution | `pyproject.toml` plus the checked-in `uv.lock` |
 | Product names, install and configuration paths, and Windows registration identifiers | [`../trackball_daemon/product.py`](../trackball_daemon/product.py) |
@@ -108,7 +118,7 @@ Motion follows this path:
 ```text
 sensor deltas
   -> firmware fusion and integrated rotation
-  -> BleTransport and selected device adapter
+  -> BleTransport + selected device adapter, or UsbTransport
   -> MotionSample
   -> App captures foreground target and one RuntimeSnapshot revision
   -> OutputEngine applies one immutable mapping for the complete sample
@@ -123,7 +133,7 @@ sensor deltas
 Control input follows a separate normalized path:
 
 ```text
-BLE full-state snapshots or Windows keyboard events
+BLE/USB full-state snapshots or Windows keyboard events
   -> input provider
   -> InputAggregator atomic pressed-set transition
   -> BindingController
@@ -138,9 +148,10 @@ Focus is captured before transformation; a sample may not be mapped for one app 
 another. Unknown or disabled foreground context produces no 3D navigation target. The app selected
 in Settings is an editing choice, not a runtime focus fallback.
 
-BLE callbacks and transport-reader threads do not perform slow host API work. They parse, normalize,
-accumulate, or publish immutable values; host interaction occurs on the thread required by the
-destination API.
+BLE callbacks and USB/transport-reader threads do not perform slow host API work. They parse,
+normalize, accumulate, or publish immutable values; host interaction occurs on the thread required
+by the destination API. Each device session has an opaque identity lease. A callback, snapshot, or
+disconnect captured by an old session must be a no-op after a replacement session begins.
 
 ## Persistent configuration and live state
 

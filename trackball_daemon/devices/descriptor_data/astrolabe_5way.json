@@ -4,7 +4,14 @@
   "source_id": "ble.astrolabe",
   "label": "Astrolabe five-way switch",
   "match": {
-    "advertised_names": ["Astrolabe"]
+    "advertised_names": ["Astrolabe"],
+    "usb_hid": {
+      "vendor_id": 7504,
+      "product_id": 24926,
+      "usage_page": 65280,
+      "usage": 1,
+      "product": "Astrolabe"
+    }
   },
   "service_uuid": "2cad0001-6e64-0146-b139-9cf2a4cd57fc",
   "motion_characteristic": "2cad0002-6e64-0146-b139-9cf2a4cd57fc",

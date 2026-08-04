@@ -19,6 +19,7 @@ _START_STAGES = (
     "autocad",
     "foreground",
     "auto_update",
+    "usb",
     "ble",
     "mainloop",
 )
@@ -76,7 +77,12 @@ def _lifecycle_app(monkeypatch, tmp_path, *, fail_at=None):
     app.config = SimpleNamespace(snapshot=lambda: SimpleNamespace(bridge_port=47900))
     app.runtime = object()
     app.device_adapters = object()
+    app.device_descriptors = ()
+    app.ble_input_providers = {}
     app.stop_event = threading.Event()
+    app.ble_enabled_event = threading.Event()
+    app.ble_enabled_event.set()
+    app.transport_handover_lock = threading.RLock()
     app.root = app.ui = app.hud = app.tray = None
     app.broker = _Boundary("broker", events, fail_at)
     app.sw_driver = _Boundary("solidworks", events, fail_at)
@@ -127,12 +133,23 @@ def _lifecycle_app(monkeypatch, tmp_path, *, fail_at=None):
             raise RuntimeError("auto-update startup failed")
         return []
 
-    def start_ble(*_args, **_kwargs):
+    def start_ble(*_args, **kwargs):
+        assert kwargs["enabled_event"] is app.ble_enabled_event
+        assert kwargs["handover_lock"] is app.transport_handover_lock
         events.append(("start", "ble"))
         if fail_at == "ble":
             raise RuntimeError("BLE startup failed")
 
+    def start_usb(*_args, **kwargs):
+        assert kwargs["enabled_event"] is app.ble_enabled_event
+        assert kwargs["handover_lock"] is app.transport_handover_lock
+        assert kwargs["external_power_callback"] == app.set_external_power
+        events.append(("start", "usb"))
+        if fail_at == "usb":
+            raise RuntimeError("USB startup failed")
+
     monkeypatch.setattr(app_module.integrations, "auto_update", auto_update)
+    monkeypatch.setattr(app_module, "start_usb_thread", start_usb)
     monkeypatch.setattr(app_module, "start_ble_thread", start_ble)
     return app, events
 
@@ -152,7 +169,8 @@ def test_whole_application_startup_and_shutdown_smoke_uses_every_boundary(
         ("release", "pointer-buttons"),
         ("release", "inputs:daemon_shutdown"),
     ]
-    for name in ("tray", "broker", "solidworks", "onshape", "autocad", "foreground", "ble"):
+    for name in (
+            "tray", "broker", "solidworks", "onshape", "autocad", "foreground", "usb", "ble"):
         assert ("start", name) in events
     for name in ("foreground", "broker", "solidworks", "onshape", "autocad", "tray", "hud"):
         assert ("stop", name) in events

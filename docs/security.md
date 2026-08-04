@@ -43,6 +43,7 @@ launch a supported 3D application. Shared ownership and lifecycle rules are defi
 | Component | Action | Scope and reversal |
 |---|---|---|
 | BLE input | Connects to the configured Trackball BLE device. | No driver or service installed. Remove/forget the device normally. |
+| USB vendor-HID input | Opens the device's second HID interface when VID, PID, usage page, usage, and product string all match, then sends an acknowledged attach to take ownership. | No driver or service installed. Read/write is confined to that one matched interface; unplugging it or stopping the daemon releases ownership. |
 | Keyboard bindings | Lazily registers the standard Windows keyboard device class through Raw Input only while an enabled compiled binding references keyboard controls. | No driver, hook, service, key suppression, or startup registration. Disable all keyboard bindings or stop the daemon to unregister it and synthesize releases. |
 | Start at login | When explicitly toggled in the tray, writes `Astrolabe` under the current user's Windows `Run` key. An earlier build's `TrackballDaemon` value is carried onto that name at startup and then removed, so only one registration ever fires at login. | No service or scheduled task. Toggle it off or delete the HKCU value. |
 | Configuration directory | Per-user state under `%APPDATA%\Mildly Useful\Astrolabe`. An earlier build's `%APPDATA%\TrackballDaemon` is copied there once, verified, and then left in place unmodified as the rollback copy. | Delete either directory. Deleting the new one reverts to the preserved copy. |
@@ -123,13 +124,19 @@ fallback. Reopening that decision requires a recorded physical Raw Input product
 proposal must include an enqueue-only callback, heartbeat/watchdog, reinstall plus
 `GetAsyncKeyState` reconciliation, and fail-safe release before it can be considered.
 
-BLE input-state packets are untrusted. The daemon validates protocol version, message kind, exact
-length, descriptor bit range, and unsigned wrap-aware sequence ordering before changing normalized
-pressed state. Invalid, duplicate, and stale packets cannot activate or release controls. A new
+Device input-state packets are untrusted over both transports. The daemon validates protocol version,
+message kind, exact length, descriptor bit range, and unsigned wrap-aware sequence ordering before
+changing normalized pressed state. Invalid, duplicate, and stale packets cannot activate or release controls. A new
 connection resets only the sequence baseline; disconnect releases the complete device-owned pressed
 set. Community control descriptors are validated JSON data and cannot name Python modules,
 callbacks, commands, config paths, or executable code. Automatic third-party adapter-code loading
 is not supported.
+
+USB attach is identity-matched, not authenticated. Any local process able to open the same HID
+interface can issue the same ownership commands, and the current VID/PID are upstream ZMK
+development defaults shared by other devices, so the product string carries the match. That is
+acceptable for a local input peripheral whose worst case is pointer motion, and it is the reason a
+production VID/PID allocation is a release gate in `TODO.md`. It is not a confidentiality boundary.
 
 ## Release security gates
 

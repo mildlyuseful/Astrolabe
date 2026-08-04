@@ -63,7 +63,11 @@ def test_shipped_profile_and_device_data_conform_to_public_schemas():
         "binding-profile-catalog-v1.schema.json",
     )
     for path in sorted((PACKAGE / "devices" / "descriptor_data").glob("*.json")):
-        _validate(_json(path), "device-descriptor-v1.schema.json")
+        descriptor = _json(path)
+        _validate(
+            descriptor,
+            f"device-descriptor-v{descriptor['schema_version']}.schema.json",
+        )
 
 
 def test_release_contracts_are_declared_and_readable_as_package_data():

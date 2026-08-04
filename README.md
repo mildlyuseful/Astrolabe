@@ -3,8 +3,8 @@
 Astrolabe is a DIY dual-sensor optical trackball that works as both a normal Bluetooth mouse and a
 three-axis controller for 3D applications.
 
-- The **firmware** fuses two PMW3389 sensors into true X/Y/Z ball rotation and exposes both BLE HID
-  mouse input and a custom rotation stream.
+- The **firmware** fuses two optical sensors into true X/Y/Z ball rotation and exposes an ordinary
+  HID mouse plus a custom daemon stream over BLE or wired USB.
 - The Windows **Trackball Daemon** consumes that stream, runs from the system tray, and switches
   between pointer input and focus-routed 3D navigation.
 - Ten integrations are included: Fusion 360, SolidWorks, AutoCAD, Onshape, Blender, FreeCAD,
@@ -38,9 +38,10 @@ released yet.
 - Windows 10 or 11.
 - Python 3.13 or newer for a source install. Packaged builds embed their own runtime and do not
   need Python installed.
-- The Astrolabe firmware on a compatible BLE trackball. The product controller target is the Seeed
-  Studio XIAO nRF52840; the repository also retains XIAO/PMW3389 and SuperMini/PMW3610 validation
-  sketches while the final hardware contract is completed.
+- The Astrolabe firmware on a compatible BLE/USB trackball. The production controller target is the
+  SuperMini nRF52840 (a nice!nano v2-compatible board) — the same controller the PMW3610 validation
+  prototype uses; the repository also retains the XIAO/PMW3389 protocol bench while the final
+  hardware contract is completed.
 - A supported 3D application only if you want its navigation integration.
 
 ## Install and run
@@ -84,7 +85,9 @@ values.
 Closing Settings or the guide hides/closes that window; it does not stop the daemon.
 
 Do not pair the trackball as a Windows Bluetooth mouse while the daemon is consuming its BLE
-rotation service. With the daemon closed, the firmware's ordinary HID mouse path works normally.
+rotation service. The ZMK candidate automatically prefers its exact vendor USB interface when
+wired and falls back to BLE after USB loss. With the daemon closed, the firmware's ordinary HID
+mouse path works normally on either ZMK output.
 
 ## First-time setup
 
@@ -235,7 +238,8 @@ restore three-axis orbit without overwriting the user's choice.
 
 ## Troubleshooting
 
-- Confirm the tray says the BLE device is connected and the control panel reports **3D** mode.
+- Confirm the tray says the device is connected over BLE or USB and the control panel reports
+  **3D** mode.
 - Confirm the intended host is foreground, its integration is enabled, and the 3D viewport has
   focus where the host requires it.
 - Open **3D Apps** and inspect the runtime-health detail before running the listed host health
@@ -251,7 +255,22 @@ restore three-axis orbit without overwriting the user's choice.
 
 ## Firmware
 
-The working five-way validation firmware is
+The production-firmware candidate is the pinned ZMK workspace under
+[`firmware/zmk/`](firmware/zmk/). Its out-of-tree Astrolabe module targets `nice_nano_v2`, reads the
+prototype's two PMW3610 sensors over their shared three-wire bus, ports the calibrated fusion and
+standalone cursor/scroll mapping, and retains ZMK's ordinary BLE/USB HID mouse behavior. When the
+daemon claims ownership it instead emits the frozen rotation and five-way snapshots over the
+custom BLE service or a second vendor USB HID interface. USB preference, acknowledged attach,
+keepalive, exact session leases, and BLE fallback are implemented in the daemon.
+
+The candidate builds from exact ZMK and Zephyr commits in CI and retains its UF2, ELF, effective
+configuration, DTS, frozen manifest, hashes, and license provenance. That is build evidence only:
+it has not been flashed or qualified on final hardware. Do not distribute the development USB
+VID/PID as product identity. The remaining sensor, switch, sleep/wake, battery, latency, route-loss,
+and final-assembly matrices are release blockers in [`TODO.md`](TODO.md); build and design details
+are in [`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md).
+
+The working five-way physical-validation firmware remains
 [`firmware/PMW3610/PMW3610.ino`](firmware/PMW3610/PMW3610.ino) (SuperMini nRF52840, dual PMW3610,
 advertised name `Astrolabe`). It fuses the two sensors, exposes BLE HID, publishes the custom
 rotation characteristic, publishes the five-way input-state snapshot used by the daemon, and exposes
@@ -260,17 +279,18 @@ once per minute while unplugged and immediately after USB is removed; an existin
 need to be removed and recreated once after flashing this GATT change. Its normal path leaves PMW3610
 Run/Rest transitions under the sensor's automatic policy; a separate serial wake-stress build is
 documented in
-[`docs/ble_device_adapters.md`](docs/ble_device_adapters.md). Its SuperMini controller and board are
-not the product hardware, and the current sleep/wake correction still requires the physical
-re-verification tracked in [`TODO.md`](TODO.md). The older
+[`docs/ble_device_adapters.md`](docs/ble_device_adapters.md). Its SuperMini nRF52840 controller is
+now the production controller target (a nice!nano v2-compatible board), so its electronics
+validation carries forward, but the sketch remains validation firmware and the current sleep/wake
+behavior still requires the physical re-verification tracked in [`TODO.md`](TODO.md). The older
 [`firmware/XIAO3389/XIAO3389.ino`](firmware/XIAO3389/XIAO3389.ino) dual-PMW3389 three-button bench
 remains supported under advertised name `Trackball BLE`. Legacy rotation-only firmware also remains
 supported. See [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) for the packet and
 descriptor contract.
-[`firmware/Astrolabe/Astrolabe.ino`](firmware/Astrolabe/Astrolabe.ino) is still the production-
-hardware placeholder for the Seeed Studio XIAO nRF52840 target pending the remaining sensor, switch,
-power, and recovery-control freeze. Prototype-only SuperMini pins and geometry remain in the PMW3610
-sketch rather than being copied into that placeholder.
+[`firmware/Astrolabe/Astrolabe.ino`](firmware/Astrolabe/Astrolabe.ino) is a placeholder superseded
+by the ZMK candidate (its header still names the retired Seeed Studio XIAO nRF52840 target) and is
+not developed further. Keep it and the Arduino CI gate until the ZMK candidate earns the live
+replacement criteria.
 
 ## Development and project documentation
 
@@ -306,11 +326,12 @@ the current verification matrix rather than relying on an old test count or vers
 
 ## License
 
-Astrolabe is open source. Everything in this repository today — the daemon, its host integrations,
-firmware, tooling, tests, and documentation — is licensed under the
+Astrolabe is open source. Astrolabe-authored daemon, integration, firmware, tooling, test, and
+documentation source is licensed under the
 [Apache License 2.0](LICENSE). Hardware design source, once it exists, will be licensed under the
 [CERN Open Hardware Licence Version 2 - Weakly Reciprocal](LICENSES/CERN-OHL-W-v2.txt).
-[`LICENSING.md`](LICENSING.md) maps each path to its license.
+[`LICENSING.md`](LICENSING.md) maps each path to its license; bundled daemon and firmware components
+are attributed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 Those licenses cover code and design source, not the project's name or logos. See
 [`TRADEMARKS.md`](TRADEMARKS.md) before naming a modified build Astrolabe.

@@ -112,10 +112,13 @@ builds it. A separate job compiles the
 retained XIAO protocol-bench sketch with pinned Arduino CLI and board-core inputs, reports binary
 sizes, and retains the firmware artifacts. Seeed's pinned nRF52 core bundles its packaging utility
 for Windows and macOS but calls `adafruit-nrfutil` from `PATH` on Linux, so that job installs and
-checks the pinned PyPI release before compiling. The obsolete SuperMini prototype remains available
-as source and evidence but is no longer a release target. Replace the bench compile with the
-official XIAO production firmware when its hardware contract is frozen. These checks establish
-reproducible buildability; they do not qualify the final product hardware.
+checks the pinned PyPI release before compiling. A separate job builds the ZMK candidate from exact
+ZMK/Zephyr commits in an immutable image and retains the UF2, ELF, effective configuration, DTS,
+frozen west manifest, build hashes, SPDX build documents, and firmware license bundle. The
+SuperMini prototype sketch remains available as source and evidence but is not a release build
+target. Keep the XIAO bench gate beside the ZMK candidate until the live replacement matrix in
+[`zmk_migration_plan.md`](zmk_migration_plan.md) passes. These checks establish reconstructible
+inputs and buildability; they do not establish bit-identical output or qualify product hardware.
 
 Before release, also install the wheel into a clean Windows account without Python or a source
 checkout, exercise the onedir GUI there, uninstall/reverse every path in `security.md`, and retain
@@ -142,7 +145,7 @@ observed safely. The provider may synthesize a release; it must not synthesize a
 stale hold, steal focus, suppress ordinary key delivery, or log raw keyboard packets. Name the
 backend Windows Raw Input, not a keyboard hook.
 
-## Firmware and BLE matrix
+## Firmware, BLE, and USB matrix
 
 Record firmware revision, descriptor ID, physical control, debounce value, and packet observation:
 
@@ -154,12 +157,20 @@ Record firmware revision, descriptor ID, physical control, debounce value, and p
 - legacy rotation-only operation with keyboard bindings;
 - daemon-absent standard HID pointer and button operation.
 
+Run the same payload/state cases over the ZMK vendor USB interface. Additionally record feature
+capability framing, exact VID/PID/usage/product match, attach request and matching ACK, keepalive,
+external-power presentation, cable pull, suspend/resume, daemon termination, BLE-to-USB preference,
+USB-to-BLE fallback, and stale-callback/late-disconnect rejection. Exercise every loss and handover
+while controls are held; no old lease may release or publish into its replacement session, and no
+queued report from an old USB owner may appear after reattach.
+
 The XIAO three-button/jumper bench proves the host protocol boundary, and the SuperMini PMW3610 loop
-proves the current five-way prototype's protocol and input behavior. Its corrected PMW3610
-sleep/wake cursor path still requires the physical matrix tracked in `TODO.md`; neither bench is the
-product assembly. The final Seeed Studio XIAO nRF52840 build's sensor path,
+proves the current five-way prototype's protocol and input behavior on what is now the production
+controller. Its automatic PMW3610 Run/Rest path and the new ZMK wake integration still require the
+physical matrix tracked in `TODO.md`; neither bench is the product assembly. The final production
+build's sensor path,
 Up/Down/Left/Right/Center pin map, debounce, and physical five-way matrix remain release blockers
-until exercised on that hardware.
+until exercised on the final assembly under the production firmware.
 
 ## Host control matrix
 

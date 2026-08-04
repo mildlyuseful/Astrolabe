@@ -1,0 +1,23 @@
+// SPDX-FileCopyrightText: 2026 Dylan Lee
+// SPDX-License-Identifier: Apache-2.0
+//
+// Opt-in flash-layout shim for SuperMini nRF52840 boards whose UF2 bootloader bundles
+// SoftDevice S140 7.x instead of the 6.1.1 that nice!nano v2 ships.
+//
+// S140 6.1.1 occupies flash through 0x26000, so upstream nice_nano_v2 starts the application
+// there. S140 7.x is one 4 KB page larger and occupies flash through 0x27000. Building the
+// stock nice_nano_v2 target for such a board produces a UF2 addressed at 0x26000, which
+// overlaps the SoftDevice: the application never starts and the board never enumerates.
+//
+// This is NOT part of the default build. Pass it explicitly:
+//   west build ... -- -DEXTRA_DTC_OVERLAY_FILE="$PWD/config/boards/supermini_s140_v7.overlay"
+//
+// Check INFO_UF2.TXT on the bootloader drive first. Use this only when it reports a 7.x
+// SoftDevice; on a genuine nice!nano v2 (S140 6.1.1) it would place the application one page
+// too high. Confirming which bootloader the production board ships is the SuperMini/nice!nano
+// compatibility gate tracked in TODO.md.
+
+&code_partition {
+    // 0x27000..0xec000, ending where storage_partition begins, as upstream does.
+    reg = <0x27000 0xc5000>;
+};

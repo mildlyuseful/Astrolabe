@@ -8,6 +8,7 @@ Threading model (Windows):
   * main thread       -> hidden Tk root + mainloop (owns all GUI; window shown/hidden on demand)
   * tray thread       -> pystray icon loop (menu callbacks marshalled to Tk via root.after)
   * ble thread        -> asyncio BLE loop and packet-boundary focus routing
+  * usb thread        -> vendor-HID hotplug, ownership keepalive, and packet routing
   * broker threads    -> NavBroker accept + sender (streams frames to the socket add-ons)
   * SolidWorks worker -> its own CoInitialize'd COM thread (daemon-side direct driver)
   * AutoCAD worker    -> its own CoInitialize'd COM thread (plugin staging/NETLOAD only)
@@ -33,6 +34,7 @@ from .devices import (
     MotionSample,
     SnapshotInputProvider,
     builtin_device_descriptors,
+    start_usb_thread,
 )
 from .input import (
     BindingController,
@@ -72,6 +74,10 @@ def _set_nested(container, path, value):
 
 
 class App:
+    # Class-level default so battery/power helpers stay readable. Tests build bare instances
+    # via App.__new__(App) and read these before __init__ assigns them.
+    _external_power = False
+
     def __init__(self, debug=False):
         self.debug = debug
         self.log = get_logger()
@@ -84,9 +90,9 @@ class App:
         self.keyboard_provider = WindowsRawInputProvider(
             self.input_aggregator.accept_many, self.input_aggregator.update_health)
         self.input_aggregator.register_provider(self.keyboard_provider)
-        device_descriptors = builtin_device_descriptors()
+        self.device_descriptors = builtin_device_descriptors()
         self.ble_input_providers = {}
-        for descriptor in device_descriptors:
+        for descriptor in self.device_descriptors:
             provider = SnapshotInputProvider(
                 descriptor,
                 self.input_aggregator.accept_many,
@@ -95,7 +101,7 @@ class App:
             self.input_aggregator.register_provider(provider)
             self.ble_input_providers[descriptor.source_id] = provider
         self.device_adapters = DeviceAdapterRegistry(
-            device_descriptors, self.ble_input_providers)
+            self.device_descriptors, self.ble_input_providers)
         self.binding_catalog = load_system_binding_profiles()
         self.pointer_button_output = SendInputPointerButtonSink()
         self.binding_controller = BindingController(
@@ -106,8 +112,12 @@ class App:
         self.runtime.add_listener(self._on_runtime_state_changed)
         self._configure_binding_controls()
         self.stop_event = threading.Event()
+        self.ble_enabled_event = threading.Event()
+        self.ble_enabled_event.set()
+        self.transport_handover_lock = threading.RLock()
         self._status = "starting"
         self._battery_state = (None, False)
+        self._external_power = False
         self._last_pushed = None
         self._last_battery_pushed = _NO_BATTERY_LEVEL
         self._health_lock = threading.Lock()
@@ -187,14 +197,14 @@ class App:
         self._apply_rates()
         self._apply_schemes()
 
-    # --- BLE wiring and packet-boundary routing -----------------------------------
+    # --- Device wiring and packet-boundary routing --------------------------------
     def get_ble_params(self):
         snapshot = self.config.snapshot()
         return (snapshot.device_value("device.name"),
                 snapshot.device_value("device.address"), snapshot.device_char_uuid)
 
     def set_status(self, text):
-        # Called from the BLE thread; just store + log. The Tk poll pushes it to the GUI.
+        # Called from transport threads; just store + log. The Tk poll pushes it to the GUI.
         self._status = text
         if not text.startswith("subscribed"):
             self._battery_state = (self._battery_state[0], False)
@@ -209,7 +219,7 @@ class App:
     def set_battery_level(self, level):
         if level is not None and (type(level) is not int or not 0 <= level <= 100):
             raise ValueError("BLE battery level must be an integer from 0 to 100 or None")
-        state = (level, level is not None)
+        state = (level, level is not None and not self._external_power)
         if state == self._battery_state:
             return
         self._battery_state = state
@@ -221,10 +231,24 @@ class App:
 
     def battery_status_text(self):
         level, current = self._battery_state
+        if self._external_power:
+            if level is None:
+                return "Power: USB (Battery unavailable)"
+            return f"Power: USB (Battery: {level}% last known)"
         if level is None:
             return "Battery: unavailable"
         suffix = "" if self.is_connected() and current else " (last known)"
         return f"Battery: {level}%{suffix}"
+
+    def set_external_power(self, powered):
+        if type(powered) is not bool:
+            raise TypeError("external-power state must be boolean")
+        if powered == self._external_power:
+            return
+        self._external_power = powered
+        if powered:
+            self._battery_state = (self._battery_state[0], False)
+        self.log.info("device power: %s", "USB" if powered else "battery/unknown")
 
     def _on_service_health_changed(self, health):
         if not isinstance(health, ServiceHealth):
@@ -662,6 +686,16 @@ class App:
             for key, old, new in integrations.auto_update(self.config):
                 self.log.info(f"updated {key} add-in {old} -> {new} (restart {key} to apply)")
 
+            start_usb_thread(
+                self.device_descriptors,
+                self.ble_input_providers,
+                self._handle_ble_motion,
+                self.set_status,
+                self.stop_event,
+                enabled_event=self.ble_enabled_event,
+                external_power_callback=self.set_external_power,
+                handover_lock=self.transport_handover_lock,
+            )
             start_ble_thread(
                 self.get_ble_params,
                 self.device_adapters,
@@ -669,6 +703,8 @@ class App:
                 self.set_status,
                 self.stop_event,
                 battery_callback=self.set_battery_level,
+                enabled_event=self.ble_enabled_event,
+                handover_lock=self.transport_handover_lock,
             )
 
             if self.debug:
@@ -708,7 +744,7 @@ class App:
                 self.ui.update_battery_status(self.battery_status_text())
             if self.tray is not None:
                 self.tray.refresh()
-        battery_signature = self._battery_state
+        battery_signature = (self._battery_state, self._external_power)
         if battery_signature != self._last_battery_pushed:
             self._last_battery_pushed = battery_signature
             if self.ui is not None:

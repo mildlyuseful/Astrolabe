@@ -12,6 +12,8 @@ import json
 import struct
 from types import SimpleNamespace
 
+import pytest
+
 from trackball_daemon import app as app_mod
 from trackball_daemon import output as output_mod
 from trackball_daemon.app import App
@@ -126,6 +128,26 @@ def test_app_battery_status_preserves_last_known_value_across_disconnect():
     assert app.battery_status_text() == "Battery: 73% (last known)"
     app.set_battery_level(73)
     assert app.battery_status_text() == "Battery: 73%"
+
+
+def test_app_external_power_is_explicit_without_fabricating_battery_charge():
+    app = App.__new__(App)
+    app._status = "subscribed -- Astrolabe over USB is live"
+    app._battery_state = (73, True)
+    app._external_power = False
+    app.log = SimpleNamespace(info=lambda *_args: None)
+
+    app.set_external_power(True)
+    assert app.battery_level() == 73
+    assert app.battery_status_text() == "Power: USB (Battery: 73% last known)"
+
+    app.set_battery_level(None)
+    assert app.battery_status_text() == "Power: USB (Battery unavailable)"
+    app.set_external_power(False)
+    assert app.battery_status_text() == "Battery: unavailable"
+
+    with pytest.raises(TypeError, match="boolean"):
+        app.set_external_power(1)
 
 
 def test_settings_battery_status_update_is_tk_thread_projection():

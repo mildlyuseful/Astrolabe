@@ -43,6 +43,9 @@ dependencies = [
     # scanner/client keyword surface. Moving off 1.x changes the BLE transport and can only be
     # qualified against real trackball hardware, so it is tracked as its own task in TODO.md.
     "bleak>=1.1,<2",
+    # The ZMK device exposes its daemon channel as a vendor-defined USB HID interface. Keep the
+    # minor release bounded because the daemon depends on hidapi's enumeration and report framing.
+    "hidapi>=0.15,<0.16; sys_platform == 'win32'",
     "pystray>=0.19.5",
     "Pillow>=10.0.0",
     "pywin32>=306; sys_platform == 'win32'",   # SolidWorks COM automation (win32com)

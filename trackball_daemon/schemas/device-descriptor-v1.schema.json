@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://astrolabe.dev/schemas/device-descriptor-v1.schema.json",
-  "title": "Astrolabe BLE device descriptor v1",
+  "title": "Astrolabe BLE and USB device descriptor v1",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "device_id", "source_id", "label", "match", "service_uuid", "motion_characteristic", "input_characteristic", "controls"],
@@ -20,6 +20,18 @@
           "minItems": 1,
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/text"}
+        },
+        "usb_hid": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["vendor_id", "product_id", "usage_page", "usage", "product"],
+          "properties": {
+            "vendor_id": {"$ref": "#/$defs/uint16"},
+            "product_id": {"$ref": "#/$defs/uint16"},
+            "usage_page": {"$ref": "#/$defs/uint16"},
+            "usage": {"$ref": "#/$defs/uint16"},
+            "product": {"$ref": "#/$defs/text"}
+          }
         }
       }
     },
@@ -35,7 +47,7 @@
         "properties": {
           "id": {"$ref": "#/$defs/identifier"},
           "label": {"$ref": "#/$defs/text"},
-          "bit": {"type": "integer", "minimum": 0, "maximum": 2039},
+          "bit": {"type": "integer", "minimum": 0, "maximum": 255},
           "kind": {"enum": ["button", "switch"]},
           "metadata": {"type": "object"}
         }
@@ -46,6 +58,7 @@
   "$defs": {
     "identifier": {"type": "string", "minLength": 1, "pattern": "^\\S+$"},
     "text": {"type": "string", "minLength": 1, "pattern": "^\\S(?:.*\\S)?$"},
+    "uint16": {"type": "integer", "minimum": 0, "maximum": 65535},
     "uuid": {"type": "string", "format": "uuid"}
   }
 }

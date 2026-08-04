@@ -3,6 +3,8 @@
 
 """Adapter for Astrolabe rotation plus versioned input-state snapshots."""
 
+from functools import partial
+
 from .astrolabe_legacy import AstrolabeLegacyAdapter
 from .model import NotificationSubscription
 
@@ -15,6 +17,7 @@ class AstrolabeFiveWayAdapter(AstrolabeLegacyAdapter):
             provider=provider,
             source_id=f"{descriptor.source_id}.motion",
             protocol_error_callback=protocol_error_callback,
+            supports_input=True,
         )
         self.descriptor = descriptor
 
@@ -24,12 +27,17 @@ class AstrolabeFiveWayAdapter(AstrolabeLegacyAdapter):
 
     @property
     def subscriptions(self):
-        return super().subscriptions + (NotificationSubscription(
-            self.descriptor.input_characteristic, self._on_input),)
+        with self._lock:
+            session = self._session
+            lease = self._lease
+            return (
+                self._rotation_subscription(session, lease),
+                NotificationSubscription(
+                    self.descriptor.input_characteristic, partial(self._on_input, lease)),
+            )
 
-    def connected(self, session):
-        self._session = session
-        self.provider.begin_session(session.instance_id, supports_input=True)
-
-    def _on_input(self, _sender, data):
-        self.provider.accept_snapshot(bytes(data))
+    def _on_input(self, lease, _sender, data):
+        with self._lock:
+            if lease is None or lease is not self._lease:
+                return
+        self.provider.accept_snapshot(bytes(data), lease=lease)
