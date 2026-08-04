@@ -19,15 +19,36 @@ and its keymap; when they disagree, the shield data is correct and this document
 |---|---|
 | Controller | SuperMini nRF52840 |
 | ZMK board target | Upstream `nice_nano_v2`; no in-tree board fork |
-| Bootloader | Adafruit nRF52 UF2. The board reserves `0x0`–`0x26000` for the SoftDevice and links the application at `0x26000`, `0xC6000` long |
+| Bootloader | Adafruit nRF52 UF2 bundling SoftDevice S140 7.3.0; application at `0x27000`, `0xC5000` long |
 | Motion sensors | Two PMW3610, sharing one bit-banged three-wire bus |
 | Directional switch | ALPS SKRHADE010 five-way (four directions plus center push) |
 | Status indicator | The controller's red user LED (pin unconfirmed, probably P0.15 — see below) |
 | Firmware stack | Pinned ZMK and Zephyr commits plus one out-of-tree Astrolabe module; no ZMK patch |
 
-The SuperMini is treated as nice!nano v2-compatible. That compatibility is a pin-and-peripheral
-claim about the board Astrolabe actually ships, not a statement that the two boards are
-interchangeable in general; it is what allows the upstream ZMK target to be used unforked.
+## The SuperMini is not flash-compatible with nice!nano v2
+
+The upstream `nice_nano_v2` target is used because the SuperMini matches it in **pinout and
+peripherals**. It does **not** match it in flash layout, and that difference is destructive:
+
+| Board | SoftDevice | Occupies through | Application starts at |
+|---|---|---|---|
+| nice!nano v2 | S140 6.1.1 | `0x26000` | `0x26000` |
+| SuperMini (ours) | S140 7.3.0 | `0x27000` | `0x27000` |
+
+S140 7.x is one 4 KB page larger. A UF2 built with upstream's unmodified `0x26000` partition lands
+*inside* the SoftDevice, so the bootloader refuses to start it and the board drops straight back to
+bootloader mode without ever enumerating. There is no partial symptom — it either boots or it is
+invisible.
+
+The shield therefore overrides `code_partition` to `0x27000`/`0xC5000` in
+[`astrolabe.overlay`](../firmware/zmk/module/boards/shields/astrolabe/astrolabe.overlay). This was
+previously an opt-in overlay passed with `-DEXTRA_DTC_OVERLAY_FILE`, and CI, the documented build
+command, and a hand build each independently forgot it, because nothing fails until the image
+reaches hardware. It now travels with the shield and applies by construction. Do not make it
+conditional; a genuine nice!nano v2 would need its own target.
+
+Verify the assumption on any new board before flashing: `INFO_UF2.TXT` on the bootloader drive
+reports the SoftDevice version.
 
 ## Pin map
 

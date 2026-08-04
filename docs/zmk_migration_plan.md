@@ -25,7 +25,7 @@ merely because the ZMK candidate compiles.
 | Concern | Decision |
 |---|---|
 | Production hardware | Frozen in [`hardware.md`](hardware.md): SuperMini nRF52840, two PMW3610 on a 52 mm ball, ALPS SKRHADE010 five-way |
-| ZMK target | Upstream `nice_nano_v2`; no in-tree board fork |
+| ZMK target | Upstream `nice_nano_v2`; no in-tree board fork. Pin-compatible only — the shield overrides `code_partition` to `0x27000` for the SuperMini's S140 7.3.0 bootloader |
 | Firmware stack | Exact ZMK and Zephyr commits plus one out-of-tree Astrolabe module; no ZMK patch |
 | BLE payloads | Frozen v1 rotation and full-state input snapshot contract, byte-identical to the existing daemon protocol |
 | Wired behavior | Normal ZMK HID mouse when standalone, plus a separate vendor HID interface for daemon data and ownership |
@@ -225,6 +225,7 @@ west build -s zmk/app -d build/astrolabe -b nice_nano_v2 -- `
   -DSHIELD=astrolabe `
   -DZMK_CONFIG="$PWD/config" `
   -DZMK_EXTRA_MODULES="$PWD/module"
+# Verify before flashing: the UF2 must report start address 0x27000, not 0x26000.
 west spdx --build-dir=build/astrolabe --analyze-includes --include-sdk
 ```
 

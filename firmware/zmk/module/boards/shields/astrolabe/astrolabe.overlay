@@ -5,6 +5,27 @@
 #include <dt-bindings/zmk/matrix_transform.h>
 #include "astrolabe-layouts.dtsi"
 
+/* The SuperMini is nice!nano v2-compatible in pinout but NOT in flash layout, which is why this
+ * shield overrides the board's partition. Its UF2 bootloader bundles SoftDevice S140 7.3.0, one
+ * 4 KB page larger than the 6.1.1 a genuine nice!nano v2 ships, so the application starts at
+ * 0x27000 rather than upstream's 0x26000. A UF2 built at 0x26000 lands inside the SoftDevice: the
+ * bootloader refuses to start it, the board drops straight back to bootloader mode, and it never
+ * enumerates -- a total brick-until-reflash, with no partial symptom to notice.
+ *
+ * This lived in config/boards/supermini_s140_v7.overlay as an opt-in flag. Three separate builds
+ * forgot to pass it (CI, the documented command in docs/zmk_migration_plan.md, and a hand build),
+ * because nothing fails until the image reaches hardware. It belongs with the rest of the frozen
+ * hardware description, where it is applied by construction.
+ *
+ * Confirmed on hardware: a 0x26000 image failed to enumerate; 0x27000 is correct for this board.
+ * If a genuine nice!nano v2 ever needs supporting, it needs its own shield or board target -- do
+ * not make this conditional and reintroduce the same footgun.
+ */
+&code_partition {
+    /* 0x27000..0xec000, ending where storage_partition begins, as upstream does. */
+    reg = <0x27000 0xc5000>;
+};
+
 / {
     chosen {
         zmk,kscan = &astrolabe_kscan;

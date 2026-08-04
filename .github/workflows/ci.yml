@@ -351,6 +351,30 @@ jobs:
             -DZMK_CONFIG="$GITHUB_WORKSPACE/firmware/zmk/config" \
             -DZMK_EXTRA_MODULES="$GITHUB_WORKSPACE/firmware/zmk/module"
 
+      # Reads the address out of the artifact rather than re-asserting the overlay's constant, so it
+      # catches the override being dropped, not just edited. The SuperMini's S140 7.3.0 bootloader
+      # puts the application at 0x27000; upstream nice_nano_v2 says 0x26000, which lands inside the
+      # SoftDevice and produces a board that never enumerates. Nothing fails at build time, so this
+      # is the only place the mistake is catchable before hardware.
+      - name: Assert UF2 application address
+        working-directory: firmware/zmk
+        shell: bash
+        run: |
+          set -euo pipefail
+          # UF2 blocks are 512 bytes; the target address is a little-endian uint32 at offset 12.
+          addr=$(python3 -c "
+          import struct, sys
+          with open('build/astrolabe/zephyr/zmk.uf2','rb') as f:
+              block = f.read(32)
+          print('0x%08X' % struct.unpack('<I', block[12:16])[0])
+          ")
+          echo "UF2 application address: $addr"
+          if [ "$addr" != "0x00027000" ]; then
+            echo "Expected 0x00027000 (S140 7.3.0). An image at 0x00026000 overlaps the" >&2
+            echo "SoftDevice and will not boot. Check the shield's code_partition override." >&2
+            exit 1
+          fi
+
       # These are the descriptor-v2 development identifiers. A production VID allocation remains
       # an explicit release gate, but the daemon and firmware must agree until it is completed.
       - name: Assert development USB identity
