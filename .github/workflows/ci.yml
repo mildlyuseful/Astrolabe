@@ -416,7 +416,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p build/astrolabe/provenance
-          west manifest --freeze > build/astrolabe/west-frozen.yml
+          # --resolve, not --freeze: freeze insists every project in the manifest be cloned so it
+          # can read a SHA out of each working tree, and dies on the optional Zephyr modules this
+          # build deliberately never clones ("cannot freeze; project chre is uncloned"). It buys
+          # nothing here anyway -- every revision the resolved manifest emits is already a pinned
+          # 40-hex SHA, so the two agree on provenance. west list below records what was actually
+          # checked out, which is the part that describes this build rather than the manifest.
+          west manifest --resolve > build/astrolabe/west-resolved.yml
           west list -f $'{name}\t{revision}\t{path}' > build/astrolabe/provenance/west-projects.tsv
           cp config/west.yml build/astrolabe/provenance/source-west.yml
           printf '%s\n' \
@@ -435,7 +441,7 @@ jobs:
               zephyr/.config \
               zephyr/zephyr.dts \
               compile_commands.json \
-              west-frozen.yml \
+              west-resolved.yml \
               spdx/app.spdx \
               spdx/zephyr.spdx \
               spdx/build.spdx \
@@ -465,7 +471,7 @@ jobs:
             firmware/zmk/build/astrolabe/zephyr/.config
             firmware/zmk/build/astrolabe/zephyr/zephyr.dts
             firmware/zmk/build/astrolabe/compile_commands.json
-            firmware/zmk/build/astrolabe/west-frozen.yml
+            firmware/zmk/build/astrolabe/west-resolved.yml
             firmware/zmk/build/astrolabe/spdx/*.spdx
             firmware/zmk/build/astrolabe/compliance/**
             firmware/zmk/build/astrolabe/provenance/*
