@@ -53,11 +53,11 @@
 
         cpi = <1600>;
         ball-diameter-um = <52000>;
-        sensor-phi-mdeg = <145000 215000>;
+        sensor-phi-mdeg = <140000 220000>;
         sensor-theta-mdeg = <120000 120000>;
         sensor-mount-mdeg = <270000 270000>;
         sensor-flipped = <1 1>;
-        frame-tilt-mdeg = <(-20000)>;
+        frame-tilt-mdeg = <(-25000)>;
 
         poll-interval-us = <1000>;
         active-window-ms = <2000>;

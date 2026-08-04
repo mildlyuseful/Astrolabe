@@ -22,6 +22,7 @@ and its keymap; when they disagree, the shield data is correct and this document
 | Bootloader | Adafruit nRF52 UF2 with SoftDevice S140 7.3.0, application at `0x27000` |
 | Motion sensors | Two PMW3610, sharing one bit-banged three-wire bus |
 | Directional switch | ALPS SKRHADE010 five-way (four directions plus center push) |
+| Status indicator | The controller's red user LED (pin unconfirmed, probably P0.15 — see below) |
 | Firmware stack | Pinned ZMK and Zephyr commits plus one out-of-tree Astrolabe module; no ZMK patch |
 
 The SuperMini is treated as nice!nano v2-compatible. That compatibility is a pin-and-peripheral
@@ -70,11 +71,14 @@ control.
 |---|---|
 | Ball diameter | 52000 µm (52 mm) |
 | Sensor CPI | 1600 |
-| Sensor azimuth φ | 145°, 215° |
+| Sensor azimuth φ | 140°, 220° |
 | Sensor polar angle θ | 120°, 120° |
 | Sensor mount rotation | 270°, 270° |
 | Sensor axis flip | both flipped |
-| Housing frame tilt | −20° |
+| Housing frame tilt | −25° |
+
+Azimuth and frame tilt are the final fixture's measurements, not the prototype's (which were 145°/215°
+and −20°). Polar angle, mount rotation, and flip carried over unchanged.
 
 Ball diameter and CPI together fix the counts-per-radian conversion
 (`radius_counts = (diameter_µm / 2000) × (CPI / 25.4)`, here ≈ 1638) that turns sensor counts into
@@ -111,19 +115,53 @@ of it. Up and Left carry no mouse button, which is what makes them available.
 | Hold Up 3 s | Enter bootloader |
 | Hold Left 3 s | Clear the active BLE profile's bond |
 
-Only the bootloader gesture is observable without a host, by mounting its UF2 drive. The other three
-change radio or endpoint state on a device with no indicator, so "nothing happened" and "it worked"
-are indistinguishable — the open indicator decision is tracked in [`../TODO.md`](../TODO.md).
+Only the bootloader gesture confirms itself without a host, by mounting its UF2 drive. The other
+three change radio or endpoint state, so they depend on the status indicator below to be observable
+at all; until it is implemented, "nothing happened" and "it worked" are indistinguishable.
 
 Reset is deliberately unbound: the hardware power switch covers it. Bond clear has no hardware
 equivalent, which is why it gets the gesture instead — ZMK accepts a pairing only onto an open
 slot, so without a bond clear all five profile slots eventually become unusable.
 
+## Status indicator
+
+The board carries two LEDs and only one of them is ours:
+
+- **Red — the status indicator.** The user LED, driven by firmware. It is the LED the Arduino
+  prototype drove through `LED_BUILTIN` and then disabled, and the one the UF2 bootloader flashes on
+  reset and during bootload. This is the device's only output that does not require a host, so it
+  carries BLE connection state, the active profile, and the selected endpoint — which is what makes
+  the three non-bootloader gestures observable.
+- **Blue — not ours.** A battery-charge indicator, lit by the charging circuit rather than by
+  firmware. Do not bind it.
+
+**The pin is not yet confirmed.** The upstream `nice_nano_v2` definition declares exactly one GPIO
+LED, `blue_led` at P0.15 active-high, named for the colour it happens to be on a real nice!nano. The
+SuperMini is a pin-compatible clone whose user LED is red, so P0.15 is very likely the red one here
+and the label is just inherited — but "very likely" is not a frozen contract. Confirm by driving
+P0.15 and observing which LED responds before the indicator is implemented. If it turns out to be a
+pin the board definition does not declare, the shield overlay needs its own `gpio-leds` node.
+
+**The LED is safe to drive, and a prior comment claiming otherwise is wrong.** It was disabled during
+normal operation in the Arduino prototype on the theory that its light reached both sensors off the
+ball and corrupted their auto-exposure — see the note still standing at
+[`../firmware/PMW3610/PMW3610.ino`](../firmware/PMW3610/PMW3610.ino). The phantom motion that
+diagnosis was built on had a different cause: a rest-to-run wake transient, where the sensor's servo
+re-locks and reports a decaying lockstep artifact. Fixing that at the source removed the symptom with
+the LED still lit. Do not re-disable the LED on interference grounds without new evidence that
+distinguishes it from the wake transient.
+
+Behavior is not implemented yet; the blink vocabulary and its verification are a gate in
+[`../TODO.md`](../TODO.md).
+
 ## What is not frozen
 
 - Enclosure, mechanical mounting, and the physical sensor fixture.
 - Battery cell selection and the charge path.
-- USB VID/PID. Builds currently use upstream ZMK development identifiers, which must not be
-  represented as release identity; a production allocation is a release gate.
+- USB PID. Builds currently enumerate as ZMK's own identifiers, `0x1D50:0x615E` — an OpenMoko
+  sub-allocation belonging to the ZMK project, so shipping them would present Astrolabe as a generic
+  ZMK device. The decision is to allocate under pid.codes (VID `0x1209`); the specific PID is not yet
+  requested. Firmware descriptor and
+  `trackball_daemon/devices/descriptor_data/astrolabe_5way.json` must change together.
 - The hardware design source bundle required by CERN-OHL-W-2.0. Schematics, layout, and mechanical
   CAD do not yet exist in preferred form in this repository.

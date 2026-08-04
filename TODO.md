@@ -17,12 +17,12 @@ The controller, sensor count and model, ball, and five-way switch are frozen in
 verifying the frozen contract against a physical production assembly. A gate below that fails is a
 product decision to reopen, not a value to quietly retune.
 
-- Confirm the frozen pin map, ball geometry, and sensor poses against the final assembly's
-  schematic and build. `firmware/PMW3610` validated these electronics on the production controller,
-  but on a prototype fixture with a 50.8 mm ball; the shipped ball is 52 mm and the enclosure,
-  mechanical sensor mounting, and wiring harness are new. Re-derive the sensor azimuth/polar/mount
-  angles and the −20° frame tilt from the assembled fixture rather than assuming the prototype's
-  values transferred.
+- Confirm the frozen pin map and ball geometry against the final assembly's schematic and build.
+  `firmware/PMW3610` validated these electronics on the production controller, but on a prototype
+  fixture with a 50.8 mm ball; the shipped ball is 52 mm and the enclosure, mechanical sensor
+  mounting, and wiring harness are new. The shield now carries the final fixture's 140°/220° azimuth
+  and −25° frame tilt, so what remains is confirming those measurements produce correct axes and
+  signs in use — a pose error shows up as cross-axis bleed, not as an obviously wrong direction.
 - Verify the five-way switch electrically and mechanically: all five positions reachable and
   distinct, 8 ms debounce adequate for the SKRHADE010's real bounce profile, no false center on
   diagonal actuation, and the forced-standalone escape (Center held through boot) reachable on the
@@ -180,13 +180,21 @@ remaining gates:
   with daemon feel parity, all four gestures, the route-driven layer split, and BLE/USB HID output
   across two hosts — so this gate is about the assembled product, not first proof the firmware
   works. Re-run it whole regardless: the ball diameter, mounting, and harness all changed.
-- Give BLE profile and output state some indication. The device has no display or LED binding, so
-  three of the four standalone gestures — profile switch, output toggle, bond clear — are
-  unobservable, and "nothing happened" is indistinguishable from "it worked". Only the bootloader
-  gesture confirms itself, by mounting. This is also what makes a wrong profile hard to diagnose:
-  ZMK accepts a pairing only onto an open slot, so a taken slot rejects the host with nothing but
-  a generic connect failure at the other end. Decide between an LED, a HID feature report the
-  daemon can read, or accepting it and documenting the recovery sequence.
+- Implement the status indicator on the controller's red user LED. Decided in favor of an LED over a
+  HID feature report because the gestures it reports are exactly the ones used when no host is
+  attached or when pairing is broken. Two steps:
+  - Confirm the pin. The `nice_nano_v2` definition declares one GPIO LED, `blue_led` at P0.15, named
+    for the nice!nano's colour; the SuperMini's user LED is red and is probably the same pin, but
+    that is inference. Drive P0.15 and see which LED lights. If it is not the red one, the shield
+    overlay needs its own `gpio-leds` node for the correct pin. Do not bind the blue LED — it is a
+    charge indicator owned by the charging circuit.
+  - Build the indicator: a blink vocabulary covering BLE connection state, active profile, and
+    selected endpoint, a ZMK listener on the profile/endpoint events, and a Kconfig switch.
+  Until it exists, three of the four gestures are unobservable and a wrong profile stays hard to
+  diagnose: ZMK accepts a pairing only onto an open slot, so a taken slot rejects the host with
+  nothing but a generic connect failure at the other end. The LED's suspected sensor interference
+  was a misdiagnosis of the wake transient and is not a reason to leave it dark — see
+  [`docs/hardware.md`](docs/hardware.md).
 - Finish verifying the standalone/daemon layer split. Clean transitions, gesture reachability in
   standalone, and unarbitrated daemon control bits are confirmed on the prototype. Still open: that
   the layer follows the route with no manual step across cable pull, daemon termination, and
@@ -206,8 +214,10 @@ remaining gates:
 - Confirm charging and USB-powered battery presentation on the physical power path. BLE may publish a
   measured percentage; an active USB daemon session must remain explicitly externally powered and
   must not fabricate a fresh percentage.
-- Obtain a production USB VID/PID allocation and update firmware plus descriptor together; the
-  upstream ZMK IDs are development-only.
+- Request a PID under the pid.codes VID `0x1209` and update the firmware descriptor plus
+  `trackball_daemon/devices/descriptor_data/astrolabe_5way.json` together. Builds currently
+  enumerate as `0x1D50:0x615E`, which is ZMK's own OpenMoko sub-allocation, so shipping them would
+  present Astrolabe as a generic ZMK device and collide with every other ZMK board on a USB match.
 - Measure flash/RAM, connection interval, throughput, motion latency, and battery behavior. Decide
   whether to enable ZMK Studio only after repeating lifecycle and resource measurements with Studio
   and the custom service together.

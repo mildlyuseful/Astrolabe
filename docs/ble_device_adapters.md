@@ -135,8 +135,9 @@ publishing different input layouts, so the transport reports the observed addres
 an explicit Device name or address instead of guessing a descriptor.
 
 USB discovery is deliberately stricter and never falls back to name alone. All five fields in the
-`usb_hid` match must agree with one enumerated HID collection. The current VID/PID are upstream
-ZMK development defaults; they are not a production allocation and must change before hardware is
+`usb_hid` match must agree with one enumerated HID collection. The current VID/PID are ZMK's own
+`0x1D50:0x615E`, shared by every ZMK board; a pid.codes allocation under VID `0x1209` is pending and
+must land in the firmware descriptor and this descriptor data together before hardware is
 distributed.
 
 ## USB vendor-HID framing
@@ -182,8 +183,10 @@ The `astrolabe_5way` publisher is the ZMK production firmware under
 Standalone HID maps Down/Right/Center to left/right/middle mouse buttons; Up and Left carry no
 button and host the recovery and radio gestures instead. The sensor path keeps Performance
 `FMODE=0`, letting the sensors manage Run/Rest automatically, so the MCU can wait for MOTION while
-motion bursts remain readable in automatic Rest. It uses neither forced Rest, Force Awake, nor a
-board LED for normal power or status management.
+motion bursts remain readable in automatic Rest. It uses neither forced Rest nor Force Awake for
+normal power management. The board's red user LED is the decided status indicator but is not
+implemented yet, so the device currently reports radio and endpoint state nowhere; see
+[`hardware.md`](hardware.md).
 
 Its source and toolchain build are automated and it has been exercised on the prototype fixture, but
 the final assembly's electrical map, sensor geometry, switch mechanics, enclosure, sleep/wake

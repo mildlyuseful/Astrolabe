@@ -180,9 +180,10 @@ The listener also checks the underlying USB status for suspend when ZMK emits a 
 event. ZMK coalesces the public suspend state into HID readiness, so immediate transient-suspend
 detection is not claimed; failed writes and the keepalive deadline remain the independent fallback.
 
-The descriptor match additionally requires the product string `Astrolabe`. Development builds use
-the upstream ZMK VID/PID and must not be represented as release identity. Obtain an assigned VID/PID
-and update the descriptor before distributing production hardware.
+The descriptor match additionally requires the product string `Astrolabe`, which is currently the
+only thing separating this device from any other ZMK board: builds enumerate as ZMK's own
+`0x1D50:0x615E`. A pid.codes PID under VID `0x1209` is pending and must replace it before
+distribution.
 
 ## Daemon transport and handover
 
