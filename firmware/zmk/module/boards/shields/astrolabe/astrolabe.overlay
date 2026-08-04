@@ -52,7 +52,7 @@
                        <&gpio0 17 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 
         cpi = <1600>;
-        ball-diameter-um = <50800>;
+        ball-diameter-um = <52000>;
         sensor-phi-mdeg = <145000 215000>;
         sensor-theta-mdeg = <120000 120000>;
         sensor-mount-mdeg = <270000 270000>;

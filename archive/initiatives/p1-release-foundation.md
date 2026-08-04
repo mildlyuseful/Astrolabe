@@ -1,18 +1,27 @@
 # P1 release foundation implementation plan
 
-This is the execution handoff for the hardware-independent portion of P1. It records the product
-and release decisions that determine implementation order; [`../TODO.md`](../TODO.md) remains the
-sole ledger for unresolved work, and [`release_verification.md`](release_verification.md) remains
-the durable release gate.
+**Archived.** Work batches 1 through 7 — licensing, package and Windows identity, support tiers, the
+internal-alpha artifact, the protected release pipeline, the installer, and first-run onboarding —
+are implemented. Batch 8, the Mildly Useful signing identity and exact-artifact qualification, was
+not completed here; its residue lives in [`../../TODO.md`](../../TODO.md) with the rest of the open
+release blockers. This plan is retained for the reasoning behind decisions that are now contract,
+not as instructions for current work.
 
-When this initiative is complete, move this plan under `archive/initiatives/` rather than leaving a
-finished phase plan among current documentation.
+Where it disagrees with the repository, the repository is right. In particular, its hardware
+sections predate the freeze in [`hardware.md`](../../docs/hardware.md).
+
+---
+
+This was the execution handoff for the hardware-independent portion of P1. It records the product
+and release decisions that determined implementation order;
+[`../../TODO.md`](../../TODO.md) remains the sole ledger for unresolved work, and
+[`release_verification.md`](../../docs/release_verification.md) remains the durable release gate.
 
 ## Before starting
 
-- Read [`../AGENTS.md`](../AGENTS.md), [`architecture.md`](architecture.md),
-  [`security.md`](security.md), [`release_verification.md`](release_verification.md), and
-  [`../TODO.md`](../TODO.md).
+- Read [`../../AGENTS.md`](../../AGENTS.md), [`architecture.md`](../../docs/architecture.md),
+  [`security.md`](../../docs/security.md), [`release_verification.md`](../../docs/release_verification.md), and
+  [`../../TODO.md`](../../TODO.md).
 - Inspect the working tree and preserve unrelated user changes. At the time this handoff was
   created, pre-existing changes were present in `TODO.md` and `ui_demo/`, with untracked capture CSV
   files. They are not part of this initiative unless the user explicitly brings them into scope.
@@ -58,10 +67,9 @@ device-specific onboarding and acceptance rows.
 
 ### Milestone C - public V1 product
 
-Combine the V1 software candidate with the final SuperMini nRF52840 (nice!nano v2-compatible)
-hardware, production
-firmware, physical input/BLE qualification, supported-host live evidence, product marking, and the
-revision-specific hardware source release.
+Combine the V1 software candidate with the frozen hardware ([`hardware.md`](../../docs/hardware.md)), the ZMK
+production firmware, physical input/BLE qualification, supported-host live evidence, product
+marking, and the revision-specific hardware source release.
 
 ## Work batch 1 - licensing, ownership, and contribution policy
 
@@ -448,7 +456,7 @@ Use disposable VMs or snapshots for:
 
 ### Reversal
 
-Exercise every path in [`security.md`](security.md), including start-at-login, each copied host
+Exercise every path in [`security.md`](../../docs/security.md), including start-at-login, each copied host
 payload, Rhino startup registration, AutoCAD trust/DLL state, and Onshape key/certificate/trust/
 userscript state. Automated targeting tests do not replace a real install/reversal run.
 
@@ -460,24 +468,29 @@ shared security, data-loss, configuration, or lifecycle defect.
 
 ## Hardware-gated work
 
-Do not attempt to close these with the current validation devices:
+Component selection and the ZMK firmware decisions are settled ([`hardware.md`](../../docs/hardware.md)). What
+remains is verification against a physical assembly, and none of it can be closed with the current
+validation devices:
 
-- production sensor/count/geometry and electrical contract;
-- final controller pin, power, battery, recovery, USB/BLE, and switch behavior;
-- production firmware port and ZMK decisions;
+- the frozen pin map, sensor geometry, and electrical contract as actually built;
+- final controller power, battery, recovery, USB/BLE, and switch behavior;
 - final physical simultaneous-control, reconnect, sleep/wake, and mode-transition matrix;
 - battery and latency measurements;
 - production device onboarding and firmware update/recovery;
+- production USB VID/PID allocation;
 - hardware design source bundle, product source-location notice, and physical packaging/marking.
 
-The completed SuperMini PMW3610 loop and XIAO protocol bench remain useful development evidence but
-do not qualify the product assembly; the SuperMini controller itself is now the production target.
+The SuperMini PMW3610 loop and the XIAO protocol bench remain useful development evidence and do not
+qualify the product assembly. The ZMK firmware has been exercised on the prototype fixture, which is
+also not the assembly, and predates the change to a 52 mm ball.
 
 ## Documentation ownership during implementation
 
 - `README.md`: user operation, install, onboarding, support-tier meaning, and troubleshooting.
 - `docs/architecture.md`: only cross-component identity, migration, ownership, or data-flow
   invariants.
+- `docs/hardware.md`: the frozen component selection, pin map, and geometry. Firmware shield data
+  stays authoritative for the values themselves.
 - `docs/security.md`: installer, signing, permissions, trust, and reversal behavior.
 - `docs/release_verification.md`: exact commands, matrices, and release gates.
 - `docs/feature_parity.md`: behavior/capability contract, not release-history or tier duplication.

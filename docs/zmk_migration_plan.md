@@ -15,7 +15,7 @@ merely because the ZMK candidate compiles.
 | Slice | Current result | Evidence boundary |
 |---|---|---|
 | Reproducible inputs | ZMK and Zephyr are pinned to exact commits; CI uses an immutable ZMK build image and retains the frozen west manifest, build configuration, DTS, ELF, UF2, and hashes. | Establishes reconstructible inputs and buildability, not bit-for-bit reproducibility. |
-| Sensor and standalone route | One out-of-tree Zephyr device owns the shared three-wire bus, both PMW3610s, the dual-sensor solver, and standalone cursor/scroll output. | Ported from the current PMW3610 prototype and build-checked; final-assembly behavior is unverified. |
+| Sensor and standalone route | One out-of-tree Zephyr device owns the shared three-wire bus, both PMW3610s, the dual-sensor solver, and standalone cursor/scroll output. | Exercised on the prototype fixture: pointer delivery at 133 Hz with daemon feel parity, all four gestures, and clean route-driven layer transitions. Final-assembly behavior is unverified, and the ball diameter has since changed. |
 | BLE daemon route | The frozen GATT UUIDs and v1 rotation/input packets are emitted without changing the daemon binding namespace. | Source and daemon protocol tests pass; live ZMK-on-device BLE remains open. |
 | Wired daemon route | A second USB HID interface implements capability discovery, acknowledged ownership commands, rotation, and full input snapshots. | Firmware and daemon paths build/test; enumeration, cable-pull, suspend, and handover need real Windows hardware. |
 | Ownership safety | Firmware has one route owner; the daemon uses identity leases so callbacks and teardown from an old BLE or USB session cannot mutate a replacement session. | Automated lifecycle coverage only. |
@@ -24,7 +24,7 @@ merely because the ZMK candidate compiles.
 
 | Concern | Decision |
 |---|---|
-| Production controller | SuperMini nRF52840, treated as nice!nano v2-compatible; final-board electrical equivalence remains a hardware gate |
+| Production hardware | Frozen in [`hardware.md`](hardware.md): SuperMini nRF52840, two PMW3610 on a 52 mm ball, ALPS SKRHADE010 five-way |
 | ZMK target | Upstream `nice_nano_v2`; no in-tree board fork |
 | Firmware stack | Exact ZMK and Zephyr commits plus one out-of-tree Astrolabe module; no ZMK patch |
 | BLE payloads | Frozen v1 rotation and full-state input snapshot contract, byte-identical to the existing daemon protocol |
@@ -32,9 +32,9 @@ merely because the ZMK candidate compiles.
 | Responsibility | Firmware owns acquisition, fusion, power integration, bonding, local HID, route state, and keymap; the daemon owns bindings, application context, and navigation state |
 | Binding identity | `source_id` remains `ble.astrolabe` for BLE and USB, preserving stored `ble.astrolabe:fiveway.*` tokens |
 
-The production assembly is not frozen by choosing the controller. Sensor placement, wiring,
-switch mechanics, power path, SuperMini/nice!nano equivalence, and enclosure behavior still require
-the physical matrix in [`../TODO.md`](../TODO.md).
+Freezing the component selection does not qualify the assembly. Sensor placement, wiring harness,
+switch mechanics, power path, and enclosure behavior still require the physical matrix in
+[`../TODO.md`](../TODO.md).
 
 ## Critical changes from the original proposal
 
@@ -51,10 +51,16 @@ Implementation review corrected several assumptions before they became contracts
 - A composite device owns acquisition and fusion directly. Zephyr's ordinary SPI and independent
   sensor-device model cannot express the atomic chip-select-framed reads required by two sensors on
   one shared half-duplex SDIO line without adding more coordination surface.
-- All five physical positions use one route-aware `&astro` behavior. A daemon-only keymap layer was
-  rejected because changing layers while a key is held can send its release to a different
-  behavior. The route-aware behavior maintains one physical bitset and decides locally whether to
-  emit a standalone button or a daemon snapshot.
+- A route-aware `&astro` behavior maintains one physical bitset and decides locally whether to emit
+  a standalone button or a daemon snapshot. A daemon-only keymap layer was rejected at first,
+  because changing layers while a key is held can send its release to a different behavior — then
+  adopted anyway once standalone needed gestures that must not sit in front of a daemon control
+  bit. The hazard is real and was accepted, not solved: Down, Right, and Center bind the same
+  `&astro` on both layers, so the three positions that carry buttons cannot split a press from its
+  release, and the route's own transition path releases emitted standalone buttons on claim and
+  suppresses fallback clicks for already-held controls on release. Up and Left do differ between
+  layers; a route change landing mid-gesture there is an open verification gate in
+  [`../TODO.md`](../TODO.md).
 - USB commands carry a 16-bit request ID and receive a matching ACK. A flag-only attach report
   could not distinguish an accepted claim from a stale or rejected command during handover.
 - Supported BLE-to-USB preference is coordinated by the daemon: receive a successful USB attach
@@ -65,11 +71,11 @@ Implementation review corrected several assumptions before they became contracts
 
 ```text
 firmware/zmk/
-  build.yaml
   config/
     west.yml
     astrolabe.conf
     astrolabe.keymap
+    logging.conf
   module/
     zephyr/module.yml
     boards/shields/astrolabe/
@@ -80,8 +86,9 @@ firmware/zmk/
 ```
 
 Pins, sensor poses, frame tilt, ball diameter, CPI, polling cadence, and cursor/scroll constants are
-shield data. Their current values are copied from the validation prototype; that makes a future
-final-assembly change reviewable as data, but does not freeze those values as product hardware.
+shield data, which keeps a hardware revision reviewable as data rather than as driver edits. The
+values are the frozen contract in [`hardware.md`](hardware.md); they are transcribed from the
+validation prototype except the ball diameter, which is the shipped 52 mm.
 
 ## Firmware data flow
 
@@ -95,10 +102,13 @@ shared PMW3610 bus + MOTION interrupts
        USB daemon  -> same values -> vendor HID input reports
 ```
 
-The current standalone mapping is Down=left click, Right=right click, Center=middle click, with Up
-and Left reserved. Recovery/profile chords use stock ZMK behaviors for bootloader, reset, next BLE
-profile, and output toggle. Holding Center through boot samples a forced-standalone escape that
-rejects daemon claims until reboot.
+The standalone mapping is Down=left click, Right=right click, Center=middle click. Up and Left carry
+no button and instead host four gestures — double-tap for output toggle and next BLE profile, three-
+second hold for bootloader and bond clear — built from stock ZMK tap-dance and hold-tap. They live
+only on the standalone layer, because a tap-dance must wait out its term before it can know a tap
+was single, and paying that latency on a daemon control bit is the mistake the original combo
+arbitration made. Reset is deliberately unbound; the hardware power switch covers it. Holding Center
+through boot samples a forced-standalone escape that rejects daemon claims until reboot.
 
 ### Route invariants
 

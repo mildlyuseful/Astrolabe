@@ -141,7 +141,7 @@ distributed.
 
 ## USB vendor-HID framing
 
-The ZMK candidate exposes a second HID instance with vendor usage page `0xFF00`, usage `1`. Every
+The ZMK firmware exposes a second HID instance with vendor usage page `0xFF00`, usage `1`. Every
 host report begins with its report ID; the sizes below are payload sizes after that byte.
 
 | ID | Direction | Payload |
@@ -177,22 +177,32 @@ battery percentage as last-known; it does not infer state of charge from the USB
 - `xiao3389_3button` / `ble.xiao3389`: bit 0 Left, bit 1 Right, bit 2 Middle; advertised name
   `Trackball BLE`. This is the dual-PMW3389 three-button test bench, not the five-way board.
 
-The validated five-way prototype publisher is
-[`firmware/PMW3610/PMW3610.ino`](../firmware/PMW3610/PMW3610.ino): SuperMini nRF52840, dual
-PMW3610 sensors, interrupt-driven reads, and the five-way protocol bit map under the `Astrolabe`
-advertised name. Standalone HID maps Down/Right/Center to left/right/middle mouse buttons; Up and Left
-are protocol-only. Its normal sensor path keeps Performance `FMODE=0`, allowing the sensors to manage
-Run/Rest automatically; the MCU can wait for MOTION while motion bursts remain readable in automatic
-Rest. It does not use forced Rest, Force Awake, or the visible board LED for normal power/status
-management.
+The `astrolabe_5way` publisher is the ZMK production firmware under
+[`../firmware/zmk/`](../firmware/zmk/), on the hardware frozen in [`hardware.md`](hardware.md).
+Standalone HID maps Down/Right/Center to left/right/middle mouse buttons; Up and Left carry no
+button and host the recovery and radio gestures instead. The sensor path keeps Performance
+`FMODE=0`, letting the sensors manage Run/Rest automatically, so the MCU can wait for MOTION while
+motion bursts remain readable in automatic Rest. It uses neither forced Rest, Force Awake, nor a
+board LED for normal power or status management.
 
-The prototype also exposes the standard BLE Battery Service. Once per minute while running from its
-LiPo, firmware averages the nRF52840's internal `VDDH/5` ADC input and maps 3.3–4.2 V to an estimated
-0–100% charge. SuperMini hardware drives VDDH from USB while attached, so firmware retains the last
-valid battery estimate instead of interpreting 5 V as battery voltage, then samples immediately after
-USB is removed. A boot that begins on USB uses 100% as the temporary externally-powered value until
-that first battery-only sample. Adding the service changes the GATT database; an already-bonded host
-may need the device removed and paired again before it displays Battery Level.
+Its source and toolchain build are automated and it has been exercised on the prototype fixture, but
+the final assembly's electrical map, sensor geometry, switch mechanics, enclosure, sleep/wake
+behavior, and live BLE/USB route matrices remain unqualified as listed in
+[`../TODO.md`](../TODO.md).
+
+ZMK owns the standard BLE Battery Service, sampling the nRF52840's internal `VDDH/5` ADC input.
+SuperMini hardware drives VDDH from USB while attached, so a USB-powered reading is not battery
+voltage; the daemon labels an active USB session as externally powered and treats any percentage as
+last-known rather than inferring state of charge. Adding the service changed the GATT database, so a
+host bonded before it existed may need the device removed and paired again before Battery Level
+appears.
+
+[`firmware/PMW3610/PMW3610.ino`](../firmware/PMW3610/PMW3610.ino) is the Arduino validation
+prototype that established this behavior on the same controller — dual PMW3610, interrupt-driven
+reads, the five-way bit map, and a once-per-minute 3.3–4.2 V battery estimate that held its last
+battery-only value across USB attach. It is retained for diagnosis, not as a supported publisher,
+and its `BALL_DIAMETER_MM` is still the prototype's 50.8, so its rotation output is uncalibrated
+against the shipped 52 mm ball.
 
 For repeatable PMW3610 transition characterization, set `PMW_WAKE_STRESS` to `1`, flash the prototype,
 keep the ball stationary, and run:
@@ -206,14 +216,8 @@ normal operation, and records raw deltas, Motion bits, SQUAL, shutter, and obser
 exists to reproduce and classify the suspect transition; forced modes are not the production power
 policy. Restore `PMW_WAKE_STRESS` to `0` and reflash before ordinary testing.
 
-The ZMK production-firmware candidate is under [`../firmware/zmk/`](../firmware/zmk/). It currently
-ports this prototype's pins, 2.0 in ball diameter, mount angles, fusion, automatic Run/Rest policy,
-and cursor/scroll constants into shield data and first-party module code. Its exact source/toolchain
-build is automated, but no ZMK build has yet earned the prototype's physical evidence. The final
-assembly's electrical map, sensor geometry, switch mechanics, enclosure, sleep/wake behavior, and
-live BLE/USB routes remain unqualified as listed in [`../TODO.md`](../TODO.md).
-
-The five-way switch is active-low with internal pull-ups, with debounce owned by firmware. Its
+The ALPS SKRHADE010 five-way switch is active-low with internal pull-ups, with debounce owned by
+firmware; its pin map and timing are in [`hardware.md`](hardware.md). Its
 mechanism ordinarily permits only one direction at a time. That is descriptive hardware metadata,
 not a decoder restriction: the protocol and provider accept any combination of declared bits so an
 unusually fast/forceful transition, a fault, or future hardware cannot strand a hold.

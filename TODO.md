@@ -12,33 +12,42 @@ already-supported contract.
 
 ### Production hardware
 
-- Complete the production hardware contract around the fixed SuperMini nRF52840 controller (a
-  nice!nano v2-compatible board, ZMK's `nice_nano_v2` target) before promoting the ZMK candidate to
-  production firmware. This retires the earlier Seeed Studio XIAO nRF52840 target and the controller
-  port it required: `firmware/PMW3610` already validates the production controller's electronics,
-  but it remains a validation prototype, not a finished production claim. Freeze or deliberately
-  change its remaining candidate choices against the final assembly:
-  - confirm sensor model/count, mounting geometry, buses, chip selects, interrupt/power pins, and
-    two-versus-three-sensor fusion expectations against the final assembly;
-  - confirm Up/Down/Left/Right/Center pins, polarity, debounce timing, and simultaneous-input behavior;
-  - battery/power design, USB/BLE expectations, host-profile behavior, and an always-reachable
-    mode/recovery control.
-- Repeat the physical switch, sensor, reconnect, held-input, sleep/wake, and mode-transition matrix
-  on the final production assembly under the ZMK production firmware. The XIAO three-button bench
-  validates the protocol boundary and the completed SuperMini PMW3610 loop validates the prototype
-  electronics on the production controller; neither qualifies the final assembly or the new
-  firmware stack.
-- The pinned ZMK candidate now builds alongside CI's `firmware/XIAO3389` protocol-bench compile.
-  Replace the bench as the release firmware gate, and delete the superseded `firmware/Astrolabe`
-  Arduino placeholder, only after the ZMK candidate passes its live replacement matrix
-  ([`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md)). Keep the PMW3610 sketch locally
-  compilable for diagnosis, but do not restore it as a required release job.
-- Verify the SuperMini prototype's BLE battery estimate against a multimeter across a representative
-  discharge, confirm that USB insertion preserves the last battery-only value and USB removal
-  refreshes it, and confirm Battery Level appears after a clean Windows re-pair and agrees across the
-  daemon's tray tooltip, tray menu, and Settings footer. The standard service, daemon transport, and
-  voltage mapping are covered automatically; this does not establish calibration for the installed
-  cell, the board's ADC tolerance, or live Windows GATT behavior.
+The controller, sensor count and model, ball, and five-way switch are frozen in
+[`docs/hardware.md`](docs/hardware.md). Those are no longer open design questions; what remains is
+verifying the frozen contract against a physical production assembly. A gate below that fails is a
+product decision to reopen, not a value to quietly retune.
+
+- Confirm the frozen pin map, ball geometry, and sensor poses against the final assembly's
+  schematic and build. `firmware/PMW3610` validated these electronics on the production controller,
+  but on a prototype fixture with a 50.8 mm ball; the shipped ball is 52 mm and the enclosure,
+  mechanical sensor mounting, and wiring harness are new. Re-derive the sensor azimuth/polar/mount
+  angles and the −20° frame tilt from the assembled fixture rather than assuming the prototype's
+  values transferred.
+- Verify the five-way switch electrically and mechanically: all five positions reachable and
+  distinct, 8 ms debounce adequate for the SKRHADE010's real bounce profile, no false center on
+  diagonal actuation, and the forced-standalone escape (Center held through boot) reachable on the
+  assembled enclosure.
+- Close the battery and power design: cell selection, charge path, and the measured discharge curve
+  behind the VDDH estimate. Then verify that estimate against a multimeter across a representative
+  discharge, that USB insertion preserves the last battery-only value while USB removal refreshes
+  it, and that Battery Level appears after a clean Windows re-pair and agrees across the daemon's
+  tray tooltip, tray menu, and Settings footer. The standard service, daemon transport, and voltage
+  mapping are covered automatically; none of that establishes calibration for the installed cell,
+  the board's ADC tolerance, or live Windows GATT behavior.
+- Run the physical switch, sensor, reconnect, held-input, sleep/wake, and mode-transition matrix on
+  the final assembly under the ZMK production firmware. The XIAO three-button bench validates the
+  protocol boundary and the SuperMini PMW3610 loop validated the prototype electronics; neither
+  qualifies the final assembly or the ZMK stack.
+- Replace CI's `firmware/XIAO3389` protocol-bench compile as the release firmware gate, and delete
+  the superseded `firmware/Astrolabe` placeholder, only after the ZMK candidate passes the P4 live
+  replacement matrix. Keep the PMW3610 sketch locally compilable for diagnosis; do not restore it
+  as a required release job. Note that its `BALL_DIAMETER_MM` is still the prototype's 50.8, which
+  is correct for the evidence it recorded and wrong for the shipped ball — treat its rotation output
+  as uncalibrated against production.
+- Produce the hardware design source bundle CERN-OHL-W-2.0 requires: schematics, layout, mechanical
+  CAD, BOM, and assembly drawings in preferred editable form, plus the product source-location
+  notice and physical marking. None of it exists in the repository yet, and the license obligation
+  attaches at distribution.
 
 ### Release qualification
 
@@ -160,12 +169,17 @@ documentation, and live viewport evidence in one delivery.
 ## P4 — ZMK production-firmware epic
 
 The pinned, out-of-tree implementation and its critical design corrections live in
-[`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md). Automated builds and daemon tests do not
-close these remaining gates:
+[`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md); the hardware it targets is frozen in
+[`docs/hardware.md`](docs/hardware.md). Automated builds and daemon tests do not close these
+remaining gates:
 
 - Flash the candidate on the final electrical assembly. Verify both PMW3610 identities, shared-bus
   signal integrity, calibrated axes/signs, full-speed motion, standalone cursor/scroll feel, all five
   switch positions, recovery gestures, forced-standalone boot, and ordinary BLE/USB HID output.
+  Several of these already passed on the prototype fixture — standalone pointer delivery at 133 Hz
+  with daemon feel parity, all four gestures, the route-driven layer split, and BLE/USB HID output
+  across two hosts — so this gate is about the assembled product, not first proof the firmware
+  works. Re-run it whole regardless: the ball diameter, mounting, and harness all changed.
 - Give BLE profile and output state some indication. The device has no display or LED binding, so
   three of the four standalone gestures — profile switch, output toggle, bond clear — are
   unobservable, and "nothing happened" is indistinguishable from "it worked". Only the bootloader
@@ -173,10 +187,11 @@ close these remaining gates:
   ZMK accepts a pairing only onto an open slot, so a taken slot rejects the host with nothing but
   a generic connect failure at the other end. Decide between an LED, a HID feature report the
   daemon can read, or accepting it and documenting the recovery sequence.
-- Verify the standalone/daemon layer split on hardware. Confirm the recovery and radio gestures are
-  reachable only in standalone, that daemon control bits report with no arbitration in front of
-  them, and that the layer follows the route with no manual step across cable pull, daemon
-  termination, and keepalive timeout — including a route change that happens mid-gesture.
+- Finish verifying the standalone/daemon layer split. Clean transitions, gesture reachability in
+  standalone, and unarbitrated daemon control bits are confirmed on the prototype. Still open: that
+  the layer follows the route with no manual step across cable pull, daemon termination, and
+  keepalive timeout, and that a route change landing mid-gesture leaves neither a stuck layer nor a
+  stranded held control.
 - Characterize automatic PMW3610 Run/Rest plus ZMK deep sleep on hardware: current draw, reliable
   MOTION/button wake, first-delta direction and magnitude, no reconnect dump, and surface-loss or
   illumination cases. SQUAL and shutter are diagnostics only; add no validity filter without this

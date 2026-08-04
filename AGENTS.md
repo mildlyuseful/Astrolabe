@@ -18,7 +18,8 @@ here.
 | Cross-component architecture, ownership, data flow, or invariants | [`docs/architecture.md`](docs/architecture.md) |
 | User capabilities, installation, operation, or troubleshooting | [`README.md`](README.md) |
 | Open defects, deferred work, release blockers, or unverified behavior | [`TODO.md`](TODO.md) |
-| Firmware, BLE transport, input snapshots, or device descriptors | The active firmware source and [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) |
+| Firmware, BLE transport, input snapshots, or device descriptors | [`firmware/zmk/`](firmware/zmk/) and [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) |
+| Controller, sensors, ball, switch, pin map, or geometry | [`docs/hardware.md`](docs/hardware.md); the shield data under [`firmware/zmk/`](firmware/zmk/) stays authoritative for values |
 | Settings, defaults, config resolution, or migration | `trackball_daemon/settings_schema.py`, `trackball_daemon/app_registry.py`, `trackball_daemon/config_store.py`, `trackball_daemon/config_resolver.py`, packaged default data, and [`docs/default_profiles.md`](docs/default_profiles.md) |
 | Input providers, chords, actions, dependencies, or live control state | `trackball_daemon/input/`, `trackball_daemon/commands.py`, `trackball_daemon/runtime_state.py`, and [`docs/keybindings.md`](docs/keybindings.md) |
 | App identity, capabilities, focus selection, or feature exposure | `trackball_daemon/app_registry.py`, `trackball_daemon/settings_schema.py`, and [`docs/feature_parity.md`](docs/feature_parity.md) |
@@ -43,8 +44,9 @@ here.
 - `trackball_daemon/app_registry.py` is the only supported-app identity, order, transport, and
   capability registry. `trackball_daemon/settings_schema.py` is the stable setting and command
   registry. Do not create parallel tables.
-- Put shared invariants in `docs/architecture.md`, host-specific facts in `docs/apps/`, user
-  instructions in `README.md`, and unresolved work only in `TODO.md`.
+- Put shared invariants in `docs/architecture.md`, frozen hardware selections in `docs/hardware.md`,
+  host-specific facts in `docs/apps/`, user instructions in `README.md`, and unresolved work only in
+  `TODO.md`.
 - `LICENSING.md` is the only per-path license authority. Every tracked path must have exactly one
   disposition there, and the copied license texts under `LICENSE`, `LICENSES/`, and `DCO` are
   verbatim published documents that are never edited.
