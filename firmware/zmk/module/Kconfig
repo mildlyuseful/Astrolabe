@@ -33,16 +33,17 @@ config ASTROLABE_DAEMON_LAYER
       two writers would desynchronise with no way to recover. Must match the second layer
       declared in the keymap.
 
-config ASTROLABE_LED_PIN_TEST
-    bool "Blink the board's GPIO LED to identify which physical LED it is"
-    default n
+config ASTROLABE_INDICATOR
+    bool "Status LED for BLE profile, bond state, and selected endpoint"
+    default y
+    depends on ZMK_BLE
     help
-      Diagnostic. Blinks the one LED nice_nano_v2 declares (`blue_led`, P0.15) in three-pulse
-      groups so it cannot be confused with the charge indicator or the bootloader's reset flash.
-      The SuperMini's user LED is red, so this establishes whether the inherited `blue_led` label
-      names the right pin before the real status indicator is built against it.
+      Drives the board's red user LED, aliased as astrolabe-status-led in the shield. Three of the
+      four standalone gestures change radio or endpoint state on a device with no screen, so
+      without this they cannot be distinguished from doing nothing at all.
 
-      Not part of any product build. Enable it on the command line for a throwaway image.
+      Event-driven: dark at rest, blinking only on a change. A repeating state display would cost
+      battery during the time nobody is watching it.
 
 config ASTROLABE_LOG_LEVEL
     int "Astrolabe log level"

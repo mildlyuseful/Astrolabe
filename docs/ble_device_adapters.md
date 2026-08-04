@@ -184,9 +184,8 @@ Standalone HID maps Down/Right/Center to left/right/middle mouse buttons; Up and
 button and host the recovery and radio gestures instead. The sensor path keeps Performance
 `FMODE=0`, letting the sensors manage Run/Rest automatically, so the MCU can wait for MOTION while
 motion bursts remain readable in automatic Rest. It uses neither forced Rest nor Force Awake for
-normal power management. The board's red user LED is the decided status indicator but is not
-implemented yet, so the device currently reports radio and endpoint state nowhere; see
-[`hardware.md`](hardware.md).
+normal power management. The board's red user LED reports BLE profile, bond state, and the selected
+endpoint as event-driven blink patterns; the vocabulary is in [`hardware.md`](hardware.md).
 
 Its source and toolchain build are automated and it has been exercised on the prototype fixture, but
 the final assembly's electrical map, sensor geometry, switch mechanics, enclosure, sleep/wake

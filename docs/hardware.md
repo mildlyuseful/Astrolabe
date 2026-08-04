@@ -158,10 +158,29 @@ The board carries two LEDs and only one of them is ours:
 
 **The pin is P0.15, confirmed on hardware.** The upstream `nice_nano_v2` definition declares exactly
 one GPIO LED, `blue_led` at P0.15 active-high, named for the colour it is on a real nice!nano. On
-this board that same pin drives the *red* LED — verified by blinking it with
-`CONFIG_ASTROLABE_LED_PIN_TEST` and observing which LED responded. The `blue_led` label is inherited
-and misleading here; the node is correct, the name is not. The shield needs no `gpio-leds` node of
-its own.
+this board that same pin drives the *red* LED, verified by blinking it and observing which LED
+responded. The `blue_led` label is inherited and misleading here; the node is correct, the name is
+not. The shield aliases it to `astrolabe-status-led` so nothing downstream has to repeat that.
+
+### Blink vocabulary
+
+Event-driven: dark at rest, blinking only when something changes. A repeating state display would
+cost battery during the time nobody is watching it, on a device whose discharge curve is not
+measured yet.
+
+| Change | Pattern |
+|---|---|
+| Endpoint selected | One long pulse, then **1 short** = USB, **2 short** = BLE |
+| BLE profile or bond state | **N short** = profile N (one-based), then **one long** if that profile has no bond |
+
+A leading long means endpoint; a leading short means profile. That grammar is what keeps them
+readable apart, and it exists because ZMK raises the same `zmk_ble_active_profile_changed` event
+for a profile switch, a bond clear, and a connection — carrying only an index. Patterns named after
+actions would be ambiguous, so the vocabulary names the state the device ended up in instead.
+
+One gap worth knowing before diagnosing a dead-looking device: clearing a bond on an
+already-unbonded profile emits nothing at all, because ZMK's `clear_profile_bond()` returns early
+when the peer is already unset and raises no event.
 
 **The LED is safe to drive, and a prior comment claiming otherwise is wrong.** It was disabled during
 normal operation in the Arduino prototype on the theory that its light reached both sensors off the
@@ -172,8 +191,9 @@ re-locks and reports a decaying lockstep artifact. Fixing that at the source rem
 the LED still lit. Do not re-disable the LED on interference grounds without new evidence that
 distinguishes it from the wake transient.
 
-Behavior is not implemented yet; the blink vocabulary and its verification are a gate in
-[`../TODO.md`](../TODO.md).
+Implemented in
+[`indicator.c`](../firmware/zmk/module/src/indicator.c) behind `CONFIG_ASTROLABE_INDICATOR`;
+confirming each pattern on hardware is a gate in [`../TODO.md`](../TODO.md).
 
 ## What is not frozen
 

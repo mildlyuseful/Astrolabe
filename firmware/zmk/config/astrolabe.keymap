@@ -26,9 +26,9 @@
 //   hold Up 3s        bootloader
 //   hold Left 3s      clear the active BLE profile's bond
 //
-// Only the bootloader gesture is observable without a host: the UF2 drive appears. The other
-// three change radio or endpoint state on a device with no indicator, so "nothing happened" and
-// "it worked" look identical. Reset is deliberately absent -- the hardware power switch covers
+// The bootloader gesture confirms itself by mounting its UF2 drive; the other three report through
+// the status LED (src/indicator.c), which is the only reason they are distinguishable from doing
+// nothing at all. Reset is deliberately absent -- the hardware power switch covers
 // it, and BT_CLR has no hardware equivalent, so it is the one that needs the gesture. Without it
 // a bonded profile can never be freed: ZMK accepts a pairing only onto an open slot
 // (pairing_allowed_for_current_profile), so all five slots would eventually become unusable.

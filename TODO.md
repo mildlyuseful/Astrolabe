@@ -180,23 +180,15 @@ remaining gates:
   with daemon feel parity, all four gestures, the route-driven layer split, and BLE/USB HID output
   across two hosts — so this gate is about the assembled product, not first proof the firmware
   works. Re-run it whole regardless: the ball diameter, mounting, and harness all changed.
-- Implement the status indicator on the controller's red user LED. Decided in favor of an LED over a
-  HID feature report because the gestures it reports are exactly the ones used when no host is
-  attached or when pairing is broken. The pin is settled: P0.15, the board's `blue_led` node, whose
-  label is the nice!nano's colour rather than this board's. Do not bind the blue LED — it is a
-  charge indicator owned by the charging circuit.
-
-  What remains is the blink vocabulary covering BLE connection state, active profile, and selected
-  endpoint, a ZMK listener on the profile/endpoint events, and a Kconfig switch. Settle the duty
-  cycle against battery life first: this is a battery device with no measured discharge curve yet,
-  so a continuously blinking state display trades runtime for information nobody is reading most of
-  the time.
-
-  Until it exists, three of the four gestures are unobservable and a wrong profile stays hard to
-  diagnose: ZMK accepts a pairing only onto an open slot, so a taken slot rejects the host with
-  nothing but a generic connect failure at the other end. The LED's suspected sensor interference
-  was a misdiagnosis of the wake transient and is not a reason to leave it dark — see
-  [`docs/hardware.md`](docs/hardware.md).
+- Verify each status-LED pattern on hardware. The indicator is implemented and the pin is confirmed
+  (P0.15, the board's misleadingly named `blue_led` node); what is unverified is that each pattern
+  fires when it should and is readable. Confirm: endpoint toggle shows long-then-one for USB and
+  long-then-two for BLE; a profile switch shows the right count; a bond clear adds the trailing
+  long; and a bond clear on an already-unbonded profile shows nothing at all, which is ZMK raising
+  no event rather than a fault. Also confirm the LED does not measurably shorten runtime once the
+  battery discharge curve exists, and that it does not disturb either sensor — the old interference
+  claim was a misdiagnosis of the wake transient, but it has never been tested with the LED
+  deliberately lit.
 - Finish verifying the standalone/daemon layer split. Clean transitions, gesture reachability in
   standalone, and unarbitrated daemon control bits are confirmed on the prototype. Still open: that
   the layer follows the route with no manual step across cable pull, daemon termination, and

@@ -32,6 +32,15 @@
         zmk,physical-layout = &astrolabe_layout;
     };
 
+    aliases {
+        /* The board declares this node as `blue_led`, which is the colour it is on a genuine
+         * nice!nano. On the SuperMini the same pin drives the RED LED -- confirmed on hardware by
+         * blinking it. The blue LED is a charge indicator owned by the charging circuit and has no
+         * GPIO node at all. Alias it so the indicator never has to repeat that explanation, and so
+         * a board revision that moves the LED is a one-line change here. */
+        astrolabe-status-led = &blue_led;
+    };
+
     astrolabe_transform: astrolabe_transform {
         compatible = "zmk,matrix-transform";
         rows = <1>;
