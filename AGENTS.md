@@ -39,6 +39,15 @@ here.
 - Due to the open-source goals of the project, prefer brief code solutions. Create systems in
   simplistic frameworks that allow later contributors to add apps and functionality with minimal
   refactoring or churn. Avoid writing needlessly verbose comments and docs.
+- **One device, one clone, no installed base.** Exactly one functional trackball exists and exactly
+  one working copy of this repository exists. Nothing has ever been released, so there is no old
+  firmware in the field, no other developer's checkout, and no user whose configuration predates a
+  change. Do not write backwards-compatibility shims, version negotiation, or elaborate migration
+  paths for states that cannot exist. Change the format, change every reader in the same commit, and
+  reflash. A protocol or schema is "frozen" only where something outside this repository actually
+  depends on it — say which thing, or treat it as editable. Re-pairing the device, wiping its
+  settings, and rebuilding the daemon's configuration are all acceptable costs. This rule stops
+  applying at public V1; until then, prefer deleting the old path to supporting it.
 - Code and packaged data are authoritative. Documentation explains current contracts and earned
   behavior that code alone cannot establish.
 - `trackball_daemon/app_registry.py` is the only supported-app identity, order, transport, and
