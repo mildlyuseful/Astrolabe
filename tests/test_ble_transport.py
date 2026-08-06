@@ -701,3 +701,65 @@ def test_configured_address_connects_without_a_scan():
 
     assert [type(target).__name__ for target in attempted] == ["BLEDevice"]
     assert [target.address for target in attempted] == ["AA:BB:CC:DD:EE:FF"]
+
+
+def test_a_learned_address_is_reported_once_for_persistence():
+    """The address is only discoverable before the device is paired for HID.
+
+    After pairing, Windows holds the device and it stops advertising, so a fresh daemon start has
+    nothing to scan for and never attempts a connection at all. Capturing the address during the
+    window where discovery works is what keeps it reachable afterwards.
+    """
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    learned = []
+    rounds = [0]
+
+    async def sleep(_delay):
+        rounds[0] += 1
+        if rounds[0] >= 3:
+            stop.set()
+
+    transport = BleTransport(
+        lambda: ("Astrolabe", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        lambda _status: None,
+        stop,
+        scanner=_AstrolabeScanner,
+        client_factory=_KeepaliveFakeClient,
+        sleep=sleep,
+        address_learned=learned.append,
+    )
+    asyncio.run(transport.run())
+
+    # Reported once despite several session loops: re-persisting an unchanged value would rewrite
+    # user configuration on every reconnect.
+    assert learned == ["AA:BB"]
+
+
+def test_a_failing_persist_does_not_break_the_session():
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    statuses = []
+
+    async def sleep(_delay):
+        stop.set()
+
+    def explode(_address):
+        raise OSError("config is read-only")
+
+    transport = BleTransport(
+        lambda: ("Astrolabe", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        statuses.append,
+        stop,
+        scanner=_AstrolabeScanner,
+        client_factory=_KeepaliveFakeClient,
+        sleep=sleep,
+        address_learned=explode,
+    )
+    asyncio.run(transport.run())
+
+    assert any("subscribed" in status for status in statuses)

@@ -41,7 +41,8 @@ def gatt_inventory(client):
 class BleTransport:
     def __init__(self, get_params, adapter_registry, motion_callback, status_callback, stop_event,
                  *, battery_callback=None, enabled_event=None, scanner=None,
-                 client_factory=None, sleep=None, handover_lock=None, clock=None):
+                 client_factory=None, sleep=None, handover_lock=None, clock=None,
+                 address_learned=None):
         if not all(callable(value) for value in (
                 get_params, motion_callback, status_callback)):
             raise TypeError("BLE transport callbacks must be callable")
@@ -61,6 +62,7 @@ class BleTransport:
         self.client_factory = client_factory or BleakClient
         self.sleep = sleep or asyncio.sleep
         self.clock = clock or time.monotonic
+        self.address_learned = address_learned or (lambda _address: None)
         self.diagnostic_callback = lambda message: logger.warning("%s", message)
         self._generation = 0
         self._session_lock = threading.Lock()
@@ -285,8 +287,17 @@ class BleTransport:
                         return
                     adapter_lease = adapter.connected(session)
                     self._activate(adapter_lease)
-                if address:
+                if address and address != self._known_address:
+                    # Persisted, not just cached: a scan cannot find this device once Windows has
+                    # paired it as a HID mouse, so without a remembered address a fresh daemon
+                    # start has nothing to connect to and never attempts one. Learning it during
+                    # the one window where discovery works -- before the device is paired for HID
+                    # -- is what keeps it reachable afterwards.
                     self._known_address = address
+                    try:
+                        self.address_learned(address)
+                    except Exception as exc:
+                        self.diagnostic_callback(f"could not remember the device address: {exc}")
                 self._run_if_active(
                     adapter_lease,
                     lambda: self.status_callback(f"connected to {address or name}"),
@@ -336,11 +347,12 @@ class BleTransport:
 
 
 def start_ble_thread(get_params, adapter_registry, motion_callback, status_callback, stop_event,
-                     *, battery_callback=None, enabled_event=None, handover_lock=None):
+                     *, battery_callback=None, enabled_event=None, handover_lock=None,
+                     address_learned=None):
     transport = BleTransport(
         get_params, adapter_registry, motion_callback, status_callback, stop_event,
         battery_callback=battery_callback, enabled_event=enabled_event,
-        handover_lock=handover_lock)
+        handover_lock=handover_lock, address_learned=address_learned)
 
     def runner():
         try:

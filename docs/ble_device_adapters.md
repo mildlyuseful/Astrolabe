@@ -155,14 +155,22 @@ a connection to it and it stops advertising, so it becomes invisible to discover
 right there, connected — and the daemon reports "not found" for a device the user can see in
 Bluetooth settings.
 
-Reaching it requires more than knowing its address. Handing bleak a bare address string does **not**
+The address is therefore the only way back, and it has to be captured while discovery still works —
+before the HID pairing exists. `BleTransport` persists the address of the first device that selects
+an adapter into `device.address`, so a later daemon start connects directly instead of scanning for
+something that will never advertise. It never overwrites an address set by hand. Without that, a
+fresh daemon start has nothing to connect to and does not attempt a connection at all, which reads
+as the daemon losing a race it never entered.
+
+Knowing the address is necessary but not sufficient. Handing bleak a bare address string does **not**
 bypass discovery: the WinRT client leaves its device handle unset and `connect()` then calls
 `find_device_by_address`, so the scan simply happens later and fails for the same reason. The client
-skips that lookup only when it is constructed from a `BLEDevice`, which carries the address as a
-resolved handle. `_direct_target` builds one, so both a configured Device address and the
-last-known address of a previously connected device connect without any advertisement. Setting the
-Device address explicitly is the reliable configuration for a device that is normally also paired
-for HID.
+skips that lookup only when constructed from a `BLEDevice`, which carries the address as a resolved
+handle — `_direct_target` builds one.
+
+`tools/ble_connect_probe.py` separates these failures: it reports whether the device advertises,
+whether a direct connection succeeds, and whether the expected GATT is present, so a discovery
+problem is never mistaken for a GATT one.
 
 Seeing a descriptor-compatible service UUID without the configured name is diagnostic evidence, not
 permission to connect. Built-in devices may share the same service and motion characteristic while
