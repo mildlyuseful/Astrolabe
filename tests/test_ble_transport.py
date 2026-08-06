@@ -630,7 +630,11 @@ def test_scan_failure_retries_a_known_address_before_giving_up():
     transport._known_address = "AA:BB"
     asyncio.run(transport.run())
 
-    assert attempted == ["AA:BB"]
+    # The type is the fix, not an implementation detail: bleak's WinRT client only skips its
+    # internal find_device_by_address when it is handed a BLEDevice, and that scan is what fails
+    # for a device Windows holds as a HID mouse.
+    assert [type(target).__name__ for target in attempted] == ["BLEDevice"]
+    assert [target.address for target in attempted] == ["AA:BB"]
     assert any("already be connected as a Bluetooth mouse" in status for status in statuses)
 
 
@@ -655,3 +659,45 @@ def test_scan_failure_without_a_known_address_reports_rather_than_guessing():
     asyncio.run(transport.run())
 
     assert not any("Trying" in status for status in statuses)
+
+
+def test_configured_address_connects_without_a_scan():
+    """A configured address must never depend on the device advertising.
+
+    This is the reliable configuration for a device that is also paired for HID, and it only works
+    if the client is handed a BLEDevice: given a bare string, bleak's WinRT backend defers a
+    find_device_by_address into connect(), which cannot see a device the OS already holds.
+    """
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    attempted = []
+
+    class _AddressClient(_KeepaliveFakeClient):
+        def __init__(self, target):
+            attempted.append(target)
+            self.address = getattr(target, "address", str(target))
+            self.is_connected = True
+            self.started = []
+            self.stopped = []
+            self.__class__.instance = self
+
+    async def sleep(_delay):
+        stop.set()
+
+    def scanner_must_not_be_used(*_args, **_kwargs):
+        raise AssertionError("a configured address must not trigger a scan")
+
+    transport = BleTransport(
+        lambda: ("Astrolabe", "AA:BB:CC:DD:EE:FF", ROTATION),
+        registry,
+        lambda _sample: None,
+        lambda _status: None,
+        stop,
+        scanner=SimpleNamespace(find_device_by_filter=scanner_must_not_be_used),
+        client_factory=_AddressClient,
+        sleep=sleep,
+    )
+    asyncio.run(transport.run())
+
+    assert [type(target).__name__ for target in attempted] == ["BLEDevice"]
+    assert [target.address for target in attempted] == ["AA:BB:CC:DD:EE:FF"]

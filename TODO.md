@@ -74,12 +74,10 @@ product decision to reopen, not a value to quietly retune.
   it, and the preserved directory is the documented rollback copy. Removing it means dropping the
   mirror, the payload fallbacks, and the migration itself — and it cannot happen before the bundled
   AutoCAD DLL is rebuilt, since that plugin can read nowhere else.
-- Move to bleak 3.x. The dependency is deliberately capped at `<2` because bleak 2.0 changed GATT
-  error types and 3.0 changed the scanner/client keyword surface. The transport's usage is narrow
-  (`find_device_by_filter`, `BleakClient`, `start_notify`/`stop_notify`) and no documented breaking
-  change appears to touch the WinRT path, but scan, connect, notify, reconnect, and
-  disconnect-while-held can only be qualified against real trackball hardware. Lift the cap in one
-  delivery with that hardware evidence.
+- Qualify bleak 3.x on hardware. The pin moved to `>=3.0.2,<4` and the transport was adapted, but
+  scan, connect, notify, reconnect, and disconnect-while-held still need a real pass on the device —
+  particularly connecting to an address with no advertisement, which is the path that makes the
+  daemon reachable while Windows holds the HID link.
 - Enable GitHub private vulnerability reporting at the moment the repository becomes public.
   `SECURITY.md` advertises `security/advisories/new` as the only reporting channel, and that feature
   cannot be enabled while the repository is private, so the advertised link does not resolve until

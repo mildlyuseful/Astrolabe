@@ -11,6 +11,7 @@ import threading
 import time
 
 from bleak import BleakClient, BleakScanner
+from bleak.backends.device import BLEDevice
 
 from .model import BleConnectionConfig, DeviceSession, GattInventory
 
@@ -169,10 +170,23 @@ class BleTransport:
                 continue
             await self._connect_once(config, target, scanned_name)
 
+    @staticmethod
+    def _direct_target(address, name):
+        """Wrap a known address so connecting to it does not require an advertisement.
+
+        Passing a bare address string looks like it bypasses discovery and does not: bleak's WinRT
+        client leaves its device handle unset and `connect()` then calls `find_device_by_address`,
+        so the scan simply moves later. A device Windows has paired as a BLE HID mouse never
+        advertises, so that scan always fails and the only cure is forgetting the device -- which
+        restores advertising. Constructing a BLEDevice sets the handle from the address up front,
+        which is what actually skips the scan.
+        """
+        return BLEDevice(address, name, None)
+
     async def _find_target(self, config):
         if config.address:
             self.status_callback(f"connecting to {config.address}...")
-            return config.address, config.name
+            return self._direct_target(config.address, config.name), config.name
         self.status_callback(f'scanning for "{config.name}"...')
         expected_name = config.name.casefold()
         expected_services = {
@@ -224,7 +238,7 @@ class BleTransport:
                 self.status_callback(
                     f'"{config.name}" is not advertising; it may already be connected as a '
                     f"Bluetooth mouse. Trying {self._known_address} directly...")
-                return self._known_address, config.name
+                return self._direct_target(self._known_address, config.name), config.name
             if len(service_candidates) == 1:
                 address, (_candidate, observed_name) = next(iter(service_candidates.items()))
                 identity = f' as "{observed_name}"' if observed_name else " without a name"

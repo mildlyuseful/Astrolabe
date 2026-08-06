@@ -150,10 +150,16 @@ separate scan response, so either source may be the only one available during a 
 A scan alone is not sufficient on Windows. Once the device is paired as a BLE HID mouse the OS holds
 a connection to it and it stops advertising, so it becomes invisible to discovery while sitting
 right there, connected — and the daemon reports "not found" for a device the user can see in
-Bluetooth settings. The transport therefore remembers the address of the last device that selected
-an adapter and retries it directly when a scan comes back empty, since bleak can reach a known
-address without an advertisement. Setting the Device address explicitly skips the scan entirely and
-is the reliable configuration for a device that is normally also paired for HID.
+Bluetooth settings.
+
+Reaching it requires more than knowing its address. Handing bleak a bare address string does **not**
+bypass discovery: the WinRT client leaves its device handle unset and `connect()` then calls
+`find_device_by_address`, so the scan simply happens later and fails for the same reason. The client
+skips that lookup only when it is constructed from a `BLEDevice`, which carries the address as a
+resolved handle. `_direct_target` builds one, so both a configured Device address and the
+last-known address of a previously connected device connect without any advertisement. Setting the
+Device address explicitly is the reliable configuration for a device that is normally also paired
+for HID.
 
 Seeing a descriptor-compatible service UUID without the configured name is diagnostic evidence, not
 permission to connect. Built-in devices may share the same service and motion characteristic while
