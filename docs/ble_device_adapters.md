@@ -18,17 +18,20 @@ Input-capable firmware adds:
 - Input state: `2cad0003-6e64-0146-b139-9cf2a4cd57fc`
 - Keepalive: `2cad0004-6e64-0146-b139-9cf2a4cd57fc`
 
-Reading the keepalive characteristic returns `[version=1, timeout_ms_le16]`. Writing anything to it,
-as the route owner, refreshes the claim; a non-owner write is rejected, which is how a daemon learns
-it has lost the route. Firmware releases the route when no write arrives inside the window, and the
-daemon paces writes at a third of it.
+Reading the keepalive characteristic returns `[version=1, timeout_ms_le16]`. **Writing to it is what
+claims the route**, not subscribing: a subscribed client's first write takes ownership, later writes
+refresh it, and firmware releases the route when no write arrives inside the window. The daemon
+paces writes at a third of the advertised window.
 
-That fail-safe is not optional bookkeeping. A CCC is persisted into the bond and the BLE link
-outlives the daemon — Windows holds it open for the HID mouse — so before this existed, a daemon
-that died without unsubscribing left the route claimed with no disconnect to notice. The claim was
-then restored on every reconnect, so it survived a power cycle, and the device presented as
-connected with a dead cursor and no working gestures until the bond was forgotten or the firmware
-reflashed. Subscribing now means "a daemon is alive", not "a daemon once was".
+Ownership hangs off the write because a CCC cannot be trusted as evidence of a live daemon. It is
+stored in the bond, and on Windows the link outlives the daemon — the OS holds it open for the HID
+mouse — so "subscribed" persists across daemon exits, reboots, and re-pairings. Granting the route
+on subscription alone produced two failures with one cause: a daemon that died left the route held
+with no disconnect to notice and reclaimed it on every reconnect, which survived power cycling and
+presented as a connected device with a dead cursor and no working gestures; and every ordinary BLE
+connection to a host that had once run the daemon suppressed standalone HID until the claim expired,
+so a click made during that window sent its press and never its release. A keepalive cannot be
+restored from a bond, so it means what a CCC only appeared to.
 
 Input packets are full snapshots, not edge messages:
 

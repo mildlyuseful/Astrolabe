@@ -116,6 +116,9 @@ void astrolabe_gatt_route_available(void) {
 }
 
 static struct bt_conn *owner_ref(astrolabe_route_lease_t *lease);
+static ssize_t rotation_ccc_write(struct bt_conn *conn, const struct bt_gatt_attr *attr,
+                                  uint16_t value);
+extern const struct bt_gatt_service_static astrolabe_service;
 
 static void arm_keepalive(void) {
     keepalive_deadline = k_uptime_get_32() + KEEPALIVE_TIMEOUT_MS;
@@ -170,11 +173,29 @@ static ssize_t keepalive_write(struct bt_conn *conn, const struct bt_gatt_attr *
     if (offset != 0U) {
         return BT_GATT_ERR(BT_ATT_ERR_INVALID_OFFSET);
     }
-    /* Only the owner may refresh. A non-owner writing here must not extend someone else's lease,
-     * and telling it so is what lets the daemon notice it has lost the route. */
+
     if (!connection_is_owner(conn)) {
-        return BT_GATT_ERR(BT_ATT_ERR_WRITE_NOT_PERMITTED);
+        /* This write, not the subscription, is what claims the route. A CCC outlives the daemon
+         * that wrote it -- it is stored in the bond and the link stays up for the HID mouse -- so
+         * treating a restored subscription as ownership suppressed standalone HID for a daemon
+         * that was not running. A keepalive cannot be restored from a bond; only a live client
+         * sends one.
+         *
+         * Still gated on being subscribed, so this grants the route to the client that will
+         * actually receive the notifications and to nobody else. */
+        if (!bt_gatt_is_subscribed(conn, &astrolabe_service.attrs[ATTR_ROTATION_VALUE],
+                                   BT_GATT_CCC_NOTIFY)) {
+            return BT_GATT_ERR(BT_ATT_ERR_WRITE_NOT_PERMITTED);
+        }
+        const ssize_t claimed =
+            rotation_ccc_write(conn, &astrolabe_service.attrs[ATTR_ROTATION_CCC],
+                               BT_GATT_CCC_NOTIFY);
+        if (claimed < 0) {
+            return claimed;
+        }
+        return len;
     }
+
     arm_keepalive();
     return len;
 }
@@ -320,23 +341,19 @@ int astrolabe_gatt_snapshot(const uint8_t payload[6]) {
     return err;
 }
 
-static void restore_candidate(struct bt_conn *conn, void *user_data) {
-    ARG_UNUSED(user_data);
-    k_mutex_lock(&owner_lock, K_FOREVER);
-    const bool available = owner == NULL;
-    k_mutex_unlock(&owner_lock);
-    if (!available || astrolabe_route_forced_standalone() ||
-        !bt_gatt_is_subscribed(conn, &astrolabe_service.attrs[ATTR_ROTATION_VALUE],
-                               BT_GATT_CCC_NOTIFY)) {
-        return;
-    }
-
-    (void)rotation_ccc_write(conn, &astrolabe_service.attrs[ATTR_ROTATION_CCC], BT_GATT_CCC_NOTIFY);
-}
-
+/*
+ * Publishes a snapshot to whoever already owns the route. It no longer hands the route to a
+ * connection merely because its CCC says it is subscribed.
+ *
+ * That claim was the bug behind both the brick and the sticky standalone buttons. A CCC is stored
+ * in the bond and the link stays up for the HID mouse, so "subscribed" persisted long after the
+ * daemon did: every connection to a host that had ever run the daemon claimed the route with
+ * nothing behind it, suppressing standalone HID. A press then went out and its release did not,
+ * because output_handler only writes while the route is standalone -- so a click stuck until the
+ * claim expired. Ownership is now granted by a keepalive write, which cannot come from a bond.
+ */
 static void restore_handler(struct k_work *work) {
     ARG_UNUSED(work);
-    bt_conn_foreach(BT_CONN_TYPE_LE, restore_candidate, NULL);
     astrolabe_route_lease_t lease;
     struct bt_conn *conn = owner_ref(&lease);
     if (conn != NULL) {
