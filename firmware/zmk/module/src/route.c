@@ -18,6 +18,11 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
+#if IS_ENABLED(CONFIG_ZMK_BLE)
+#include <zephyr/bluetooth/conn.h>
+#include <zmk/ble.h>
+#endif
+
 #include <zmk/endpoints.h>
 #include <zmk/hid.h>
 #include <zmk/keymap.h>
@@ -185,6 +190,47 @@ static void apply_route_layer(enum astrolabe_route route) {
     } else {
         zmk_keymap_layer_activate(CONFIG_ASTROLABE_DAEMON_LAYER);
     }
+}
+
+/*
+ * Standalone send pacing, in milliseconds.
+ *
+ * ZMK's BLE mouse path enqueues into zmk_hog_mouse_msgq and drains it at the connection interval,
+ * and every queued report carries the button state captured when it was enqueued. Producing faster
+ * than the link drains therefore does not just add latency -- it makes a release arrive behind a
+ * backlog of reports that all still say "pressed", so a click stays down for about as long as it
+ * was held. USB has no equivalent queue, which is why this was only ever visible over BLE.
+ *
+ * So pace to what the link actually negotiated rather than to a guess. Windows commonly settles
+ * around 11.25 ms for HID; reading it keeps this correct if that changes or another host differs.
+ * The configured interval remains the floor: this only ever slows output down to the rate the
+ * endpoint can carry.
+ */
+static uint32_t standalone_interval_ms(void) {
+    const uint32_t configured = state.config.send_interval_ms;
+
+#if IS_ENABLED(CONFIG_ZMK_BLE)
+    if (zmk_endpoints_selected().transport != ZMK_TRANSPORT_BLE) {
+        return configured;
+    }
+
+    struct bt_conn *conn = zmk_ble_active_profile_conn();
+    if (conn == NULL) {
+        return configured;
+    }
+
+    struct bt_conn_info info;
+    uint32_t interval = configured;
+    if (bt_conn_get_info(conn, &info) == 0 && info.type == BT_CONN_TYPE_LE) {
+        /* Units of 1.25 ms, rounded up so we never outrun the link by a fraction. */
+        const uint32_t negotiated = ((uint32_t)info.le.interval * 5U + 3U) / 4U;
+        interval = MAX(configured, negotiated);
+    }
+    bt_conn_unref(conn);
+    return interval;
+#else
+    return configured;
+#endif
 }
 
 static int16_t clamp_report(float value) {
@@ -363,10 +409,24 @@ int astrolabe_route_claim(enum astrolabe_route route, astrolabe_route_lease_t *l
     }
     k_mutex_unlock(&state.lock);
 
-    /* Revoke the old transport and drain standalone buttons before publishing. */
+    /* Revoke the old transport and drain standalone buttons before publishing.
+     *
+     * Synchronously, not by submitting: output_handler returns immediately unless the route is
+     * standalone, so a queued release loses a race against `state.current = route` below and the
+     * button is never released at all. That is a host left holding a click with no way to clear it
+     * except pressing again -- and the release cannot be retried later, because by then the route
+     * belongs to the daemon and standalone output is suppressed for good. */
     revoke_transport(previous, previous_lease);
     if (released_buttons != 0U) {
-        submit_output();
+        for (uint8_t button = 0; button < 5U; ++button) {
+            zmk_hid_mouse_button_release(button);
+        }
+        zmk_hid_mouse_movement_set(0, 0);
+        zmk_hid_mouse_scroll_set(0, 0);
+        (void)zmk_endpoints_send_mouse_report();
+        k_mutex_lock(&state.lock, K_FOREVER);
+        state.sent_buttons = 0U;
+        k_mutex_unlock(&state.lock);
     }
 
     k_mutex_lock(&state.lock, K_FOREVER);
@@ -466,8 +526,15 @@ void astrolabe_route_flush(uint32_t now_ms) {
 
     k_mutex_lock(&state.output_lock, K_FOREVER);
     k_mutex_lock(&state.lock, K_FOREVER);
-    if (!state.initialized ||
-        (uint32_t)(now_ms - state.last_send_ms) < state.config.send_interval_ms) {
+    if (!state.initialized) {
+        k_mutex_unlock(&state.lock);
+        k_mutex_unlock(&state.output_lock);
+        return;
+    }
+    const uint32_t interval = state.current == ASTROLABE_ROUTE_STANDALONE
+                                  ? standalone_interval_ms()
+                                  : state.config.send_interval_ms;
+    if ((uint32_t)(now_ms - state.last_send_ms) < interval) {
         k_mutex_unlock(&state.lock);
         k_mutex_unlock(&state.output_lock);
         return;
