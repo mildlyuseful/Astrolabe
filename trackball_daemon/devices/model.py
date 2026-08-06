@@ -96,6 +96,7 @@ class DeviceDescriptor:
     controls: tuple
     metadata: object = field(default_factory=dict)
     usb_hid: UsbHidMatch | None = None
+    keepalive_characteristic: str | None = None
 
     def __post_init__(self):
         if self.schema_version != 1:
@@ -113,6 +114,11 @@ class DeviceDescriptor:
         if self.input_characteristic is not None:
             object.__setattr__(
                 self, "input_characteristic", normalize_uuid(self.input_characteristic))
+        # Optional: a device may own the route for as long as it is subscribed, or it may require
+        # periodic writes to keep it. Absent means the former, which is every device but this one.
+        if self.keepalive_characteristic is not None:
+            object.__setattr__(
+                self, "keepalive_characteristic", normalize_uuid(self.keepalive_characteristic))
         controls = tuple(self.controls)
         if any(not isinstance(control, DeviceControl) for control in controls):
             raise TypeError("descriptor controls must be DeviceControl values")

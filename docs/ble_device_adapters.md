@@ -16,6 +16,19 @@ The existing service and rotation characteristic are compatibility-frozen:
 Input-capable firmware adds:
 
 - Input state: `2cad0003-6e64-0146-b139-9cf2a4cd57fc`
+- Keepalive: `2cad0004-6e64-0146-b139-9cf2a4cd57fc`
+
+Reading the keepalive characteristic returns `[version=1, timeout_ms_le16]`. Writing anything to it,
+as the route owner, refreshes the claim; a non-owner write is rejected, which is how a daemon learns
+it has lost the route. Firmware releases the route when no write arrives inside the window, and the
+daemon paces writes at a third of it.
+
+That fail-safe is not optional bookkeeping. A CCC is persisted into the bond and the BLE link
+outlives the daemon — Windows holds it open for the HID mouse — so before this existed, a daemon
+that died without unsubscribing left the route claimed with no disconnect to notice. The claim was
+then restored on every reconnect, so it survived a power cycle, and the device presented as
+connected with a dead cursor and no working gestures until the bond was forgotten or the firmware
+reflashed. Subscribing now means "a daemon is alive", not "a daemon once was".
 
 Input packets are full snapshots, not edge messages:
 
@@ -64,6 +77,11 @@ Built-ins live in `trackball_daemon/devices/descriptor_data`. A descriptor conta
   "metadata": {"simultaneous_controls": "mechanically_exclusive_not_enforced", "protocol_version": 1}
 }
 ```
+
+`keepalive_characteristic` is optional and omitted above deliberately: absent means the device grants
+route ownership for as long as the subscription lasts, which is the right model for firmware whose
+link cannot outlive its host session. Declare it only for firmware that expires an idle claim, as
+`astrolabe_5way` does.
 
 A device that also exposes a wired route adds an exact vendor-HID identity under
 `match.usb_hid`. The field is optional and does not change the schema version: it is additive, so
@@ -128,6 +146,14 @@ A configured BLE address is authoritative and bypasses name discovery. Without a
 `BleTransport` compares the configured name case-insensitively with both the current advertisement's
 local name and the operating system's cached device name. Some peripherals put the name in a
 separate scan response, so either source may be the only one available during a scan.
+
+A scan alone is not sufficient on Windows. Once the device is paired as a BLE HID mouse the OS holds
+a connection to it and it stops advertising, so it becomes invisible to discovery while sitting
+right there, connected — and the daemon reports "not found" for a device the user can see in
+Bluetooth settings. The transport therefore remembers the address of the last device that selected
+an adapter and retries it directly when a scan comes back empty, since bleak can reach a known
+address without an advertisement. Setting the Device address explicitly skips the scan entirely and
+is the reliable configuration for a device that is normally also paired for HID.
 
 Seeing a descriptor-compatible service UUID without the configured name is diagnostic evidence, not
 permission to connect. Built-in devices may share the same service and motion characteristic while

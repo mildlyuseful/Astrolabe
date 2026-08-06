@@ -147,7 +147,15 @@ The service and characteristics remain:
 
 - service `2cad0001-6e64-0146-b139-9cf2a4cd57fc`;
 - rotation `2cad0002-6e64-0146-b139-9cf2a4cd57fc`;
-- input state `2cad0003-6e64-0146-b139-9cf2a4cd57fc`.
+- input state `2cad0003-6e64-0146-b139-9cf2a4cd57fc`;
+- keepalive `2cad0004-6e64-0146-b139-9cf2a4cd57fc`.
+
+The keepalive characteristic is newer than the rest and changes the GATT database, so hosts bonded
+before it existed need re-pairing. It exists because a subscription is not evidence of a live
+daemon: the CCC persists into the bond and Windows keeps the link up for the HID mouse, so a daemon
+that dies without unsubscribing used to hold the route indefinitely and reclaim it on every
+reconnect. Firmware now expires a claim that stops being refreshed, which covers a restored
+subscription with nothing behind it as much as a crashed session.
 
 Rotation is three little-endian `float32` values. Input is
 `[version=1, kind=1, sequence_le16, state_bytes=1, bitset]`. Rotation notification ownership is

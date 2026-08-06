@@ -202,6 +202,11 @@ remaining gates:
 - Run the frozen motion/input, hold/toggle, dependency, foreground, reconnect, and HUD matrices over
   the ZMK BLE service without changing stored binding/profile semantics. Include persisted CCC,
   re-pair, disconnect while held, malformed/stale packets, and owner replacement.
+- Verify the BLE keepalive fail-safe on hardware. Kill the daemon without a clean shutdown while
+  Windows holds the HID link and confirm the route returns to standalone within the window, that it
+  does so again after a reconnect restores the persisted CCC, and that an ordinary live session is
+  never expired underneath itself. This is the fix for the only reproducible brick found so far, and
+  the failure it prevents is silent — a connected device with a dead cursor and no working gestures.
 - Run the same matrix over wired vendor HID on Windows. Include enumeration identity, attach/ACK,
   lost attach ACK recovery, keepalive loss, daemon termination, suspend/resume, cable pull, stale
   queued reports, rapid BLE-to-USB preference and USB-to-BLE fallback, and held inputs across every
