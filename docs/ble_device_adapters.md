@@ -200,9 +200,10 @@ Opcodes are attach=1, detach=2, and keepalive=3. Results are success=0,
 forced-standalone=1, and invalid=2. Owners are standalone=0, BLE=1, and USB=2. Attach is accepted
 only when the matching ACK names USB as owner. The daemon then installs the USB provider lease
 before pausing BLE. Keepalive runs within the firmware-advertised timeout; cable loss, endpoint
-failure, timeout, or detach releases the exact USB owner and restores BLE eligibility. Firmware
-also reconsiders a still-connected subscribed BLE client after USB release, covering an accepted
-attach whose ACK never reached the daemon. USB has priority if a new wired lease wins that race.
+failure, timeout, or detach releases the exact USB owner and restores BLE eligibility. Firmware does
+not hand the route back to a BLE client on its own once USB has taken it — a client that is still
+connected reclaims it with its next keepalive write, which is what covers an accepted attach whose
+ACK never reached the daemon. USB has priority if a new wired lease wins that race.
 
 The firmware checks the underlying USB status for suspend whenever ZMK publishes a connection-state
 event. Because ZMK represents suspend and configured HID with the same public connection state, a

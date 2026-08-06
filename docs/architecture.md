@@ -34,13 +34,16 @@ frozen BLE characteristics or the vendor USB HID interface; exact UUIDs, packet 
 rules, ownership commands, and sequence handling are defined in
 [`ble_device_adapters.md`](ble_device_adapters.md).
 
-Subscribing to the BLE rotation stream or completing an acknowledged USB attach transfers pointer
-ownership to the daemon: firmware suppresses its standalone HID pointer/button output so the same
-physical action is not delivered twice. Exact-owner unsubscribe, disconnect, detach, keepalive loss,
-or transport loss returns ownership to the standalone HID path. Controls held at that boundary are
-suppressed from fallback clicks until physically released. USB has priority over BLE during
-handover; after USB releases, firmware reconsiders an already-subscribed BLE connection so a lost
-attach ACK cannot leave that connection subscribed but ownerless.
+Writing the BLE keepalive characteristic from a subscribed connection, or completing an acknowledged
+USB attach, transfers pointer ownership to the daemon: firmware suppresses its standalone HID
+pointer/button output so the same physical action is not delivered twice. Subscription alone does
+not claim the route — a CCC is persisted in the bond and outlives the daemon that wrote it, so it is
+not evidence of a live client. Exact-owner unsubscribe, disconnect, detach, keepalive expiry, or
+transport loss returns ownership to the standalone HID path, and the handover releases whatever
+buttons the outgoing owner had asserted. Controls still physically held at that boundary are
+suppressed from fallback clicks until released. USB has priority over BLE during handover; when USB
+releases, a BLE client takes the route back by resuming its keepalive rather than being restored to
+it automatically.
 
 The debug cube is a host-neutral math reference and diagnostic consumer. It is not a place for
 host-specific signs, scales, pivots, or camera conventions.

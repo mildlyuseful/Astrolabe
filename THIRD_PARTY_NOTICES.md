@@ -53,10 +53,10 @@ runtime attribution, including the GCC Runtime Library Exception, is recorded se
 | typing_extensions | PSF-2.0 | Copyright (c) 2001-2025 Python Software Foundation | [text](LICENSES/third-party/typing-extensions.txt) | [python/typing_extensions](https://github.com/python/typing_extensions) |
 | winrt-runtime and the `winrt-Windows.*` projection packages | MIT | Copyright (c) Microsoft Corporation; Copyright (c) 2021-2025 David Lechner | [text](LICENSES/third-party/pywinrt.txt) | [pywinrt/pywinrt](https://github.com/pywinrt/pywinrt) |
 
-Eight `winrt-Windows.*` packages ship — Devices.Bluetooth, Devices.Bluetooth.Advertisement,
-Devices.Bluetooth.GenericAttributeProfile, Devices.Enumeration, Foundation,
-Foundation.Collections, and Storage.Streams, plus `winrt-runtime`. They are one upstream project
-under one license and are listed together.
+Nine packages ship: the eight `winrt-Windows.*` projections — Devices.Bluetooth,
+Devices.Bluetooth.Advertisement, Devices.Bluetooth.GenericAttributeProfile, Devices.Enumeration,
+Devices.Radios, Foundation, Foundation.Collections, and Storage.Streams — plus `winrt-runtime`.
+They are one upstream project under one license and are listed together.
 
 ### Components embedded inside those components
 

@@ -104,11 +104,14 @@ shared PMW3610 bus + MOTION interrupts
 
 The standalone mapping is Down=left click, Right=right click, Center=middle click. Up and Left carry
 no button and instead host four gestures — double-tap for output toggle and next BLE profile, three-
-second hold for bootloader and bond clear — built from stock ZMK tap-dance and hold-tap. They live
-only on the standalone layer, because a tap-dance must wait out its term before it can know a tap
-was single, and paying that latency on a daemon control bit is the mistake the original combo
-arbitration made. Reset is deliberately unbound; the hardware power switch covers it. Holding Center
-through boot samples a forced-standalone escape that rejects daemon claims until reboot.
+second hold for bootloader and bond clear — built from stock ZMK tap-dance and hold-tap. The one
+non-stock piece is `&astro_out` on the output toggle, because ZMK's `&out OUT_TOG` saves a
+preference and returns silently when it cannot be applied, which is indistinguishable from a dead
+device; `&astro_out` reports the outcome to the status LED instead. The gestures live only on the
+standalone layer, because a tap-dance must wait out its term before it can know a tap was single,
+and paying that latency on a daemon control bit is the mistake the original combo arbitration made.
+Reset is deliberately unbound; the hardware power switch covers it. Holding Center through boot
+samples a forced-standalone escape that rejects daemon claims until reboot.
 
 ### Route invariants
 
@@ -160,9 +163,11 @@ subscription with nothing behind it as much as a crashed session.
 Rotation is three little-endian `float32` values. Input is
 `[version=1, kind=1, sequence_le16, state_bytes=1, bitset]`. Rotation notification ownership is
 connection-specific; unsubscribe or disconnect releases only that owner. The input CCC is accepted
-only for the rotation owner. Persisted CCC restoration reclaims an available route and publishes a
-fresh snapshot. USB release also schedules that restoration, so an accepted USB attach whose ACK
-was lost cannot strand an otherwise live BLE subscription.
+only for the rotation owner. A restored CCC publishes a fresh snapshot to a connection that already
+owns the route but never reclaims one, which is the whole point of hanging ownership off the
+keepalive. A client that lost the route — to a USB attach, or to its own claim expiring — takes it
+back by writing the keepalive again, so an accepted USB attach whose ACK was lost cannot strand an
+otherwise live BLE session.
 
 The existing name-based daemon scan remains supported. The custom service UUID is not added to
 ZMK's advertising payload by this module, so service-UUID-only discovery is not claimed.

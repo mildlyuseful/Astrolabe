@@ -84,10 +84,12 @@ combination of both. Setting cycles accept a comma-separated sequence of two or 
 values.
 Closing Settings or the guide hides/closes that window; it does not stop the daemon.
 
-Do not pair the trackball as a Windows Bluetooth mouse while the daemon is consuming its BLE
-rotation service. The firmware automatically prefers its exact vendor USB interface when
-wired and falls back to BLE after USB loss. With the daemon closed, the firmware's ordinary HID
-mouse path works normally on either ZMK output.
+The trackball may stay paired as an ordinary Windows Bluetooth mouse while the daemon runs. The
+daemon takes the rotation stream from a device Windows is already holding, and the firmware hands
+the route back on its own if the daemon exits, crashes, or the device is powered off — so the
+device never ends up connected with a dead cursor. The firmware automatically prefers its exact
+vendor USB interface when wired and falls back to BLE after USB loss. With the daemon closed, the
+firmware's ordinary HID mouse path works normally on either ZMK output.
 
 ## First-time setup
 
@@ -95,7 +97,8 @@ The first-run guide walks through this sequence and can be reopened from the tra
 manual path remains:
 
 1. Open tray → **Settings** and configure the device name or BLE address if discovery does not find
-   the trackball.
+   the trackball. The daemon remembers the address once it has connected, which is what lets it
+   reach a device that Windows has paired and is therefore no longer advertising.
 2. Open **3D Apps**, expand an application's **Instructions**, and choose **Set up** or **Enable**.
    The panel shows detected versions, supported/unverified status, every file or trust change, a
    manual path, and a health check before it acts.
@@ -268,12 +271,18 @@ recovery and radio gestures — double-tap to toggle USB/BLE output or step BLE 
 seconds for bootloader or bond clear. Those gestures exist only in standalone; with a daemon
 attached the same positions are plain control bits with nothing arbitrating in front of them.
 
+Because three of those gestures change radio or endpoint state with no host to report it, the
+controller's red LED blinks a short pattern naming the state the device ended up in — which output
+is active, which BLE profile, and whether the thing you selected could actually be applied. It is
+dark at rest. The vocabulary is in [`docs/hardware.md`](docs/hardware.md).
+
 The firmware builds from exact ZMK and Zephyr commits in CI and retains its UF2, ELF, effective
-configuration, DTS, frozen manifest, hashes, and license provenance. It has been exercised on the
-prototype fixture but not on a final assembly, and it is not qualified for distribution: the
-development USB VID/PID is not product identity, and the remaining sensor, switch, sleep/wake,
-battery, latency, and route-loss matrices are release blockers in [`TODO.md`](TODO.md). Hardware is
-frozen in [`docs/hardware.md`](docs/hardware.md); build and design details are in
+configuration, DTS, frozen manifest, hashes, and license provenance. It runs on the current
+fixture, where HID output, the gestures, the indicator, route handover, and the daemon's keepalive
+fail-safe are confirmed. It is still not qualified for distribution: the development USB VID/PID is
+not product identity, and sensor pose calibration, switch bounce margin, sleep/wake, battery, and
+latency remain release blockers in [`TODO.md`](TODO.md). Hardware is frozen in
+[`docs/hardware.md`](docs/hardware.md); build and design details are in
 [`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md).
 
 Three Arduino sketches are retained as diagnostics and compatibility references, not as products:

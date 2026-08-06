@@ -114,7 +114,12 @@ sizes, and retains the firmware artifacts. Seeed's pinned nRF52 core bundles its
 for Windows and macOS but calls `adafruit-nrfutil` from `PATH` on Linux, so that job installs and
 checks the pinned PyPI release before compiling. A separate job builds the ZMK firmware from exact
 ZMK/Zephyr commits in an immutable image and retains the UF2, ELF, effective configuration, DTS,
-frozen west manifest, build hashes, SPDX build documents, and firmware license bundle. The PMW3610
+frozen west manifest, build hashes, SPDX build documents, and firmware license bundle. That job also
+asserts the application address by reading it back out of the built UF2, which must be `0x00027000`
+for the SuperMini's S140 7.3.0 bootloader. It reads the artifact rather than re-checking the
+overlay's constant, so it catches the shield's `code_partition` override being dropped and not only
+edited — a build with upstream's `0x26000` lands inside the SoftDevice, produces a board that never
+enumerates, and fails nothing at build time. The PMW3610
 prototype sketch remains available as source and evidence but is not a release build target. Keep
 the XIAO bench gate beside the ZMK build until the live replacement matrix in
 [`../TODO.md`](../TODO.md) passes. These checks establish reconstructible inputs and buildability;

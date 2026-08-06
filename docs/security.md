@@ -42,7 +42,7 @@ launch a supported 3D application. Shared ownership and lifecycle rules are defi
 
 | Component | Action | Scope and reversal |
 |---|---|---|
-| BLE input | Connects to the configured Trackball BLE device. | No driver or service installed. Remove/forget the device normally. |
+| BLE input | Connects to the configured Trackball BLE device, and records the address it connected to in per-user configuration so it can still reach a device that Windows has paired and that has therefore stopped advertising. It never overwrites an address set by hand. | No driver or service installed. Clear the address in Settings, or remove/forget the device normally. |
 | USB vendor-HID input | Opens the device's second HID interface when VID, PID, usage page, usage, and product string all match, then sends an acknowledged attach to take ownership. | No driver or service installed. Read/write is confined to that one matched interface; unplugging it or stopping the daemon releases ownership. |
 | Keyboard bindings | Lazily registers the standard Windows keyboard device class through Raw Input only while an enabled compiled binding references keyboard controls. | No driver, hook, service, key suppression, or startup registration. Disable all keyboard bindings or stop the daemon to unregister it and synthesize releases. |
 | Start at login | When explicitly toggled in the tray, writes `Astrolabe` under the current user's Windows `Run` key. An earlier build's `TrackballDaemon` value is carried onto that name at startup and then removed, so only one registration ever fires at login. | No service or scheduled task. Toggle it off or delete the HKCU value. |
