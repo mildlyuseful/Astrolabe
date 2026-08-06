@@ -166,11 +166,11 @@ queued report from an old USB owner may appear after reattach.
 
 The XIAO three-button/jumper bench proves the host protocol boundary, and the SuperMini PMW3610 loop
 proved the five-way protocol and input behavior on the production controller. Neither is the product
-assembly, and both predate the ZMK stack. Hardware is frozen in [`hardware.md`](hardware.md), but
-the frozen pin map, debounce, sensor path, ball geometry, and physical five-way matrix are release
-blockers until exercised on the final assembly under the production firmware — the ball diameter,
-mechanical mounting, and harness all changed after the prototype's evidence was recorded. The
-automatic PMW3610 Run/Rest path and the ZMK wake integration need the physical matrix tracked in
+assembly, and both predate the ZMK stack. The ZMK candidate now runs on the current fixture with
+BLE and USB HID output, route handover, and the keepalive fail-safe confirmed
+([evidence](../archive/release-evidence/zmk-hardware-freeze-live-2026-08-06.md)) — but confirming
+individual behaviors is not running this matrix, and the pin map, debounce margin, sensor pose
+calibration, PMW3610 Run/Rest path, and ZMK wake integration remain release blockers tracked in
 [`../TODO.md`](../TODO.md).
 
 ## Host control matrix

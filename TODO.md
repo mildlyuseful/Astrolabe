@@ -17,16 +17,15 @@ The controller, sensor count and model, ball, and five-way switch are frozen in
 verifying the frozen contract against a physical production assembly. A gate below that fails is a
 product decision to reopen, not a value to quietly retune.
 
-- Confirm the frozen pin map and ball geometry against the final assembly's schematic and build.
+- Confirm the frozen pin map against the final assembly's schematic and as-built wiring.
   `firmware/PMW3610` validated these electronics on the production controller, but on a prototype
   fixture with a 50.8 mm ball; the shipped ball is 52 mm and the enclosure, mechanical sensor
-  mounting, and wiring harness are new. The shield now carries the final fixture's 140°/220° azimuth
-  and −25° frame tilt, so what remains is confirming those measurements produce correct axes and
-  signs in use — a pose error shows up as cross-axis bleed, not as an obviously wrong direction.
-- Verify the five-way switch electrically and mechanically: all five positions reachable and
-  distinct, 8 ms debounce adequate for the SKRHADE010's real bounce profile, no false center on
-  diagonal actuation, and the forced-standalone escape (Center held through boot) reachable on the
-  assembled enclosure.
+  mounting, and wiring harness are new. This is the paper check that the shield describes what was
+  actually built; calibrating the pose in use is the P4 axis gate.
+- Characterize the five-way switch electrically and mechanically: 8 ms debounce adequate for the
+  SKRHADE010's real bounce profile, and no false center on diagonal actuation. All five positions
+  and the forced-standalone escape are confirmed reachable in use, which is not the same as knowing
+  the debounce window has margin against the part's actual bounce.
 - Close the battery and power design: cell selection, charge path, and the measured discharge curve
   behind the VDDH estimate. Then verify that estimate against a multimeter across a representative
   discharge, that USB insertion preserves the last battery-only value while USB removal refreshes
@@ -74,10 +73,6 @@ product decision to reopen, not a value to quietly retune.
   it, and the preserved directory is the documented rollback copy. Removing it means dropping the
   mirror, the payload fallbacks, and the migration itself — and it cannot happen before the bundled
   AutoCAD DLL is rebuilt, since that plugin can read nowhere else.
-- Qualify bleak 3.x on hardware. The pin moved to `>=3.0.2,<4` and the transport was adapted, but
-  scan, connect, notify, reconnect, and disconnect-while-held still need a real pass on the device —
-  particularly connecting to an address with no advertisement, which is the path that makes the
-  daemon reachable while Windows holds the HID link.
 - Enable GitHub private vulnerability reporting at the moment the repository becomes public.
   `SECURITY.md` advertises `security/advisories/new` as the only reporting channel, and that feature
   cannot be enabled while the repository is private, so the advertised link does not resolve until
@@ -171,40 +166,28 @@ The pinned, out-of-tree implementation and its critical design corrections live 
 [`docs/hardware.md`](docs/hardware.md). Automated builds and daemon tests do not close these
 remaining gates:
 
-- Flash the candidate on the final electrical assembly. Verify both PMW3610 identities, shared-bus
-  signal integrity, calibrated axes/signs, full-speed motion, standalone cursor/scroll feel, all five
-  switch positions, recovery gestures, forced-standalone boot, and ordinary BLE/USB HID output.
-  Several of these already passed on the prototype fixture — standalone pointer delivery at 133 Hz
-  with daemon feel parity, all four gestures, the route-driven layer split, and BLE/USB HID output
-  across two hosts — so this gate is about the assembled product, not first proof the firmware
-  works. Re-run it whole regardless: the ball diameter, mounting, and harness all changed.
-- Verify each status-LED pattern on hardware. The indicator is implemented and the pin is confirmed
-  (P0.15, the board's misleadingly named `blue_led` node); what is unverified is that each pattern
-  fires when it should and is readable. Confirm: endpoint toggle shows long-then-one for USB and
-  long-then-two for BLE; a profile switch shows the right count; a bond clear adds the trailing
-  long; a toggle that cannot be applied (cable out, or no BLE host) shows the trailing long instead
-  of nothing; and a bond clear on an already-unbonded profile shows nothing at all, which is ZMK
-  raising no event rather than a fault. Also confirm the LED does not measurably shorten runtime once the
-  battery discharge curve exists, and that it does not disturb either sensor — the old interference
-  claim was a misdiagnosis of the wake transient, but it has never been tested with the LED
-  deliberately lit.
-- Finish verifying the standalone/daemon layer split. Clean transitions, gesture reachability in
-  standalone, and unarbitrated daemon control bits are confirmed on the prototype. Still open: that
-  the layer follows the route with no manual step across cable pull, daemon termination, and
-  keepalive timeout, and that a route change landing mid-gesture leaves neither a stuck layer nor a
-  stranded held control.
+- Calibrate sensor axes and signs on the current fixture. The candidate runs on the assembly and
+  BLE/USB HID output, standalone cursor/scroll feel, the five switch positions, recovery gestures,
+  forced-standalone boot, and the route-driven layer split are confirmed there
+  (`archive/release-evidence/zmk-hardware-freeze-live-2026-08-06.md`). What that pass did not
+  establish is that the shield's 140°/220° azimuth, 120° polar, and −25° frame tilt reproduce the
+  fixture: pose error shows up as cross-axis bleed under an isolated single-axis roll, not as an
+  obviously wrong direction, and nothing so far isolated an axis. Verify both PMW3610 identities and
+  shared-bus signal integrity at full-speed motion in the same pass. Re-run whole if the enclosure,
+  mechanical mounting, or harness changes again.
+- Measure what the status LED costs at the battery once the discharge curve exists. The pin, every
+  pattern, and the absence of sensor interference are confirmed; its runtime cost is not, and it is
+  the only always-available indicator, so a measurable cost is a duty-cycle decision rather than a
+  reason to drop it.
 - Characterize automatic PMW3610 Run/Rest plus ZMK deep sleep on hardware: current draw, reliable
   MOTION/button wake, first-delta direction and magnitude, no reconnect dump, and surface-loss or
   illumination cases. SQUAL and shutter are diagnostics only; add no validity filter without this
   evidence.
 - Run the frozen motion/input, hold/toggle, dependency, foreground, reconnect, and HUD matrices over
-  the ZMK BLE service without changing stored binding/profile semantics. Include persisted CCC,
-  re-pair, disconnect while held, malformed/stale packets, and owner replacement.
-- Verify the BLE keepalive fail-safe on hardware. Kill the daemon without a clean shutdown while
-  Windows holds the HID link and confirm the route returns to standalone within the window, that it
-  does so again after a reconnect restores the persisted CCC, and that an ordinary live session is
-  never expired underneath itself. This is the fix for the only reproducible brick found so far, and
-  the failure it prevents is silent — a connected device with a dead cursor and no working gestures.
+  the ZMK BLE service without changing stored binding/profile semantics. Include malformed and stale
+  packets. Persisted CCC, re-pair, disconnect while held, and owner replacement have each been
+  exercised individually against the keepalive and route-claim work, but the matrix has never been
+  run as a matrix, which is what catches a binding or profile semantic drifting under a transition.
 - Run the same matrix over wired vendor HID on Windows. Include enumeration identity, attach/ACK,
   lost attach ACK recovery, keepalive loss, daemon termination, suspend/resume, cable pull, stale
   queued reports, rapid BLE-to-USB preference and USB-to-BLE fallback, and held inputs across every
@@ -225,8 +208,8 @@ remaining gates:
 ### Route/keymap integration depth
 
 The route now drives a daemon keymap layer, one way: a route change may move the layer, a layer
-change never moves the route. That boundary is deliberately the whole of it for now. These extend
-it and are only worth building once the split above is confirmed on hardware:
+change never moves the route. That split is confirmed on hardware and that boundary is deliberately
+the whole of it for V1. These extend it and are deferred behind the feature freeze:
 
 - Allow ZMK behaviors to express derived gestures to the daemon. `state.controls` is a byte with
   five bits used, and `astrolabe_route_control` caps `bit_index` at 5, so a tap-dance today can

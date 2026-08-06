@@ -206,8 +206,10 @@ the LED still lit. Do not re-disable the LED on interference grounds without new
 distinguishes it from the wake transient.
 
 Implemented in
-[`indicator.c`](../firmware/zmk/module/src/indicator.c) behind `CONFIG_ASTROLABE_INDICATOR`;
-confirming each pattern on hardware is a gate in [`../TODO.md`](../TODO.md).
+[`indicator.c`](../firmware/zmk/module/src/indicator.c) behind `CONFIG_ASTROLABE_INDICATOR`. Every
+pattern above is confirmed on hardware
+([evidence](../archive/release-evidence/zmk-hardware-freeze-live-2026-08-06.md)); what the LED costs
+at the battery is not, and stays a gate in [`../TODO.md`](../TODO.md).
 
 ## What is not frozen
 
