@@ -101,7 +101,7 @@ jobs:
         run: uv build --out-dir build/ci-python
 
       - name: Export locked runtime requirements
-        run: uv export --locked --no-dev --extra onshape --no-emit-project --format requirements.txt --output-file build/ci-python/runtime-requirements.txt
+        run: uv export --locked --no-dev --no-emit-project --format requirements.txt --output-file build/ci-python/runtime-requirements.txt
 
       - name: Install and smoke-test the wheel outside the checkout
         shell: pwsh
@@ -151,7 +151,7 @@ jobs:
         env:
           UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/astrolabe-release-runtime
         run: |
-          uv sync --locked --no-editable --extra onshape --python 3.13
+          uv sync --locked --no-editable --python 3.13
           if ($LASTEXITCODE -ne 0) { throw "Release runtime sync failed." }
           $RuntimePython = Join-Path $env:UV_PROJECT_ENVIRONMENT "Scripts/python.exe"
           python tools/audit_notices.py --environment $RuntimePython

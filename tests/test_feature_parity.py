@@ -3,6 +3,7 @@
 
 """UI capability declarations must match behavior already present in each host integration."""
 from pathlib import Path
+import tomllib
 
 from trackball_daemon.app_registry import APP_BINDING_PROFILES
 from trackball_daemon.ui import _free_orbit_needs_roll_warning
@@ -42,6 +43,21 @@ def test_every_advertised_model_center_has_a_non_selection_runtime_path():
     for key, (path, token) in checks.items():
         assert "object" in APP_BINDING_PROFILES[key].pivots
         assert token in _source(path), f"{key} advertises Model Center without its own object path"
+
+
+def test_advertised_integrations_do_not_require_an_optional_install_extra():
+    """Setting an integration up must work on a default install, not only an incanted one.
+
+    Onshape's `Set up` mints its own TLS certificate, which needs `cryptography`. While that sat in
+    an `onshape` extra, `uv run astrolabe` from a clone -- which syncs default dependencies only --
+    produced a daemon that advertised the integration in the UI and then failed setup on a package
+    the user was never told to ask for.
+    """
+    project = tomllib.loads(_source("pyproject.toml"))["project"]
+    assert any(requirement.startswith("cryptography") for requirement in project["dependencies"])
+    for extra, requirements in project.get("optional-dependencies", {}).items():
+        assert not any(requirement.startswith("cryptography") for requirement in requirements), (
+            f"cryptography belongs in the base dependencies, not the {extra!r} extra")
 
 
 def test_every_advertised_to_object_zoom_has_a_model_bounds_consumer():

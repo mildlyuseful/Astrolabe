@@ -49,7 +49,7 @@ released yet.
 From a PowerShell prompt in the repository:
 
 ```powershell
-python -m pip install ".[onshape]"
+python -m pip install .
 python -m trackball_daemon
 ```
 

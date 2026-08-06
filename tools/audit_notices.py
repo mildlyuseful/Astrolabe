@@ -5,7 +5,7 @@
 
 The authority is the environment a release is actually built from, not the dependency lock: markers,
 extras, and platform wheels decide what ships. Point ``--environment`` at the interpreter of a
-release runtime environment (``uv sync --locked --no-editable --extra onshape``) and this compares
+release runtime environment (``uv sync --locked --no-editable``) and this compares
 the distributions installed there against ``third_party.json`` and ``THIRD_PARTY_NOTICES.md``.
 
 With no ``--environment`` it audits the interpreter running it, which is only meaningful when that

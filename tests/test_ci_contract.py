@@ -16,7 +16,7 @@ def test_ci_builds_and_smokes_wheel_outside_checkout():
     assert 'version: "0.11.28"' in WORKFLOW
     assert "uv sync --locked --all-extras --python 3.13" in WORKFLOW
     assert "uv build --out-dir build/ci-python" in WORKFLOW
-    assert "uv export --locked --no-dev --extra onshape --no-emit-project" in WORKFLOW
+    assert "uv export --locked --no-dev --no-emit-project" in WORKFLOW
     assert 'Join-Path $env:RUNNER_TEMP "astrolabe-wheel-smoke"' in WORKFLOW
     assert "pip install --require-hashes -r $Requirements" in WORKFLOW
     assert "pip install --no-deps $Wheel" in WORKFLOW
@@ -129,7 +129,7 @@ def test_installed_wheel_notices_are_verified_outside_the_checkout():
 
 def test_bundled_component_notices_are_audited_against_a_real_release_runtime():
     """The gate must run against a synced runtime environment, not the all-extras build env."""
-    assert "uv sync --locked --no-editable --extra onshape" in WORKFLOW
+    assert "uv sync --locked --no-editable --python 3.13" in WORKFLOW
     assert "tools/audit_notices.py --environment" in WORKFLOW
     assert "Bundled-component notice audit failed." in WORKFLOW
     assert "tools/audit_notices.py --environment $RuntimePython" in RELEASE_BUILD

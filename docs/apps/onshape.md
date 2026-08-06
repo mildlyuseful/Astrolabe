@@ -451,6 +451,7 @@ the daemon-side bridge. Current live qualification is tracked only in [`TODO.md`
   Onshape is not in `_ADDINS`; there is no host add-in to copy or auto-update.
 - `ui.py` — generated 3D Apps and Per-App surfaces through the generic no-add-in setup path.
 - `winfocus.py` — read-only foreground process query used by `app_registry` context resolution.
-- `pyproject.toml` — the `onshape` extra supplies `cryptography` on Windows; `openssl` is the
-  certificate-generation fallback. The WSS server itself is stdlib-only (`ssl` + hand-rolled
-  WebSocket).
+- `pyproject.toml` — `cryptography` is a base Windows dependency, not an extra: setup has to be
+  able to mint the certificate on any install, including a bare `uv run astrolabe` from a clone.
+  `openssl` remains the fallback but cannot be relied on (Windows puts none on PATH). The WSS
+  server itself is stdlib-only (`ssl` + hand-rolled WebSocket).

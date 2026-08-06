@@ -80,9 +80,9 @@ def test_release_builder_is_onedir_repository_bounded_and_self_verifying():
     assert "--mode=onefile" not in builder and "--onefile" not in builder
     assert "OutputDirectory must resolve inside the repository" in builder
     assert "$env:NUITKA_CACHE_DIR = $NuitkaCache" in builder
-    assert "& $Uv sync --locked --no-editable --extra release --extra onshape" in builder
+    assert "& $Uv sync --locked --no-editable --extra release" in builder
     assert "& $Uv build --out-dir $PythonArtifacts" in builder
-    assert "& $Uv sync --locked --no-editable --extra onshape" in builder
+    assert "& $Uv sync --locked --no-editable --python" in builder
     assert "& $SbomTool environment $RuntimePython" in builder
     assert "--output-reproducible --output-file $Sbom" in builder
     assert "--release-smoke" in builder
