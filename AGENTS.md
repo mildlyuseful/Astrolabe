@@ -32,6 +32,20 @@ here.
 
 ## Working rules
 
+- **Read the API before theorising about it.** When behaviour does not match what a call obviously
+  does, open the implementation — `firmware/zmk/zmk/`, `firmware/zmk/zephyr/`, or the installed
+  Python package — before proposing a cause. Three separate faults in one session came from
+  assuming instead, and each was answered by ten lines of somebody else's source:
+  `zmk_hid_mouse_button_press` is reference counted rather than idempotent, so re-asserting a held
+  button every cycle left a click down for exactly as long as it was held; bleak's `BleakClient`
+  does not resolve a bare address string up front but defers a scan into `connect()`, so a
+  "direct" connection still failed for a device that was not advertising; and `config/boards/`
+  registers a board root, not per-board overlays, so an opt-in flash override silently never
+  applied. Symptoms that look like design questions are usually contract questions.
+- **Evidence from your own build is not evidence.** A measurement is only as good as the artifact
+  that produced it. A UF2 built without the shield's flash override reported an application address
+  that was then used to "correct" documentation that had been right all along. Before treating an
+  observation as ground truth, confirm the thing you measured is the thing you meant to build.
 - Build toward an open-source-quality foundation before release. Fix defects at the layer that owns
   the broken invariant, remove compensating workarounds once the root cause is understood, and do not
   accept avoidable lifecycle, latency, or maintenance debt merely because a patch passes the current
