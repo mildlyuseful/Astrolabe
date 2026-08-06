@@ -15,26 +15,26 @@ merely because the ZMK candidate compiles.
 | Slice | Current result | Evidence boundary |
 |---|---|---|
 | Reproducible inputs | ZMK and Zephyr are pinned to exact commits; CI uses an immutable ZMK build image and retains the frozen west manifest, build configuration, DTS, ELF, UF2, and hashes. | Establishes reconstructible inputs and buildability, not bit-for-bit reproducibility. |
-| Sensor and standalone route | One out-of-tree Zephyr device owns the shared three-wire bus, both PMW3610s, the dual-sensor solver, and standalone cursor/scroll output. | Ported from the current PMW3610 prototype and build-checked; final-assembly behavior is unverified. |
-| BLE daemon route | The frozen GATT UUIDs and v1 rotation/input packets are emitted without changing the daemon binding namespace. | Source and daemon protocol tests pass; live ZMK-on-device BLE remains open. |
-| Wired daemon route | A second USB HID interface implements capability discovery, acknowledged ownership commands, rotation, and full input snapshots. | Firmware and daemon paths build/test; enumeration, cable-pull, suspend, and handover need real Windows hardware. |
-| Ownership safety | Firmware has one route owner; the daemon uses identity leases so callbacks and teardown from an old BLE or USB session cannot mutate a replacement session. | Automated lifecycle coverage only. |
+| Sensor and standalone route | One out-of-tree Zephyr device owns the shared three-wire bus, both PMW3610s, the dual-sensor solver, and standalone cursor/scroll output. | Exercised on the current 52 mm fixture: pointer delivery at 133 Hz with daemon feel parity, all four gestures, the five switch positions, forced-standalone boot, and clean route-driven layer transitions. Sensor pose is confirmed for feel, not calibrated — no axis was isolated. |
+| BLE daemon route | The frozen GATT UUIDs and v1 rotation/input packets are emitted without changing the daemon binding namespace. | Live on device: the daemon claims the route from a Windows-held BLE HID link, the keepalive returns it on an unclean exit, and HID output is correct across the handover. The full input/binding matrix has not been run over BLE. |
+| Wired daemon route | A second USB HID interface implements capability discovery, acknowledged ownership commands, rotation, and full input snapshots. | Live on Windows for HID output and cable-pull route transitions; enumeration identity, lost attach ACK recovery, and suspend/resume still need a real pass. |
+| Ownership safety | Firmware has one route owner; the daemon uses identity leases so callbacks and teardown from an old BLE or USB session cannot mutate a replacement session. | Owner replacement and keepalive expiry are exercised on hardware, including a device powered off mid-session; the rest is automated lifecycle coverage. |
 
 ## Fixed boundaries
 
 | Concern | Decision |
 |---|---|
-| Production controller | SuperMini nRF52840, treated as nice!nano v2-compatible; final-board electrical equivalence remains a hardware gate |
-| ZMK target | Upstream `nice_nano_v2`; no in-tree board fork |
+| Production hardware | Frozen in [`hardware.md`](hardware.md): SuperMini nRF52840, two PMW3610 on a 52 mm ball, ALPS SKRHADE010 five-way |
+| ZMK target | Upstream `nice_nano_v2`; no in-tree board fork. Pin-compatible only — the shield overrides `code_partition` to `0x27000` for the SuperMini's S140 7.3.0 bootloader |
 | Firmware stack | Exact ZMK and Zephyr commits plus one out-of-tree Astrolabe module; no ZMK patch |
 | BLE payloads | Frozen v1 rotation and full-state input snapshot contract, byte-identical to the existing daemon protocol |
 | Wired behavior | Normal ZMK HID mouse when standalone, plus a separate vendor HID interface for daemon data and ownership |
 | Responsibility | Firmware owns acquisition, fusion, power integration, bonding, local HID, route state, and keymap; the daemon owns bindings, application context, and navigation state |
 | Binding identity | `source_id` remains `ble.astrolabe` for BLE and USB, preserving stored `ble.astrolabe:fiveway.*` tokens |
 
-The production assembly is not frozen by choosing the controller. Sensor placement, wiring,
-switch mechanics, power path, SuperMini/nice!nano equivalence, and enclosure behavior still require
-the physical matrix in [`../TODO.md`](../TODO.md).
+Freezing the component selection does not qualify the assembly. Sensor placement, wiring harness,
+switch mechanics, power path, and enclosure behavior still require the physical matrix in
+[`../TODO.md`](../TODO.md).
 
 ## Critical changes from the original proposal
 
@@ -51,10 +51,16 @@ Implementation review corrected several assumptions before they became contracts
 - A composite device owns acquisition and fusion directly. Zephyr's ordinary SPI and independent
   sensor-device model cannot express the atomic chip-select-framed reads required by two sensors on
   one shared half-duplex SDIO line without adding more coordination surface.
-- All five physical positions use one route-aware `&astro` behavior. A daemon-only keymap layer was
-  rejected because changing layers while a key is held can send its release to a different
-  behavior. The route-aware behavior maintains one physical bitset and decides locally whether to
-  emit a standalone button or a daemon snapshot.
+- A route-aware `&astro` behavior maintains one physical bitset and decides locally whether to emit
+  a standalone button or a daemon snapshot. A daemon-only keymap layer was rejected at first,
+  because changing layers while a key is held can send its release to a different behavior — then
+  adopted anyway once standalone needed gestures that must not sit in front of a daemon control
+  bit. The hazard is real and was accepted, not solved: Down, Right, and Center bind the same
+  `&astro` on both layers, so the three positions that carry buttons cannot split a press from its
+  release, and the route's own transition path releases emitted standalone buttons on claim and
+  suppresses fallback clicks for already-held controls on release. Up and Left do differ between
+  layers; a route change landing mid-gesture there is an open verification gate in
+  [`../TODO.md`](../TODO.md).
 - USB commands carry a 16-bit request ID and receive a matching ACK. A flag-only attach report
   could not distinguish an accepted claim from a stale or rejected command during handover.
 - Supported BLE-to-USB preference is coordinated by the daemon: receive a successful USB attach
@@ -65,11 +71,11 @@ Implementation review corrected several assumptions before they became contracts
 
 ```text
 firmware/zmk/
-  build.yaml
   config/
     west.yml
     astrolabe.conf
     astrolabe.keymap
+    logging.conf
   module/
     zephyr/module.yml
     boards/shields/astrolabe/
@@ -80,8 +86,9 @@ firmware/zmk/
 ```
 
 Pins, sensor poses, frame tilt, ball diameter, CPI, polling cadence, and cursor/scroll constants are
-shield data. Their current values are copied from the validation prototype; that makes a future
-final-assembly change reviewable as data, but does not freeze those values as product hardware.
+shield data, which keeps a hardware revision reviewable as data rather than as driver edits. The
+values are the frozen contract in [`hardware.md`](hardware.md); they are transcribed from the
+validation prototype except the ball diameter, which is the shipped 52 mm.
 
 ## Firmware data flow
 
@@ -95,10 +102,16 @@ shared PMW3610 bus + MOTION interrupts
        USB daemon  -> same values -> vendor HID input reports
 ```
 
-The current standalone mapping is Down=left click, Right=right click, Center=middle click, with Up
-and Left reserved. Recovery/profile chords use stock ZMK behaviors for bootloader, reset, next BLE
-profile, and output toggle. Holding Center through boot samples a forced-standalone escape that
-rejects daemon claims until reboot.
+The standalone mapping is Down=left click, Right=right click, Center=middle click. Up and Left carry
+no button and instead host four gestures — double-tap for output toggle and next BLE profile, three-
+second hold for bootloader and bond clear — built from stock ZMK tap-dance and hold-tap. The one
+non-stock piece is `&astro_out` on the output toggle, because ZMK's `&out OUT_TOG` saves a
+preference and returns silently when it cannot be applied, which is indistinguishable from a dead
+device; `&astro_out` reports the outcome to the status LED instead. The gestures live only on the
+standalone layer, because a tap-dance must wait out its term before it can know a tap was single,
+and paying that latency on a daemon control bit is the mistake the original combo arbitration made.
+Reset is deliberately unbound; the hardware power switch covers it. Holding Center through boot
+samples a forced-standalone escape that rejects daemon claims until reboot.
 
 ### Route invariants
 
@@ -137,14 +150,24 @@ The service and characteristics remain:
 
 - service `2cad0001-6e64-0146-b139-9cf2a4cd57fc`;
 - rotation `2cad0002-6e64-0146-b139-9cf2a4cd57fc`;
-- input state `2cad0003-6e64-0146-b139-9cf2a4cd57fc`.
+- input state `2cad0003-6e64-0146-b139-9cf2a4cd57fc`;
+- keepalive `2cad0004-6e64-0146-b139-9cf2a4cd57fc`.
+
+The keepalive characteristic is newer than the rest and changes the GATT database, so hosts bonded
+before it existed need re-pairing. It exists because a subscription is not evidence of a live
+daemon: the CCC persists into the bond and Windows keeps the link up for the HID mouse, so a daemon
+that dies without unsubscribing used to hold the route indefinitely and reclaim it on every
+reconnect. Firmware now expires a claim that stops being refreshed, which covers a restored
+subscription with nothing behind it as much as a crashed session.
 
 Rotation is three little-endian `float32` values. Input is
 `[version=1, kind=1, sequence_le16, state_bytes=1, bitset]`. Rotation notification ownership is
 connection-specific; unsubscribe or disconnect releases only that owner. The input CCC is accepted
-only for the rotation owner. Persisted CCC restoration reclaims an available route and publishes a
-fresh snapshot. USB release also schedules that restoration, so an accepted USB attach whose ACK
-was lost cannot strand an otherwise live BLE subscription.
+only for the rotation owner. A restored CCC publishes a fresh snapshot to a connection that already
+owns the route but never reclaims one, which is the whole point of hanging ownership off the
+keepalive. A client that lost the route — to a USB attach, or to its own claim expiring — takes it
+back by writing the keepalive again, so an accepted USB attach whose ACK was lost cannot strand an
+otherwise live BLE session.
 
 The existing name-based daemon scan remains supported. The custom service UUID is not added to
 ZMK's advertising payload by this module, so service-UUID-only discovery is not claimed.
@@ -170,9 +193,10 @@ The listener also checks the underlying USB status for suspend when ZMK emits a 
 event. ZMK coalesces the public suspend state into HID readiness, so immediate transient-suspend
 detection is not claimed; failed writes and the keepalive deadline remain the independent fallback.
 
-The descriptor match additionally requires the product string `Astrolabe`. Development builds use
-the upstream ZMK VID/PID and must not be represented as release identity. Obtain an assigned VID/PID
-and update the descriptor before distributing production hardware.
+The descriptor match additionally requires the product string `Astrolabe`, which is currently the
+only thing separating this device from any other ZMK board: builds enumerate as ZMK's own
+`0x1D50:0x615E`. A pid.codes PID under VID `0x1209` is pending and must replace it before
+distribution.
 
 ## Daemon transport and handover
 
@@ -214,6 +238,7 @@ west build -s zmk/app -d build/astrolabe -b nice_nano_v2 -- `
   -DSHIELD=astrolabe `
   -DZMK_CONFIG="$PWD/config" `
   -DZMK_EXTRA_MODULES="$PWD/module"
+# Verify before flashing: the UF2 must report start address 0x27000, not 0x26000.
 west spdx --build-dir=build/astrolabe --analyze-includes --include-sdk
 ```
 

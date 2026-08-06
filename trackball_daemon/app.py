@@ -203,6 +203,20 @@ class App:
         return (snapshot.device_value("device.name"),
                 snapshot.device_value("device.address"), snapshot.device_char_uuid)
 
+    def _remember_ble_address(self, address):
+        """Persist a discovered BLE address so the device stays reachable once paired for HID.
+
+        Windows stops advertising a device it holds as a BLE HID mouse, so scanning cannot find it
+        and a fresh daemon start has nothing to connect to. Discovery only works before that
+        pairing exists, so the address has to be captured while it does. Never overwrites an
+        address the user set by hand.
+        """
+        snapshot = self.config.snapshot()
+        if snapshot.device_value("device.address"):
+            return
+        self.config.set_global("device.address", address)
+        self.log.info("remembered BLE address %s for reconnecting while paired", address)
+
     def set_status(self, text):
         # Called from transport threads; just store + log. The Tk poll pushes it to the GUI.
         self._status = text
@@ -705,6 +719,7 @@ class App:
                 battery_callback=self.set_battery_level,
                 enabled_event=self.ble_enabled_event,
                 handover_lock=self.transport_handover_lock,
+                address_learned=self._remember_ble_address,
             )
 
             if self.debug:

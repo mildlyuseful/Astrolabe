@@ -38,10 +38,10 @@ released yet.
 - Windows 10 or 11.
 - Python 3.13 or newer for a source install. Packaged builds embed their own runtime and do not
   need Python installed.
-- The Astrolabe firmware on a compatible BLE/USB trackball. The production controller target is the
-  SuperMini nRF52840 (a nice!nano v2-compatible board) — the same controller the PMW3610 validation
-  prototype uses; the repository also retains the XIAO/PMW3389 protocol bench while the final
-  hardware contract is completed.
+- The Astrolabe firmware on a compatible BLE/USB trackball. The hardware is frozen: a SuperMini
+  nRF52840 controller, two PMW3610 sensors on a 52 mm ball, and an ALPS SKRHADE010 five-way switch.
+  See [`docs/hardware.md`](docs/hardware.md) for the full contract. Legacy rotation-only and
+  three-button bench firmware also remain supported by the daemon.
 - A supported 3D application only if you want its navigation integration.
 
 ## Install and run
@@ -84,10 +84,12 @@ combination of both. Setting cycles accept a comma-separated sequence of two or 
 values.
 Closing Settings or the guide hides/closes that window; it does not stop the daemon.
 
-Do not pair the trackball as a Windows Bluetooth mouse while the daemon is consuming its BLE
-rotation service. The ZMK candidate automatically prefers its exact vendor USB interface when
-wired and falls back to BLE after USB loss. With the daemon closed, the firmware's ordinary HID
-mouse path works normally on either ZMK output.
+The trackball may stay paired as an ordinary Windows Bluetooth mouse while the daemon runs. The
+daemon takes the rotation stream from a device Windows is already holding, and the firmware hands
+the route back on its own if the daemon exits, crashes, or the device is powered off — so the
+device never ends up connected with a dead cursor. The firmware automatically prefers its exact
+vendor USB interface when wired and falls back to BLE after USB loss. With the daemon closed, the
+firmware's ordinary HID mouse path works normally on either ZMK output.
 
 ## First-time setup
 
@@ -95,7 +97,8 @@ The first-run guide walks through this sequence and can be reopened from the tra
 manual path remains:
 
 1. Open tray → **Settings** and configure the device name or BLE address if discovery does not find
-   the trackball.
+   the trackball. The daemon remembers the address once it has connected, which is what lets it
+   reach a device that Windows has paired and is therefore no longer advertising.
 2. Open **3D Apps**, expand an application's **Instructions**, and choose **Set up** or **Enable**.
    The panel shows detected versions, supported/unverified status, every file or trust change, a
    manual path, and a health check before it acts.
@@ -255,48 +258,50 @@ restore three-axis orbit without overwriting the user's choice.
 
 ## Firmware
 
-The production-firmware candidate is the pinned ZMK workspace under
-[`firmware/zmk/`](firmware/zmk/). Its out-of-tree Astrolabe module targets `nice_nano_v2`, reads the
-prototype's two PMW3610 sensors over their shared three-wire bus, ports the calibrated fusion and
-standalone cursor/scroll mapping, and retains ZMK's ordinary BLE/USB HID mouse behavior. When the
-daemon claims ownership it instead emits the frozen rotation and five-way snapshots over the
-custom BLE service or a second vendor USB HID interface. USB preference, acknowledged attach,
-keepalive, exact session leases, and BLE fallback are implemented in the daemon.
+The production firmware is the pinned ZMK workspace under [`firmware/zmk/`](firmware/zmk/). Its
+out-of-tree Astrolabe module targets `nice_nano_v2`, reads both PMW3610 sensors over their shared
+three-wire bus, fuses them into three-axis ball rotation, and retains ZMK's ordinary BLE/USB HID
+mouse behavior. When the daemon claims ownership it instead emits the frozen rotation and five-way
+snapshots over the custom BLE service or a second vendor USB HID interface. USB preference,
+acknowledged attach, keepalive, exact session leases, and BLE fallback are implemented in the daemon.
 
-The candidate builds from exact ZMK and Zephyr commits in CI and retains its UF2, ELF, effective
-configuration, DTS, frozen manifest, hashes, and license provenance. That is build evidence only:
-it has not been flashed or qualified on final hardware. Do not distribute the development USB
-VID/PID as product identity. The remaining sensor, switch, sleep/wake, battery, latency, route-loss,
-and final-assembly matrices are release blockers in [`TODO.md`](TODO.md); build and design details
-are in [`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md).
+Standing alone, the device is an ordinary mouse: Down, Right, and Center are left, right, and middle
+click, and yaw-dominant ball rotation becomes scroll. Up and Left carry no button, so they host the
+recovery and radio gestures — double-tap to toggle USB/BLE output or step BLE profile, hold three
+seconds for bootloader or bond clear. Those gestures exist only in standalone; with a daemon
+attached the same positions are plain control bits with nothing arbitrating in front of them.
 
-The working five-way physical-validation firmware remains
-[`firmware/PMW3610/PMW3610.ino`](firmware/PMW3610/PMW3610.ino) (SuperMini nRF52840, dual PMW3610,
-advertised name `Astrolabe`). It fuses the two sensors, exposes BLE HID, publishes the custom
-rotation characteristic, publishes the five-way input-state snapshot used by the daemon, and exposes
-an estimated charge level through the standard BLE Battery Service. The battery estimate refreshes
-once per minute while unplugged and immediately after USB is removed; an existing Windows pairing may
-need to be removed and recreated once after flashing this GATT change. Its normal path leaves PMW3610
-Run/Rest transitions under the sensor's automatic policy; a separate serial wake-stress build is
-documented in
-[`docs/ble_device_adapters.md`](docs/ble_device_adapters.md). Its SuperMini nRF52840 controller is
-now the production controller target (a nice!nano v2-compatible board), so its electronics
-validation carries forward, but the sketch remains validation firmware and the current sleep/wake
-behavior still requires the physical re-verification tracked in [`TODO.md`](TODO.md). The older
-[`firmware/XIAO3389/XIAO3389.ino`](firmware/XIAO3389/XIAO3389.ino) dual-PMW3389 three-button bench
-remains supported under advertised name `Trackball BLE`. Legacy rotation-only firmware also remains
-supported. See [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) for the packet and
-descriptor contract.
-[`firmware/Astrolabe/Astrolabe.ino`](firmware/Astrolabe/Astrolabe.ino) is a placeholder superseded
-by the ZMK candidate (its header still names the retired Seeed Studio XIAO nRF52840 target) and is
-not developed further. Keep it and the Arduino CI gate until the ZMK candidate earns the live
-replacement criteria.
+Because three of those gestures change radio or endpoint state with no host to report it, the
+controller's red LED blinks a short pattern naming the state the device ended up in — which output
+is active, which BLE profile, and whether the thing you selected could actually be applied. It is
+dark at rest. The vocabulary is in [`docs/hardware.md`](docs/hardware.md).
+
+The firmware builds from exact ZMK and Zephyr commits in CI and retains its UF2, ELF, effective
+configuration, DTS, frozen manifest, hashes, and license provenance. It runs on the current
+fixture, where HID output, the gestures, the indicator, route handover, and the daemon's keepalive
+fail-safe are confirmed. It is still not qualified for distribution: the development USB VID/PID is
+not product identity, and sensor pose calibration, switch bounce margin, sleep/wake, battery, and
+latency remain release blockers in [`TODO.md`](TODO.md). Hardware is frozen in
+[`docs/hardware.md`](docs/hardware.md); build and design details are in
+[`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md).
+
+Three Arduino sketches are retained as diagnostics and compatibility references, not as products:
+[`firmware/PMW3610/`](firmware/PMW3610/PMW3610.ino) is the five-way validation prototype that proved
+the sensor loop and the battery service on this controller,
+[`firmware/XIAO3389/`](firmware/XIAO3389/XIAO3389.ino) is the dual-PMW3389 three-button protocol
+bench that still guards the host packet boundary in CI, and
+[`firmware/Astrolabe/`](firmware/Astrolabe/Astrolabe.ino) is a superseded placeholder. All three are
+retired once the ZMK firmware passes its live replacement gates. Legacy rotation-only firmware
+remains supported by the daemon. See [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md)
+for the packet and descriptor contract.
 
 ## Development and project documentation
 
 - [`AGENTS.md`](AGENTS.md) — task-first contributor routing and documentation ownership.
 - [`docs/architecture.md`](docs/architecture.md) — current shared firmware, daemon, state, mapping,
   routing, lifecycle, and integration contracts.
+- [`docs/hardware.md`](docs/hardware.md) — the frozen controller, sensor, ball, and switch contract,
+  with the pin map and geometry the firmware implements.
 - [`TODO.md`](TODO.md) — open verification, parity gaps, risks, and product work.
 - [`docs/apps/`](docs/apps/) — host-specific implementation and maintenance guides.
 - [`docs/default_profiles.md`](docs/default_profiles.md) — host alignment and shipped-default data.

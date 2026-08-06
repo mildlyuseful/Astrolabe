@@ -43,6 +43,7 @@ struct route_state {
     struct k_mutex lock;
     struct k_mutex output_lock;
     uint8_t sent_buttons;
+    uint8_t applied_buttons;
     uint8_t button_latch;
     struct astrolabe_route_config config;
     enum astrolabe_route current;
@@ -187,6 +188,25 @@ static void apply_route_layer(enum astrolabe_route route) {
     }
 }
 
+/* Drives only the difference, because ZMK's mouse buttons are reference counted. Takes state.lock
+ * itself: applied_buttons must not drift from what the HID layer was actually told. */
+static void apply_buttons_locked(uint8_t buttons) {
+    k_mutex_lock(&state.lock, K_FOREVER);
+    const uint8_t changed = buttons ^ state.applied_buttons;
+    for (uint8_t button = 0; button < 5U; ++button) {
+        if ((changed & BIT(button)) == 0U) {
+            continue;
+        }
+        if ((buttons & BIT(button)) != 0U) {
+            zmk_hid_mouse_button_press(button);
+        } else {
+            zmk_hid_mouse_button_release(button);
+        }
+    }
+    state.applied_buttons = buttons;
+    k_mutex_unlock(&state.lock);
+}
+
 static int16_t clamp_report(float value) {
     if (value > 32767.0f) {
         return 32767;
@@ -197,8 +217,20 @@ static int16_t clamp_report(float value) {
     return (int16_t)value;
 }
 
-/* One writer of ZMK's mouse report. Buttons are re-asserted from the desired mask every cycle
- * rather than tracked as edges, so a failed send self-heals on the next one.
+/* One writer of ZMK's mouse report.
+ *
+ * Buttons are driven as EDGES against applied_buttons, never re-asserted from the desired mask.
+ * zmk_hid_mouse_button_press/release are reference counted, not idempotent: press increments a
+ * per-button counter and release only clears the bit once that counter returns to zero. Calling
+ * press every cycle while a button is held therefore builds a count proportional to how long it
+ * was held, and the release then takes exactly that long to drain -- a click that stays down for
+ * as long as it was pressed, on every transport. The repeated releases for unheld buttons were
+ * also logging "Tried to release button N too often" on every cycle.
+ *
+ * applied_buttons tracks what the HID layer has been told, which is not the same thing as what the
+ * host has received: ZMK's report state survives a failed send, so a retry must not re-apply the
+ * edge. sent_buttons stays the delivery bookkeeping and still gates whether a report is worth
+ * sending at all, so a failed send is still retried on the next cycle.
  *
  * Movement is a level and collapsing it across cycles is correct; a button is an edge and
  * collapsing it loses the event outright. A press and its release can easily land in the same
@@ -228,13 +260,7 @@ static void output_handler(struct k_work *work) {
         return;
     }
 
-    for (uint8_t button = 0; button < 5U; ++button) {
-        if ((buttons & BIT(button)) != 0U) {
-            zmk_hid_mouse_button_press(button);
-        } else {
-            zmk_hid_mouse_button_release(button);
-        }
-    }
+    apply_buttons_locked(buttons);
     zmk_hid_mouse_movement_set(dx, dy);
     zmk_hid_mouse_scroll_set(0, wheel);
     const int err = zmk_endpoints_send_mouse_report();
@@ -282,6 +308,7 @@ int astrolabe_route_init(const struct astrolabe_route_config *config) {
     k_mutex_init(&state.output_lock);
     k_mutex_lock(&state.lock, K_FOREVER);
     state.sent_buttons = 0U;
+    state.applied_buttons = 0U;
     state.config = *config;
     state.current = ASTROLABE_ROUTE_STANDALONE;
     state.controls = 0U;
@@ -363,10 +390,22 @@ int astrolabe_route_claim(enum astrolabe_route route, astrolabe_route_lease_t *l
     }
     k_mutex_unlock(&state.lock);
 
-    /* Revoke the old transport and drain standalone buttons before publishing. */
+    /* Revoke the old transport and drain standalone buttons before publishing.
+     *
+     * Synchronously, not by submitting: output_handler returns immediately unless the route is
+     * standalone, so a queued release loses a race against `state.current = route` below and the
+     * button is never released at all. That is a host left holding a click with no way to clear it
+     * except pressing again -- and the release cannot be retried later, because by then the route
+     * belongs to the daemon and standalone output is suppressed for good. */
     revoke_transport(previous, previous_lease);
     if (released_buttons != 0U) {
-        submit_output();
+        apply_buttons_locked(0U);
+        zmk_hid_mouse_movement_set(0, 0);
+        zmk_hid_mouse_scroll_set(0, 0);
+        (void)zmk_endpoints_send_mouse_report();
+        k_mutex_lock(&state.lock, K_FOREVER);
+        state.sent_buttons = 0U;
+        k_mutex_unlock(&state.lock);
     }
 
     k_mutex_lock(&state.lock, K_FOREVER);

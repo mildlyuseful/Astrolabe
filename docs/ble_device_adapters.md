@@ -16,6 +16,22 @@ The existing service and rotation characteristic are compatibility-frozen:
 Input-capable firmware adds:
 
 - Input state: `2cad0003-6e64-0146-b139-9cf2a4cd57fc`
+- Keepalive: `2cad0004-6e64-0146-b139-9cf2a4cd57fc`
+
+Reading the keepalive characteristic returns `[version=1, timeout_ms_le16]`. **Writing to it is what
+claims the route**, not subscribing: a subscribed client's first write takes ownership, later writes
+refresh it, and firmware releases the route when no write arrives inside the window. The daemon
+paces writes at a third of the advertised window.
+
+Ownership hangs off the write because a CCC cannot be trusted as evidence of a live daemon. It is
+stored in the bond, and on Windows the link outlives the daemon — the OS holds it open for the HID
+mouse — so "subscribed" persists across daemon exits, reboots, and re-pairings. Granting the route
+on subscription alone produced two failures with one cause: a daemon that died left the route held
+with no disconnect to notice and reclaimed it on every reconnect, which survived power cycling and
+presented as a connected device with a dead cursor and no working gestures; and every ordinary BLE
+connection to a host that had once run the daemon suppressed standalone HID until the claim expired,
+so a click made during that window sent its press and never its release. A keepalive cannot be
+restored from a bond, so it means what a CCC only appeared to.
 
 Input packets are full snapshots, not edge messages:
 
@@ -64,6 +80,11 @@ Built-ins live in `trackball_daemon/devices/descriptor_data`. A descriptor conta
   "metadata": {"simultaneous_controls": "mechanically_exclusive_not_enforced", "protocol_version": 1}
 }
 ```
+
+`keepalive_characteristic` is optional and omitted above deliberately: absent means the device grants
+route ownership for as long as the subscription lasts, which is the right model for firmware whose
+link cannot outlive its host session. Declare it only for firmware that expires an idle claim, as
+`astrolabe_5way` does.
 
 A device that also exposes a wired route adds an exact vendor-HID identity under
 `match.usb_hid`. The field is optional and does not change the schema version: it is additive, so
@@ -129,19 +150,42 @@ A configured BLE address is authoritative and bypasses name discovery. Without a
 local name and the operating system's cached device name. Some peripherals put the name in a
 separate scan response, so either source may be the only one available during a scan.
 
+A scan alone is not sufficient on Windows. Once the device is paired as a BLE HID mouse the OS holds
+a connection to it and it stops advertising, so it becomes invisible to discovery while sitting
+right there, connected — and the daemon reports "not found" for a device the user can see in
+Bluetooth settings.
+
+The address is therefore the only way back, and it has to be captured while discovery still works —
+before the HID pairing exists. `BleTransport` persists the address of the first device that selects
+an adapter into `device.address`, so a later daemon start connects directly instead of scanning for
+something that will never advertise. It never overwrites an address set by hand. Without that, a
+fresh daemon start has nothing to connect to and does not attempt a connection at all, which reads
+as the daemon losing a race it never entered.
+
+Knowing the address is necessary but not sufficient. Handing bleak a bare address string does **not**
+bypass discovery: the WinRT client leaves its device handle unset and `connect()` then calls
+`find_device_by_address`, so the scan simply happens later and fails for the same reason. The client
+skips that lookup only when constructed from a `BLEDevice`, which carries the address as a resolved
+handle — `_direct_target` builds one.
+
+`tools/ble_connect_probe.py` separates these failures: it reports whether the device advertises,
+whether a direct connection succeeds, and whether the expected GATT is present, so a discovery
+problem is never mistaken for a GATT one.
+
 Seeing a descriptor-compatible service UUID without the configured name is diagnostic evidence, not
 permission to connect. Built-in devices may share the same service and motion characteristic while
 publishing different input layouts, so the transport reports the observed address/name and asks for
 an explicit Device name or address instead of guessing a descriptor.
 
 USB discovery is deliberately stricter and never falls back to name alone. All five fields in the
-`usb_hid` match must agree with one enumerated HID collection. The current VID/PID are upstream
-ZMK development defaults; they are not a production allocation and must change before hardware is
+`usb_hid` match must agree with one enumerated HID collection. The current VID/PID are ZMK's own
+`0x1D50:0x615E`, shared by every ZMK board; a pid.codes allocation under VID `0x1209` is pending and
+must land in the firmware descriptor and this descriptor data together before hardware is
 distributed.
 
 ## USB vendor-HID framing
 
-The ZMK candidate exposes a second HID instance with vendor usage page `0xFF00`, usage `1`. Every
+The ZMK firmware exposes a second HID instance with vendor usage page `0xFF00`, usage `1`. Every
 host report begins with its report ID; the sizes below are payload sizes after that byte.
 
 | ID | Direction | Payload |
@@ -156,9 +200,10 @@ Opcodes are attach=1, detach=2, and keepalive=3. Results are success=0,
 forced-standalone=1, and invalid=2. Owners are standalone=0, BLE=1, and USB=2. Attach is accepted
 only when the matching ACK names USB as owner. The daemon then installs the USB provider lease
 before pausing BLE. Keepalive runs within the firmware-advertised timeout; cable loss, endpoint
-failure, timeout, or detach releases the exact USB owner and restores BLE eligibility. Firmware
-also reconsiders a still-connected subscribed BLE client after USB release, covering an accepted
-attach whose ACK never reached the daemon. USB has priority if a new wired lease wins that race.
+failure, timeout, or detach releases the exact USB owner and restores BLE eligibility. Firmware does
+not hand the route back to a BLE client on its own once USB has taken it — a client that is still
+connected reclaims it with its next keepalive write, which is what covers an accepted attach whose
+ACK never reached the daemon. USB has priority if a new wired lease wins that race.
 
 The firmware checks the underlying USB status for suspend whenever ZMK publishes a connection-state
 event. Because ZMK represents suspend and configured HID with the same public connection state, a
@@ -177,22 +222,33 @@ battery percentage as last-known; it does not infer state of charge from the USB
 - `xiao3389_3button` / `ble.xiao3389`: bit 0 Left, bit 1 Right, bit 2 Middle; advertised name
   `Trackball BLE`. This is the dual-PMW3389 three-button test bench, not the five-way board.
 
-The validated five-way prototype publisher is
-[`firmware/PMW3610/PMW3610.ino`](../firmware/PMW3610/PMW3610.ino): SuperMini nRF52840, dual
-PMW3610 sensors, interrupt-driven reads, and the five-way protocol bit map under the `Astrolabe`
-advertised name. Standalone HID maps Down/Right/Center to left/right/middle mouse buttons; Up and Left
-are protocol-only. Its normal sensor path keeps Performance `FMODE=0`, allowing the sensors to manage
-Run/Rest automatically; the MCU can wait for MOTION while motion bursts remain readable in automatic
-Rest. It does not use forced Rest, Force Awake, or the visible board LED for normal power/status
-management.
+The `astrolabe_5way` publisher is the ZMK production firmware under
+[`../firmware/zmk/`](../firmware/zmk/), on the hardware frozen in [`hardware.md`](hardware.md).
+Standalone HID maps Down/Right/Center to left/right/middle mouse buttons; Up and Left carry no
+button and host the recovery and radio gestures instead. The sensor path keeps Performance
+`FMODE=0`, letting the sensors manage Run/Rest automatically, so the MCU can wait for MOTION while
+motion bursts remain readable in automatic Rest. It uses neither forced Rest nor Force Awake for
+normal power management. The board's red user LED reports BLE profile, bond state, and the selected
+endpoint as event-driven blink patterns; the vocabulary is in [`hardware.md`](hardware.md).
 
-The prototype also exposes the standard BLE Battery Service. Once per minute while running from its
-LiPo, firmware averages the nRF52840's internal `VDDH/5` ADC input and maps 3.3–4.2 V to an estimated
-0–100% charge. SuperMini hardware drives VDDH from USB while attached, so firmware retains the last
-valid battery estimate instead of interpreting 5 V as battery voltage, then samples immediately after
-USB is removed. A boot that begins on USB uses 100% as the temporary externally-powered value until
-that first battery-only sample. Adding the service changes the GATT database; an already-bonded host
-may need the device removed and paired again before it displays Battery Level.
+Its source and toolchain build are automated and it has been exercised on the prototype fixture, but
+the final assembly's electrical map, sensor geometry, switch mechanics, enclosure, sleep/wake
+behavior, and live BLE/USB route matrices remain unqualified as listed in
+[`../TODO.md`](../TODO.md).
+
+ZMK owns the standard BLE Battery Service, sampling the nRF52840's internal `VDDH/5` ADC input.
+SuperMini hardware drives VDDH from USB while attached, so a USB-powered reading is not battery
+voltage; the daemon labels an active USB session as externally powered and treats any percentage as
+last-known rather than inferring state of charge. Adding the service changed the GATT database, so a
+host bonded before it existed may need the device removed and paired again before Battery Level
+appears.
+
+[`firmware/PMW3610/PMW3610.ino`](../firmware/PMW3610/PMW3610.ino) is the Arduino validation
+prototype that established this behavior on the same controller — dual PMW3610, interrupt-driven
+reads, the five-way bit map, and a once-per-minute 3.3–4.2 V battery estimate that held its last
+battery-only value across USB attach. It is retained for diagnosis, not as a supported publisher,
+and its `BALL_DIAMETER_MM` is still the prototype's 50.8, so its rotation output is uncalibrated
+against the shipped 52 mm ball.
 
 For repeatable PMW3610 transition characterization, set `PMW_WAKE_STRESS` to `1`, flash the prototype,
 keep the ball stationary, and run:
@@ -206,14 +262,8 @@ normal operation, and records raw deltas, Motion bits, SQUAL, shutter, and obser
 exists to reproduce and classify the suspect transition; forced modes are not the production power
 policy. Restore `PMW_WAKE_STRESS` to `0` and reflash before ordinary testing.
 
-The ZMK production-firmware candidate is under [`../firmware/zmk/`](../firmware/zmk/). It currently
-ports this prototype's pins, 2.0 in ball diameter, mount angles, fusion, automatic Run/Rest policy,
-and cursor/scroll constants into shield data and first-party module code. Its exact source/toolchain
-build is automated, but no ZMK build has yet earned the prototype's physical evidence. The final
-assembly's electrical map, sensor geometry, switch mechanics, enclosure, sleep/wake behavior, and
-live BLE/USB routes remain unqualified as listed in [`../TODO.md`](../TODO.md).
-
-The five-way switch is active-low with internal pull-ups, with debounce owned by firmware. Its
+The ALPS SKRHADE010 five-way switch is active-low with internal pull-ups, with debounce owned by
+firmware; its pin map and timing are in [`hardware.md`](hardware.md). Its
 mechanism ordinarily permits only one direction at a time. That is descriptive hardware metadata,
 not a decoder restriction: the protocol and provider accept any combination of declared bits so an
 unusually fast/forceful transition, a fault, or future hardware cannot strand a hold.

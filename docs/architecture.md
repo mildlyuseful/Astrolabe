@@ -18,11 +18,15 @@ Astrolabe has three responsibility layers:
 - Host integrations translate the shared navigation contract into a host camera/view API. They do
   not own device bindings, foreground policy, user configuration, or global navigation state.
 
-The production-firmware candidate under [`../firmware/zmk/`](../firmware/zmk/) fuses two PMW3610
-sensors into three-axis ball rotation on the SuperMini nRF52840 (`nice_nano_v2` target). Its current
-pins and geometry come from the validation prototype; remaining final-assembly and live firmware
-qualification is tracked in [`../TODO.md`](../TODO.md). The implementation decisions and transition
-boundary are in [`zmk_migration_plan.md`](zmk_migration_plan.md).
+The production firmware under [`../firmware/zmk/`](../firmware/zmk/) fuses two PMW3610 sensors into
+three-axis ball rotation on the SuperMini nRF52840 (`nice_nano_v2` target). The hardware it targets
+is frozen in [`hardware.md`](hardware.md); remaining final-assembly and live qualification is
+tracked in [`../TODO.md`](../TODO.md), and the implementation decisions and transition boundary are
+in [`zmk_migration_plan.md`](zmk_migration_plan.md).
+
+Rotation crosses every boundary in radians, never in sensor counts. The firmware divides fused
+counts by a radius derived from ball diameter and CPI before anything downstream sees them, so
+gains, deadzones, and host profiles stay valid across a deliberate change to either.
 
 The custom motion value contains three little-endian `float32` rotation deltas in radians.
 Input-capable devices add sequenced full-state control snapshots. The same payloads travel over the
@@ -30,13 +34,16 @@ frozen BLE characteristics or the vendor USB HID interface; exact UUIDs, packet 
 rules, ownership commands, and sequence handling are defined in
 [`ble_device_adapters.md`](ble_device_adapters.md).
 
-Subscribing to the BLE rotation stream or completing an acknowledged USB attach transfers pointer
-ownership to the daemon: firmware suppresses its standalone HID pointer/button output so the same
-physical action is not delivered twice. Exact-owner unsubscribe, disconnect, detach, keepalive loss,
-or transport loss returns ownership to the standalone HID path. Controls held at that boundary are
-suppressed from fallback clicks until physically released. USB has priority over BLE during
-handover; after USB releases, firmware reconsiders an already-subscribed BLE connection so a lost
-attach ACK cannot leave that connection subscribed but ownerless.
+Writing the BLE keepalive characteristic from a subscribed connection, or completing an acknowledged
+USB attach, transfers pointer ownership to the daemon: firmware suppresses its standalone HID
+pointer/button output so the same physical action is not delivered twice. Subscription alone does
+not claim the route — a CCC is persisted in the bond and outlives the daemon that wrote it, so it is
+not evidence of a live client. Exact-owner unsubscribe, disconnect, detach, keepalive expiry, or
+transport loss returns ownership to the standalone HID path, and the handover releases whatever
+buttons the outgoing owner had asserted. Controls still physically held at that boundary are
+suppressed from fallback clicks until released. USB has priority over BLE during handover; when USB
+releases, a BLE client takes the route back by resuming its keepalive rather than being restored to
+it automatically.
 
 The debug cube is a host-neutral math reference and diagnostic consumer. It is not a place for
 host-specific signs, scales, pivots, or camera conventions.
@@ -45,7 +52,8 @@ host-specific signs, scales, pivots, or camera conventions.
 
 | Concern | Authority |
 |---|---|
-| Production-candidate firmware pins, geometry, acquisition, fusion, route, and transport framing | [`../firmware/zmk/`](../firmware/zmk/) |
+| Frozen hardware selections: controller, sensor model/count, ball, and switch | [`hardware.md`](hardware.md) |
+| Production firmware pins, geometry, acquisition, fusion, route, and transport framing | [`../firmware/zmk/`](../firmware/zmk/) |
 | Supported app IDs, order, display identity, process selectors, transports, modes, and capabilities | [`../trackball_daemon/app_registry.py`](../trackball_daemon/app_registry.py) |
 | Stable setting and command IDs, validation, scope, capability predicates, operations, and UI metadata | [`../trackball_daemon/settings_schema.py`](../trackball_daemon/settings_schema.py) |
 | Setup, detection, installation, update, consent text, and health checks | [`../trackball_daemon/integrations.py`](../trackball_daemon/integrations.py), referencing canonical `AppSpec` records |

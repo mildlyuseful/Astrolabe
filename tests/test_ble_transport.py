@@ -490,3 +490,276 @@ def test_transport_reports_compatible_service_when_name_is_missing():
         and "set the Device name or address" in text
         for text in statuses
     )
+
+
+KEEPALIVE = "2cad0004-6e64-0146-b139-9cf2a4cd57fc"
+
+
+class _AstrolabeDevice(_FakeDevice):
+    name = "Astrolabe"
+
+
+class _AstrolabeScanner:
+    @staticmethod
+    async def find_device_by_filter(filterfunc, timeout):
+        device = _AstrolabeDevice()
+        advertisement = SimpleNamespace(local_name="Astrolabe", service_uuids=(SERVICE,))
+        return device if filterfunc(device, advertisement) else None
+
+
+class _KeepaliveFakeServices:
+    def __init__(self):
+        self.services = {SERVICE: _FakeService(SERVICE, (ROTATION, INPUT, KEEPALIVE))}
+
+
+class _KeepaliveFakeClient(_FakeClient):
+    """Astrolabe five-way: advertises a keepalive characteristic reporting a 2000 ms window."""
+
+    async def __aenter__(self):
+        self.services = _KeepaliveFakeServices()
+        self.writes = []
+        return self
+
+    async def read_gatt_char(self, uuid):
+        assert uuid == KEEPALIVE
+        return b"\x01\xd0\x07"  # version 1, 2000 ms little-endian
+
+    async def write_gatt_char(self, uuid, data, response=True):
+        self.writes.append((uuid, bytes(data), response))
+
+
+def _run_keepalive_transport(ticks):
+    """Drive the session loop for len(ticks) iterations with a scripted clock."""
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    remaining = list(ticks)
+    now = [0.0]
+
+    async def sleep(_delay):
+        if remaining:
+            now[0] = remaining.pop(0)
+        else:
+            stop.set()
+
+    transport = BleTransport(
+        lambda: ("Astrolabe", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        lambda _status: None,
+        stop,
+        scanner=_AstrolabeScanner,
+        client_factory=_KeepaliveFakeClient,
+        sleep=sleep,
+        clock=lambda: now[0],
+    )
+    asyncio.run(transport.run())
+    return _KeepaliveFakeClient.instance
+
+
+def test_keepalive_is_written_at_a_third_of_the_firmware_window():
+    # 2000 ms window -> 0.667 s interval. One write lands immediately on entry so the claim is
+    # armed before the first sleep, then 0.3 and 0.6 are inside the interval and 0.9 crosses it.
+    client = _run_keepalive_transport([0.3, 0.6, 0.9])
+
+    assert [uuid for uuid, _data, _response in client.writes] == [KEEPALIVE, KEEPALIVE]
+    # Write-without-response: a heartbeat should not pay an ATT round trip.
+    assert all(response is False for _uuid, _data, response in client.writes)
+
+
+def test_keepalive_is_skipped_for_a_device_that_does_not_advertise_it():
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+
+    async def sleep(_delay):
+        stop.set()
+
+    transport = BleTransport(
+        lambda: ("Trackball BLE", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        lambda _status: None,
+        stop,
+        scanner=_FakeScanner,
+        client_factory=_FakeClient,
+        sleep=sleep,
+    )
+    # _FakeClient has no write_gatt_char at all: reaching for one would raise.
+    asyncio.run(transport.run())
+
+
+class _SilentScanner:
+    """Finds nothing: what a scan sees once Windows holds the device as a BLE HID mouse."""
+
+    calls = 0
+
+    @classmethod
+    async def find_device_by_filter(cls, filterfunc, timeout):
+        cls.calls += 1
+        return None
+
+
+def test_scan_failure_retries_a_known_address_before_giving_up():
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    statuses = []
+    attempted = []
+
+    class _AddressClient(_KeepaliveFakeClient):
+        def __init__(self, target):
+            # A direct-connect target is a bare address string, not a scanned device object.
+            attempted.append(target)
+            self.address = str(target)
+            self.is_connected = True
+            self.started = []
+            self.stopped = []
+            self.__class__.instance = self
+
+    async def sleep(_delay):
+        stop.set()
+
+    transport = BleTransport(
+        lambda: ("Astrolabe", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        statuses.append,
+        stop,
+        scanner=_SilentScanner,
+        client_factory=_AddressClient,
+        sleep=sleep,
+    )
+    transport._known_address = "AA:BB"
+    asyncio.run(transport.run())
+
+    # The type is the fix, not an implementation detail: bleak's WinRT client only skips its
+    # internal find_device_by_address when it is handed a BLEDevice, and that scan is what fails
+    # for a device Windows holds as a HID mouse.
+    assert [type(target).__name__ for target in attempted] == ["BLEDevice"]
+    assert [target.address for target in attempted] == ["AA:BB"]
+    assert any("already be connected as a Bluetooth mouse" in status for status in statuses)
+
+
+def test_scan_failure_without_a_known_address_reports_rather_than_guessing():
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    statuses = []
+
+    async def sleep(_delay):
+        stop.set()
+
+    transport = BleTransport(
+        lambda: ("Astrolabe", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        statuses.append,
+        stop,
+        scanner=_SilentScanner,
+        client_factory=_KeepaliveFakeClient,
+        sleep=sleep,
+    )
+    asyncio.run(transport.run())
+
+    assert not any("Trying" in status for status in statuses)
+
+
+def test_configured_address_connects_without_a_scan():
+    """A configured address must never depend on the device advertising.
+
+    This is the reliable configuration for a device that is also paired for HID, and it only works
+    if the client is handed a BLEDevice: given a bare string, bleak's WinRT backend defers a
+    find_device_by_address into connect(), which cannot see a device the OS already holds.
+    """
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    attempted = []
+
+    class _AddressClient(_KeepaliveFakeClient):
+        def __init__(self, target):
+            attempted.append(target)
+            self.address = getattr(target, "address", str(target))
+            self.is_connected = True
+            self.started = []
+            self.stopped = []
+            self.__class__.instance = self
+
+    async def sleep(_delay):
+        stop.set()
+
+    def scanner_must_not_be_used(*_args, **_kwargs):
+        raise AssertionError("a configured address must not trigger a scan")
+
+    transport = BleTransport(
+        lambda: ("Astrolabe", "AA:BB:CC:DD:EE:FF", ROTATION),
+        registry,
+        lambda _sample: None,
+        lambda _status: None,
+        stop,
+        scanner=SimpleNamespace(find_device_by_filter=scanner_must_not_be_used),
+        client_factory=_AddressClient,
+        sleep=sleep,
+    )
+    asyncio.run(transport.run())
+
+    assert [type(target).__name__ for target in attempted] == ["BLEDevice"]
+    assert [target.address for target in attempted] == ["AA:BB:CC:DD:EE:FF"]
+
+
+def test_a_learned_address_is_reported_once_for_persistence():
+    """The address is only discoverable before the device is paired for HID.
+
+    After pairing, Windows holds the device and it stops advertising, so a fresh daemon start has
+    nothing to scan for and never attempts a connection at all. Capturing the address during the
+    window where discovery works is what keeps it reachable afterwards.
+    """
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    learned = []
+    rounds = [0]
+
+    async def sleep(_delay):
+        rounds[0] += 1
+        if rounds[0] >= 3:
+            stop.set()
+
+    transport = BleTransport(
+        lambda: ("Astrolabe", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        lambda _status: None,
+        stop,
+        scanner=_AstrolabeScanner,
+        client_factory=_KeepaliveFakeClient,
+        sleep=sleep,
+        address_learned=learned.append,
+    )
+    asyncio.run(transport.run())
+
+    # Reported once despite several session loops: re-persisting an unchanged value would rewrite
+    # user configuration on every reconnect.
+    assert learned == ["AA:BB"]
+
+
+def test_a_failing_persist_does_not_break_the_session():
+    registry, _providers, _aggregator = _registry()
+    stop = threading.Event()
+    statuses = []
+
+    async def sleep(_delay):
+        stop.set()
+
+    def explode(_address):
+        raise OSError("config is read-only")
+
+    transport = BleTransport(
+        lambda: ("Astrolabe", "", ROTATION),
+        registry,
+        lambda _sample: None,
+        statuses.append,
+        stop,
+        scanner=_AstrolabeScanner,
+        client_factory=_KeepaliveFakeClient,
+        sleep=sleep,
+        address_learned=explode,
+    )
+    asyncio.run(transport.run())
+
+    assert any("subscribed" in status for status in statuses)

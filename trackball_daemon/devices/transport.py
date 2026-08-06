@@ -8,8 +8,10 @@ from collections.abc import Mapping
 from functools import partial
 import logging
 import threading
+import time
 
 from bleak import BleakClient, BleakScanner
+from bleak.backends.device import BLEDevice
 
 from .model import BleConnectionConfig, DeviceSession, GattInventory
 
@@ -39,7 +41,8 @@ def gatt_inventory(client):
 class BleTransport:
     def __init__(self, get_params, adapter_registry, motion_callback, status_callback, stop_event,
                  *, battery_callback=None, enabled_event=None, scanner=None,
-                 client_factory=None, sleep=None, handover_lock=None):
+                 client_factory=None, sleep=None, handover_lock=None, clock=None,
+                 address_learned=None):
         if not all(callable(value) for value in (
                 get_params, motion_callback, status_callback)):
             raise TypeError("BLE transport callbacks must be callable")
@@ -58,10 +61,15 @@ class BleTransport:
         self.scanner = scanner or BleakScanner
         self.client_factory = client_factory or BleakClient
         self.sleep = sleep or asyncio.sleep
+        self.clock = clock or time.monotonic
+        self.address_learned = address_learned or (lambda _address: None)
         self.diagnostic_callback = lambda message: logger.warning("%s", message)
         self._generation = 0
         self._session_lock = threading.Lock()
         self._active_lease = None
+        # Address of the last device that selected an adapter. Used only as a scan fallback; see
+        # _find_target for why a scan alone is not sufficient on Windows.
+        self._known_address = None
 
     def _activate(self, lease):
         with self._session_lock:
@@ -124,6 +132,35 @@ class BleTransport:
         except Exception as exc:
             self.diagnostic_callback(f"could not subscribe to BLE Battery Level: {exc}")
 
+    async def _start_keepalive(self, client, adapter, inventory):
+        """Return (uuid, interval, first_due) when the device requires keepalives, else None.
+
+        A subscription alone used to mean the daemon owned the route for as long as the CCC said
+        so. That outlives the daemon: the CCC is persisted into the bond and the link stays up for
+        the HID mouse, so a daemon that dies leaves the route claimed with no disconnect to notice
+        and no way back short of forgetting the bond. Firmware now expires an idle claim; these
+        writes are what keep a live session from being expired with it.
+        """
+        descriptor = getattr(adapter, "descriptor", None)
+        characteristic_uuid = getattr(descriptor, "keepalive_characteristic", None)
+        if characteristic_uuid is None or characteristic_uuid not in inventory.characteristic_uuids:
+            return None
+        try:
+            payload = await client.read_gatt_char(characteristic_uuid)
+        except Exception as exc:
+            self.diagnostic_callback(f"could not read the keepalive interval: {exc}")
+            return None
+        if len(payload) < 3 or payload[0] != 1:
+            self.diagnostic_callback("keepalive characteristic reported an unsupported layout")
+            return None
+        timeout = int.from_bytes(payload[1:3], "little") / 1000.0
+        if timeout <= 0.0:
+            return None
+        # A third of the window, matching the wired path: two writes may be lost before firmware
+        # concludes the daemon is gone.
+        interval = max(0.05, timeout / 3.0)
+        return characteristic_uuid, interval, self.clock()
+
     async def run(self):
         while not self.stop_event.is_set():
             if not self._is_enabled():
@@ -135,10 +172,23 @@ class BleTransport:
                 continue
             await self._connect_once(config, target, scanned_name)
 
+    @staticmethod
+    def _direct_target(address, name):
+        """Wrap a known address so connecting to it does not require an advertisement.
+
+        Passing a bare address string looks like it bypasses discovery and does not: bleak's WinRT
+        client leaves its device handle unset and `connect()` then calls `find_device_by_address`,
+        so the scan simply moves later. A device Windows has paired as a BLE HID mouse never
+        advertises, so that scan always fails and the only cure is forgetting the device -- which
+        restores advertising. Constructing a BLEDevice sets the handle from the address up front,
+        which is what actually skips the scan.
+        """
+        return BLEDevice(address, name, None)
+
     async def _find_target(self, config):
         if config.address:
             self.status_callback(f"connecting to {config.address}...")
-            return config.address, config.name
+            return self._direct_target(config.address, config.name), config.name
         self.status_callback(f'scanning for "{config.name}"...')
         expected_name = config.name.casefold()
         expected_services = {
@@ -182,6 +232,15 @@ class BleTransport:
         if device is None:
             if not self._is_enabled():
                 return None, None
+            # A scan cannot see a device the OS already holds a connection to: once Windows has
+            # paired it as a BLE HID mouse it stops advertising, so the daemon looks for something
+            # that is sitting right there, connected. Bleak can still reach it by address, so a
+            # device we have reached before is worth trying directly before reporting failure.
+            if self._known_address:
+                self.status_callback(
+                    f'"{config.name}" is not advertising; it may already be connected as a '
+                    f"Bluetooth mouse. Trying {self._known_address} directly...")
+                return self._direct_target(self._known_address, config.name), config.name
             if len(service_candidates) == 1:
                 address, (_candidate, observed_name) = next(iter(service_candidates.items()))
                 identity = f' as "{observed_name}"' if observed_name else " without a name"
@@ -228,6 +287,17 @@ class BleTransport:
                         return
                     adapter_lease = adapter.connected(session)
                     self._activate(adapter_lease)
+                if address and address != self._known_address:
+                    # Persisted, not just cached: a scan cannot find this device once Windows has
+                    # paired it as a HID mouse, so without a remembered address a fresh daemon
+                    # start has nothing to connect to and never attempts one. Learning it during
+                    # the one window where discovery works -- before the device is paired for HID
+                    # -- is what keeps it reachable afterwards.
+                    self._known_address = address
+                    try:
+                        self.address_learned(address)
+                    except Exception as exc:
+                        self.diagnostic_callback(f"could not remember the device address: {exc}")
                 self._run_if_active(
                     adapter_lease,
                     lambda: self.status_callback(f"connected to {address or name}"),
@@ -242,8 +312,19 @@ class BleTransport:
                         adapter_lease,
                         lambda: self.status_callback(f"subscribed -- {adapter.label} is live"),
                     )
+                    keepalive = await self._start_keepalive(client, adapter, inventory)
                     while (client.is_connected and not self.stop_event.is_set()
                            and self._is_enabled()):
+                        if keepalive is not None:
+                            characteristic_uuid, interval, due = keepalive
+                            now = self.clock()
+                            if now >= due:
+                                # A rejected write means the firmware handed the route to someone
+                                # else -- drop the session rather than keep publishing into a route
+                                # we no longer own.
+                                await client.write_gatt_char(
+                                    characteristic_uuid, b"\x01", response=False)
+                                keepalive = (characteristic_uuid, interval, now + interval)
                         await self.sleep(0.3)
                 finally:
                     for characteristic_uuid in reversed(subscribed):
@@ -266,11 +347,12 @@ class BleTransport:
 
 
 def start_ble_thread(get_params, adapter_registry, motion_callback, status_callback, stop_event,
-                     *, battery_callback=None, enabled_event=None, handover_lock=None):
+                     *, battery_callback=None, enabled_event=None, handover_lock=None,
+                     address_learned=None):
     transport = BleTransport(
         get_params, adapter_registry, motion_callback, status_callback, stop_event,
         battery_callback=battery_callback, enabled_event=enabled_event,
-        handover_lock=handover_lock)
+        handover_lock=handover_lock, address_learned=address_learned)
 
     def runner():
         try:

@@ -38,6 +38,7 @@
     "service_uuid": {"$ref": "#/$defs/uuid"},
     "motion_characteristic": {"$ref": "#/$defs/uuid"},
     "input_characteristic": {"oneOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
+    "keepalive_characteristic": {"oneOf": [{"$ref": "#/$defs/uuid"}, {"type": "null"}]},
     "controls": {
       "type": "array",
       "items": {

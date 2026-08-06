@@ -5,10 +5,40 @@
 #include <dt-bindings/zmk/matrix_transform.h>
 #include "astrolabe-layouts.dtsi"
 
+/* The SuperMini is nice!nano v2-compatible in pinout but NOT in flash layout, which is why this
+ * shield overrides the board's partition. Its UF2 bootloader bundles SoftDevice S140 7.3.0, one
+ * 4 KB page larger than the 6.1.1 a genuine nice!nano v2 ships, so the application starts at
+ * 0x27000 rather than upstream's 0x26000. A UF2 built at 0x26000 lands inside the SoftDevice: the
+ * bootloader refuses to start it, the board drops straight back to bootloader mode, and it never
+ * enumerates -- a total brick-until-reflash, with no partial symptom to notice.
+ *
+ * This lived in config/boards/supermini_s140_v7.overlay as an opt-in flag. Three separate builds
+ * forgot to pass it (CI, the documented command in docs/zmk_migration_plan.md, and a hand build),
+ * because nothing fails until the image reaches hardware. It belongs with the rest of the frozen
+ * hardware description, where it is applied by construction.
+ *
+ * Confirmed on hardware: a 0x26000 image failed to enumerate; 0x27000 is correct for this board.
+ * If a genuine nice!nano v2 ever needs supporting, it needs its own shield or board target -- do
+ * not make this conditional and reintroduce the same footgun.
+ */
+&code_partition {
+    /* 0x27000..0xec000, ending where storage_partition begins, as upstream does. */
+    reg = <0x27000 0xc5000>;
+};
+
 / {
     chosen {
         zmk,kscan = &astrolabe_kscan;
         zmk,physical-layout = &astrolabe_layout;
+    };
+
+    aliases {
+        /* The board declares this node as `blue_led`, which is the colour it is on a genuine
+         * nice!nano. On the SuperMini the same pin drives the RED LED -- confirmed on hardware by
+         * blinking it. The blue LED is a charge indicator owned by the charging circuit and has no
+         * GPIO node at all. Alias it so the indicator never has to repeat that explanation, and so
+         * a board revision that moves the LED is a one-line change here. */
+        astrolabe-status-led = &blue_led;
     };
 
     astrolabe_transform: astrolabe_transform {
@@ -52,12 +82,12 @@
                        <&gpio0 17 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
 
         cpi = <1600>;
-        ball-diameter-um = <50800>;
-        sensor-phi-mdeg = <145000 215000>;
+        ball-diameter-um = <52000>;
+        sensor-phi-mdeg = <140000 220000>;
         sensor-theta-mdeg = <120000 120000>;
         sensor-mount-mdeg = <270000 270000>;
         sensor-flipped = <1 1>;
-        frame-tilt-mdeg = <(-20000)>;
+        frame-tilt-mdeg = <(-25000)>;
 
         poll-interval-us = <1000>;
         active-window-ms = <2000>;
@@ -88,6 +118,13 @@
             compatible = "astrolabe,behavior-control-bit";
             #binding-cells = <1>;
             display-name = "Astrolabe Control Bit";
+        };
+
+        /* Replaces `&out OUT_TOG`, which is silent when the toggle cannot be applied. */
+        astro_out: astrolabe_output_toggle {
+            compatible = "astrolabe,behavior-output-toggle";
+            #binding-cells = <0>;
+            display-name = "Astrolabe Output Toggle";
         };
     };
 

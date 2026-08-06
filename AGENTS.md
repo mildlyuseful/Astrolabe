@@ -18,7 +18,8 @@ here.
 | Cross-component architecture, ownership, data flow, or invariants | [`docs/architecture.md`](docs/architecture.md) |
 | User capabilities, installation, operation, or troubleshooting | [`README.md`](README.md) |
 | Open defects, deferred work, release blockers, or unverified behavior | [`TODO.md`](TODO.md) |
-| Firmware, BLE transport, input snapshots, or device descriptors | The active firmware source and [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) |
+| Firmware, BLE transport, input snapshots, or device descriptors | [`firmware/zmk/`](firmware/zmk/) and [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) |
+| Controller, sensors, ball, switch, pin map, or geometry | [`docs/hardware.md`](docs/hardware.md); the shield data under [`firmware/zmk/`](firmware/zmk/) stays authoritative for values |
 | Settings, defaults, config resolution, or migration | `trackball_daemon/settings_schema.py`, `trackball_daemon/app_registry.py`, `trackball_daemon/config_store.py`, `trackball_daemon/config_resolver.py`, packaged default data, and [`docs/default_profiles.md`](docs/default_profiles.md) |
 | Input providers, chords, actions, dependencies, or live control state | `trackball_daemon/input/`, `trackball_daemon/commands.py`, `trackball_daemon/runtime_state.py`, and [`docs/keybindings.md`](docs/keybindings.md) |
 | App identity, capabilities, focus selection, or feature exposure | `trackball_daemon/app_registry.py`, `trackball_daemon/settings_schema.py`, and [`docs/feature_parity.md`](docs/feature_parity.md) |
@@ -31,6 +32,20 @@ here.
 
 ## Working rules
 
+- **Read the API before theorising about it.** When behaviour does not match what a call obviously
+  does, open the implementation — `firmware/zmk/zmk/`, `firmware/zmk/zephyr/`, or the installed
+  Python package — before proposing a cause. Three separate faults in one session came from
+  assuming instead, and each was answered by ten lines of somebody else's source:
+  `zmk_hid_mouse_button_press` is reference counted rather than idempotent, so re-asserting a held
+  button every cycle left a click down for exactly as long as it was held; bleak's `BleakClient`
+  does not resolve a bare address string up front but defers a scan into `connect()`, so a
+  "direct" connection still failed for a device that was not advertising; and `config/boards/`
+  registers a board root, not per-board overlays, so an opt-in flash override silently never
+  applied. Symptoms that look like design questions are usually contract questions.
+- **Evidence from your own build is not evidence.** A measurement is only as good as the artifact
+  that produced it. A UF2 built without the shield's flash override reported an application address
+  that was then used to "correct" documentation that had been right all along. Before treating an
+  observation as ground truth, confirm the thing you measured is the thing you meant to build.
 - Build toward an open-source-quality foundation before release. Fix defects at the layer that owns
   the broken invariant, remove compensating workarounds once the root cause is understood, and do not
   accept avoidable lifecycle, latency, or maintenance debt merely because a patch passes the current
@@ -38,13 +53,23 @@ here.
 - Due to the open-source goals of the project, prefer brief code solutions. Create systems in
   simplistic frameworks that allow later contributors to add apps and functionality with minimal
   refactoring or churn. Avoid writing needlessly verbose comments and docs.
+- **One device, one clone, no installed base.** Exactly one functional trackball exists and exactly
+  one working copy of this repository exists. Nothing has ever been released, so there is no old
+  firmware in the field, no other developer's checkout, and no user whose configuration predates a
+  change. Do not write backwards-compatibility shims, version negotiation, or elaborate migration
+  paths for states that cannot exist. Change the format, change every reader in the same commit, and
+  reflash. A protocol or schema is "frozen" only where something outside this repository actually
+  depends on it — say which thing, or treat it as editable. Re-pairing the device, wiping its
+  settings, and rebuilding the daemon's configuration are all acceptable costs. This rule stops
+  applying at public V1; until then, prefer deleting the old path to supporting it.
 - Code and packaged data are authoritative. Documentation explains current contracts and earned
   behavior that code alone cannot establish.
 - `trackball_daemon/app_registry.py` is the only supported-app identity, order, transport, and
   capability registry. `trackball_daemon/settings_schema.py` is the stable setting and command
   registry. Do not create parallel tables.
-- Put shared invariants in `docs/architecture.md`, host-specific facts in `docs/apps/`, user
-  instructions in `README.md`, and unresolved work only in `TODO.md`.
+- Put shared invariants in `docs/architecture.md`, frozen hardware selections in `docs/hardware.md`,
+  host-specific facts in `docs/apps/`, user instructions in `README.md`, and unresolved work only in
+  `TODO.md`.
 - `LICENSING.md` is the only per-path license authority. Every tracked path must have exactly one
   disposition there, and the copied license texts under `LICENSE`, `LICENSES/`, and `DCO` are
   verbatim published documents that are never edited.

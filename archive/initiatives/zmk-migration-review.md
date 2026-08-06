@@ -1,9 +1,9 @@
 # ZMK migration review
 
 Independent review of the `codex/zmk-migration` working tree, 2026-08-02. This is a review
-record, not a design document — [`zmk_migration_plan.md`](zmk_migration_plan.md) owns the design
-and [`../TODO.md`](../TODO.md) owns the release gates. When the migration closes, this file
-moves under `archive/initiatives/` with the plan.
+record, not a design document — [`zmk_migration_plan.md`](../../docs/zmk_migration_plan.md) owns the
+design and [`TODO.md`](../../TODO.md) owns the release gates. The plan follows this file into
+`archive/initiatives/` once the migration's live gates close.
 
 ## Note for other reviewers adding to this file
 

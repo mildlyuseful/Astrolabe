@@ -112,13 +112,18 @@ builds it. A separate job compiles the
 retained XIAO protocol-bench sketch with pinned Arduino CLI and board-core inputs, reports binary
 sizes, and retains the firmware artifacts. Seeed's pinned nRF52 core bundles its packaging utility
 for Windows and macOS but calls `adafruit-nrfutil` from `PATH` on Linux, so that job installs and
-checks the pinned PyPI release before compiling. A separate job builds the ZMK candidate from exact
+checks the pinned PyPI release before compiling. A separate job builds the ZMK firmware from exact
 ZMK/Zephyr commits in an immutable image and retains the UF2, ELF, effective configuration, DTS,
-frozen west manifest, build hashes, SPDX build documents, and firmware license bundle. The
-SuperMini prototype sketch remains available as source and evidence but is not a release build
-target. Keep the XIAO bench gate beside the ZMK candidate until the live replacement matrix in
-[`zmk_migration_plan.md`](zmk_migration_plan.md) passes. These checks establish reconstructible
-inputs and buildability; they do not establish bit-identical output or qualify product hardware.
+frozen west manifest, build hashes, SPDX build documents, and firmware license bundle. That job also
+asserts the application address by reading it back out of the built UF2, which must be `0x00027000`
+for the SuperMini's S140 7.3.0 bootloader. It reads the artifact rather than re-checking the
+overlay's constant, so it catches the shield's `code_partition` override being dropped and not only
+edited — a build with upstream's `0x26000` lands inside the SoftDevice, produces a board that never
+enumerates, and fails nothing at build time. The PMW3610
+prototype sketch remains available as source and evidence but is not a release build target. Keep
+the XIAO bench gate beside the ZMK build until the live replacement matrix in
+[`../TODO.md`](../TODO.md) passes. These checks establish reconstructible inputs and buildability;
+they do not establish bit-identical output or qualify product hardware.
 
 Before release, also install the wheel into a clean Windows account without Python or a source
 checkout, exercise the onedir GUI there, uninstall/reverse every path in `security.md`, and retain
@@ -165,12 +170,13 @@ while controls are held; no old lease may release or publish into its replacemen
 queued report from an old USB owner may appear after reattach.
 
 The XIAO three-button/jumper bench proves the host protocol boundary, and the SuperMini PMW3610 loop
-proves the current five-way prototype's protocol and input behavior on what is now the production
-controller. Its automatic PMW3610 Run/Rest path and the new ZMK wake integration still require the
-physical matrix tracked in `TODO.md`; neither bench is the product assembly. The final production
-build's sensor path,
-Up/Down/Left/Right/Center pin map, debounce, and physical five-way matrix remain release blockers
-until exercised on the final assembly under the production firmware.
+proved the five-way protocol and input behavior on the production controller. Neither is the product
+assembly, and both predate the ZMK stack. The ZMK candidate now runs on the current fixture with
+BLE and USB HID output, route handover, and the keepalive fail-safe confirmed
+([evidence](../archive/release-evidence/zmk-hardware-freeze-live-2026-08-06.md)) — but confirming
+individual behaviors is not running this matrix, and the pin map, debounce margin, sensor pose
+calibration, PMW3610 Run/Rest path, and ZMK wake integration remain release blockers tracked in
+[`../TODO.md`](../TODO.md).
 
 ## Host control matrix
 

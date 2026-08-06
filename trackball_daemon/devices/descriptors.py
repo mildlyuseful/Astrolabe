@@ -17,7 +17,7 @@ def _parse_descriptor(data):
         "schema_version", "device_id", "source_id", "label", "match",
         "service_uuid", "motion_characteristic", "input_characteristic", "controls",
     }
-    unknown = set(data) - required - {"metadata"}
+    unknown = set(data) - required - {"metadata", "keepalive_characteristic"}
     missing = required - set(data)
     if missing or unknown:
         raise ValueError(
@@ -62,6 +62,7 @@ def _parse_descriptor(data):
         controls=tuple(parsed_controls),
         metadata=data.get("metadata", {}),
         usb_hid=parsed_usb_hid,
+        keepalive_characteristic=data.get("keepalive_characteristic"),
     )
 
 

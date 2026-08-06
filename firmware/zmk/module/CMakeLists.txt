@@ -12,4 +12,8 @@ if(CONFIG_ASTROLABE_FIRMWARE)
   )
   target_sources_ifdef(CONFIG_ASTROLABE_GATT app PRIVATE src/gatt.c)
   target_sources_ifdef(CONFIG_ASTROLABE_USB app PRIVATE src/usb.c)
+  target_sources_ifdef(CONFIG_ASTROLABE_INDICATOR app PRIVATE
+    src/indicator.c
+    src/behavior_output.c
+  )
 endif()

@@ -95,4 +95,4 @@ first, because global `class_name` types come from the project's script-class ca
 step reports every cross-file type as undeclared. A new Godot release can also turn a previously
 inferable expression into a parse error, so this is worth re-running against a new editor version.
 
-The current GUI and live-viewport checks are tracked in [`TODO.md`](../../TODO.md).
+The current GUI and live-viewport checks are tracked in [`TODO.md`](../../../../TODO.md).

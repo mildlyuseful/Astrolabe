@@ -115,6 +115,13 @@
       "source": "https://github.com/pywinrt/pywinrt"
     },
     {
+      "name": "winrt-Windows.Devices.Radios",
+      "license": "MIT",
+      "copyright": "Copyright (c) Microsoft Corporation. Copyright (c) 2021-2025 David Lechner",
+      "source": "https://github.com/pywinrt/pywinrt",
+      "note": "Pulled in by bleak 3.x, which queries radio state; not imported directly."
+    },
+    {
       "name": "winrt-Windows.Foundation",
       "license": "MIT",
       "copyright": "Copyright (c) Microsoft Corporation. Copyright (c) 2021-2025 David Lechner",

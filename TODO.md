@@ -12,33 +12,37 @@ already-supported contract.
 
 ### Production hardware
 
-- Complete the production hardware contract around the fixed SuperMini nRF52840 controller (a
-  nice!nano v2-compatible board, ZMK's `nice_nano_v2` target) before promoting the ZMK candidate to
-  production firmware. This retires the earlier Seeed Studio XIAO nRF52840 target and the controller
-  port it required: `firmware/PMW3610` already validates the production controller's electronics,
-  but it remains a validation prototype, not a finished production claim. Freeze or deliberately
-  change its remaining candidate choices against the final assembly:
-  - confirm sensor model/count, mounting geometry, buses, chip selects, interrupt/power pins, and
-    two-versus-three-sensor fusion expectations against the final assembly;
-  - confirm Up/Down/Left/Right/Center pins, polarity, debounce timing, and simultaneous-input behavior;
-  - battery/power design, USB/BLE expectations, host-profile behavior, and an always-reachable
-    mode/recovery control.
-- Repeat the physical switch, sensor, reconnect, held-input, sleep/wake, and mode-transition matrix
-  on the final production assembly under the ZMK production firmware. The XIAO three-button bench
-  validates the protocol boundary and the completed SuperMini PMW3610 loop validates the prototype
-  electronics on the production controller; neither qualifies the final assembly or the new
-  firmware stack.
-- The pinned ZMK candidate now builds alongside CI's `firmware/XIAO3389` protocol-bench compile.
-  Replace the bench as the release firmware gate, and delete the superseded `firmware/Astrolabe`
-  Arduino placeholder, only after the ZMK candidate passes its live replacement matrix
-  ([`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md)). Keep the PMW3610 sketch locally
-  compilable for diagnosis, but do not restore it as a required release job.
-- Verify the SuperMini prototype's BLE battery estimate against a multimeter across a representative
-  discharge, confirm that USB insertion preserves the last battery-only value and USB removal
-  refreshes it, and confirm Battery Level appears after a clean Windows re-pair and agrees across the
-  daemon's tray tooltip, tray menu, and Settings footer. The standard service, daemon transport, and
-  voltage mapping are covered automatically; this does not establish calibration for the installed
-  cell, the board's ADC tolerance, or live Windows GATT behavior.
+The controller, sensor count and model, ball, and five-way switch are frozen in
+[`docs/hardware.md`](docs/hardware.md). Those are no longer open design questions; what remains is
+verifying the frozen contract against a physical production assembly. A gate below that fails is a
+product decision to reopen, not a value to quietly retune.
+
+- Confirm the frozen pin map against the final assembly's schematic and as-built wiring.
+  `firmware/PMW3610` validated these electronics on the production controller, but on a prototype
+  fixture with a 50.8 mm ball; the shipped ball is 52 mm and the enclosure, mechanical sensor
+  mounting, and wiring harness are new. This is the paper check that the shield describes what was
+  actually built; calibrating the pose in use is the P4 axis gate.
+- Characterize the five-way switch electrically and mechanically: 8 ms debounce adequate for the
+  SKRHADE010's real bounce profile, and no false center on diagonal actuation. All five positions
+  and the forced-standalone escape are confirmed reachable in use, which is not the same as knowing
+  the debounce window has margin against the part's actual bounce.
+- Close the battery and power design: cell selection, charge path, and the measured discharge curve
+  behind the VDDH estimate. Then verify that estimate against a multimeter across a representative
+  discharge, that USB insertion preserves the last battery-only value while USB removal refreshes
+  it, and that Battery Level appears after a clean Windows re-pair and agrees across the daemon's
+  tray tooltip, tray menu, and Settings footer. The standard service, daemon transport, and voltage
+  mapping are covered automatically; none of that establishes calibration for the installed cell,
+  the board's ADC tolerance, or live Windows GATT behavior.
+- Run the physical switch, sensor, reconnect, held-input, sleep/wake, and mode-transition matrix on
+  the final assembly under the ZMK production firmware. The XIAO three-button bench validates the
+  protocol boundary and the SuperMini PMW3610 loop validated the prototype electronics; neither
+  qualifies the final assembly or the ZMK stack.
+- Replace CI's `firmware/XIAO3389` protocol-bench compile as the release firmware gate, and delete
+  the superseded `firmware/Astrolabe` placeholder, only after the ZMK candidate passes the P4 live
+  replacement matrix. Keep the PMW3610 sketch locally compilable for diagnosis; do not restore it
+  as a required release job. Note that its `BALL_DIAMETER_MM` is still the prototype's 50.8, which
+  is correct for the evidence it recorded and wrong for the shipped ball — treat its rotation output
+  as uncalibrated against production.
 
 ### Release qualification
 
@@ -65,16 +69,6 @@ already-supported contract.
   it, and the preserved directory is the documented rollback copy. Removing it means dropping the
   mirror, the payload fallbacks, and the migration itself — and it cannot happen before the bundled
   AutoCAD DLL is rebuilt, since that plugin can read nowhere else.
-- Move to bleak 3.x. The dependency is deliberately capped at `<2` because bleak 2.0 changed GATT
-  error types and 3.0 changed the scanner/client keyword surface. The transport's usage is narrow
-  (`find_device_by_filter`, `BleakClient`, `start_notify`/`stop_notify`) and no documented breaking
-  change appears to touch the WinRT path, but scan, connect, notify, reconnect, and
-  disconnect-while-held can only be qualified against real trackball hardware. Lift the cap in one
-  delivery with that hardware evidence.
-- Enable GitHub private vulnerability reporting at the moment the repository becomes public.
-  `SECURITY.md` advertises `security/advisories/new` as the only reporting channel, and that feature
-  cannot be enabled while the repository is private, so the advertised link does not resolve until
-  it is turned on.
 - Replace the placeholder contact promises once the Mildly Useful domain exists. `SECURITY.md` says
   a security mailbox will be added and `TRADEMARKS.md` says a permission contact will be listed;
   both must become real addresses or stop promising one.
@@ -92,6 +86,29 @@ already-supported contract.
 - Test every uninstall/reversal path listed in `docs/security.md`.
 - Qualify the packaged Raw Input path with a non-US AltGr layout and across a Remote Desktop
   connect/disconnect boundary.
+
+### Public-release gate
+
+None of these can start while the repository is private and carries no hardware sources. They are
+listed in dependency order and are deliberately separated from the hardware and firmware gates
+above, which are all completable on a private repo. Publishing is a decision, not a milestone these
+reach on their own.
+
+- Produce the hardware design source bundle CERN-OHL-W-2.0 requires: schematics, layout, mechanical
+  CAD, BOM, and assembly drawings in preferred editable form, plus the product source-location
+  notice and physical marking. None of it exists in the repository yet, and the license obligation
+  attaches at distribution. This is also the prerequisite for the PID below.
+- Request a PID under the pid.codes VID `0x1209`, then update the firmware descriptor and
+  `trackball_daemon/devices/descriptor_data/astrolabe_5way.json` together and re-run the wired
+  enumeration-identity checks. pid.codes allocates only to projects whose sources are public, so the
+  request cannot be filed ahead of the bundle above. Until it lands, builds enumerate as
+  `0x1D50:0x615E`, ZMK's own OpenMoko sub-allocation — which would present Astrolabe as a generic ZMK
+  device and collide with every other ZMK board on a USB match. Nothing is distributed yet, so that
+  is a shipping blocker rather than a current defect.
+- Enable GitHub private vulnerability reporting at the moment the repository becomes public.
+  `SECURITY.md` advertises `security/advisories/new` as the only reporting channel, and that feature
+  cannot be enabled while the repository is private, so the advertised link does not resolve until
+  it is turned on.
 
 ## P2 — Live host qualification
 
@@ -160,39 +177,40 @@ documentation, and live viewport evidence in one delivery.
 ## P4 — ZMK production-firmware epic
 
 The pinned, out-of-tree implementation and its critical design corrections live in
-[`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md). Automated builds and daemon tests do not
-close these remaining gates:
+[`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md); the hardware it targets is frozen in
+[`docs/hardware.md`](docs/hardware.md). Automated builds and daemon tests do not close these
+remaining gates:
 
-- Flash the candidate on the final electrical assembly. Verify both PMW3610 identities, shared-bus
-  signal integrity, calibrated axes/signs, full-speed motion, standalone cursor/scroll feel, all five
-  switch positions, recovery gestures, forced-standalone boot, and ordinary BLE/USB HID output.
-- Give BLE profile and output state some indication. The device has no display or LED binding, so
-  three of the four standalone gestures — profile switch, output toggle, bond clear — are
-  unobservable, and "nothing happened" is indistinguishable from "it worked". Only the bootloader
-  gesture confirms itself, by mounting. This is also what makes a wrong profile hard to diagnose:
-  ZMK accepts a pairing only onto an open slot, so a taken slot rejects the host with nothing but
-  a generic connect failure at the other end. Decide between an LED, a HID feature report the
-  daemon can read, or accepting it and documenting the recovery sequence.
-- Verify the standalone/daemon layer split on hardware. Confirm the recovery and radio gestures are
-  reachable only in standalone, that daemon control bits report with no arbitration in front of
-  them, and that the layer follows the route with no manual step across cable pull, daemon
-  termination, and keepalive timeout — including a route change that happens mid-gesture.
+- Calibrate sensor axes and signs on the current fixture. The candidate runs on the assembly and
+  BLE/USB HID output, standalone cursor/scroll feel, the five switch positions, recovery gestures,
+  forced-standalone boot, and the route-driven layer split are confirmed there
+  (`archive/release-evidence/zmk-hardware-freeze-live-2026-08-06.md`). What that pass did not
+  establish is that the shield's 140°/220° azimuth, 120° polar, and −25° frame tilt reproduce the
+  fixture: pose error shows up as cross-axis bleed under an isolated single-axis roll, not as an
+  obviously wrong direction, and nothing so far isolated an axis. Verify both PMW3610 identities and
+  shared-bus signal integrity at full-speed motion in the same pass. Re-run whole if the enclosure,
+  mechanical mounting, or harness changes again.
+- Measure what the status LED costs at the battery once the discharge curve exists. The pin, every
+  pattern, and the absence of sensor interference are confirmed; its runtime cost is not, and it is
+  the only always-available indicator, so a measurable cost is a duty-cycle decision rather than a
+  reason to drop it.
 - Characterize automatic PMW3610 Run/Rest plus ZMK deep sleep on hardware: current draw, reliable
   MOTION/button wake, first-delta direction and magnitude, no reconnect dump, and surface-loss or
   illumination cases. SQUAL and shutter are diagnostics only; add no validity filter without this
   evidence.
 - Run the frozen motion/input, hold/toggle, dependency, foreground, reconnect, and HUD matrices over
-  the ZMK BLE service without changing stored binding/profile semantics. Include persisted CCC,
-  re-pair, disconnect while held, malformed/stale packets, and owner replacement.
+  the ZMK BLE service without changing stored binding/profile semantics. Include malformed and stale
+  packets. Persisted CCC, re-pair, disconnect while held, and owner replacement have each been
+  exercised individually against the keepalive and route-claim work, but the matrix has never been
+  run as a matrix, which is what catches a binding or profile semantic drifting under a transition.
 - Run the same matrix over wired vendor HID on Windows. Include enumeration identity, attach/ACK,
   lost attach ACK recovery, keepalive loss, daemon termination, suspend/resume, cable pull, stale
   queued reports, rapid BLE-to-USB preference and USB-to-BLE fallback, and held inputs across every
-  transition.
+  transition. The enumeration-identity portion has to be repeated after the VID/PID changes at the
+  public-release gate below; everything else in this matrix is independent of it.
 - Confirm charging and USB-powered battery presentation on the physical power path. BLE may publish a
   measured percentage; an active USB daemon session must remain explicitly externally powered and
   must not fabricate a fresh percentage.
-- Obtain a production USB VID/PID allocation and update firmware plus descriptor together; the
-  upstream ZMK IDs are development-only.
 - Measure flash/RAM, connection interval, throughput, motion latency, and battery behavior. Decide
   whether to enable ZMK Studio only after repeating lifecycle and resource measurements with Studio
   and the custom service together.
@@ -202,8 +220,8 @@ close these remaining gates:
 ### Route/keymap integration depth
 
 The route now drives a daemon keymap layer, one way: a route change may move the layer, a layer
-change never moves the route. That boundary is deliberately the whole of it for now. These extend
-it and are only worth building once the split above is confirmed on hardware:
+change never moves the route. That split is confirmed on hardware and that boundary is deliberately
+the whole of it for V1. These extend it and are deferred behind the feature freeze:
 
 - Allow ZMK behaviors to express derived gestures to the daemon. `state.controls` is a byte with
   five bits used, and `astrolabe_route_control` caps `bit_index` at 5, so a tap-dance today can

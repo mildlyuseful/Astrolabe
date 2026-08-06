@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Toggles the preferred output transport and reports the result on the status LED, including the
+  case where ZMK cannot apply the change because only one transport is ready.
+
+compatible: "astrolabe,behavior-output-toggle"
+
+include: zero_param.yaml

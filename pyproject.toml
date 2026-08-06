@@ -39,10 +39,11 @@ classifiers = [
 requires-python = ">=3.13"
 
 dependencies = [
-    # Ceiling is deliberate, not staleness: bleak 2.0 changed GATT error types and 3.0 changed the
-    # scanner/client keyword surface. Moving off 1.x changes the BLE transport and can only be
-    # qualified against real trackball hardware, so it is tracked as its own task in TODO.md.
-    "bleak>=1.1,<2",
+    # Ceiling is deliberate, not staleness: bleak 4.0 has not been evaluated against this
+    # transport. The 3.x client takes its per-backend options as a `winrt=` mapping and resolves a
+    # bare address by scanning, which is load-bearing here -- see _direct_target in
+    # devices/transport.py.
+    "bleak>=3.0.2,<4",
     # The ZMK device exposes its daemon channel as a vendor-defined USB HID interface. Keep the
     # minor release bounded because the daemon depends on hidapi's enumeration and report framing.
     "hidapi>=0.15,<0.16; sys_platform == 'win32'",

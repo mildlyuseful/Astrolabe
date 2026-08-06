@@ -121,7 +121,7 @@ them; a second copy of a gate list is a list that goes stale.
 
 | Workflow / job | Trigger | Produces | Credentials |
 |---|---|---|---|
-| `ci.yml` · `checks`, `firmware` | every pull request, or a manual run | wheel, sdist, installed-wheel smoke, SBOM, firmware | none |
+| `ci.yml` · `checks`, `firmware`, `zmk_firmware` | every pull request, or a manual run | wheel, sdist, installed-wheel smoke, SBOM, Arduino bench firmware, pinned ZMK UF2 | none |
 | `ci.yml` · `onedir` | packaging-relevant pull request, or a manual run | **unsigned onedir**, SBOM, manifest | none |
 | `release.yml` | a `v*` tag, or a manual run naming an exact revision | the same artifacts plus a **draft** GitHub release | signing secrets, scoped to the `release` environment |
 
