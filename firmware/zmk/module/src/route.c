@@ -18,11 +18,6 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
 
-#if IS_ENABLED(CONFIG_ZMK_BLE)
-#include <zephyr/bluetooth/conn.h>
-#include <zmk/ble.h>
-#endif
-
 #include <zmk/endpoints.h>
 #include <zmk/hid.h>
 #include <zmk/keymap.h>
@@ -48,6 +43,7 @@ struct route_state {
     struct k_mutex lock;
     struct k_mutex output_lock;
     uint8_t sent_buttons;
+    uint8_t applied_buttons;
     uint8_t button_latch;
     struct astrolabe_route_config config;
     enum astrolabe_route current;
@@ -192,45 +188,23 @@ static void apply_route_layer(enum astrolabe_route route) {
     }
 }
 
-/*
- * Standalone send pacing, in milliseconds.
- *
- * ZMK's BLE mouse path enqueues into zmk_hog_mouse_msgq and drains it at the connection interval,
- * and every queued report carries the button state captured when it was enqueued. Producing faster
- * than the link drains therefore does not just add latency -- it makes a release arrive behind a
- * backlog of reports that all still say "pressed", so a click stays down for about as long as it
- * was held. USB has no equivalent queue, which is why this was only ever visible over BLE.
- *
- * So pace to what the link actually negotiated rather than to a guess. Windows commonly settles
- * around 11.25 ms for HID; reading it keeps this correct if that changes or another host differs.
- * The configured interval remains the floor: this only ever slows output down to the rate the
- * endpoint can carry.
- */
-static uint32_t standalone_interval_ms(void) {
-    const uint32_t configured = state.config.send_interval_ms;
-
-#if IS_ENABLED(CONFIG_ZMK_BLE)
-    if (zmk_endpoints_selected().transport != ZMK_TRANSPORT_BLE) {
-        return configured;
+/* Drives only the difference, because ZMK's mouse buttons are reference counted. Takes state.lock
+ * itself: applied_buttons must not drift from what the HID layer was actually told. */
+static void apply_buttons_locked(uint8_t buttons) {
+    k_mutex_lock(&state.lock, K_FOREVER);
+    const uint8_t changed = buttons ^ state.applied_buttons;
+    for (uint8_t button = 0; button < 5U; ++button) {
+        if ((changed & BIT(button)) == 0U) {
+            continue;
+        }
+        if ((buttons & BIT(button)) != 0U) {
+            zmk_hid_mouse_button_press(button);
+        } else {
+            zmk_hid_mouse_button_release(button);
+        }
     }
-
-    struct bt_conn *conn = zmk_ble_active_profile_conn();
-    if (conn == NULL) {
-        return configured;
-    }
-
-    struct bt_conn_info info;
-    uint32_t interval = configured;
-    if (bt_conn_get_info(conn, &info) == 0 && info.type == BT_CONN_TYPE_LE) {
-        /* Units of 1.25 ms, rounded up so we never outrun the link by a fraction. */
-        const uint32_t negotiated = ((uint32_t)info.le.interval * 5U + 3U) / 4U;
-        interval = MAX(configured, negotiated);
-    }
-    bt_conn_unref(conn);
-    return interval;
-#else
-    return configured;
-#endif
+    state.applied_buttons = buttons;
+    k_mutex_unlock(&state.lock);
 }
 
 static int16_t clamp_report(float value) {
@@ -243,8 +217,20 @@ static int16_t clamp_report(float value) {
     return (int16_t)value;
 }
 
-/* One writer of ZMK's mouse report. Buttons are re-asserted from the desired mask every cycle
- * rather than tracked as edges, so a failed send self-heals on the next one.
+/* One writer of ZMK's mouse report.
+ *
+ * Buttons are driven as EDGES against applied_buttons, never re-asserted from the desired mask.
+ * zmk_hid_mouse_button_press/release are reference counted, not idempotent: press increments a
+ * per-button counter and release only clears the bit once that counter returns to zero. Calling
+ * press every cycle while a button is held therefore builds a count proportional to how long it
+ * was held, and the release then takes exactly that long to drain -- a click that stays down for
+ * as long as it was pressed, on every transport. The repeated releases for unheld buttons were
+ * also logging "Tried to release button N too often" on every cycle.
+ *
+ * applied_buttons tracks what the HID layer has been told, which is not the same thing as what the
+ * host has received: ZMK's report state survives a failed send, so a retry must not re-apply the
+ * edge. sent_buttons stays the delivery bookkeeping and still gates whether a report is worth
+ * sending at all, so a failed send is still retried on the next cycle.
  *
  * Movement is a level and collapsing it across cycles is correct; a button is an edge and
  * collapsing it loses the event outright. A press and its release can easily land in the same
@@ -274,13 +260,7 @@ static void output_handler(struct k_work *work) {
         return;
     }
 
-    for (uint8_t button = 0; button < 5U; ++button) {
-        if ((buttons & BIT(button)) != 0U) {
-            zmk_hid_mouse_button_press(button);
-        } else {
-            zmk_hid_mouse_button_release(button);
-        }
-    }
+    apply_buttons_locked(buttons);
     zmk_hid_mouse_movement_set(dx, dy);
     zmk_hid_mouse_scroll_set(0, wheel);
     const int err = zmk_endpoints_send_mouse_report();
@@ -328,6 +308,7 @@ int astrolabe_route_init(const struct astrolabe_route_config *config) {
     k_mutex_init(&state.output_lock);
     k_mutex_lock(&state.lock, K_FOREVER);
     state.sent_buttons = 0U;
+    state.applied_buttons = 0U;
     state.config = *config;
     state.current = ASTROLABE_ROUTE_STANDALONE;
     state.controls = 0U;
@@ -418,9 +399,7 @@ int astrolabe_route_claim(enum astrolabe_route route, astrolabe_route_lease_t *l
      * belongs to the daemon and standalone output is suppressed for good. */
     revoke_transport(previous, previous_lease);
     if (released_buttons != 0U) {
-        for (uint8_t button = 0; button < 5U; ++button) {
-            zmk_hid_mouse_button_release(button);
-        }
+        apply_buttons_locked(0U);
         zmk_hid_mouse_movement_set(0, 0);
         zmk_hid_mouse_scroll_set(0, 0);
         (void)zmk_endpoints_send_mouse_report();
@@ -526,15 +505,8 @@ void astrolabe_route_flush(uint32_t now_ms) {
 
     k_mutex_lock(&state.output_lock, K_FOREVER);
     k_mutex_lock(&state.lock, K_FOREVER);
-    if (!state.initialized) {
-        k_mutex_unlock(&state.lock);
-        k_mutex_unlock(&state.output_lock);
-        return;
-    }
-    const uint32_t interval = state.current == ASTROLABE_ROUTE_STANDALONE
-                                  ? standalone_interval_ms()
-                                  : state.config.send_interval_ms;
-    if ((uint32_t)(now_ms - state.last_send_ms) < interval) {
+    if (!state.initialized ||
+        (uint32_t)(now_ms - state.last_send_ms) < state.config.send_interval_ms) {
         k_mutex_unlock(&state.lock);
         k_mutex_unlock(&state.output_lock);
         return;
