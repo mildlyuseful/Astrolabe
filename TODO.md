@@ -43,10 +43,6 @@ product decision to reopen, not a value to quietly retune.
   as a required release job. Note that its `BALL_DIAMETER_MM` is still the prototype's 50.8, which
   is correct for the evidence it recorded and wrong for the shipped ball — treat its rotation output
   as uncalibrated against production.
-- Produce the hardware design source bundle CERN-OHL-W-2.0 requires: schematics, layout, mechanical
-  CAD, BOM, and assembly drawings in preferred editable form, plus the product source-location
-  notice and physical marking. None of it exists in the repository yet, and the license obligation
-  attaches at distribution.
 
 ### Release qualification
 
@@ -73,10 +69,6 @@ product decision to reopen, not a value to quietly retune.
   it, and the preserved directory is the documented rollback copy. Removing it means dropping the
   mirror, the payload fallbacks, and the migration itself — and it cannot happen before the bundled
   AutoCAD DLL is rebuilt, since that plugin can read nowhere else.
-- Enable GitHub private vulnerability reporting at the moment the repository becomes public.
-  `SECURITY.md` advertises `security/advisories/new` as the only reporting channel, and that feature
-  cannot be enabled while the repository is private, so the advertised link does not resolve until
-  it is turned on.
 - Replace the placeholder contact promises once the Mildly Useful domain exists. `SECURITY.md` says
   a security mailbox will be added and `TRADEMARKS.md` says a permission contact will be listed;
   both must become real addresses or stop promising one.
@@ -94,6 +86,29 @@ product decision to reopen, not a value to quietly retune.
 - Test every uninstall/reversal path listed in `docs/security.md`.
 - Qualify the packaged Raw Input path with a non-US AltGr layout and across a Remote Desktop
   connect/disconnect boundary.
+
+### Public-release gate
+
+None of these can start while the repository is private and carries no hardware sources. They are
+listed in dependency order and are deliberately separated from the hardware and firmware gates
+above, which are all completable on a private repo. Publishing is a decision, not a milestone these
+reach on their own.
+
+- Produce the hardware design source bundle CERN-OHL-W-2.0 requires: schematics, layout, mechanical
+  CAD, BOM, and assembly drawings in preferred editable form, plus the product source-location
+  notice and physical marking. None of it exists in the repository yet, and the license obligation
+  attaches at distribution. This is also the prerequisite for the PID below.
+- Request a PID under the pid.codes VID `0x1209`, then update the firmware descriptor and
+  `trackball_daemon/devices/descriptor_data/astrolabe_5way.json` together and re-run the wired
+  enumeration-identity checks. pid.codes allocates only to projects whose sources are public, so the
+  request cannot be filed ahead of the bundle above. Until it lands, builds enumerate as
+  `0x1D50:0x615E`, ZMK's own OpenMoko sub-allocation — which would present Astrolabe as a generic ZMK
+  device and collide with every other ZMK board on a USB match. Nothing is distributed yet, so that
+  is a shipping blocker rather than a current defect.
+- Enable GitHub private vulnerability reporting at the moment the repository becomes public.
+  `SECURITY.md` advertises `security/advisories/new` as the only reporting channel, and that feature
+  cannot be enabled while the repository is private, so the advertised link does not resolve until
+  it is turned on.
 
 ## P2 — Live host qualification
 
@@ -191,14 +206,11 @@ remaining gates:
 - Run the same matrix over wired vendor HID on Windows. Include enumeration identity, attach/ACK,
   lost attach ACK recovery, keepalive loss, daemon termination, suspend/resume, cable pull, stale
   queued reports, rapid BLE-to-USB preference and USB-to-BLE fallback, and held inputs across every
-  transition.
+  transition. The enumeration-identity portion has to be repeated after the VID/PID changes at the
+  public-release gate below; everything else in this matrix is independent of it.
 - Confirm charging and USB-powered battery presentation on the physical power path. BLE may publish a
   measured percentage; an active USB daemon session must remain explicitly externally powered and
   must not fabricate a fresh percentage.
-- Request a PID under the pid.codes VID `0x1209` and update the firmware descriptor plus
-  `trackball_daemon/devices/descriptor_data/astrolabe_5way.json` together. Builds currently
-  enumerate as `0x1D50:0x615E`, which is ZMK's own OpenMoko sub-allocation, so shipping them would
-  present Astrolabe as a generic ZMK device and collide with every other ZMK board on a USB match.
 - Measure flash/RAM, connection interval, throughput, motion latency, and battery behavior. Decide
   whether to enable ZMK Studio only after repeating lifecycle and resource measurements with Studio
   and the custom service together.

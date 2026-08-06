@@ -217,8 +217,12 @@ at the battery is not, and stays a gate in [`../TODO.md`](../TODO.md).
 - Battery cell selection and the charge path.
 - USB PID. Builds currently enumerate as ZMK's own identifiers, `0x1D50:0x615E` — an OpenMoko
   sub-allocation belonging to the ZMK project, so shipping them would present Astrolabe as a generic
-  ZMK device. The decision is to allocate under pid.codes (VID `0x1209`); the specific PID is not yet
-  requested. Firmware descriptor and
+  ZMK device. The decision is to allocate under pid.codes (VID `0x1209`), but pid.codes allocates
+  only to projects whose sources are public, so the request waits on this repository going public
+  with the design bundle below. Firmware descriptor and
   `trackball_daemon/devices/descriptor_data/astrolabe_5way.json` must change together.
 - The hardware design source bundle required by CERN-OHL-W-2.0. Schematics, layout, and mechanical
   CAD do not yet exist in preferred form in this repository.
+
+Both sit behind the public-release gate in [`../TODO.md`](../TODO.md), not behind any hardware or
+firmware verification. Everything else on this page can be frozen without them.
