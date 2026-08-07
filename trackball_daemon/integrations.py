@@ -653,10 +653,11 @@ def setup_onshape(appdef: "AppDef", cfg) -> tuple[bool, str]:
     modify the system trust store automatically."""
     from . import onshape_bridge
     cert_path, key_path = _onshape_cert_paths(cfg)
-    if not onshape_bridge.ensure_cert(cert_path, key_path):
-        return False, ("Could not generate the TLS certificate the Onshape bridge needs.\n"
-                       "Install the Python 'cryptography' package (pip install cryptography) or "
-                       "make sure 'openssl' is on PATH, then try again.")
+    ok, reason = onshape_bridge.ensure_cert(cert_path, key_path)
+    if not ok:
+        return False, ("Could not generate the TLS certificate the Onshape bridge needs, "
+                       "because %s.\n\n"
+                       "It would have been written to:\n%s" % (reason, cert_path))
     a = _operational_state(cfg, appdef.key)
     a["installed"] = True
     a["enabled"] = True

@@ -323,11 +323,17 @@ def default_cert_paths():
 
 def ensure_cert(cert_path, key_path):
     """Make sure a self-signed cert (CN + IP SAN for 127.51.68.120) exists at the given paths.
-    Returns True if present/created. Safe: only writes files in our own config dir -- it does NOT
-    touch any trust store (that's a separate, user-confirmed step). Tries cryptography, then the
-    openssl CLI."""
+    Safe: only writes files in our own config dir -- it does NOT touch any trust store (that's a
+    separate, user-confirmed step). Tries cryptography, then the openssl CLI.
+
+    Returns ``(ok, reason)``, where reason is "" on success. It used to return a bare bool, which
+    left every caller reporting the same guess -- "install cryptography or put openssl on PATH" --
+    and sent anyone whose real problem was an unwritable path or a broken openssl chasing a
+    dependency that was already installed. Both generation paths now say what actually went wrong
+    so the setup dialog can repeat it verbatim."""
     if os.path.exists(cert_path) and os.path.exists(key_path):
-        return True
+        return True, ""
+    reasons = []
     if _HAVE_CRYPTOGRAPHY:
         try:
             key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -349,20 +355,35 @@ def ensure_cert(cert_path, key_path):
                                           serialization.NoEncryption()))
             with open(cert_path, "wb") as f:
                 f.write(cert.public_bytes(serialization.Encoding.PEM))
-            return True
-        except Exception:
-            get_logger().info("onshape: cryptography cert generation failed", exc_info=False)
-    # Fallback: shell out to openssl with an IP SAN (-addext needs OpenSSL >= 1.1.1).
+            return True, ""
+        except Exception as exc:
+            reasons.append("the 'cryptography' package could not write it (%s)" % exc)
+            get_logger().info("onshape: cryptography cert generation failed", exc_info=True)
+    else:
+        reasons.append("the 'cryptography' package is missing from this install")
+    # Fallback: shell out to openssl with an IP SAN (-addext needs OpenSSL >= 1.1.1). Its stderr is
+    # captured rather than discarded -- an openssl that runs and then refuses is the case where the
+    # message is worth the most, and it used to be the case that produced the least.
     try:
         subprocess.run(
             ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
              "-keyout", key_path, "-out", cert_path, "-days", "3650",
              "-subj", "/CN=%s" % BRIDGE_HOST,
              "-addext", "subjectAltName=IP:%s" % BRIDGE_HOST],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return os.path.exists(cert_path) and os.path.exists(key_path)
-    except Exception:
-        return False
+            check=True, capture_output=True, text=True)
+        if os.path.exists(cert_path) and os.path.exists(key_path):
+            return True, ""
+        reasons.append("openssl reported success but wrote no certificate")
+    except FileNotFoundError:
+        reasons.append("no 'openssl' executable is on PATH")
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or "").strip().splitlines()
+        reasons.append("openssl exited %s%s" % (
+            exc.returncode, (": " + detail[-1]) if detail else ""))
+    except Exception as exc:
+        reasons.append("openssl could not be run (%s)" % exc)
+    get_logger().info("onshape: cert generation failed: %s", "; ".join(reasons))
+    return False, ", and ".join(reasons)
 
 
 # --- minimal RFC6455 WebSocket framing --------------------------------------------------------
@@ -1272,12 +1293,12 @@ class OnshapeBridge:
         while not self._stop.is_set():
             if not self._enabled.wait(0.25):
                 continue
-            if not ensure_cert(self._cert_path, self._key_path):
-                self._log.info("onshape: no TLS cert (run Onshape 'Set up', or install "
-                               "cryptography/openssl); bridge disabled")
+            ok, reason = ensure_cert(self._cert_path, self._key_path)
+            if not ok:
+                self._log.info("onshape: no TLS cert (%s); bridge disabled", reason)
                 self._set_health(
                     ServiceHealthState.FAILED,
-                    "TLS certificate is unavailable; run Onshape Set up",
+                    "TLS certificate is unavailable (%s); run Onshape Set up" % reason,
                 )
                 self._enabled.clear()
                 continue
@@ -1943,8 +1964,9 @@ def _main():
     spin = "--spin" in sys.argv
     force = "--force" in sys.argv      # drive even if Onshape reports its view unfocused
     cert, key = default_cert_paths()
-    if not ensure_cert(cert, key):
-        print("Could not generate a TLS cert (install `cryptography` or have `openssl` on PATH).")
+    ok, reason = ensure_cert(cert, key)
+    if not ok:
+        print("Could not generate a TLS cert: %s." % reason)
         return
     print("Cert: %s" % cert)
     print("Trust it (Chrome/Edge, no admin):  certutil -user -addstore Root \"%s\"" % cert)

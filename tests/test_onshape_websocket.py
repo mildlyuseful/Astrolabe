@@ -323,6 +323,42 @@ def test_tls_health_requires_explicit_certificate_alert_and_never_demotes_connec
     assert health[-1].state is ob.ServiceHealthState.HEALTHY
 
 
+def test_cert_generation_reports_the_cause_it_actually_hit(tmp_path, monkeypatch):
+    """A failure has to name itself. Reporting one canned guess is what made a missing package and
+    an unwritable path indistinguishable to the person reading the setup dialog."""
+    cert = str(tmp_path / "c.pem")
+    key = str(tmp_path / "k.pem")
+
+    def no_openssl(*_args, **_kwargs):
+        raise FileNotFoundError(2, "The system cannot find the file specified")
+
+    monkeypatch.setattr(ob, "_HAVE_CRYPTOGRAPHY", False)
+    monkeypatch.setattr(ob.subprocess, "run", no_openssl)
+    ok, reason = ob.ensure_cert(cert, key)
+    assert ok is False
+    assert "'cryptography' package is missing" in reason
+    assert "no 'openssl' executable is on PATH" in reason
+
+    monkeypatch.setattr(ob.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(
+        ob.subprocess.CalledProcessError(1, "openssl", stderr="unknown option -addext\n")))
+    ok, reason = ob.ensure_cert(cert, key)
+    assert ok is False
+    assert "openssl exited 1: unknown option -addext" in reason
+
+
+def test_cert_generation_succeeds_and_is_idempotent(tmp_path):
+    cert = str(tmp_path / "c.pem")
+    key = str(tmp_path / "k.pem")
+
+    assert ob.ensure_cert(cert, key) == (True, "")
+    minted = open(cert, "rb").read()
+    assert b"BEGIN CERTIFICATE" in minted
+
+    # A second call must not re-mint: the trust the user granted is bound to this exact cert.
+    assert ob.ensure_cert(cert, key) == (True, "")
+    assert open(cert, "rb").read() == minted
+
+
 def test_normal_onshape_controller_close_returns_to_waiting_health():
     health = []
     bridge = ob.OnshapeBridge(on_health_changed=health.append)
