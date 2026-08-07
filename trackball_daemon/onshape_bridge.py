@@ -951,11 +951,21 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
 (function () {
   "use strict";
   var ENDPOINT = "__ASTROLABE_ONSHAPE_ORIGIN__/trackball/pointer";
-  var last = { t: 0, x: 0, y: 0, on: false };
+  // Movement updates local state only; one timer owns the transport. Posting from the mousemove
+  // handler put a cross-origin request on the wire per pointer event -- 120+ a second over the
+  // canvas, each its own TLS handshake, to report what a 100 ms tick reports just as well (the
+  // bridge only reads this when a gesture starts, and discards a sample older than _POINTER_TTL).
+  // The flood is also what turns Chromium's Local Network Access permission into a flickering
+  // prompt: until the site holds that permission, every one of those requests re-asks for it.
+  var SEND_MS = 100;             // upper bound on how stale a reported sample can be
+  var REFRESH_MS = 300;          // resend an unchanged sample, well inside the bridge's TTL
+  var last = null;
+  var sentKey = "";
+  var sentAt = 0;
   function canvasEl() {
     return document.getElementById("canvas") || document.querySelector("canvas");
   }
-  function report(ev) {
+  function observe(ev) {
     var c = canvasEl();
     if (!c) return;
     var r = c.getBoundingClientRect();
@@ -965,24 +975,15 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
     var fx = (ev.clientX - r.left) / r.width;
     var fy = (ev.clientY - r.top) / r.height;
     // NDC: x right, y up, both in [-1,1] (matches the bridge's _pixel_ray).
-    var ndcX = fx * 2 - 1;
-    var ndcY = 1 - fy * 2;
-    last = { t: Date.now(), x: ndcX, y: ndcY, on: on, cw: r.width, ch: r.height };
-    // fire-and-forget; Private Network Access preflight is answered by the bridge OPTIONS handler
-    try {
-      fetch(ENDPOINT, {
-        method: "POST",
-        mode: "cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ndc_x: ndcX, ndc_y: ndcY, on_canvas: on,
-                               canvas_w: r.width, canvas_h: r.height })
-      }).catch(function () {});
-    } catch (e) {}
+    last = { x: fx * 2 - 1, y: 1 - fy * 2, on: on, cw: r.width, ch: r.height };
   }
-  window.addEventListener("mousemove", report, { passive: true, capture: true });
-  // Keep the last sample fresh while the cursor is still (gesture start without a move).
-  setInterval(function () {
-    if (!last.t) return;
+  function send() {
+    if (!last) return;
+    var key = [last.x, last.y, last.on, last.cw, last.ch].join(",");
+    var now = Date.now();
+    if (key === sentKey && now - sentAt < REFRESH_MS) return;
+    sentKey = key;
+    sentAt = now;
     try {
       fetch(ENDPOINT, {
         method: "POST",
@@ -992,12 +993,17 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
                                canvas_w: last.cw, canvas_h: last.ch })
       }).catch(function () {});
     } catch (e) {}
-  }, 200);
+  }
+  window.addEventListener("mousemove", observe, { passive: true, capture: true });
+  setInterval(send, SEND_MS);
 })();
 """.replace("__ASTROLABE_ONSHAPE_ORIGIN__", _BRIDGE_ORIGIN)
 
 POINTER_SCRIPT_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer.js"
 POINTER_STATUS_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer"
+# The page to visit once to accept the certificate. Public because the setup dialog offers it as a
+# button and as copyable text, and both must name the port the server actually binds.
+BRIDGE_URL = _BRIDGE_ORIGIN
 
 
 def pointer_userscript_source():

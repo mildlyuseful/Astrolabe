@@ -356,17 +356,37 @@ The served Tampermonkey/Violentmonkey script reads `#canvas.getBoundingClientRec
 posts NDC to `/trackball/pointer`. The bridge accepts only fresh on-canvas samples; stale or missing
 samples make the pivot unavailable so the fallback chain continues.
 
+`mousemove` only updates the script's local state — a `SEND_MS` (100 ms) timer owns the transport,
+and resends an unchanged sample every `REFRESH_MS` (300 ms) to stay inside `_POINTER_TTL`. The rate
+is deliberately decoupled from the event: the bridge reads this once per gesture start, so posting
+per pointer event bought nothing and cost 120+ cross-origin requests a second, each its own TLS
+handshake and, pre-grant, its own Local Network Access prompt (§8.15).
+
 Install through **3D Apps → Onshape → Set up** or the Per-App **Copy userscript…** action, then reload
 Onshape. `GET /trackball/pointer` is a diagnostic view of the cached sample. Offline tests cover
 parsing, TTL, ray construction, targeting, and fallback behavior; current live qualification belongs
 in [`TODO.md`](../../TODO.md), with completed evidence under `archive/release-evidence/`.
 
-### 8.15 Chromium requires Private Network Access opt-in
+### 8.15 Chromium gates the loopback bridge, first by preflight and now by permission
 
-Chromium sends an `OPTIONS` preflight when `cad.onshape.com` connects to the loopback bridge. Every
-CORS response must include `Access-Control-Allow-Private-Network: true`. Certificate trust remains a
-separate requirement. Use browser DevTools and `TB_ONSHAPE_DEBUG=1` to distinguish certificate, PNA,
-and missing Onshape-option failures.
+Two mechanisms, and a Chrome version decides which one is in force:
+
+- **Private Network Access (older Chromium).** An `OPTIONS` preflight when `cad.onshape.com`
+  connects to the loopback bridge; every CORS response must carry
+  `Access-Control-Allow-Private-Network: true`. `_http` still sends it, because the browsers that
+  want it are still in use.
+- **Local Network Access (Chrome 142+, flag-gated from 138).** The preflight opt-in is replaced by a
+  user permission: "cad.onshape.com wants to access other apps and services on this device". The
+  server cannot grant it and no response header suppresses it — the user must Allow. Until the grant
+  is remembered, *every* request from the page re-asks, so a page that talks to the bridge steadily
+  makes the prompt appear to flicker. Tell users to tick **"Remember my choice for this site"**;
+  one grant then covers the session and the prompt stops.
+
+This is why the userscript's send rate is decoupled from `mousemove` (§8.14): at one request per
+pointer event the pre-grant prompt is re-triggered ~120 times a second.
+
+Certificate trust remains a separate requirement from both. Use browser DevTools and
+`TB_ONSHAPE_DEBUG=1` to distinguish certificate, permission, and missing Onshape-option failures.
 
 ---
 
@@ -431,7 +451,8 @@ Orbit/To-Cursor gesture holds. Camera pivot is not exposed because turn-in-place
 normal orthographic projection degenerates into an image slide.
 
 Firefox uses its own certificate store, while Chromium browsers also require the Private Network
-Access response described in §8.15. Under-cursor behavior requires the supplied
+Access response or the Local Network Access permission described in §8.15. Under-cursor behavior
+requires the supplied
 `/trackball/pointer.js` userscript. Onshape has no host add-in to install or update; the transport is
 the daemon-side bridge. Current live qualification is tracked only in [`TODO.md`](../../TODO.md).
 

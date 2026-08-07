@@ -644,7 +644,7 @@ def _onshape_cert_paths(cfg):
     return (o.get("cert_path") or d_cert, o.get("key_path") or d_key)
 
 
-def setup_onshape(appdef: "AppDef", cfg) -> tuple[bool, str]:
+def setup_onshape(appdef: "AppDef", cfg) -> tuple[bool, str, list]:
     """Enable the Onshape integration. Like SolidWorks there is no add-in to install: Onshape is
     driven over the browser's native 3Dconnexion support by a daemon-side bridge that impersonates
     the local NL-Proxy service. Setup (a) generates a self-signed TLS cert for 127.51.68.120 (safe
@@ -663,23 +663,33 @@ def setup_onshape(appdef: "AppDef", cfg) -> tuple[bool, str]:
     a["enabled"] = True
     a["addin_version"] = ""                       # no add-in for Onshape (browser bridge)
     _save_operational(cfg, appdef.key, a)
+    trust_command = 'certutil -user -addstore Root "%s"' % cert_path
+    # Both URLs come from the bridge module rather than being spelled out again: the address and
+    # port are configurable, and a setup step that names the wrong port is worse than none.
     return True, (
         "Onshape integration enabled — it's driven through the browser's built-in 3Dconnexion "
         "support, so there's no add-in to install.\n\n"
         "One-time steps:\n"
         "1) Trust the local certificate so Chrome/Edge/Firefox will connect. Recommended (no admin) "
         "— run in a terminal:\n"
-        "      certutil -user -addstore Root \"%s\"\n"
+        "      %s\n"
         "   Click 'Yes' on the Windows prompt. (To undo later: certutil -user -delstore Root "
-        "127.51.68.120.) Alternatively, just browse to https://127.51.68.120:8181 once and accept "
-        "the warning.\n"
+        "%s.) Alternatively, use \"Open bridge page\" below (or browse to %s) and accept the "
+        "warning once.\n"
         "2) In Onshape, enable the SpaceMouse / 3Dconnexion option (Account → Preferences, or the "
         "view settings).\n"
-        "3) For under-cursor orbit (Orbit pivot = cursor), install the userscript with "
+        "3) Chrome and Edge also ask whether cad.onshape.com may reach this device — choose "
+        "\"Remember my choice for this site\", then Allow. Until it is remembered, every request "
+        "the page makes re-asks, which looks like the prompt flickering.\n"
+        "4) For under-cursor orbit (Orbit pivot = cursor), install the userscript with "
         "\"Copy userscript\" below (also available under Per-App Bindings → Onshape).\n\n"
         "Then open an Onshape document, switch the daemon to 3D mode, and focus the Onshape tab — "
         "the row flips to \"connected\" once Onshape's 3D mouse client connects."
-        % cert_path)
+        % (trust_command, onshape_bridge.BRIDGE_HOST, onshape_bridge.BRIDGE_URL)
+    ), [
+        ("Copy trust command", trust_command),
+        ("Copy bridge URL", onshape_bridge.BRIDGE_URL),
+    ]
 
 
 # --- Blender add-on install (legacy bl_info add-on -> scripts/addons, + auto-enable startup shim) --
