@@ -172,9 +172,12 @@ def test_pixel_ray_uses_the_camera_basis():
 
 # --- page pointer ingest ----------------------------------------------------------------------
 def test_parse_pointer_body_ndc():
+    # A body with no "v" is a userscript installed before the version stamp; it parses, and the
+    # empty string is what lets the daemon report the copy as unidentified rather than current.
     assert ob._parse_pointer_body(b'{"ndc_x":0.5,"ndc_y":-0.25,"on_canvas":true}') == \
-        (0.5, -0.25, True)
+        (0.5, -0.25, True, "")
     assert ob._parse_pointer_body('{"ndc_x":0,"ndc_y":0,"on_canvas":false}')[2] is False
+    assert ob._parse_pointer_body(b'{"ndc_x":0,"ndc_y":0,"v":"9.9.9"}')[3] == "9.9.9"
 
 
 def test_parse_pointer_body_xywh():

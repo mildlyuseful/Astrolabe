@@ -3,6 +3,8 @@
 
 """Onshape setup: what the one-time trust steps have to hand the user, and in what form."""
 
+from types import SimpleNamespace
+
 from trackball_daemon import integrations, onshape_bridge
 from trackball_daemon.config import Config
 
@@ -49,6 +51,53 @@ def test_setup_explains_the_local_network_prompt(isolated_config):
     _ok, msg, _copyables = integrations.install(appdef, cfg)
 
     assert "Remember my choice for this site" in msg
+
+
+def test_installed_userscript_can_be_identified_and_updated():
+    """The script runs from the browser extension, so pulling the repo cannot replace it.
+
+    An installed copy is invisible and immortal without these two things: a version the daemon can
+    compare against, and an update URL the extension can poll. Their absence is why a fixed script
+    kept behaving like the old one after an update."""
+    script = onshape_bridge.pointer_userscript_source()
+
+    assert "// @version      %s" % onshape_bridge.USERSCRIPT_VERSION in script
+    assert onshape_bridge.USERSCRIPT_VERSION != "0.1"        # was a literal that never moved
+    assert "// @updateURL    %s" % onshape_bridge.POINTER_SCRIPT_URL in script
+    assert "// @downloadURL  %s" % onshape_bridge.POINTER_SCRIPT_URL in script
+    # It also has to say who it is on every sample, or the daemon can only guess.
+    assert 'var VERSION = "%s";' % onshape_bridge.USERSCRIPT_VERSION in script
+    assert "v: VERSION" in script
+    assert "__ASTROLABE_" not in script                      # every placeholder substituted
+
+
+def test_a_stale_userscript_is_reported_rather_than_silently_accepted(monkeypatch):
+    """The daemon's logger does not propagate to root, so this records at the call site."""
+    lines = []
+    monkeypatch.setattr(onshape_bridge, "get_logger",
+                        lambda: SimpleNamespace(info=lambda msg, *a: lines.append(msg % a)))
+    onshape_bridge._USERSCRIPT_VERSION_SEEN.clear()
+    try:
+        onshape_bridge._set_page_pointer(0.0, 0.0, True, "0.1")
+        onshape_bridge._set_page_pointer(0.1, 0.1, True, "0.1")   # same version, one message
+        stale = [line for line in lines if "userscript reports version" in line]
+        assert len(stale) == 1
+        assert "'0.1'" in stale[0] and onshape_bridge.USERSCRIPT_VERSION in stale[0]
+
+        lines.clear()
+        onshape_bridge._set_page_pointer(0.0, 0.0, True, onshape_bridge.USERSCRIPT_VERSION)
+        assert not [line for line in lines if "userscript reports version" in line]
+    finally:
+        onshape_bridge._USERSCRIPT_VERSION_SEEN.clear()
+
+
+def test_pointer_status_reports_both_versions():
+    """`GET /trackball/pointer` is the check the install steps point at, so it has to show the
+    comparison rather than leave the user to infer it from behavior."""
+    onshape_bridge._set_page_pointer(0.0, 0.0, True, "0.1")
+    with onshape_bridge._PAGE_POINTER_LOCK:
+        assert onshape_bridge._PAGE_POINTER["version"] == "0.1"
+    assert onshape_bridge.USERSCRIPT_VERSION != "0.1"
 
 
 def test_pointer_userscript_rate_is_decoupled_from_pointer_events():

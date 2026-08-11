@@ -56,6 +56,7 @@ import threading
 import time
 from urllib.parse import urlsplit
 
+from . import __version__
 from .config import ONSHAPE_BRIDGE_HOST, ONSHAPE_BRIDGE_PORT, orbit_pivot_candidates
 from .paths import user_config_dir
 from .service_health import ServiceHealth, ServiceHealthState
@@ -668,7 +669,7 @@ class _OnshapeConn:
         if path_only.startswith("/trackball/pointer") and method in ("POST", "PUT"):
             parsed = _parse_pointer_body(body_in)
             if parsed is not None:
-                _set_page_pointer(parsed[0], parsed[1], parsed[2])
+                _set_page_pointer(parsed[0], parsed[1], parsed[2], parsed[3])
                 self._http(204, "", origin, ctype=None)
             else:
                 self._http(400, "bad pointer json", origin, ctype="text/plain")
@@ -678,7 +679,9 @@ class _OnshapeConn:
             with _PAGE_POINTER_LOCK:
                 age = (time.monotonic() - _PAGE_POINTER["t"]) if _PAGE_POINTER["t"] else None
                 snap = {"age_s": age, "on_canvas": _PAGE_POINTER["on"],
-                        "ndc_x": _PAGE_POINTER["ndc_x"], "ndc_y": _PAGE_POINTER["ndc_y"]}
+                        "ndc_x": _PAGE_POINTER["ndc_x"], "ndc_y": _PAGE_POINTER["ndc_y"],
+                        "userscript_version": _PAGE_POINTER["version"],
+                        "userscript_version_served": USERSCRIPT_VERSION}
             self._http(200, json.dumps(snap), origin, ctype="application/json")
             return False
         upgrades = {item.strip().lower() for item in
@@ -934,23 +937,38 @@ class _OnshapeConn:
 # document.getElementById("canvas").getBoundingClientRect() to POST /trackball/pointer.
 
 
-_PAGE_POINTER = {"t": 0.0, "ndc_x": 0.0, "ndc_y": 0.0, "on": False}
+_PAGE_POINTER = {"t": 0.0, "ndc_x": 0.0, "ndc_y": 0.0, "on": False, "version": ""}
 _PAGE_POINTER_LOCK = threading.Lock()
+_USERSCRIPT_VERSION_SEEN = set()
+
+POINTER_SCRIPT_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer.js"
+POINTER_STATUS_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer"
+# The page to visit once to accept the certificate. Public because the setup dialog offers it as a
+# button and as copyable text, and both must name the port the server actually binds.
+BRIDGE_URL = _BRIDGE_ORIGIN
+# The userscript lives in the user's browser extension, not in this install, so `git pull` cannot
+# change it -- an installed copy runs until something replaces it. Stamping the daemon version into
+# @version and pointing @updateURL at the served script lets the extension notice a newer one; the
+# script reports the same string back on every sample so the daemon can say when it is behind.
+USERSCRIPT_VERSION = __version__
 
 # Bookmarklet / Violentmonkey userscript body (also served as text/javascript from the bridge).
 _POINTER_USERSCRIPT = r"""// ==UserScript==
 // @name         Astrolabe Onshape cursor pivot
 // @namespace    https://github.com/mildlyuseful/Astrolabe
-// @version      0.1
+// @version      __ASTROLABE_VERSION__
 // @description  Report the mouse position on Onshape's #canvas to the local trackball NL-Proxy.
 // @match        https://cad.onshape.com/*
 // @match        https://*.onshape.com/*
+// @downloadURL  __ASTROLABE_SCRIPT_URL__
+// @updateURL    __ASTROLABE_SCRIPT_URL__
 // @grant        none
 // @run-at       document-idle
 // ==/UserScript==
 (function () {
   "use strict";
   var ENDPOINT = "__ASTROLABE_ONSHAPE_ORIGIN__/trackball/pointer";
+  var VERSION = "__ASTROLABE_VERSION__";
   // Movement updates local state only; one timer owns the transport. Posting from the mousemove
   // handler put a cross-origin request on the wire per pointer event -- 120+ a second over the
   // canvas, each its own TLS handshake, to report what a 100 ms tick reports just as well (the
@@ -990,20 +1008,16 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
         mode: "cors",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ndc_x: last.x, ndc_y: last.y, on_canvas: last.on,
-                               canvas_w: last.cw, canvas_h: last.ch })
+                               canvas_w: last.cw, canvas_h: last.ch, v: VERSION })
       }).catch(function () {});
     } catch (e) {}
   }
   window.addEventListener("mousemove", observe, { passive: true, capture: true });
   setInterval(send, SEND_MS);
 })();
-""".replace("__ASTROLABE_ONSHAPE_ORIGIN__", _BRIDGE_ORIGIN)
-
-POINTER_SCRIPT_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer.js"
-POINTER_STATUS_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer"
-# The page to visit once to accept the certificate. Public because the setup dialog offers it as a
-# button and as copyable text, and both must name the port the server actually binds.
-BRIDGE_URL = _BRIDGE_ORIGIN
+""".replace("__ASTROLABE_ONSHAPE_ORIGIN__", _BRIDGE_ORIGIN) \
+   .replace("__ASTROLABE_SCRIPT_URL__", POINTER_SCRIPT_URL) \
+   .replace("__ASTROLABE_VERSION__", USERSCRIPT_VERSION)
 
 
 def pointer_userscript_source():
@@ -1019,13 +1033,17 @@ def pointer_install_instructions():
         "2) Open the extension → Create a new script (or \"+\" / Add new script).\n"
         "3) Delete the template, paste the Astrolabe userscript (use Copy userscript), then Save.\n"
         "4) Reload your Onshape tab and move the mouse over the 3D view.\n"
-        "5) Optional check: open %s — ndc_x/ndc_y should update as you move.\n\n"
+        "5) Optional check: open %s — ndc_x/ndc_y should update as you move, and "
+        "userscript_version should read %s.\n\n"
+        "Already have it installed? The script lives in your browser extension, so updating the "
+        "daemon does not change it — paste over the old one and Save. Copies from %s on carry an "
+        "update URL, so the extension can pick up later versions by itself.\n\n"
         "Script URL (daemon must be running): %s"
-        % (POINTER_STATUS_URL, POINTER_SCRIPT_URL)
+        % (POINTER_STATUS_URL, USERSCRIPT_VERSION, USERSCRIPT_VERSION, POINTER_SCRIPT_URL)
     )
 
 
-def _set_page_pointer(ndc_x, ndc_y, on_canvas):
+def _set_page_pointer(ndc_x, ndc_y, on_canvas, version=""):
     """Record a page-reported canvas NDC sample (called from the HTTP accept thread)."""
     try:
         x = float(ndc_x); y = float(ndc_y)
@@ -1033,11 +1051,21 @@ def _set_page_pointer(ndc_x, ndc_y, on_canvas):
         return
     if not (math.isfinite(x) and math.isfinite(y)):
         return
+    reported = str(version or "")
     with _PAGE_POINTER_LOCK:
         _PAGE_POINTER["t"] = time.monotonic()
         _PAGE_POINTER["ndc_x"] = max(-1.5, min(1.5, x))
         _PAGE_POINTER["ndc_y"] = max(-1.5, min(1.5, y))
         _PAGE_POINTER["on"] = bool(on_canvas)
+        _PAGE_POINTER["version"] = reported
+        first_sight = reported not in _USERSCRIPT_VERSION_SEEN
+        _USERSCRIPT_VERSION_SEEN.add(reported)
+    # Once per distinct version, not per sample: this arrives at the userscript's send rate, and a
+    # stale copy in the browser is otherwise invisible -- updating the daemon cannot replace it.
+    if first_sight and reported != USERSCRIPT_VERSION:
+        get_logger().info(
+            "onshape: userscript reports version %r, this daemon serves %r -- reinstall it from %s",
+            reported or "(none)", USERSCRIPT_VERSION, POINTER_SCRIPT_URL)
 
 
 def _get_page_pointer(ttl=_POINTER_TTL):
@@ -1052,16 +1080,22 @@ def _get_page_pointer(ttl=_POINTER_TTL):
 
 
 def _parse_pointer_body(raw):
-    """Parse a /trackball/pointer JSON body. Returns (ndc_x, ndc_y, on_canvas) or None."""
+    """Parse a /trackball/pointer JSON body.
+
+    Returns ``(ndc_x, ndc_y, on_canvas, version)`` or None. ``version`` is what the userscript
+    stamped itself with, and is "" for a copy predating the stamp -- which is exactly the copy
+    worth telling the user about, so an absent field is reported rather than defaulted away."""
     try:
         data = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
     except Exception:
         return None
     if not isinstance(data, dict):
         return None
+    version = data.get("v")
+    version = str(version) if isinstance(version, (str, int, float)) else ""
     if "ndc_x" in data and "ndc_y" in data:
         on = data.get("on_canvas", True)
-        return (data.get("ndc_x"), data.get("ndc_y"), bool(on))
+        return (data.get("ndc_x"), data.get("ndc_y"), bool(on), version)
     # Alternate: CSS-pixel offset inside the canvas + size (also exact).
     if all(k in data for k in ("x", "y", "w", "h")):
         try:
@@ -1071,7 +1105,7 @@ def _parse_pointer_body(raw):
             fx = float(data["x"]) / w
             fy = float(data["y"]) / h
             on = (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0)
-            return (fx * 2.0 - 1.0, 1.0 - fy * 2.0, on)
+            return (fx * 2.0 - 1.0, 1.0 - fy * 2.0, on, version)
         except (TypeError, ValueError):
             return None
     return None

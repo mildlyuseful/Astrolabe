@@ -356,6 +356,15 @@ The served Tampermonkey/Violentmonkey script reads `#canvas.getBoundingClientRec
 posts NDC to `/trackball/pointer`. The bridge accepts only fresh on-canvas samples; stale or missing
 samples make the pivot unavailable so the fallback chain continues.
 
+The script runs from the user's browser extension, not from this install, so updating the daemon
+cannot change an installed copy — it runs until something overwrites it. `@version` carries the
+daemon version and `@updateURL`/`@downloadURL` point at the served script, so the extension can pick
+up later versions; each sample also reports `v`, which `GET /trackball/pointer` echoes as
+`userscript_version` beside `userscript_version_served`, and a mismatch is logged once per version.
+A copy installed before the stamp reports `""` and is therefore still identifiable as stale. Anyone
+upgrading from such a copy has to paste the new script over it once, since the old one carries no
+update URL for the extension to follow.
+
 `mousemove` only updates the script's local state — a `SEND_MS` (100 ms) timer owns the transport,
 and resends an unchanged sample every `REFRESH_MS` (300 ms) to stay inside `_POINTER_TTL`. The rate
 is deliberately decoupled from the event: the bridge reads this once per gesture start, so posting
