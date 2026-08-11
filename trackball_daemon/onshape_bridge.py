@@ -663,7 +663,10 @@ class _OnshapeConn:
                        origin, ctype="application/json")
             return False
         # Exact canvas pointer from the Onshape page (userscript). No screen capture.
-        if path_only.startswith("/trackball/pointer.js") and method == "GET":
+        # Both suffixes serve the same body: `.user.js` is the convention every userscript manager
+        # keys install and update detection on, and `.js` is what earlier builds published.
+        if method == "GET" and (path_only.startswith("/trackball/pointer.user.js") or
+                                path_only.startswith("/trackball/pointer.js")):
             self._http(200, _POINTER_USERSCRIPT, origin, ctype="application/javascript")
             return False
         if path_only.startswith("/trackball/pointer") and method in ("POST", "PUT"):
@@ -717,7 +720,7 @@ class _OnshapeConn:
                 "if you can read this with no certificate warning, the cert is trusted.</p>"
                 "<h2>Under-cursor orbit</h2>"
                 "<p>Install the userscript from "
-                "<a href='/trackball/pointer.js'>/trackball/pointer.js</a> "
+                "<a href='/trackball/pointer.user.js'>/trackball/pointer.user.js</a> "
                 "(Violentmonkey / Tampermonkey on <code>cad.onshape.com</code>). It posts the exact "
                 "#canvas pointer to this bridge &mdash; no screen capture, no calibration.</p>"
                 "</body></html>")
@@ -941,7 +944,12 @@ _PAGE_POINTER = {"t": 0.0, "ndc_x": 0.0, "ndc_y": 0.0, "on": False, "version": "
 _PAGE_POINTER_LOCK = threading.Lock()
 _USERSCRIPT_VERSION_SEEN = set()
 
-POINTER_SCRIPT_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer.js"
+# `.user.js`, not `.js`: Violentmonkey, Tampermonkey and the rest recognise a userscript by that
+# suffix. Served from a plain `.js` URL the browser just renders the source, "Install from URL"
+# has no reason to treat it as installable, and the update check never fires. The old path still
+# serves the same body so anything already pointing at it keeps working.
+POINTER_SCRIPT_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer.user.js"
+POINTER_SCRIPT_LEGACY_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer.js"
 POINTER_STATUS_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer"
 # The page to visit once to accept the certificate. Public because the setup dialog offers it as a
 # button and as copyable text, and both must name the port the server actually binds.

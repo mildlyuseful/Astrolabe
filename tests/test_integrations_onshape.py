@@ -100,6 +100,19 @@ def test_pointer_status_reports_both_versions():
     assert onshape_bridge.USERSCRIPT_VERSION != "0.1"
 
 
+def test_userscript_is_published_under_the_suffix_managers_recognise():
+    """A userscript manager decides whether a URL is installable by its `.user.js` suffix.
+
+    Served from a plain `.js` URL, Firefox renders the source and Violentmonkey's Install from URL
+    has nothing to act on, so the install path the steps recommend cannot work."""
+    assert onshape_bridge.POINTER_SCRIPT_URL.endswith("/trackball/pointer.user.js")
+    assert onshape_bridge.POINTER_SCRIPT_LEGACY_URL.endswith("/trackball/pointer.js")
+    # The metadata block must advertise the recognised URL, or the update check never fires.
+    script = onshape_bridge.pointer_userscript_source()
+    assert "// @updateURL    %s" % onshape_bridge.POINTER_SCRIPT_URL in script
+    assert "pointer.user.js" in script
+
+
 def test_pointer_userscript_rate_is_decoupled_from_pointer_events():
     """The userscript posted once per mousemove -- 120+ cross-origin requests a second, each its
     own TLS handshake, and before the site holds the Local Network Access permission, each one a

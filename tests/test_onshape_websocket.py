@@ -244,6 +244,21 @@ def test_discovery_advertises_the_fixed_listener_port():
     }
 
 
+@pytest.mark.parametrize("path", ["/trackball/pointer.user.js", "/trackball/pointer.js"])
+def test_userscript_is_served_from_both_the_recognised_and_legacy_paths(path):
+    """`.user.js` is what a userscript manager will install from; `.js` is what older builds
+    published and what an already-installed copy may still poll."""
+    connection, sock = handshake_for(websocket_request(path=path))
+
+    assert connection.handshake_http() is False
+    response = sock.sent[-1]
+    assert response.startswith(b"HTTP/1.1 200")
+    head, body = response.split(b"\r\n\r\n", 1)
+    assert b"Content-Type: application/javascript" in head
+    assert body.startswith(b"// ==UserScript==")
+    assert ob.USERSCRIPT_VERSION.encode() in body
+
+
 @pytest.mark.parametrize(
     "request_bytes",
     [
