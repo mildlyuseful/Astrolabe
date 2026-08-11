@@ -659,6 +659,7 @@ class _OnshapeConn:
             self._http(204, "", origin, ctype=None)
             return False
         if path_only.startswith("/3dconnexion/nlproxy"):
+            _count_bridge_event("discovery_probes")
             self._http(200, json.dumps({"port": BRIDGE_PORT, "version": NLPROXY_VERSION}),
                        origin, ctype="application/json")
             return False
@@ -667,24 +668,31 @@ class _OnshapeConn:
         # keys install and update detection on, and `.js` is what earlier builds published.
         if method == "GET" and (path_only.startswith("/trackball/pointer.user.js") or
                                 path_only.startswith("/trackball/pointer.js")):
+            _count_bridge_event("script_downloads")
             self._http(200, _POINTER_USERSCRIPT, origin, ctype="application/javascript")
             return False
         if path_only.startswith("/trackball/pointer") and method in ("POST", "PUT"):
             parsed = _parse_pointer_body(body_in)
             if parsed is not None:
+                _count_bridge_event("posts_received")
                 _set_page_pointer(parsed[0], parsed[1], parsed[2], parsed[3])
                 self._http(204, "", origin, ctype=None)
             else:
+                _count_bridge_event("posts_rejected")
                 self._http(400, "bad pointer json", origin, ctype="text/plain")
             return False
         if path_only.startswith("/trackball/pointer") and method == "GET":
-            # Status for the cert-trust / install page.
+            # Status for the cert-trust / install page. `diagnosis` leads so a screenshot of the
+            # rendered JSON answers "which link is broken" without anyone reading counters.
             with _PAGE_POINTER_LOCK:
                 age = (time.monotonic() - _PAGE_POINTER["t"]) if _PAGE_POINTER["t"] else None
-                snap = {"age_s": age, "on_canvas": _PAGE_POINTER["on"],
+                snap = {"diagnosis": _pointer_chain_diagnosis(age),
+                        "age_s": age, "on_canvas": _PAGE_POINTER["on"],
                         "ndc_x": _PAGE_POINTER["ndc_x"], "ndc_y": _PAGE_POINTER["ndc_y"],
                         "userscript_version": _PAGE_POINTER["version"],
                         "userscript_version_served": USERSCRIPT_VERSION}
+            with _BRIDGE_STATS_LOCK:
+                snap.update(_BRIDGE_STATS)
             self._http(200, json.dumps(snap), origin, ctype="application/json")
             return False
         upgrades = {item.strip().lower() for item in
@@ -943,6 +951,51 @@ class _OnshapeConn:
 _PAGE_POINTER = {"t": 0.0, "ndc_x": 0.0, "ndc_y": 0.0, "on": False, "version": ""}
 _PAGE_POINTER_LOCK = threading.Lock()
 _USERSCRIPT_VERSION_SEEN = set()
+
+# One counter per link of the userscript -> daemon chain, since daemon start. These exist because
+# the machine with the problem is usually not the machine being debugged from: the status page is
+# the one artifact users reliably share, so it has to carry the diagnosis itself. The first zero
+# (or nonzero rejection) walking down this chain names the broken link.
+_BRIDGE_STATS = {"script_downloads": 0, "posts_received": 0, "posts_rejected": 0,
+                 "discovery_probes": 0, "tls_rejections": 0, "last_tls_rejection": ""}
+_BRIDGE_STATS_LOCK = threading.Lock()
+
+
+def _count_bridge_event(key, last_tls_rejection=None):
+    with _BRIDGE_STATS_LOCK:
+        _BRIDGE_STATS[key] += 1
+        if last_tls_rejection is not None:
+            _BRIDGE_STATS["last_tls_rejection"] = last_tls_rejection
+
+
+def _pointer_chain_diagnosis(age):
+    """One sentence naming the furthest confirmed link in the chain and what to do next.
+
+    Ordered by how far the evidence reaches: samples parsed beats samples rejected beats a TLS
+    handshake refusal beats never having fetched the script at all."""
+    with _BRIDGE_STATS_LOCK:
+        stats = dict(_BRIDGE_STATS)
+    if stats["posts_received"]:
+        if age is not None and age < 2.0:
+            return "receiving pointer samples"
+        return ("pointer samples arrived but stopped %.0f s ago -- the Onshape tab was closed, "
+                "reloaded without the userscript, or is no longer sending" % age)
+    if stats["posts_rejected"]:
+        return ("pointer posts are arriving but none parsed (%d rejected) -- the installed "
+                "userscript sends something this daemon does not understand; reinstall it from %s"
+                % (stats["posts_rejected"], POINTER_SCRIPT_URL))
+    if stats["tls_rejections"]:
+        return ("no pointer sample has ever arrived, and a client rejected this daemon's TLS "
+                "certificate %d time(s) (last: %s) -- trust the certificate in the browser that "
+                "runs the userscript; Firefox keeps its own certificate store, separate from "
+                "Windows" % (stats["tls_rejections"], stats["last_tls_rejection"] or "?"))
+    if not stats["script_downloads"]:
+        return ("no pointer sample has ever arrived, and the userscript has never been downloaded "
+                "from this daemon since it started -- install it from %s" % POINTER_SCRIPT_URL)
+    return ("no pointer sample has ever arrived although the userscript was downloaded %d "
+            "time(s) -- make sure exactly one copy is enabled in the userscript manager, then "
+            "reload the Onshape tab and move the mouse over the 3D view while watching this page"
+            % stats["script_downloads"])
 
 # `.user.js`, not `.js`: Violentmonkey, Tampermonkey and the rest recognise a userscript by that
 # suffix. Served from a plain `.js` URL the browser just renders the source, "Install from URL"
@@ -1421,6 +1474,7 @@ class OnshapeBridge:
             # controller. EOF/reset/wrong-version failures on those sockets are not certificate
             # evidence and must never demote a healthy controller.
             if _tls_certificate_rejected(exc):
+                _count_bridge_event("tls_rejections", last_tls_rejection=str(exc)[:200])
                 self._warn_once(
                     "tls", "onshape: a client explicitly rejected the local TLS certificate")
                 if not self._connected:

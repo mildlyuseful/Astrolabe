@@ -372,7 +372,14 @@ per pointer event bought nothing and cost 120+ cross-origin requests a second, e
 handshake and, pre-grant, its own Local Network Access prompt (§8.15).
 
 Install through **3D Apps → Onshape → Set up** or the Per-App **Copy userscript…** action, then reload
-Onshape. `GET /trackball/pointer` is a diagnostic view of the cached sample. Offline tests cover
+Onshape. `GET /trackball/pointer` is a diagnostic view of the cached sample, and it diagnoses
+itself: a `diagnosis` field names the furthest confirmed link of the userscript → daemon chain
+(script never downloaded, TLS certificate rejected by a client, script downloaded but silent,
+posts arriving but unparseable, or receiving), backed by per-link counters since daemon start
+(`script_downloads`, `posts_received`, `posts_rejected`, `discovery_probes`, `tls_rejections`).
+A TLS rejection with a working status page means the rejecting client is a different certificate
+context than the browser showing the page — typically Firefox, whose store is separate from
+Windows'. Offline tests cover
 parsing, TTL, ray construction, targeting, and fallback behavior; current live qualification belongs
 in [`TODO.md`](../../TODO.md), with completed evidence under `archive/release-evidence/`.
 

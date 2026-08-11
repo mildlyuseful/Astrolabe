@@ -244,6 +244,100 @@ def test_discovery_advertises_the_fixed_listener_port():
     }
 
 
+def _reset_pointer_chain_state():
+    with ob._BRIDGE_STATS_LOCK:
+        for key in ob._BRIDGE_STATS:
+            ob._BRIDGE_STATS[key] = "" if key == "last_tls_rejection" else 0
+    with ob._PAGE_POINTER_LOCK:
+        ob._PAGE_POINTER.update({"t": 0.0, "ndc_x": 0.0, "ndc_y": 0.0, "on": False, "version": ""})
+
+
+def http_request(method, path, body=b"", ctype="application/json"):
+    head = ("%s %s HTTP/1.1\r\nOrigin: https://cad.onshape.com\r\n"
+            "Content-Type: %s\r\nContent-Length: %d\r\n\r\n" % (method, path, ctype, len(body)))
+    return head.encode("ascii") + body
+
+
+def _status_json():
+    connection, sock = handshake_for(http_request("GET", "/trackball/pointer"))
+    assert connection.handshake_http() is False
+    return json.loads(sock.sent[-1].split(b"\r\n\r\n", 1)[1])
+
+
+def test_status_page_diagnoses_the_first_broken_chain_link():
+    """The machine with the problem is rarely the machine being debugged from, and the status page
+    is what its user actually shares. So the page itself must say which link is broken, not leave
+    four counters to be cross-referenced by hand."""
+    _reset_pointer_chain_state()
+    try:
+        snap = _status_json()
+        assert "never been downloaded" in snap["diagnosis"]
+        assert ob.POINTER_SCRIPT_URL in snap["diagnosis"]
+
+        connection, _sock = handshake_for(http_request("GET", "/trackball/pointer.user.js"))
+        assert connection.handshake_http() is False
+        snap = _status_json()
+        assert "downloaded 1" in snap["diagnosis"]
+        assert snap["script_downloads"] == 1
+
+        body = json.dumps({"ndc_x": 0.1, "ndc_y": 0.2, "on_canvas": True,
+                           "v": ob.USERSCRIPT_VERSION}).encode()
+        connection, sock = handshake_for(http_request("POST", "/trackball/pointer", body))
+        assert connection.handshake_http() is False
+        assert sock.sent[-1].startswith(b"HTTP/1.1 204")
+        snap = _status_json()
+        assert snap["diagnosis"] == "receiving pointer samples"
+        assert snap["posts_received"] == 1
+        assert snap["userscript_version"] == ob.USERSCRIPT_VERSION
+    finally:
+        _reset_pointer_chain_state()
+
+
+def test_status_page_reports_unparseable_posts_as_their_own_link():
+    _reset_pointer_chain_state()
+    try:
+        connection, sock = handshake_for(
+            http_request("POST", "/trackball/pointer", b"not-json"))
+        assert connection.handshake_http() is False
+        assert sock.sent[-1].startswith(b"HTTP/1.1 400")
+        snap = _status_json()
+        assert "none parsed (1 rejected)" in snap["diagnosis"]
+    finally:
+        _reset_pointer_chain_state()
+
+
+def test_status_page_reports_certificate_rejection_and_names_the_firefox_store():
+    """An explicit TLS certificate alert is the one failure the page's own load cannot show: the
+    status page renders fine in a browser that trusts the cert while the userscript's browser
+    rejects it. Firefox keeping its own store is exactly that split, so the diagnosis names it."""
+    _reset_pointer_chain_state()
+    try:
+        bridge = ob.OnshapeBridge(on_health_changed=lambda _h: None)
+        bridge._enabled.set()
+
+        class Raw:
+            def settimeout(self, _timeout):
+                pass
+
+            def close(self):
+                pass
+
+        class Context:
+            @staticmethod
+            def wrap_socket(_raw, server_side):
+                raise ssl.SSLError(
+                    "[SSL: TLSV1_ALERT_UNKNOWN_CA] tlsv1 alert unknown ca")
+
+        bridge._handle_raw(Raw(), Context())
+        snap = _status_json()
+        assert snap["tls_rejections"] == 1
+        assert "unknown ca" in snap["last_tls_rejection"]
+        assert "rejected this daemon's TLS certificate" in snap["diagnosis"]
+        assert "Firefox keeps its own certificate store" in snap["diagnosis"]
+    finally:
+        _reset_pointer_chain_state()
+
+
 @pytest.mark.parametrize("path", ["/trackball/pointer.user.js", "/trackball/pointer.js"])
 def test_userscript_is_served_from_both_the_recognised_and_legacy_paths(path):
     """`.user.js` is what a userscript manager will install from; `.js` is what older builds
