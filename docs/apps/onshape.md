@@ -365,6 +365,10 @@ A copy installed before the stamp reports `""` and is therefore still identifiab
 upgrading from such a copy has to paste the new script over it once, since the old one carries no
 update URL for the extension to follow.
 
+A failed post backs the next one off exponentially to a 5 s ceiling, cleared by the first success.
+Without it the pre-grant permission prompt is recreated ten times a second — faster than it can be
+clicked — so the retry rate prevents the grant that would make the retries succeed.
+
 `mousemove` only updates the script's local state — a `SEND_MS` (100 ms) timer owns the transport,
 and resends an unchanged sample every `REFRESH_MS` (300 ms) to stay inside `_POINTER_TTL`. The rate
 is deliberately decoupled from the event: the bridge reads this once per gesture start, so posting
@@ -374,9 +378,16 @@ handshake and, pre-grant, its own Local Network Access prompt (§8.15).
 Install through **3D Apps → Onshape → Set up** or the Per-App **Copy userscript…** action, then reload
 Onshape. `GET /trackball/pointer` is a diagnostic view of the cached sample, and it diagnoses
 itself: a `diagnosis` field names the furthest confirmed link of the userscript → daemon chain
-(script never downloaded, TLS certificate rejected by a client, script downloaded but silent,
-posts arriving but unparseable, or receiving), backed by per-link counters since daemon start
-(`script_downloads`, `posts_received`, `posts_rejected`, `discovery_probes`, `tls_rejections`).
+(script never downloaded, TLS certificate rejected by a client, page blocked from reaching the
+device at all, script downloaded but silent, posts arriving but unparseable, or receiving), backed
+by per-link counters since daemon start (`script_downloads`, `posts_received`, `posts_rejected`,
+`discovery_probes`, `cors_preflights`, `tls_rejections`).
+
+`discovery_probes` and `cors_preflights` both at zero while the page is visibly attempting requests
+is the signature of §8.15's permission being ungranted: the browser refuses the request before a
+socket is opened, so no channel — not Onshape's own discovery, not even a preflight — reaches the
+daemon. That state is self-perpetuating unless the client backs off, which is why the userscript
+does (§8.14).
 A TLS rejection with a working status page means the rejecting client is a different certificate
 context than the browser showing the page — typically Firefox, whose store is separate from
 Windows'. Offline tests cover

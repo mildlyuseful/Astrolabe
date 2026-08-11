@@ -656,6 +656,7 @@ class _OnshapeConn:
         body_in = body_in[:content_len]
 
         if method == "OPTIONS":
+            _count_bridge_event("cors_preflights")
             self._http(204, "", origin, ctype=None)
             return False
         if path_only.startswith("/3dconnexion/nlproxy"):
@@ -957,7 +958,8 @@ _USERSCRIPT_VERSION_SEEN = set()
 # the one artifact users reliably share, so it has to carry the diagnosis itself. The first zero
 # (or nonzero rejection) walking down this chain names the broken link.
 _BRIDGE_STATS = {"script_downloads": 0, "posts_received": 0, "posts_rejected": 0,
-                 "discovery_probes": 0, "tls_rejections": 0, "last_tls_rejection": ""}
+                 "discovery_probes": 0, "cors_preflights": 0, "tls_rejections": 0,
+                 "last_tls_rejection": ""}
 _BRIDGE_STATS_LOCK = threading.Lock()
 
 
@@ -992,10 +994,24 @@ def _pointer_chain_diagnosis(age):
     if not stats["script_downloads"]:
         return ("no pointer sample has ever arrived, and the userscript has never been downloaded "
                 "from this daemon since it started -- install it from %s" % POINTER_SCRIPT_URL)
-    return ("no pointer sample has ever arrived although the userscript was downloaded %d "
-            "time(s) -- make sure exactly one copy is enabled in the userscript manager, then "
-            "reload the Onshape tab and move the mouse over the 3D view while watching this page"
-            % stats["script_downloads"])
+    # The script was fetched, so a userscript manager has it, yet the Onshape page has produced no
+    # traffic of any kind -- not its own 3Dconnexion discovery probe, not even a CORS preflight.
+    # A page cannot be silent in every one of those ways by installing the wrong script; the
+    # browser is refusing to let it off the machine. That is the local-network permission, and
+    # while it is ungranted the refusal is what re-triggers the prompt on every attempt.
+    if not stats["discovery_probes"] and not stats["cors_preflights"]:
+        return ("the userscript was downloaded %d time(s), but nothing from the Onshape page has "
+                "reached this daemon -- no 3Dconnexion discovery probe and no CORS preflight, so "
+                "the browser is blocking cad.onshape.com from reaching this device. Grant its "
+                "local-network permission with \"Remember my choice for this site\" ticked. If the "
+                "prompt is flickering too fast to click, disable the userscript, reload the tab, "
+                "grant it on the calm prompt, then re-enable the userscript"
+                % stats["script_downloads"])
+    return ("no pointer sample has ever arrived although the userscript was downloaded %d time(s) "
+            "and the page reached this daemon (%d discovery probe(s), %d preflight(s)) -- make "
+            "sure exactly one copy is enabled in the userscript manager, then reload the Onshape "
+            "tab and move the mouse over the 3D view while watching this page"
+            % (stats["script_downloads"], stats["discovery_probes"], stats["cors_preflights"]))
 
 # `.user.js`, not `.js`: Violentmonkey, Tampermonkey and the rest recognise a userscript by that
 # suffix. Served from a plain `.js` URL the browser just renders the source, "Install from URL"
@@ -1038,9 +1054,17 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
   // prompt: until the site holds that permission, every one of those requests re-asks for it.
   var SEND_MS = 100;             // upper bound on how stale a reported sample can be
   var REFRESH_MS = 300;          // resend an unchanged sample, well inside the bridge's TTL
+  var MAX_BACKOFF_MS = 5000;     // slowest retry while the bridge is unreachable
   var last = null;
   var sentKey = "";
   var sentAt = 0;
+  // Failures used to be swallowed and the next tick sent anyway, so an unreachable bridge was
+  // retried ten times a second forever. That is worst exactly when it matters: before the browser
+  // has been granted local-network permission every attempt re-raises the permission prompt, and
+  // at ten a second the prompt is recreated faster than it can be clicked -- so the retry rate
+  // was itself preventing the grant that would have fixed it. Back off until something succeeds.
+  var failures = 0;
+  var retryAt = 0;
   function canvasEl() {
     return document.getElementById("canvas") || document.querySelector("canvas");
   }
@@ -1058,8 +1082,9 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
   }
   function send() {
     if (!last) return;
-    var key = [last.x, last.y, last.on, last.cw, last.ch].join(",");
     var now = Date.now();
+    if (now < retryAt) return;
+    var key = [last.x, last.y, last.on, last.cw, last.ch].join(",");
     if (key === sentKey && now - sentAt < REFRESH_MS) return;
     sentKey = key;
     sentAt = now;
@@ -1070,7 +1095,14 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ndc_x: last.x, ndc_y: last.y, on_canvas: last.on,
                                canvas_w: last.cw, canvas_h: last.ch, v: VERSION })
-      }).catch(function () {});
+      }).then(function () {
+        failures = 0;
+        retryAt = 0;
+      }).catch(function () {
+        failures += 1;
+        retryAt = Date.now() + Math.min(MAX_BACKOFF_MS, SEND_MS * Math.pow(2, failures));
+        sentKey = "";                // do not let the skipped send count as delivered
+      });
     } catch (e) {}
   }
   window.addEventListener("mousemove", observe, { passive: true, capture: true });

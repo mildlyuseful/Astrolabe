@@ -125,3 +125,19 @@ def test_pointer_userscript_rate_is_decoupled_from_pointer_events():
     # The resend floor has to stay inside the bridge's staleness window or a still cursor expires.
     assert "var REFRESH_MS = 300;" in script
     assert onshape_bridge._POINTER_TTL * 1000 > 300
+
+
+def test_userscript_backs_off_instead_of_hammering_an_unreachable_bridge():
+    """A failed post must slow the next one down, or the retry rate blocks its own fix.
+
+    Before the browser grants local-network permission every attempt re-raises the prompt; at the
+    steady send rate the prompt is recreated faster than the user can click Allow, so retrying
+    hard is what prevents the grant that would make the retries succeed."""
+    script = onshape_bridge.pointer_userscript_source()
+
+    assert "var MAX_BACKOFF_MS = 5000;" in script
+    assert "if (now < retryAt) return;" in script
+    assert "failures += 1;" in script
+    assert "Math.pow(2, failures)" in script
+    # Success has to clear the backoff, or one blip would throttle the rest of the session.
+    assert "failures = 0;" in script and "retryAt = 0;" in script
