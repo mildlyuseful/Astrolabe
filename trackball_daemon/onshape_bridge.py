@@ -1029,17 +1029,24 @@ def pointer_install_instructions():
     """User-facing steps to install the under-cursor userscript (shared by setup UI + docs)."""
     return (
         "Under-cursor orbit needs a tiny page script (exact #canvas size from the DOM):\n\n"
-        "1) Install the Tampermonkey or Violentmonkey extension in the browser you use for Onshape.\n"
-        "2) Open the extension → Create a new script (or \"+\" / Add new script).\n"
-        "3) Delete the template, paste the Astrolabe userscript (use Copy userscript), then Save.\n"
+        "1) Install the Violentmonkey or Tampermonkey extension in the browser you use for Onshape.\n"
+        "2) Install it from the URL below — Violentmonkey: dashboard → \"+\" → Install from URL. "
+        "Tampermonkey: Utilities → Install from URL. Paste just the URL:\n"
+        "      %s\n"
+        "   The daemon must be running and its certificate trusted, or the extension cannot fetch "
+        "it. Installing this way records the update URL, so later versions arrive on their own.\n"
+        "3) If that is unavailable, create a new script, delete the template, paste the Astrolabe "
+        "userscript (use Copy userscript), then Save.\n"
         "4) Reload your Onshape tab and move the mouse over the 3D view.\n"
-        "5) Optional check: open %s — ndc_x/ndc_y should update as you move, and "
-        "userscript_version should read %s.\n\n"
+        "5) Check: open %s — ndc_x/ndc_y should update as you move, and userscript_version should "
+        "read %s. An empty userscript_version means the browser is still running a copy from "
+        "before the version stamp.\n\n"
         "Already have it installed? The script lives in your browser extension, so updating the "
-        "daemon does not change it — paste over the old one and Save. Copies from %s on carry an "
-        "update URL, so the extension can pick up later versions by itself.\n\n"
+        "daemon does not change it. Re-installing from the URL replaces it in place (the name and "
+        "namespace match); pasting over the old script works too. Either way, make sure you do not "
+        "end up with two enabled copies — that doubles the requests the page makes.\n\n"
         "Script URL (daemon must be running): %s"
-        % (POINTER_STATUS_URL, USERSCRIPT_VERSION, USERSCRIPT_VERSION, POINTER_SCRIPT_URL)
+        % (POINTER_SCRIPT_URL, POINTER_STATUS_URL, USERSCRIPT_VERSION, POINTER_SCRIPT_URL)
     )
 
 
