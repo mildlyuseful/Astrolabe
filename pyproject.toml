@@ -50,6 +50,14 @@ dependencies = [
     "pystray>=0.19.5",
     "Pillow>=10.0.0",
     "pywin32>=306; sys_platform == 'win32'",   # SolidWorks COM automation (win32com)
+    # Onshape's bridge mints its own loopback TLS certificate on first setup, and the stdlib cannot
+    # build an X.509 certificate at all. This was an `onshape` extra until a source install proved
+    # that split unshippable: `uv run astrolabe` syncs default dependencies only, so a plain clone
+    # got a daemon that advertises Onshape and then fails setup on a missing package. The `openssl`
+    # CLI fallback does not rescue it either -- Windows ships no openssl on PATH, and the one inside
+    # Git for Windows lives in mingw64\bin, which the installer does not add. A first-class feature
+    # cannot depend on an install incantation, so the requirement is declared where it is used.
+    "cryptography>=41.0; sys_platform == 'win32'",
 ]
 
 # Keep sub-tables below every key of [project]: a table header ends the parent table, so anything
@@ -63,8 +71,6 @@ Security = "https://github.com/mildlyuseful/Astrolabe/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
 debug = ["pygame>=2.5.0", "PyOpenGL>=3.1.7"]
-# Onshape bridge cert generation; without it the bridge falls back to an `openssl` CLI on PATH.
-onshape = ["cryptography>=41.0; sys_platform == 'win32'"]
 # PyYAML is here so the workflow-structure tests actually run. A workflow GitHub cannot parse is
 # rejected before any job starts, which produces no job and no readable error, so that check has to
 # happen locally or not at all.

@@ -33,6 +33,11 @@ launch a supported 3D application. Shared ownership and lifecycle rules are defi
   insists on TLS to a fixed loopback IP. Setup creates a non-CA leaf certificate in the current
   user's APPDATA but never trusts it automatically. The user can explicitly trust it, accept it for
   a browser session, or leave Onshape disabled.
+- Browsers can also require Onshape's site permission to access apps on this device/local network.
+  Certificate trust does not grant it. The cursor userscript observes the permission through the
+  browser's Permissions API and waits for Onshape's native client to obtain the grant; it does not
+  grant permission or modify browser security settings. Browsers without a queryable network
+  permission use serialized requests.
 - The first-run setup guide is observational by default. Its only direct choices are selecting the
   existing keyboard-only input profile and, on Finish, applying the existing current-user
   **Start at login** toggle. Host setup remains in the 3D Apps panel with the same consent and

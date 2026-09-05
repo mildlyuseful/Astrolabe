@@ -356,17 +356,69 @@ The served Tampermonkey/Violentmonkey script reads `#canvas.getBoundingClientRec
 posts NDC to `/trackball/pointer`. The bridge accepts only fresh on-canvas samples; stale or missing
 samples make the pivot unavailable so the fallback chain continues.
 
+The script runs from the user's browser extension, not from this install, so updating the daemon
+cannot change an installed copy — it runs until something overwrites it. `@version` carries
+`USERSCRIPT_VERSION`, bumped independently on script changes, and `@updateURL`/`@downloadURL` point at
+the served script, so the extension can pick
+up later versions; each sample also reports `v`, which `GET /trackball/pointer` echoes as
+`userscript_version` beside `userscript_version_served`, and a mismatch is logged once per version.
+A copy installed before the stamp reports `""` and is therefore still identifiable as stale. Anyone
+upgrading from such a copy has to paste the new script over it once, since the old one carries no
+update URL for the extension to follow.
+
+Onshape's built-in 3Dconnexion client owns the first local-device permission request. The cursor
+script queries `loopback-network` (or `local-network-access` where only that name is supported)
+without opening a connection, then retains the live `PermissionStatus`. While the query is pending
+or the state is `prompt`/`denied`, it sends nothing; grant enables sending, revocation stops it.
+Browsers without either permission name use serialized transport. Other query failures leave
+reporting paused until reload. The script runs once in the top-level page, with a duplicate guard.
+
+`mousemove` only updates local state. A `SEND_MS` (100 ms) timer sends the latest sample, with at
+most one unfinished `fetch`; an unanswered permission request must never be aborted/retried on a
+timer. An unchanged sample refreshes every `REFRESH_MS` (300 ms), inside `_POINTER_TTL`. Network
+errors, synchronous exceptions, and unsuccessful HTTP responses back off to a 5 s ceiling;
+success restores the normal rate. Backoff alone cannot prevent overlapping *pending* requests.
+
 Install through **3D Apps → Onshape → Set up** or the Per-App **Copy userscript…** action, then reload
-Onshape. `GET /trackball/pointer` is a diagnostic view of the cached sample. Offline tests cover
+Onshape. `GET /trackball/pointer` is a diagnostic view of the cached sample, and it diagnoses
+itself: a `diagnosis` field names the furthest confirmed link of the userscript → daemon chain
+(script never downloaded, TLS certificate rejected by a client, no page traffic observed,
+script downloaded but silent, posts arriving but unparseable, or receiving), backed
+by per-link counters since daemon start (`script_downloads`, `posts_received`, `posts_rejected`,
+`discovery_probes`, `cors_preflights`, `tls_rejections`).
+
+Zero `discovery_probes` and `cors_preflights` are consistent with an ungranted permission, but cannot
+prove it: a closed document, disabled 3Dconnexion option, or inactive script can also be silent.
+A TLS rejection with a working status page means the rejecting client is a different certificate
+context than the browser showing the page — typically Firefox, whose store is separate from
+Windows'. Offline tests cover
 parsing, TTL, ray construction, targeting, and fallback behavior; current live qualification belongs
 in [`TODO.md`](../../TODO.md), with completed evidence under `archive/release-evidence/`.
 
-### 8.15 Chromium requires Private Network Access opt-in
+### 8.15 Site permission and TLS trust are separate browser gates
 
-Chromium sends an `OPTIONS` preflight when `cad.onshape.com` connects to the loopback bridge. Every
-CORS response must include `Access-Control-Allow-Private-Network: true`. Certificate trust remains a
-separate requirement. Use browser DevTools and `TB_ONSHAPE_DEBUG=1` to distinguish certificate, PNA,
-and missing Onshape-option failures.
+- **Private Network Access (older Chromium).** An `OPTIONS` preflight when `cad.onshape.com`
+  connects to the loopback bridge; every CORS response must carry
+  `Access-Control-Allow-Private-Network: true`. `_http` still sends it, because the browsers that
+  want it are still in use.
+- **Local Network Access / loopback permission (Chromium and Firefox).** The browser can ask to let
+  the Onshape site access local devices or apps/services on this machine. The server cannot grant
+  this permission through a response header. Choose **Allow** and remember the choice if the browser
+  offers that option. Query the supported permission name rather than infer it from a browser version.
+
+Both the native 3Dconnexion discovery and the cursor userscript access the same loopback service
+from the Onshape page. They do not need separate Astrolabe and FeatureScript grants; the cursor
+helper is a browser userscript, not Onshape FeatureScript. Concurrent unanswered requests can
+repeatedly replace the visible prompt and strand earlier fetches, as documented in
+[Mozilla bug 2033408](https://bugzilla.mozilla.org/show_bug.cgi?id=2033408). This is why the script
+waits for the native client's permission grant and serializes its own requests (§8.14).
+
+API references: [Permissions.query](https://developer.mozilla.org/en-US/docs/Web/API/Permissions/query),
+[network permission names](https://developer.mozilla.org/en-US/docs/Web/Security/Defenses/Local_network_access),
+and [Chromium's LNA introduction](https://developer.chrome.com/blog/local-network-access).
+
+Certificate trust remains a separate requirement from both. Use browser DevTools and
+`TB_ONSHAPE_DEBUG=1` to distinguish certificate, permission, and missing Onshape-option failures.
 
 ---
 
@@ -431,7 +483,8 @@ Orbit/To-Cursor gesture holds. Camera pivot is not exposed because turn-in-place
 normal orthographic projection degenerates into an image slide.
 
 Firefox uses its own certificate store, while Chromium browsers also require the Private Network
-Access response described in §8.15. Under-cursor behavior requires the supplied
+Access response or the Local Network Access permission described in §8.15. Under-cursor behavior
+requires the supplied
 `/trackball/pointer.js` userscript. Onshape has no host add-in to install or update; the transport is
 the daemon-side bridge. Current live qualification is tracked only in [`TODO.md`](../../TODO.md).
 
@@ -451,6 +504,7 @@ the daemon-side bridge. Current live qualification is tracked only in [`TODO.md`
   Onshape is not in `_ADDINS`; there is no host add-in to copy or auto-update.
 - `ui.py` — generated 3D Apps and Per-App surfaces through the generic no-add-in setup path.
 - `winfocus.py` — read-only foreground process query used by `app_registry` context resolution.
-- `pyproject.toml` — the `onshape` extra supplies `cryptography` on Windows; `openssl` is the
-  certificate-generation fallback. The WSS server itself is stdlib-only (`ssl` + hand-rolled
-  WebSocket).
+- `pyproject.toml` — `cryptography` is a base Windows dependency, not an extra: setup has to be
+  able to mint the certificate on any install, including a bare `uv run astrolabe` from a clone.
+  `openssl` remains the fallback but cannot be relied on (Windows puts none on PATH). The WSS
+  server itself is stdlib-only (`ssl` + hand-rolled WebSocket).

@@ -244,6 +244,138 @@ def test_discovery_advertises_the_fixed_listener_port():
     }
 
 
+def _reset_pointer_chain_state():
+    with ob._BRIDGE_STATS_LOCK:
+        for key in ob._BRIDGE_STATS:
+            ob._BRIDGE_STATS[key] = "" if key == "last_tls_rejection" else 0
+    with ob._PAGE_POINTER_LOCK:
+        ob._PAGE_POINTER.update({"t": 0.0, "ndc_x": 0.0, "ndc_y": 0.0, "on": False, "version": ""})
+
+
+def http_request(method, path, body=b"", ctype="application/json"):
+    head = ("%s %s HTTP/1.1\r\nOrigin: https://cad.onshape.com\r\n"
+            "Content-Type: %s\r\nContent-Length: %d\r\n\r\n" % (method, path, ctype, len(body)))
+    return head.encode("ascii") + body
+
+
+def _status_json():
+    connection, sock = handshake_for(http_request("GET", "/trackball/pointer"))
+    assert connection.handshake_http() is False
+    return json.loads(sock.sent[-1].split(b"\r\n\r\n", 1)[1])
+
+
+def test_status_page_diagnoses_the_first_broken_chain_link():
+    """The machine with the problem is rarely the machine being debugged from, and the status page
+    is what its user actually shares. So the page itself must say which link is broken, not leave
+    four counters to be cross-referenced by hand."""
+    _reset_pointer_chain_state()
+    try:
+        snap = _status_json()
+        assert "never been downloaded" in snap["diagnosis"]
+        assert ob.POINTER_SCRIPT_URL in snap["diagnosis"]
+
+        connection, _sock = handshake_for(http_request("GET", "/trackball/pointer.user.js"))
+        assert connection.handshake_http() is False
+        snap = _status_json()
+        assert "downloaded 1" in snap["diagnosis"]
+        assert snap["script_downloads"] == 1
+
+        body = json.dumps({"ndc_x": 0.1, "ndc_y": 0.2, "on_canvas": True,
+                           "v": ob.USERSCRIPT_VERSION}).encode()
+        connection, sock = handshake_for(http_request("POST", "/trackball/pointer", body))
+        assert connection.handshake_http() is False
+        assert sock.sent[-1].startswith(b"HTTP/1.1 204")
+        snap = _status_json()
+        assert snap["diagnosis"] == "receiving pointer samples"
+        assert snap["posts_received"] == 1
+        assert snap["userscript_version"] == ob.USERSCRIPT_VERSION
+    finally:
+        _reset_pointer_chain_state()
+
+
+def test_status_page_reports_silence_without_claiming_it_proves_a_permission_block():
+    _reset_pointer_chain_state()
+    try:
+        connection, _sock = handshake_for(http_request("GET", "/trackball/pointer.user.js"))
+        assert connection.handshake_http() is False
+
+        snap = _status_json()
+        assert "nothing from the Onshape page has reached this daemon" in snap["diagnosis"]
+        assert "Remember my choice for this site" in snap["diagnosis"]
+        assert "one possible cause" in snap["diagnosis"]
+        assert "enable its SpaceMouse" in snap["diagnosis"]
+        assert snap["cors_preflights"] == 0
+
+        # One preflight is proof the page can reach us, so the advice must change.
+        connection, _sock = handshake_for(http_request("OPTIONS", "/trackball/pointer"))
+        assert connection.handshake_http() is False
+        snap = _status_json()
+        assert snap["cors_preflights"] == 1
+        assert "exactly one copy is enabled" in snap["diagnosis"]
+    finally:
+        _reset_pointer_chain_state()
+
+
+def test_status_page_reports_unparseable_posts_as_their_own_link():
+    _reset_pointer_chain_state()
+    try:
+        connection, sock = handshake_for(
+            http_request("POST", "/trackball/pointer", b"not-json"))
+        assert connection.handshake_http() is False
+        assert sock.sent[-1].startswith(b"HTTP/1.1 400")
+        snap = _status_json()
+        assert "none parsed (1 rejected)" in snap["diagnosis"]
+    finally:
+        _reset_pointer_chain_state()
+
+
+def test_status_page_reports_certificate_rejection_and_names_the_firefox_store():
+    """An explicit TLS certificate alert is the one failure the page's own load cannot show: the
+    status page renders fine in a browser that trusts the cert while the userscript's browser
+    rejects it. Firefox keeping its own store is exactly that split, so the diagnosis names it."""
+    _reset_pointer_chain_state()
+    try:
+        bridge = ob.OnshapeBridge(on_health_changed=lambda _h: None)
+        bridge._enabled.set()
+
+        class Raw:
+            def settimeout(self, _timeout):
+                pass
+
+            def close(self):
+                pass
+
+        class Context:
+            @staticmethod
+            def wrap_socket(_raw, server_side):
+                raise ssl.SSLError(
+                    "[SSL: TLSV1_ALERT_UNKNOWN_CA] tlsv1 alert unknown ca")
+
+        bridge._handle_raw(Raw(), Context())
+        snap = _status_json()
+        assert snap["tls_rejections"] == 1
+        assert "unknown ca" in snap["last_tls_rejection"]
+        assert "rejected this daemon's TLS certificate" in snap["diagnosis"]
+        assert "Firefox keeps its own certificate store" in snap["diagnosis"]
+    finally:
+        _reset_pointer_chain_state()
+
+
+@pytest.mark.parametrize("path", ["/trackball/pointer.user.js", "/trackball/pointer.js"])
+def test_userscript_is_served_from_both_the_recognised_and_legacy_paths(path):
+    """`.user.js` is what a userscript manager will install from; `.js` is what older builds
+    published and what an already-installed copy may still poll."""
+    connection, sock = handshake_for(websocket_request(path=path))
+
+    assert connection.handshake_http() is False
+    response = sock.sent[-1]
+    assert response.startswith(b"HTTP/1.1 200")
+    head, body = response.split(b"\r\n\r\n", 1)
+    assert b"Content-Type: application/javascript" in head
+    assert body.startswith(b"// ==UserScript==")
+    assert ob.USERSCRIPT_VERSION.encode() in body
+
+
 @pytest.mark.parametrize(
     "request_bytes",
     [
@@ -321,6 +453,42 @@ def test_tls_health_requires_explicit_certificate_alert_and_never_demotes_connec
 
     assert raw.closed
     assert health[-1].state is ob.ServiceHealthState.HEALTHY
+
+
+def test_cert_generation_reports_the_cause_it_actually_hit(tmp_path, monkeypatch):
+    """A failure has to name itself. Reporting one canned guess is what made a missing package and
+    an unwritable path indistinguishable to the person reading the setup dialog."""
+    cert = str(tmp_path / "c.pem")
+    key = str(tmp_path / "k.pem")
+
+    def no_openssl(*_args, **_kwargs):
+        raise FileNotFoundError(2, "The system cannot find the file specified")
+
+    monkeypatch.setattr(ob, "_HAVE_CRYPTOGRAPHY", False)
+    monkeypatch.setattr(ob.subprocess, "run", no_openssl)
+    ok, reason = ob.ensure_cert(cert, key)
+    assert ok is False
+    assert "'cryptography' package is missing" in reason
+    assert "no 'openssl' executable is on PATH" in reason
+
+    monkeypatch.setattr(ob.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(
+        ob.subprocess.CalledProcessError(1, "openssl", stderr="unknown option -addext\n")))
+    ok, reason = ob.ensure_cert(cert, key)
+    assert ok is False
+    assert "openssl exited 1: unknown option -addext" in reason
+
+
+def test_cert_generation_succeeds_and_is_idempotent(tmp_path):
+    cert = str(tmp_path / "c.pem")
+    key = str(tmp_path / "k.pem")
+
+    assert ob.ensure_cert(cert, key) == (True, "")
+    minted = open(cert, "rb").read()
+    assert b"BEGIN CERTIFICATE" in minted
+
+    # A second call must not re-mint: the trust the user granted is bound to this exact cert.
+    assert ob.ensure_cert(cert, key) == (True, "")
+    assert open(cert, "rb").read() == minted
 
 
 def test_normal_onshape_controller_close_returns_to_waiting_health():

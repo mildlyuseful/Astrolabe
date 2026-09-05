@@ -49,7 +49,7 @@ released yet.
 From a PowerShell prompt in the repository:
 
 ```powershell
-python -m pip install ".[onshape]"
+python -m pip install .
 python -m trackball_daemon
 ```
 
@@ -110,6 +110,11 @@ manual path remains:
    its Global links; **Link all to Global** removes app overrides. Neither action disables the
    integration or forgets its installed add-on version.
 
+Every app keeps its setup button and **Instructions** available, including after setup succeeds.
+Use **Set up** or **Enable** again to repeat local setup and reopen its steps; apps with installed
+add-ons offer **Reinstall** or **Update**. Local setup success does not confirm that browser trust
+or other host-side steps are finished.
+
 The status row and tray list the versions of add-ons that are actually connected. The tray also
 summarizes runtime health, while **3D Apps** shows the navigation broker and gated SolidWorks,
 AutoCAD, and Onshape owners as disabled, waiting, healthy, degraded, or failed with the current
@@ -151,6 +156,14 @@ maintenance, and includes its setup, update, reversal, and runtime-health behavi
 | Fusion 360 | Per-user Python add-in; run it once and enable **Run on Startup** in Fusion. | [Fusion 360](docs/apps/fusion360.md) |
 | SolidWorks | Direct COM control of an already-running instance; no host add-in is installed. | [SolidWorks](docs/apps/solidworks.md) |
 | Onshape | Loopback TLS bridge; explicitly trust/accept its certificate and install the supplied pointer userscript for accurate under-cursor targeting. | [Onshape](docs/apps/onshape.md) |
+
+For Onshape, enable SpaceMouse / 3Dconnexion and open a document, then **Allow** the browser's
+local-device access prompt (remember the choice if offered). This is separate from trusting the
+certificate. The cursor userscript waits for that grant. If an older script makes the prompt
+flicker, disable it in Violentmonkey/Tampermonkey, replace it using **3D Apps → Onshape → Set up**
+or **Copy userscript**, and reload Onshape. Updating the daemon alone does not replace the running
+browser script; the [pointer status page](https://127.51.68.120:8181/trackball/pointer) shows
+`userscript_version` and `userscript_version_served`, which should match after moving over the view.
 
 ### Experimental integrations
 

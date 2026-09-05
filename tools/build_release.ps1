@@ -124,7 +124,7 @@ try {
         throw "Pinned interpreter runtime preflight failed with exit code $LASTEXITCODE"
     }
 
-    & $Uv sync --locked --no-editable --extra release --extra onshape --python $BuildPython
+    & $Uv sync --locked --no-editable --extra release --python $BuildPython
     if ($LASTEXITCODE -ne 0) {
         throw "Locked release-environment sync failed with exit code $LASTEXITCODE"
     }
@@ -308,7 +308,7 @@ try {
     $Sbom = Join-Path $OutputRoot (
         [System.IO.Path]::ChangeExtension($Identity.archive_name, $null) + "cdx.json")
     $env:UV_PROJECT_ENVIRONMENT = $RuntimeEnvironment
-    & $Uv sync --locked --no-editable --extra onshape --python $BuildPython
+    & $Uv sync --locked --no-editable --python $BuildPython
     if ($LASTEXITCODE -ne 0) {
         throw "Locked runtime-environment sync failed with exit code $LASTEXITCODE"
     }

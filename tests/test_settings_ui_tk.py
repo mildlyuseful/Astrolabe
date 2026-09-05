@@ -6,13 +6,30 @@
 from types import SimpleNamespace
 import time
 import tkinter as tk
+import webbrowser
 from tkinter import ttk
 
 import pytest
 
+from trackball_daemon import integrations, onshape_bridge
+
 from trackball_daemon.config_store import ConfigStore
 from trackball_daemon.input import InputAggregator, load_system_binding_profiles
 from trackball_daemon.ui import SettingsWindow
+
+
+@pytest.fixture(scope="module")
+def tk_root():
+    """One Tk root for the module. Creating a second one after the first is destroyed fails on
+    Windows with `invalid command name "tcl_findLibrary"`, so the root outlives each test and the
+    tests clean up their own toplevels."""
+    try:
+        root = tk.Tk()
+    except tk.TclError as exc:  # pragma: no cover - headless non-Windows CI
+        pytest.skip(f"Tk display unavailable: {exc}")
+    root.withdraw()
+    yield root
+    root.destroy()
 
 
 def _walk(widget):
@@ -35,12 +52,88 @@ def _row_with_label(parent, text):
     raise AssertionError(f"missing setting row {text}")
 
 
-def test_generated_tabs_and_linked_value_refresh_after_global_edit(tmp_path):
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:  # pragma: no cover - headless non-Windows CI
-        pytest.skip(f"Tk display unavailable: {exc}")
-    root.withdraw()
+@pytest.mark.parametrize("appdef", integrations.APPS, ids=lambda app: app.key)
+def test_app_setup_remains_available_through_setup_and_refresh(
+        tmp_path, monkeypatch, tk_root, appdef):
+    store = ConfigStore(tmp_path / "config.json").load()
+    app = SimpleNamespace(
+        config=store, binding_catalog=load_system_binding_profiles(),
+        input_aggregator=InputAggregator(), runtime_health_snapshot=lambda: {},
+        observed_addin_versions={},
+    )
+    monkeypatch.setattr(SettingsWindow, "_app_status_text", lambda *_: "waiting for host")
+    monkeypatch.setattr(SettingsWindow, "_compatibility_text", lambda *_: ("Test host", "#555"))
+    monkeypatch.setattr(integrations, "installed_addin_version", lambda _: None)
+    monkeypatch.setattr(integrations, "bundled_addin_version", lambda _: "2.0")
+    monkeypatch.setattr(integrations, "unsupported_host_warning", lambda _: "Test confirmation")
+    proceed = False
+    monkeypatch.setattr("trackball_daemon.ui.messagebox.askokcancel", lambda *_a, **_k: proceed)
+    succeed = False
+    installs = []
+    dialogs = []
+
+    def install(*_args, **_kwargs):
+        installs.append(appdef.key)
+        if succeed:
+            store.set_app_operational(appdef.key, installed=True, enabled=True)
+        return succeed, "Finish the host steps", []
+
+    def show_result(*_args, **_kwargs):
+        # Capture the row before the user could complete any instructions in the result dialog.
+        dialogs.append(button.winfo_manager())
+
+    monkeypatch.setattr(integrations, "install", install)
+    monkeypatch.setattr(SettingsWindow, "_install_blender_interactive", install)
+    monkeypatch.setattr(SettingsWindow, "_show_integration_dialog", show_result)
+    monkeypatch.setattr(SettingsWindow, "_show_onshape_userscript_dialog", show_result)
+
+    def assert_available():
+        tk_root.update()
+        assert button.winfo_ismapped()
+        assert str(button.cget("text"))
+        assert not button.instate(["disabled"])
+
+    # Rebuild from saved operational state too: completing setup must not hide the action on launch.
+    for reopening in (False, True):
+        app.config = store = ConfigStore(store.path).load() if reopening else store
+        ui = SettingsWindow(tk_root, app)
+        ui.win = tk.Toplevel(tk_root)
+        try:
+            ui._app_row(ui.win, appdef)
+            button = ui._app_action_buttons[appdef.key]
+            assert_available()
+            if not reopening:
+                button.invoke()  # Decline confirmation.
+                assert installs == dialogs == []
+                assert_available()
+                proceed = True
+                button.invoke()  # Setup fails; retry remains available.
+                assert len(installs) == len(dialogs) == 1
+                assert_available()
+                succeed = True
+            before = len(installs)
+            button.invoke()  # Local setup succeeds; host steps are still unfinished.
+            assert len(installs) == before + 1
+            assert dialogs[-1] == "pack"
+            assert_available()
+            store.set_app_operational(appdef.key, enabled=False)
+            for infos in ([(appdef.key, "1.0", "test")], []):
+                app.observed_addin_versions[appdef.key] = "1.0"
+                ui.update_app_connections(infos)
+                assert_available()
+                if appdef.key in integrations.ADDIN_KEYS:
+                    assert button.cget("text") == "Update → v2.0"
+            button.invoke()  # Repeat setup reopens its instructions.
+            assert len(installs) == before + 2
+            assert dialogs[-1] == "pack"
+            assert_available()
+        finally:
+            store.remove_listener(ui._on_config_event)
+            ui.win.destroy()
+
+
+def test_generated_tabs_and_linked_value_refresh_after_global_edit(tmp_path, tk_root):
+    root = tk_root
     store = ConfigStore(tmp_path / "config.json").load()
     app = SimpleNamespace(
         config=store,
@@ -172,4 +265,68 @@ def test_generated_tabs_and_linked_value_refresh_after_global_edit(tmp_path):
     finally:
         if ui.win is not None:
             ui.win.destroy()
-        root.destroy()
+
+
+def test_onshape_setup_dialog_is_copyable_and_can_open_the_trust_page(tmp_path, monkeypatch,
+                                                                     tk_root):
+    """The trust steps are only useful if the user can get them out of the dialog.
+
+    They were rendered in a ttk.Label, which cannot be selected at all, so the certutil command
+    and the bridge URL had to be retyped from the screen. The lead is a read-only Text now, and
+    the page you have to visit to accept the certificate is one button away."""
+    root = tk_root
+    store = ConfigStore(tmp_path / "config.json").load()
+    app = SimpleNamespace(
+        config=store,
+        binding_catalog=load_system_binding_profiles(),
+        input_aggregator=InputAggregator(),
+        status_text=lambda: "stopped",
+        battery_status_text=lambda: "Battery: 64% (last known)",
+        runtime_health_snapshot=lambda: {},
+    )
+    ui = SettingsWindow(root, app)
+    opened = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: (opened.append(url), True)[1])
+    lead = 'Run certutil -user -addstore Root "C:\\cert.pem" or visit the bridge.'
+    seen = {}
+
+    def _inspect():
+        # No assertions in here: an exception would skip the destroy and hang wait_window().
+        try:
+            dialog = next(w for w in _walk(root)
+                          if isinstance(w, tk.Toplevel) and w.title() == "Onshape — Set up")
+            texts = [w for w in _walk(dialog) if isinstance(w, tk.Text)]
+            seen["contents"] = [w.get("1.0", "end-1c") for w in texts]
+            seen["states"] = [str(w.cget("state")) for w in texts]
+            buttons = {str(w.cget("text")): w for w in _walk(dialog)
+                       if isinstance(w, ttk.Button)}
+            seen["buttons"] = set(buttons)
+            if "Open bridge page" in buttons:
+                buttons["Open bridge page"].invoke()
+            if "Copy trust command" in buttons:
+                buttons["Copy trust command"].invoke()
+                seen["clipboard"] = root.clipboard_get()
+        except Exception as exc:                      # pragma: no cover - surfaced by the asserts
+            seen["error"] = repr(exc)
+        finally:
+            for widget in _walk(root):
+                if isinstance(widget, tk.Toplevel):
+                    widget.destroy()
+
+    try:
+        root.after(0, _inspect)
+        ui._show_onshape_userscript_dialog(
+            title="Onshape — Set up", lead=lead,
+            copyables=[("Copy trust command", 'certutil -user -addstore Root "C:\\cert.pem"')])
+
+        assert "error" not in seen, seen.get("error")
+        assert lead in seen["contents"]
+        # "disabled" is what made the text unselectable; read-only is enforced by key bindings.
+        assert "disabled" not in seen["states"]
+        assert {"Open bridge page", "Copy userscript", "Copy trust command"} <= seen["buttons"]
+        assert opened == [onshape_bridge.BRIDGE_URL]
+        assert seen["clipboard"] == 'certutil -user -addstore Root "C:\\cert.pem"'
+    finally:
+        for widget in _walk(root):
+            if isinstance(widget, tk.Toplevel):
+                widget.destroy()

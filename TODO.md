@@ -46,6 +46,11 @@ product decision to reopen, not a value to quietly retune.
 
 ### Release qualification
 
+- Complete Onshape's remaining browser-permission matrix after the
+  [successful single-prompt retest](archive/release-evidence/onshape-permission-live-2026-09-05.md):
+  denial, revocation, and pointer recovery after a daemon restart in Firefox and Chromium, plus
+  initial permission with the userscript enabled in Chromium. Automated JavaScript lifecycle tests
+  do not establish these browser behaviors.
 - Exercise the exact release wheel, onedir GUI, and per-user installer on a clean Windows account
   without Python or a source checkout.
 - Daily-drive the packaged `0.2.0a2` artifact and record what it finds. The process, the per

@@ -193,6 +193,11 @@ existing input profile and apply the existing Start-at-login action only after t
 them. Integration setup, trust, and host changes remain behind `integrations.py` and the same
 explicit confirmation boundaries used by Settings.
 
+Every integration card retains its setup action and instructions regardless of local setup,
+enabled, or connection state. Local setup success does not establish completion of manual host
+steps. `integrations.setup_action_label` selects setup, enable, reinstall, or update text; UI
+refreshes may change that text but must not hide the action.
+
 ### Live state
 
 Persistent configuration is not live control state.

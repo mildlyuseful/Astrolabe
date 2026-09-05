@@ -23,6 +23,7 @@ name = "astrolabe-daemon"
 source = { editable = "." }
 dependencies = [
     { name = "bleak" },
+    { name = "cryptography", marker = "sys_platform == 'win32'" },
     { name = "hidapi", marker = "sys_platform == 'win32'" },
     { name = "pillow" },
     { name = "pystray" },
@@ -39,9 +40,6 @@ dev = [
     { name = "pytest" },
     { name = "pyyaml" },
 ]
-onshape = [
-    { name = "cryptography", marker = "sys_platform == 'win32'" },
-]
 release = [
     { name = "cyclonedx-bom" },
     { name = "nuitka" },
@@ -51,7 +49,7 @@ release = [
 [package.metadata]
 requires-dist = [
     { name = "bleak", specifier = ">=3.0.2,<4" },
-    { name = "cryptography", marker = "sys_platform == 'win32' and extra == 'onshape'", specifier = ">=41.0" },
+    { name = "cryptography", marker = "sys_platform == 'win32'", specifier = ">=41.0" },
     { name = "cyclonedx-bom", marker = "extra == 'release'", specifier = "==7.3.0" },
     { name = "hidapi", marker = "sys_platform == 'win32'", specifier = ">=0.15,<0.16" },
     { name = "jsonschema", extras = ["format"], marker = "extra == 'dev'" },
@@ -65,7 +63,7 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'dev'" },
     { name = "setuptools", marker = "extra == 'release'", specifier = "==82.0.1" },
 ]
-provides-extras = ["debug", "onshape", "dev", "release"]
+provides-extras = ["debug", "dev", "release"]
 
 [[package]]
 name = "attrs"

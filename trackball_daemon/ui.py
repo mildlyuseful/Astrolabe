@@ -10,6 +10,7 @@ changes persist and apply live.
 """
 import json
 import tkinter as tk
+import webbrowser
 from tkinter import ttk, messagebox
 
 from . import integrations
@@ -221,13 +222,7 @@ class SettingsWindow:
                 pass
         for key, button in self._app_action_buttons.items():
             try:
-                action = self._app_button_text(integrations.APPS_BY_KEY[key])
-                if action:
-                    button.config(text=action)
-                    if not button.winfo_manager():
-                        button.pack(side="right")
-                else:
-                    button.pack_forget()
+                button.config(text=self._app_button_text(integrations.APPS_BY_KEY[key]))
             except tk.TclError:
                 pass
 
@@ -1400,16 +1395,20 @@ class SettingsWindow:
         return self._clipboard_set(pointer_userscript_source())
 
     def _show_onshape_userscript_dialog(self, *, title, lead="", show_dont_show_again=False,
-                                        copy_on_open=False):
+                                        copy_on_open=False, copyables=None):
         """Modal with Copy userscript + install steps. Optional 'do not show again' for the cursor warn.
-        When `copy_on_open` is True, the script is copied immediately and the lead becomes 'Copied!'."""
-        from .onshape_bridge import pointer_install_instructions, POINTER_SCRIPT_URL
+        When `copy_on_open` is True, the script is copied immediately and the lead becomes 'Copied!'.
+
+        The lead carries the certificate trust steps, so it goes in a selectable read-only Text
+        rather than a Label: trusting the cert means running a certutil command or visiting the
+        bridge URL, and a Label gives the user no way to get either out of the dialog."""
+        from .onshape_bridge import pointer_install_instructions, POINTER_SCRIPT_URL, BRIDGE_URL
 
         parent = self.win if self.win is not None else self.root
         dlg = tk.Toplevel(parent)
         dlg.title(title)
         dlg.transient(parent)
-        dlg.resizable(False, False)
+        dlg.resizable(True, True)          # the lead is scrollable text now, not a fixed Label
         dlg.grab_set()
 
         body = ttk.Frame(dlg, padding=12)
@@ -1425,7 +1424,15 @@ class SettingsWindow:
                 status.set("Copy failed — open %s and paste manually." % POINTER_SCRIPT_URL)
 
         if lead:
-            ttk.Label(body, text=lead, wraplength=520, justify="left").pack(anchor="w", pady=(0, 8))
+            lead_frame = ttk.Frame(body)
+            lead_frame.pack(fill="both", expand=True, pady=(0, 8))
+            lead_vsb = ttk.Scrollbar(lead_frame, orient="vertical")
+            lead_text = self._readonly_text(lead_frame, lead, width=68,
+                                            height=min(16, lead.count("\n") + 2))
+            lead_text.configure(yscrollcommand=lead_vsb.set)
+            lead_vsb.config(command=lead_text.yview)
+            lead_vsb.pack(side="right", fill="y")
+            lead_text.pack(side="left", fill="both", expand=True)
 
         ttk.Label(body, textvariable=status, foreground="#1a7f37").pack(anchor="w")
 
@@ -1435,7 +1442,30 @@ class SettingsWindow:
             else:
                 status.set("Copy failed — open %s and paste manually." % POINTER_SCRIPT_URL)
 
-        ttk.Button(body, text="Copy userscript", command=_copy).pack(anchor="w", pady=(4, 10))
+        actions = ttk.Frame(body)
+        actions.pack(fill="x", pady=(4, 10))
+        ttk.Button(actions, text="Copy userscript", command=_copy).pack(side="left", padx=(0, 8))
+
+        def _open_bridge():
+            if self._open_url(BRIDGE_URL):
+                status.set("Opened %s — accept the warning once, then reload." % BRIDGE_URL)
+            else:
+                status.set("Could not open a browser — visit %s manually." % BRIDGE_URL)
+
+        ttk.Button(actions, text="Open bridge page", command=_open_bridge).pack(
+            side="left", padx=(0, 8))
+
+        def _make_copy(label, payload):
+            def _copy_payload():
+                if self._clipboard_set(payload):
+                    status.set("Copied: " + label)
+                else:
+                    status.set("Copy failed — select and copy from the steps above.")
+            return _copy_payload
+
+        for label, payload in (copyables or []):
+            ttk.Button(actions, text=label,
+                       command=_make_copy(label, payload)).pack(side="left", padx=(0, 8))
 
         ttk.Label(body, text=pointer_install_instructions(), wraplength=520,
                   justify="left").pack(anchor="w")
@@ -1552,10 +1582,8 @@ class SettingsWindow:
     def _app_button_text(self, appdef):
         observed = getattr(self.app, "observed_addin_versions", {}).get(appdef.key)
         if observed is not None:
-            return integrations.setup_action_label(
-                appdef, self.cfg.snapshot().app_operational[appdef.key], installed_version=observed)
-        return integrations.setup_action_label(
-            appdef, self.cfg.snapshot().app_operational[appdef.key])
+            return integrations.setup_action_label(appdef, installed_version=observed)
+        return integrations.setup_action_label(appdef)
 
     @staticmethod
     def _compatibility_text(appdef):
@@ -1608,12 +1636,11 @@ class SettingsWindow:
 
         holder = {}
         action = self._app_button_text(appdef)
-        btn = ttk.Button(controls, text=action or "",
+        btn = ttk.Button(controls, text=action,
                          command=lambda: self._do_install(appdef, enabled, status, holder))
         holder["btn"] = btn
         self._app_action_buttons[appdef.key] = btn
-        if action:
-            btn.pack(side="right")
+        btn.pack(side="right")
 
         details = ttk.Frame(card)
         shown = tk.BooleanVar(value=False)
@@ -1666,6 +1693,45 @@ class SettingsWindow:
         except tk.TclError:
             return False
 
+    def _open_url(self, url):
+        """Open ``url`` in the user's browser. Returns True on success."""
+        try:
+            return bool(webbrowser.open(url))
+        except Exception:                            # no browser, or a broken handler registration
+            return False
+
+    def _readonly_text(self, parent, content, *, width=72, height=14):
+        """A read-only Text the user can still select and copy out of.
+
+        `state="disabled"` is the obvious way to make a Text read-only and the reason setup steps
+        could not be copied: Tk's Button-1 binding skips `focus $w` unless the state is normal, so
+        the widget never holds focus and Ctrl+C has nothing to act on. Dropping the keys that edit
+        keeps the text immutable without taking selection and copy away with it -- which matters
+        here because these dialogs carry the certutil command and the bridge URL.
+        """
+        text = tk.Text(parent, wrap="word", width=width, height=height, relief="flat",
+                       padx=2, pady=2)
+        text.insert("1.0", content)
+
+        passthrough = {"Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next",
+                       "Shift_L", "Shift_R", "Control_L", "Control_R", "Tab"}
+
+        def _block_edits(event):
+            if event.state & 0x4 or event.keysym in passthrough:
+                return None                          # Ctrl-C / Ctrl-A and navigation stay live
+            return "break"
+
+        text.bind("<Key>", _block_edits)
+        text.bind("<<Paste>>", lambda _e: "break")
+        text.bind("<<Cut>>", lambda _e: "break")
+
+        menu = tk.Menu(text, tearoff=0)
+        menu.add_command(label="Copy", command=lambda: text.event_generate("<<Copy>>"))
+        menu.add_command(label="Select All", command=lambda: (text.tag_add("sel", "1.0", "end-1c"),
+                                                              text.focus_set()))
+        text.bind("<Button-3>", lambda e: menu.tk_popup(e.x_root, e.y_root))
+        return text
+
     def _show_integration_dialog(self, title, msg, copyables=None, *, warning=False):
         """Modal result dialog for Set up / Update. ``copyables`` is ``[(button_label, text), ...]``."""
         parent = self.win if self.win is not None else self.root
@@ -1682,13 +1748,11 @@ class SettingsWindow:
         text_frame = ttk.Frame(body)
         text_frame.pack(fill="both", expand=True)
         vsb = ttk.Scrollbar(text_frame, orient="vertical")
-        text = tk.Text(text_frame, wrap="word", width=72, height=14,
-                       yscrollcommand=vsb.set, relief="flat", padx=2, pady=2)
+        text = self._readonly_text(text_frame, msg)
+        text.configure(yscrollcommand=vsb.set)
         vsb.config(command=text.yview)
         vsb.pack(side="right", fill="y")
         text.pack(side="left", fill="both", expand=True)
-        text.insert("1.0", msg)
-        text.configure(state="disabled")
 
         status = tk.StringVar(value="")
         ttk.Label(body, textvariable=status, foreground="#1a7f37").pack(anchor="w", pady=(8, 0))
@@ -1745,19 +1809,14 @@ class SettingsWindow:
             enabled_var.set(bool(self.cfg.snapshot().app_operational[appdef.key]["enabled"]))
             try:
                 status_label.config(text=self._app_status_text(appdef))
-                action = self._app_button_text(appdef)
-                if action:
-                    holder["btn"].config(text=action)
-                    if not holder["btn"].winfo_manager():
-                        holder["btn"].pack(side="right")
-                else:
-                    holder["btn"].pack_forget()
+                holder["btn"].config(text=self._app_button_text(appdef))
             except tk.TclError:
                 pass
             if appdef.key == "onshape":
                 self._show_onshape_userscript_dialog(
                     title="Onshape — Set up",
                     lead=msg,
+                    copyables=copyables,
                 )
             else:
                 self._show_integration_dialog("Integration", msg, copyables, warning=False)

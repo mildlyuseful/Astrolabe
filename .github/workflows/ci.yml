@@ -91,6 +91,12 @@ jobs:
       - name: Compile Python sources
         run: uv run --locked --all-extras python -m compileall -q trackball_daemon tests tools
 
+      - name: Set up Node for Onshape userscript tests
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
       - name: Run Python suite
         run: uv run --locked --all-extras python -m pytest -q
 
@@ -101,7 +107,7 @@ jobs:
         run: uv build --out-dir build/ci-python
 
       - name: Export locked runtime requirements
-        run: uv export --locked --no-dev --extra onshape --no-emit-project --format requirements.txt --output-file build/ci-python/runtime-requirements.txt
+        run: uv export --locked --no-dev --no-emit-project --format requirements.txt --output-file build/ci-python/runtime-requirements.txt
 
       - name: Install and smoke-test the wheel outside the checkout
         shell: pwsh
@@ -151,7 +157,7 @@ jobs:
         env:
           UV_PROJECT_ENVIRONMENT: ${{ runner.temp }}/astrolabe-release-runtime
         run: |
-          uv sync --locked --no-editable --extra onshape --python 3.13
+          uv sync --locked --no-editable --python 3.13
           if ($LASTEXITCODE -ne 0) { throw "Release runtime sync failed." }
           $RuntimePython = Join-Path $env:UV_PROJECT_ENVIRONMENT "Scripts/python.exe"
           python tools/audit_notices.py --environment $RuntimePython
@@ -180,7 +186,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
-          python-version: "3.13"
+          python-version: "3.13.14"
 
       - name: Set up pinned uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0

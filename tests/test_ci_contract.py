@@ -16,7 +16,7 @@ def test_ci_builds_and_smokes_wheel_outside_checkout():
     assert 'version: "0.11.28"' in WORKFLOW
     assert "uv sync --locked --all-extras --python 3.13" in WORKFLOW
     assert "uv build --out-dir build/ci-python" in WORKFLOW
-    assert "uv export --locked --no-dev --extra onshape --no-emit-project" in WORKFLOW
+    assert "uv export --locked --no-dev --no-emit-project" in WORKFLOW
     assert 'Join-Path $env:RUNNER_TEMP "astrolabe-wheel-smoke"' in WORKFLOW
     assert "pip install --require-hashes -r $Requirements" in WORKFLOW
     assert "pip install --no-deps $Wheel" in WORKFLOW
@@ -67,6 +67,14 @@ def test_windows_release_includes_dynamic_winrt_projection_package():
 
 
 def test_release_build_pins_python_and_normalizes_the_user_visible_onedir():
+    import re
+    import yaml
+
+    pinned = re.search(r'\[string\]\$PythonVersion = "([^"]+)"', RELEASE_BUILD).group(1)
+    steps = yaml.safe_load(WORKFLOW)["jobs"]["onedir"]["steps"]
+    setup_python = next(step for step in steps
+                        if step.get("uses", "").startswith("actions/setup-python@"))
+    assert setup_python["with"]["python-version"] == pinned
     assert '[string]$PythonVersion = "3.13.14"' in RELEASE_BUILD
     assert "$ActualPythonVersion -ne $PythonVersion" in RELEASE_BUILD
     assert '$ReleaseDirectory = Join-Path $NuitkaArtifacts $Identity.product_name' in RELEASE_BUILD
@@ -129,7 +137,7 @@ def test_installed_wheel_notices_are_verified_outside_the_checkout():
 
 def test_bundled_component_notices_are_audited_against_a_real_release_runtime():
     """The gate must run against a synced runtime environment, not the all-extras build env."""
-    assert "uv sync --locked --no-editable --extra onshape" in WORKFLOW
+    assert "uv sync --locked --no-editable --python 3.13" in WORKFLOW
     assert "tools/audit_notices.py --environment" in WORKFLOW
     assert "Bundled-component notice audit failed." in WORKFLOW
     assert "tools/audit_notices.py --environment $RuntimePython" in RELEASE_BUILD

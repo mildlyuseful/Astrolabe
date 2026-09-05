@@ -323,11 +323,17 @@ def default_cert_paths():
 
 def ensure_cert(cert_path, key_path):
     """Make sure a self-signed cert (CN + IP SAN for 127.51.68.120) exists at the given paths.
-    Returns True if present/created. Safe: only writes files in our own config dir -- it does NOT
-    touch any trust store (that's a separate, user-confirmed step). Tries cryptography, then the
-    openssl CLI."""
+    Safe: only writes files in our own config dir -- it does NOT touch any trust store (that's a
+    separate, user-confirmed step). Tries cryptography, then the openssl CLI.
+
+    Returns ``(ok, reason)``, where reason is "" on success. It used to return a bare bool, which
+    left every caller reporting the same guess -- "install cryptography or put openssl on PATH" --
+    and sent anyone whose real problem was an unwritable path or a broken openssl chasing a
+    dependency that was already installed. Both generation paths now say what actually went wrong
+    so the setup dialog can repeat it verbatim."""
     if os.path.exists(cert_path) and os.path.exists(key_path):
-        return True
+        return True, ""
+    reasons = []
     if _HAVE_CRYPTOGRAPHY:
         try:
             key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -349,20 +355,35 @@ def ensure_cert(cert_path, key_path):
                                           serialization.NoEncryption()))
             with open(cert_path, "wb") as f:
                 f.write(cert.public_bytes(serialization.Encoding.PEM))
-            return True
-        except Exception:
-            get_logger().info("onshape: cryptography cert generation failed", exc_info=False)
-    # Fallback: shell out to openssl with an IP SAN (-addext needs OpenSSL >= 1.1.1).
+            return True, ""
+        except Exception as exc:
+            reasons.append("the 'cryptography' package could not write it (%s)" % exc)
+            get_logger().info("onshape: cryptography cert generation failed", exc_info=True)
+    else:
+        reasons.append("the 'cryptography' package is missing from this install")
+    # Fallback: shell out to openssl with an IP SAN (-addext needs OpenSSL >= 1.1.1). Its stderr is
+    # captured rather than discarded -- an openssl that runs and then refuses is the case where the
+    # message is worth the most, and it used to be the case that produced the least.
     try:
         subprocess.run(
             ["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
              "-keyout", key_path, "-out", cert_path, "-days", "3650",
              "-subj", "/CN=%s" % BRIDGE_HOST,
              "-addext", "subjectAltName=IP:%s" % BRIDGE_HOST],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return os.path.exists(cert_path) and os.path.exists(key_path)
-    except Exception:
-        return False
+            check=True, capture_output=True, text=True)
+        if os.path.exists(cert_path) and os.path.exists(key_path):
+            return True, ""
+        reasons.append("openssl reported success but wrote no certificate")
+    except FileNotFoundError:
+        reasons.append("no 'openssl' executable is on PATH")
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or "").strip().splitlines()
+        reasons.append("openssl exited %s%s" % (
+            exc.returncode, (": " + detail[-1]) if detail else ""))
+    except Exception as exc:
+        reasons.append("openssl could not be run (%s)" % exc)
+    get_logger().info("onshape: cert generation failed: %s", "; ".join(reasons))
+    return False, ", and ".join(reasons)
 
 
 # --- minimal RFC6455 WebSocket framing --------------------------------------------------------
@@ -634,30 +655,44 @@ class _OnshapeConn:
         body_in = body_in[:content_len]
 
         if method == "OPTIONS":
+            _count_bridge_event("cors_preflights")
             self._http(204, "", origin, ctype=None)
             return False
         if path_only.startswith("/3dconnexion/nlproxy"):
+            _count_bridge_event("discovery_probes")
             self._http(200, json.dumps({"port": BRIDGE_PORT, "version": NLPROXY_VERSION}),
                        origin, ctype="application/json")
             return False
         # Exact canvas pointer from the Onshape page (userscript). No screen capture.
-        if path_only.startswith("/trackball/pointer.js") and method == "GET":
+        # Both suffixes serve the same body: `.user.js` is the convention every userscript manager
+        # keys install and update detection on, and `.js` is what earlier builds published.
+        if method == "GET" and (path_only.startswith("/trackball/pointer.user.js") or
+                                path_only.startswith("/trackball/pointer.js")):
+            _count_bridge_event("script_downloads")
             self._http(200, _POINTER_USERSCRIPT, origin, ctype="application/javascript")
             return False
         if path_only.startswith("/trackball/pointer") and method in ("POST", "PUT"):
             parsed = _parse_pointer_body(body_in)
             if parsed is not None:
-                _set_page_pointer(parsed[0], parsed[1], parsed[2])
+                _count_bridge_event("posts_received")
+                _set_page_pointer(parsed[0], parsed[1], parsed[2], parsed[3])
                 self._http(204, "", origin, ctype=None)
             else:
+                _count_bridge_event("posts_rejected")
                 self._http(400, "bad pointer json", origin, ctype="text/plain")
             return False
         if path_only.startswith("/trackball/pointer") and method == "GET":
-            # Status for the cert-trust / install page.
+            # Status for the cert-trust / install page. `diagnosis` leads so a screenshot of the
+            # rendered JSON answers "which link is broken" without anyone reading counters.
             with _PAGE_POINTER_LOCK:
                 age = (time.monotonic() - _PAGE_POINTER["t"]) if _PAGE_POINTER["t"] else None
-                snap = {"age_s": age, "on_canvas": _PAGE_POINTER["on"],
-                        "ndc_x": _PAGE_POINTER["ndc_x"], "ndc_y": _PAGE_POINTER["ndc_y"]}
+                snap = {"diagnosis": _pointer_chain_diagnosis(age),
+                        "age_s": age, "on_canvas": _PAGE_POINTER["on"],
+                        "ndc_x": _PAGE_POINTER["ndc_x"], "ndc_y": _PAGE_POINTER["ndc_y"],
+                        "userscript_version": _PAGE_POINTER["version"],
+                        "userscript_version_served": USERSCRIPT_VERSION}
+            with _BRIDGE_STATS_LOCK:
+                snap.update(_BRIDGE_STATS)
             self._http(200, json.dumps(snap), origin, ctype="application/json")
             return False
         upgrades = {item.strip().lower() for item in
@@ -693,7 +728,7 @@ class _OnshapeConn:
                 "if you can read this with no certificate warning, the cert is trusted.</p>"
                 "<h2>Under-cursor orbit</h2>"
                 "<p>Install the userscript from "
-                "<a href='/trackball/pointer.js'>/trackball/pointer.js</a> "
+                "<a href='/trackball/pointer.user.js'>/trackball/pointer.user.js</a> "
                 "(Violentmonkey / Tampermonkey on <code>cad.onshape.com</code>). It posts the exact "
                 "#canvas pointer to this bridge &mdash; no screen capture, no calibration.</p>"
                 "</body></html>")
@@ -913,28 +948,134 @@ class _OnshapeConn:
 # document.getElementById("canvas").getBoundingClientRect() to POST /trackball/pointer.
 
 
-_PAGE_POINTER = {"t": 0.0, "ndc_x": 0.0, "ndc_y": 0.0, "on": False}
+_PAGE_POINTER = {"t": 0.0, "ndc_x": 0.0, "ndc_y": 0.0, "on": False, "version": ""}
 _PAGE_POINTER_LOCK = threading.Lock()
+_USERSCRIPT_VERSION_SEEN = set()
+
+# One counter per link of the userscript -> daemon chain, since daemon start. These exist because
+# the machine with the problem is usually not the machine being debugged from: the status page is
+# the one artifact users reliably share, so it has to carry the diagnosis itself. The first zero
+# (or nonzero rejection) walking down this chain names the broken link.
+_BRIDGE_STATS = {"script_downloads": 0, "posts_received": 0, "posts_rejected": 0,
+                 "discovery_probes": 0, "cors_preflights": 0, "tls_rejections": 0,
+                 "last_tls_rejection": ""}
+_BRIDGE_STATS_LOCK = threading.Lock()
+
+
+def _count_bridge_event(key, last_tls_rejection=None):
+    with _BRIDGE_STATS_LOCK:
+        _BRIDGE_STATS[key] += 1
+        if last_tls_rejection is not None:
+            _BRIDGE_STATS["last_tls_rejection"] = last_tls_rejection
+
+
+def _pointer_chain_diagnosis(age):
+    """One sentence naming the furthest confirmed link in the chain and what to do next.
+
+    Ordered by how far the evidence reaches: samples parsed beats samples rejected beats a TLS
+    handshake refusal beats never having fetched the script at all."""
+    with _BRIDGE_STATS_LOCK:
+        stats = dict(_BRIDGE_STATS)
+    if stats["posts_received"]:
+        if age is not None and age < 2.0:
+            return "receiving pointer samples"
+        return ("pointer samples arrived but stopped %.0f s ago -- the Onshape tab was closed, "
+                "reloaded without the userscript, or is no longer sending" % age)
+    if stats["posts_rejected"]:
+        return ("pointer posts are arriving but none parsed (%d rejected) -- the installed "
+                "userscript sends something this daemon does not understand; reinstall it from %s"
+                % (stats["posts_rejected"], POINTER_SCRIPT_URL))
+    if stats["tls_rejections"]:
+        return ("no pointer sample has ever arrived, and a client rejected this daemon's TLS "
+                "certificate %d time(s) (last: %s) -- trust the certificate in the browser that "
+                "runs the userscript; Firefox keeps its own certificate store, separate from "
+                "Windows" % (stats["tls_rejections"], stats["last_tls_rejection"] or "?"))
+    if not stats["script_downloads"]:
+        return ("no pointer sample has ever arrived, and the userscript has never been downloaded "
+                "from this daemon since it started -- install it from %s" % POINTER_SCRIPT_URL)
+    # Server silence cannot distinguish a pending permission from an inactive/unconfigured page.
+    if not stats["discovery_probes"] and not stats["cors_preflights"]:
+        return ("the userscript was downloaded %d time(s), but nothing from the Onshape page has "
+                "reached this daemon -- no 3Dconnexion discovery probe and no CORS preflight. "
+                "A pending/blocked local-device permission is one possible cause; open an Onshape "
+                "document and enable its SpaceMouse / 3Dconnexion option. Allow the site's "
+                "local-device access when prompted (\"Remember my choice for this site\" if "
+                "offered). The cursor script waits for that grant. If an old script makes the "
+                "prompt flicker, disable it, replace it from %s, and reload the tab"
+                % (stats["script_downloads"], POINTER_SCRIPT_URL))
+    return ("no pointer sample has ever arrived although the userscript was downloaded %d time(s) "
+            "and the page reached this daemon (%d discovery probe(s), %d preflight(s)) -- make "
+            "sure exactly one copy is enabled in the userscript manager, then reload the Onshape "
+            "tab and move the mouse over the 3D view while watching this page"
+            % (stats["script_downloads"], stats["discovery_probes"], stats["cors_preflights"]))
+
+# `.user.js`, not `.js`: Violentmonkey, Tampermonkey and the rest recognise a userscript by that
+# suffix. Served from a plain `.js` URL the browser just renders the source, "Install from URL"
+# has no reason to treat it as installable, and the update check never fires. The old path still
+# serves the same body so anything already pointing at it keeps working.
+POINTER_SCRIPT_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer.user.js"
+POINTER_SCRIPT_LEGACY_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer.js"
+POINTER_STATUS_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer"
+# The page to visit once to accept the certificate. Public because the setup dialog offers it as a
+# button and as copyable text, and both must name the port the server actually binds.
+BRIDGE_URL = _BRIDGE_ORIGIN
+# Bump on script changes even when the daemon version stays unchanged. The extension compares
+# @version before updating its installed copy; samples report it for the status-page check.
+USERSCRIPT_VERSION = "0.2.1"
 
 # Bookmarklet / Violentmonkey userscript body (also served as text/javascript from the bridge).
 _POINTER_USERSCRIPT = r"""// ==UserScript==
 // @name         Astrolabe Onshape cursor pivot
 // @namespace    https://github.com/mildlyuseful/Astrolabe
-// @version      0.1
+// @version      __ASTROLABE_VERSION__
 // @description  Report the mouse position on Onshape's #canvas to the local trackball NL-Proxy.
 // @match        https://cad.onshape.com/*
 // @match        https://*.onshape.com/*
+// @downloadURL  __ASTROLABE_SCRIPT_URL__
+// @updateURL    __ASTROLABE_SCRIPT_URL__
 // @grant        none
+// @noframes
 // @run-at       document-idle
 // ==/UserScript==
 (function () {
   "use strict";
+  if (window.top !== window.self || window.__astrolabeCursorPivot) return;
+  window.__astrolabeCursorPivot = true;
   var ENDPOINT = "__ASTROLABE_ONSHAPE_ORIGIN__/trackball/pointer";
-  var last = { t: 0, x: 0, y: 0, on: false };
+  var VERSION = "__ASTROLABE_VERSION__";
+  // Observe locally; the timer sends only the latest position.
+  var SEND_MS = 100;             // upper bound on how stale a reported sample can be
+  var REFRESH_MS = 300;          // resend an unchanged sample, well inside the bridge's TTL
+  var MAX_BACKOFF_MS = 5000;     // slowest retry while the bridge is unreachable
+  var last = null;
+  var sentKey = "";
+  var sentAt = 0;
+  var pending = false;
+  var failures = 0;
+  var retryAt = 0;
+  var permission = null;
+  var permissionReady = false;
+  async function watchPermission() {
+    // Onshape's native client owns the first permission request. Querying does not prompt;
+    // retaining PermissionStatus lets send() also observe a later grant or revocation.
+    if (navigator.permissions && navigator.permissions.query) {
+      for (var name of ["loopback-network", "local-network-access"]) {
+        try {
+          permission = await navigator.permissions.query({ name: name });
+          permissionReady = true;
+          return;
+        } catch (error) {
+          if (error.name !== "TypeError") return;
+        }
+      }
+    }
+    // Browsers without either permission name still use one request at a time.
+    permissionReady = true;
+  }
   function canvasEl() {
     return document.getElementById("canvas") || document.querySelector("canvas");
   }
-  function report(ev) {
+  function observe(ev) {
     var c = canvasEl();
     if (!c) return;
     var r = c.getBoundingClientRect();
@@ -944,39 +1085,46 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
     var fx = (ev.clientX - r.left) / r.width;
     var fy = (ev.clientY - r.top) / r.height;
     // NDC: x right, y up, both in [-1,1] (matches the bridge's _pixel_ray).
-    var ndcX = fx * 2 - 1;
-    var ndcY = 1 - fy * 2;
-    last = { t: Date.now(), x: ndcX, y: ndcY, on: on, cw: r.width, ch: r.height };
-    // fire-and-forget; Private Network Access preflight is answered by the bridge OPTIONS handler
-    try {
-      fetch(ENDPOINT, {
-        method: "POST",
-        mode: "cors",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ndc_x: ndcX, ndc_y: ndcY, on_canvas: on,
-                               canvas_w: r.width, canvas_h: r.height })
-      }).catch(function () {});
-    } catch (e) {}
+    last = { x: fx * 2 - 1, y: 1 - fy * 2, on: on, cw: r.width, ch: r.height };
   }
-  window.addEventListener("mousemove", report, { passive: true, capture: true });
-  // Keep the last sample fresh while the cursor is still (gesture start without a move).
-  setInterval(function () {
-    if (!last.t) return;
+  async function send() {
+    if (!last || pending || !permissionReady) return;
+    if (permission && permission.state !== "granted") return;
+    var now = Date.now();
+    if (now < retryAt) return;
+    var key = [last.x, last.y, last.on, last.cw, last.ch].join(",");
+    if (key === sentKey && now - sentAt < REFRESH_MS) return;
+    // A prompt can leave fetch pending indefinitely. Never abort/retry it on a timer:
+    // concurrent requests can replace the unanswered browser prompt (Mozilla bug 2033408).
+    pending = true;
     try {
-      fetch(ENDPOINT, {
+      var response = await fetch(ENDPOINT, {
         method: "POST",
         mode: "cors",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ndc_x: last.x, ndc_y: last.y, on_canvas: last.on,
-                               canvas_w: last.cw, canvas_h: last.ch })
-      }).catch(function () {});
-    } catch (e) {}
-  }, 200);
+                               canvas_w: last.cw, canvas_h: last.ch, v: VERSION })
+      });
+      if (!response.ok) throw new Error("Pointer HTTP " + response.status);
+      sentKey = key;
+      sentAt = now;
+      failures = 0;
+      retryAt = 0;
+    } catch (error) {
+      failures += 1;
+      retryAt = Date.now() + Math.min(MAX_BACKOFF_MS, SEND_MS * Math.pow(2, failures));
+      sentKey = "";
+    } finally {
+      pending = false;
+    }
+  }
+  watchPermission();
+  window.addEventListener("mousemove", observe, { passive: true, capture: true });
+  setInterval(send, SEND_MS);
 })();
-""".replace("__ASTROLABE_ONSHAPE_ORIGIN__", _BRIDGE_ORIGIN)
-
-POINTER_SCRIPT_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer.js"
-POINTER_STATUS_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer"
+""".replace("__ASTROLABE_ONSHAPE_ORIGIN__", _BRIDGE_ORIGIN) \
+   .replace("__ASTROLABE_SCRIPT_URL__", POINTER_SCRIPT_URL) \
+   .replace("__ASTROLABE_VERSION__", USERSCRIPT_VERSION)
 
 
 def pointer_userscript_source():
@@ -988,17 +1136,30 @@ def pointer_install_instructions():
     """User-facing steps to install the under-cursor userscript (shared by setup UI + docs)."""
     return (
         "Under-cursor orbit needs a tiny page script (exact #canvas size from the DOM):\n\n"
-        "1) Install the Tampermonkey or Violentmonkey extension in the browser you use for Onshape.\n"
-        "2) Open the extension → Create a new script (or \"+\" / Add new script).\n"
-        "3) Delete the template, paste the Astrolabe userscript (use Copy userscript), then Save.\n"
-        "4) Reload your Onshape tab and move the mouse over the 3D view.\n"
-        "5) Optional check: open %s — ndc_x/ndc_y should update as you move.\n\n"
+        "1) Install the Violentmonkey or Tampermonkey extension in the browser you use for Onshape.\n"
+        "2) Install it from the URL below — Violentmonkey: dashboard → \"+\" → Install from URL. "
+        "Tampermonkey: Utilities → Install from URL. Paste just the URL:\n"
+        "      %s\n"
+        "   The daemon must be running and its certificate trusted, or the extension cannot fetch "
+        "it. Installing this way records the update URL, so later versions arrive on their own.\n"
+        "3) If that is unavailable, create a new script, delete the template, paste the Astrolabe "
+        "userscript (use Copy userscript), then Save.\n"
+        "4) Reload an Onshape document with SpaceMouse / 3Dconnexion enabled and Allow its "
+        "local-device access prompt. The cursor script waits for this grant before sending. "
+        "Then move the mouse over the 3D view.\n"
+        "5) Check: open %s — ndc_x/ndc_y should update as you move, and userscript_version should "
+        "read %s. An empty userscript_version means the browser is still running a copy from "
+        "before the version stamp.\n\n"
+        "Already have it installed? The script lives in your browser extension, so updating the "
+        "daemon does not change it. Re-installing from the URL replaces it in place (the name and "
+        "namespace match); pasting over the old script works too. Either way, make sure you do not "
+        "end up with two enabled copies — that doubles the requests the page makes.\n\n"
         "Script URL (daemon must be running): %s"
-        % (POINTER_STATUS_URL, POINTER_SCRIPT_URL)
+        % (POINTER_SCRIPT_URL, POINTER_STATUS_URL, USERSCRIPT_VERSION, POINTER_SCRIPT_URL)
     )
 
 
-def _set_page_pointer(ndc_x, ndc_y, on_canvas):
+def _set_page_pointer(ndc_x, ndc_y, on_canvas, version=""):
     """Record a page-reported canvas NDC sample (called from the HTTP accept thread)."""
     try:
         x = float(ndc_x); y = float(ndc_y)
@@ -1006,11 +1167,21 @@ def _set_page_pointer(ndc_x, ndc_y, on_canvas):
         return
     if not (math.isfinite(x) and math.isfinite(y)):
         return
+    reported = str(version or "")
     with _PAGE_POINTER_LOCK:
         _PAGE_POINTER["t"] = time.monotonic()
         _PAGE_POINTER["ndc_x"] = max(-1.5, min(1.5, x))
         _PAGE_POINTER["ndc_y"] = max(-1.5, min(1.5, y))
         _PAGE_POINTER["on"] = bool(on_canvas)
+        _PAGE_POINTER["version"] = reported
+        first_sight = reported not in _USERSCRIPT_VERSION_SEEN
+        _USERSCRIPT_VERSION_SEEN.add(reported)
+    # Once per distinct version, not per sample: this arrives at the userscript's send rate, and a
+    # stale copy in the browser is otherwise invisible -- updating the daemon cannot replace it.
+    if first_sight and reported != USERSCRIPT_VERSION:
+        get_logger().info(
+            "onshape: userscript reports version %r, this daemon serves %r -- reinstall it from %s",
+            reported or "(none)", USERSCRIPT_VERSION, POINTER_SCRIPT_URL)
 
 
 def _get_page_pointer(ttl=_POINTER_TTL):
@@ -1025,16 +1196,22 @@ def _get_page_pointer(ttl=_POINTER_TTL):
 
 
 def _parse_pointer_body(raw):
-    """Parse a /trackball/pointer JSON body. Returns (ndc_x, ndc_y, on_canvas) or None."""
+    """Parse a /trackball/pointer JSON body.
+
+    Returns ``(ndc_x, ndc_y, on_canvas, version)`` or None. ``version`` is what the userscript
+    stamped itself with, and is "" for a copy predating the stamp -- which is exactly the copy
+    worth telling the user about, so an absent field is reported rather than defaulted away."""
     try:
         data = json.loads(raw.decode("utf-8") if isinstance(raw, (bytes, bytearray)) else raw)
     except Exception:
         return None
     if not isinstance(data, dict):
         return None
+    version = data.get("v")
+    version = str(version) if isinstance(version, (str, int, float)) else ""
     if "ndc_x" in data and "ndc_y" in data:
         on = data.get("on_canvas", True)
-        return (data.get("ndc_x"), data.get("ndc_y"), bool(on))
+        return (data.get("ndc_x"), data.get("ndc_y"), bool(on), version)
     # Alternate: CSS-pixel offset inside the canvas + size (also exact).
     if all(k in data for k in ("x", "y", "w", "h")):
         try:
@@ -1044,7 +1221,7 @@ def _parse_pointer_body(raw):
             fx = float(data["x"]) / w
             fy = float(data["y"]) / h
             on = (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0)
-            return (fx * 2.0 - 1.0, 1.0 - fy * 2.0, on)
+            return (fx * 2.0 - 1.0, 1.0 - fy * 2.0, on, version)
         except (TypeError, ValueError):
             return None
     return None
@@ -1272,12 +1449,12 @@ class OnshapeBridge:
         while not self._stop.is_set():
             if not self._enabled.wait(0.25):
                 continue
-            if not ensure_cert(self._cert_path, self._key_path):
-                self._log.info("onshape: no TLS cert (run Onshape 'Set up', or install "
-                               "cryptography/openssl); bridge disabled")
+            ok, reason = ensure_cert(self._cert_path, self._key_path)
+            if not ok:
+                self._log.info("onshape: no TLS cert (%s); bridge disabled", reason)
                 self._set_health(
                     ServiceHealthState.FAILED,
-                    "TLS certificate is unavailable; run Onshape Set up",
+                    "TLS certificate is unavailable (%s); run Onshape Set up" % reason,
                 )
                 self._enabled.clear()
                 continue
@@ -1345,6 +1522,7 @@ class OnshapeBridge:
             # controller. EOF/reset/wrong-version failures on those sockets are not certificate
             # evidence and must never demote a healthy controller.
             if _tls_certificate_rejected(exc):
+                _count_bridge_event("tls_rejections", last_tls_rejection=str(exc)[:200])
                 self._warn_once(
                     "tls", "onshape: a client explicitly rejected the local TLS certificate")
                 if not self._connected:
@@ -1943,8 +2121,9 @@ def _main():
     spin = "--spin" in sys.argv
     force = "--force" in sys.argv      # drive even if Onshape reports its view unfocused
     cert, key = default_cert_paths()
-    if not ensure_cert(cert, key):
-        print("Could not generate a TLS cert (install `cryptography` or have `openssl` on PATH).")
+    ok, reason = ensure_cert(cert, key)
+    if not ok:
+        print("Could not generate a TLS cert: %s." % reason)
         return
     print("Cert: %s" % cert)
     print("Trust it (Chrome/Edge, no admin):  certutil -user -addstore Root \"%s\"" % cert)

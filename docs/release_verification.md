@@ -11,7 +11,8 @@ rather than copying test counts, artifact hashes, or dated environment claims in
 ## Build and automated checks
 
 Install the pinned `uv` version required by `pyproject.toml`, synchronize the checked-in lock, then
-run:
+run the commands below. The Python suite also requires Node.js (22 or newer) on PATH to execute
+the served Onshape userscript's browser lifecycle tests.
 
 ```powershell
 uv sync --locked --all-extras
@@ -28,7 +29,8 @@ git diff --check
 
 The release interpreter is pinned to Python 3.13.14. A different interpreter fails before
 dependency synchronization; pass `-BuildPython <exact path>` when it is not the first `python` on
-PATH. For installer qualification, install the pinned Inno Setup compiler and run:
+PATH. CI's unsigned onedir job must select the same exact interpreter as the release builder.
+For installer qualification, install the pinned Inno Setup compiler and run:
 
 ```powershell
 & ".\tools\build_release.ps1" -BuildInstaller -InnoCompilerPath <path-to-ISCC.exe>
