@@ -219,7 +219,7 @@ class AppDef:
     setup: Optional[Callable] = None   # per-app installer; None => generic mark-installed
     install_model: str = ""
     setup_required: bool = True
-    first_run_action: Optional[str] = "Set up"
+    setup_action: str = "Set up"
     #: Host versions this integration has actually been verified against. Deliberately not named for
     #: "support": the release commitment is `spec.support_tier`, and conflating the two is how an
     #: experimental integration ends up reading as supported because its host version is verified.
@@ -678,9 +678,10 @@ def setup_onshape(appdef: "AppDef", cfg) -> tuple[bool, str, list]:
         "warning once.\n"
         "2) In Onshape, enable the SpaceMouse / 3Dconnexion option (Account → Preferences, or the "
         "view settings).\n"
-        "3) Chrome and Edge also ask whether cad.onshape.com may reach this device — choose "
-        "\"Remember my choice for this site\", then Allow. Until it is remembered, every request "
-        "the page makes re-asks, which looks like the prompt flickering.\n"
+        "3) Open an Onshape document. If the browser asks whether cad.onshape.com may access "
+        "apps/services on this device or your local network, choose Allow. Select "
+        "\"Remember my choice for this site\" if offered. This permission is separate from "
+        "certificate trust; the cursor script waits for Onshape's grant before sending.\n"
         "4) For under-cursor orbit (Orbit pivot = cursor), install the userscript with "
         "\"Copy userscript\" below (also available under Per-App Bindings → Onshape).\n\n"
         "Then open an Onshape document, switch the daemon to 3D mode, and focus the Onshape tab — "
@@ -1502,10 +1503,11 @@ _APP_UX = {
     "solidworks": dict(
         install_model="Direct COM automation; no SolidWorks add-in or host files are installed.",
         setup_required=False,
-        first_run_action="Enable",
+        setup_action="Enable",
         verified_versions="SOLIDWORKS 2025 (tested on 2025)",
-        setup_instructions=("Enable performs a one-time prerequisite check for SOLIDWORKS and "
-                            "pywin32. After that, the Enabled checkbox is the only control needed."),
+        setup_instructions=("Enable checks for SOLIDWORKS and pywin32 and enables the integration. "
+                            "Use it again to repeat the check and reopen the instructions. The "
+                            "Enabled checkbox controls automatic connection."),
         manual_install=("There is nothing to copy. If the prerequisite check fails, install "
                         "pywin32 into the daemon's Python environment with: pip install pywin32."),
         health_check=("Open a part or assembly and focus SOLIDWORKS; the row should show connected. "
@@ -1517,8 +1519,9 @@ _APP_UX = {
     "onshape": dict(
         install_model="Browser bridge; no Onshape add-in is installed.",
         verified_versions="Current Onshape web release (rolling release)",
-        setup_instructions=("Set up creates the bridge's per-user local TLS certificate. Trust it "
-                            "once and enable SpaceMouse/3Dconnexion in Onshape preferences."),
+        setup_instructions=("Set up creates or reuses the bridge's per-user local TLS certificate "
+                            "and opens the instructions. Trust it once and enable "
+                            "SpaceMouse/3Dconnexion in Onshape preferences."),
         manual_install=("No application files need copying. Generate/trust the certificate using "
                         "the Set up dialog or certutil -user, then install the supplied userscript "
                         "only if Under Cursor orbit is wanted. Administrator access is not required."),
@@ -1582,11 +1585,11 @@ APPS_BY_KEY = MappingProxyType({app_id: next(app for app in APPS if app.key == a
                                 for app_id in APP_SPECS_BY_ID})
 
 
-def setup_action_label(appdef: AppDef, app_cfg, installed_version=_VERSION_UNSET) -> Optional[str]:
-    """The meaningful setup action for the app's current state, or None for no button.
+def setup_action_label(appdef: AppDef, *, installed_version=_VERSION_UNSET) -> str:
+    """Every app keeps a setup action, including after local setup succeeds.
 
-    Bundled add-ins can always be reinstalled/updated. No-file integrations expose their one-time
-    prerequisite/setup action only until it succeeds; there is deliberately no placebo Re-check.
+    Host-side steps may still be unfinished. Bundled add-ins offer reinstall/update; other
+    integrations repeat local setup and reopen its instructions.
     """
     if appdef.key in ADDIN_KEYS:
         version = (installed_addin_version(appdef.key)
@@ -1595,10 +1598,7 @@ def setup_action_label(appdef: AppDef, app_cfg, installed_version=_VERSION_UNSET
             if update_available(appdef.key, installed_version=version):
                 return f"Update → v{bundled_addin_version(appdef.key)}"
             return "Reinstall"
-        return appdef.first_run_action or "Set up"
-    if not bool((app_cfg or {}).get("installed")):
-        return appdef.first_run_action
-    return None
+    return appdef.setup_action
 
 
 def status_line(appdef: AppDef) -> str:

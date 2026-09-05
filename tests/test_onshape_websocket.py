@@ -293,12 +293,7 @@ def test_status_page_diagnoses_the_first_broken_chain_link():
         _reset_pointer_chain_state()
 
 
-def test_status_page_separates_a_blocked_browser_from_a_misinstalled_script():
-    """Script fetched, page totally silent: no discovery probe and no preflight either.
-
-    A wrong or disabled script still lets Onshape's own client probe and still produces preflights.
-    Silence on every channel is the browser refusing to let the page off the machine, so the
-    diagnosis has to send the user to the permission rather than back to the userscript manager."""
+def test_status_page_reports_silence_without_claiming_it_proves_a_permission_block():
     _reset_pointer_chain_state()
     try:
         connection, _sock = handshake_for(http_request("GET", "/trackball/pointer.user.js"))
@@ -307,6 +302,8 @@ def test_status_page_separates_a_blocked_browser_from_a_misinstalled_script():
         snap = _status_json()
         assert "nothing from the Onshape page has reached this daemon" in snap["diagnosis"]
         assert "Remember my choice for this site" in snap["diagnosis"]
+        assert "one possible cause" in snap["diagnosis"]
+        assert "enable its SpaceMouse" in snap["diagnosis"]
         assert snap["cors_preflights"] == 0
 
         # One preflight is proof the page can reach us, so the advice must change.

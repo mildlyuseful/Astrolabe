@@ -56,7 +56,6 @@ import threading
 import time
 from urllib.parse import urlsplit
 
-from . import __version__
 from .config import ONSHAPE_BRIDGE_HOST, ONSHAPE_BRIDGE_PORT, orbit_pivot_candidates
 from .paths import user_config_dir
 from .service_health import ServiceHealth, ServiceHealthState
@@ -994,19 +993,16 @@ def _pointer_chain_diagnosis(age):
     if not stats["script_downloads"]:
         return ("no pointer sample has ever arrived, and the userscript has never been downloaded "
                 "from this daemon since it started -- install it from %s" % POINTER_SCRIPT_URL)
-    # The script was fetched, so a userscript manager has it, yet the Onshape page has produced no
-    # traffic of any kind -- not its own 3Dconnexion discovery probe, not even a CORS preflight.
-    # A page cannot be silent in every one of those ways by installing the wrong script; the
-    # browser is refusing to let it off the machine. That is the local-network permission, and
-    # while it is ungranted the refusal is what re-triggers the prompt on every attempt.
+    # Server silence cannot distinguish a pending permission from an inactive/unconfigured page.
     if not stats["discovery_probes"] and not stats["cors_preflights"]:
         return ("the userscript was downloaded %d time(s), but nothing from the Onshape page has "
-                "reached this daemon -- no 3Dconnexion discovery probe and no CORS preflight, so "
-                "the browser is blocking cad.onshape.com from reaching this device. Grant its "
-                "local-network permission with \"Remember my choice for this site\" ticked. If the "
-                "prompt is flickering too fast to click, disable the userscript, reload the tab, "
-                "grant it on the calm prompt, then re-enable the userscript"
-                % stats["script_downloads"])
+                "reached this daemon -- no 3Dconnexion discovery probe and no CORS preflight. "
+                "A pending/blocked local-device permission is one possible cause; open an Onshape "
+                "document and enable its SpaceMouse / 3Dconnexion option. Allow the site's "
+                "local-device access when prompted (\"Remember my choice for this site\" if "
+                "offered). The cursor script waits for that grant. If an old script makes the "
+                "prompt flicker, disable it, replace it from %s, and reload the tab"
+                % (stats["script_downloads"], POINTER_SCRIPT_URL))
     return ("no pointer sample has ever arrived although the userscript was downloaded %d time(s) "
             "and the page reached this daemon (%d discovery probe(s), %d preflight(s)) -- make "
             "sure exactly one copy is enabled in the userscript manager, then reload the Onshape "
@@ -1023,11 +1019,9 @@ POINTER_STATUS_URL = f"{_BRIDGE_ORIGIN}/trackball/pointer"
 # The page to visit once to accept the certificate. Public because the setup dialog offers it as a
 # button and as copyable text, and both must name the port the server actually binds.
 BRIDGE_URL = _BRIDGE_ORIGIN
-# The userscript lives in the user's browser extension, not in this install, so `git pull` cannot
-# change it -- an installed copy runs until something replaces it. Stamping the daemon version into
-# @version and pointing @updateURL at the served script lets the extension notice a newer one; the
-# script reports the same string back on every sample so the daemon can say when it is behind.
-USERSCRIPT_VERSION = __version__
+# Bump on script changes even when the daemon version stays unchanged. The extension compares
+# @version before updating its installed copy; samples report it for the status-page check.
+USERSCRIPT_VERSION = "0.2.1"
 
 # Bookmarklet / Violentmonkey userscript body (also served as text/javascript from the bridge).
 _POINTER_USERSCRIPT = r"""// ==UserScript==
@@ -1040,31 +1034,44 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
 // @downloadURL  __ASTROLABE_SCRIPT_URL__
 // @updateURL    __ASTROLABE_SCRIPT_URL__
 // @grant        none
+// @noframes
 // @run-at       document-idle
 // ==/UserScript==
 (function () {
   "use strict";
+  if (window.top !== window.self || window.__astrolabeCursorPivot) return;
+  window.__astrolabeCursorPivot = true;
   var ENDPOINT = "__ASTROLABE_ONSHAPE_ORIGIN__/trackball/pointer";
   var VERSION = "__ASTROLABE_VERSION__";
-  // Movement updates local state only; one timer owns the transport. Posting from the mousemove
-  // handler put a cross-origin request on the wire per pointer event -- 120+ a second over the
-  // canvas, each its own TLS handshake, to report what a 100 ms tick reports just as well (the
-  // bridge only reads this when a gesture starts, and discards a sample older than _POINTER_TTL).
-  // The flood is also what turns Chromium's Local Network Access permission into a flickering
-  // prompt: until the site holds that permission, every one of those requests re-asks for it.
+  // Observe locally; the timer sends only the latest position.
   var SEND_MS = 100;             // upper bound on how stale a reported sample can be
   var REFRESH_MS = 300;          // resend an unchanged sample, well inside the bridge's TTL
   var MAX_BACKOFF_MS = 5000;     // slowest retry while the bridge is unreachable
   var last = null;
   var sentKey = "";
   var sentAt = 0;
-  // Failures used to be swallowed and the next tick sent anyway, so an unreachable bridge was
-  // retried ten times a second forever. That is worst exactly when it matters: before the browser
-  // has been granted local-network permission every attempt re-raises the permission prompt, and
-  // at ten a second the prompt is recreated faster than it can be clicked -- so the retry rate
-  // was itself preventing the grant that would have fixed it. Back off until something succeeds.
+  var pending = false;
   var failures = 0;
   var retryAt = 0;
+  var permission = null;
+  var permissionReady = false;
+  async function watchPermission() {
+    // Onshape's native client owns the first permission request. Querying does not prompt;
+    // retaining PermissionStatus lets send() also observe a later grant or revocation.
+    if (navigator.permissions && navigator.permissions.query) {
+      for (var name of ["loopback-network", "local-network-access"]) {
+        try {
+          permission = await navigator.permissions.query({ name: name });
+          permissionReady = true;
+          return;
+        } catch (error) {
+          if (error.name !== "TypeError") return;
+        }
+      }
+    }
+    // Browsers without either permission name still use one request at a time.
+    permissionReady = true;
+  }
   function canvasEl() {
     return document.getElementById("canvas") || document.querySelector("canvas");
   }
@@ -1080,31 +1087,38 @@ _POINTER_USERSCRIPT = r"""// ==UserScript==
     // NDC: x right, y up, both in [-1,1] (matches the bridge's _pixel_ray).
     last = { x: fx * 2 - 1, y: 1 - fy * 2, on: on, cw: r.width, ch: r.height };
   }
-  function send() {
-    if (!last) return;
+  async function send() {
+    if (!last || pending || !permissionReady) return;
+    if (permission && permission.state !== "granted") return;
     var now = Date.now();
     if (now < retryAt) return;
     var key = [last.x, last.y, last.on, last.cw, last.ch].join(",");
     if (key === sentKey && now - sentAt < REFRESH_MS) return;
-    sentKey = key;
-    sentAt = now;
+    // A prompt can leave fetch pending indefinitely. Never abort/retry it on a timer:
+    // concurrent requests can replace the unanswered browser prompt (Mozilla bug 2033408).
+    pending = true;
     try {
-      fetch(ENDPOINT, {
+      var response = await fetch(ENDPOINT, {
         method: "POST",
         mode: "cors",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ndc_x: last.x, ndc_y: last.y, on_canvas: last.on,
                                canvas_w: last.cw, canvas_h: last.ch, v: VERSION })
-      }).then(function () {
-        failures = 0;
-        retryAt = 0;
-      }).catch(function () {
-        failures += 1;
-        retryAt = Date.now() + Math.min(MAX_BACKOFF_MS, SEND_MS * Math.pow(2, failures));
-        sentKey = "";                // do not let the skipped send count as delivered
       });
-    } catch (e) {}
+      if (!response.ok) throw new Error("Pointer HTTP " + response.status);
+      sentKey = key;
+      sentAt = now;
+      failures = 0;
+      retryAt = 0;
+    } catch (error) {
+      failures += 1;
+      retryAt = Date.now() + Math.min(MAX_BACKOFF_MS, SEND_MS * Math.pow(2, failures));
+      sentKey = "";
+    } finally {
+      pending = false;
+    }
   }
+  watchPermission();
   window.addEventListener("mousemove", observe, { passive: true, capture: true });
   setInterval(send, SEND_MS);
 })();
@@ -1130,7 +1144,9 @@ def pointer_install_instructions():
         "it. Installing this way records the update URL, so later versions arrive on their own.\n"
         "3) If that is unavailable, create a new script, delete the template, paste the Astrolabe "
         "userscript (use Copy userscript), then Save.\n"
-        "4) Reload your Onshape tab and move the mouse over the 3D view.\n"
+        "4) Reload an Onshape document with SpaceMouse / 3Dconnexion enabled and Allow its "
+        "local-device access prompt. The cursor script waits for this grant before sending. "
+        "Then move the mouse over the 3D view.\n"
         "5) Check: open %s — ndc_x/ndc_y should update as you move, and userscript_version should "
         "read %s. An empty userscript_version means the browser is still running a copy from "
         "before the version stamp.\n\n"

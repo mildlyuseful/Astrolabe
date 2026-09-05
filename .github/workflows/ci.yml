@@ -91,6 +91,12 @@ jobs:
       - name: Compile Python sources
         run: uv run --locked --all-extras python -m compileall -q trackball_daemon tests tools
 
+      - name: Set up Node for Onshape userscript tests
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          package-manager-cache: false
+
       - name: Run Python suite
         run: uv run --locked --all-extras python -m pytest -q
 

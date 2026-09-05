@@ -91,6 +91,10 @@ exact commands.
 
 ## Checks to run
 
+Install Node.js (22 or newer) on PATH for the Onshape userscript lifecycle tests invoked by pytest.
+They execute the served JavaScript with mocked browser permissions, requests, and timers; no npm
+packages or running Onshape session are needed.
+
 ```powershell
 python -m pytest -q
 python -m compileall -q trackball_daemon tests tools

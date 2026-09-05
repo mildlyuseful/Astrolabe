@@ -11,7 +11,8 @@ rather than copying test counts, artifact hashes, or dated environment claims in
 ## Build and automated checks
 
 Install the pinned `uv` version required by `pyproject.toml`, synchronize the checked-in lock, then
-run:
+run the commands below. The Python suite also requires Node.js (22 or newer) on PATH to execute
+the served Onshape userscript's browser lifecycle tests.
 
 ```powershell
 uv sync --locked --all-extras

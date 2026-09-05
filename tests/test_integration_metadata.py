@@ -20,6 +20,7 @@ def test_every_app_has_complete_copyable_setup_metadata():
         assert app.manual_install, app.key
         assert app.health_check, app.key
         assert app.security_notes, app.key
+        assert app.setup_action, app.key
         text = integrations.integration_instructions(app)
         assert "Install model\n" in text
         assert "Automatic setup\n" in text
@@ -57,29 +58,27 @@ def test_status_line_warns_for_unverified_and_unsupported_hosts(monkeypatch):
     assert integrations.status_line(unsupported).startswith("WARNING")
 
 
-def test_no_file_integrations_have_no_placebo_recheck_action():
+def test_no_file_integrations_keep_their_setup_action():
     solidworks = integrations.APPS_BY_KEY["solidworks"]
     onshape = integrations.APPS_BY_KEY["onshape"]
     assert solidworks.needs_plugin is False
     assert solidworks.setup_required is False
-    assert integrations.setup_action_label(solidworks, {"installed": False}) == "Enable"
-    assert integrations.setup_action_label(solidworks, {"installed": True}) is None
-    assert integrations.setup_action_label(onshape, {"installed": False}) == "Set up"
-    assert integrations.setup_action_label(onshape, {"installed": True}) is None
+    assert integrations.setup_action_label(solidworks) == "Enable"
+    assert integrations.setup_action_label(onshape) == "Set up"
 
 
 def test_addin_actions_follow_real_install_and_update_state(monkeypatch):
     blender = integrations.APPS_BY_KEY["blender"]
     monkeypatch.setattr(integrations, "installed_addin_version", lambda _key: None)
-    assert integrations.setup_action_label(blender, {}) == "Set up"
+    assert integrations.setup_action_label(blender) == "Set up"
 
     monkeypatch.setattr(integrations, "installed_addin_version", lambda _key: "1.0")
     monkeypatch.setattr(integrations, "update_available", lambda _key, **_kwargs: False)
-    assert integrations.setup_action_label(blender, {}) == "Reinstall"
+    assert integrations.setup_action_label(blender) == "Reinstall"
 
     monkeypatch.setattr(integrations, "update_available", lambda _key, **_kwargs: True)
     monkeypatch.setattr(integrations, "bundled_addin_version", lambda _key: "2.0")
-    assert integrations.setup_action_label(blender, {}) == "Update → v2.0"
+    assert integrations.setup_action_label(blender) == "Update → v2.0"
 
 
 def test_loaded_copy_version_overrides_primary_destination_for_update_state(monkeypatch):
@@ -87,8 +86,8 @@ def test_loaded_copy_version_overrides_primary_destination_for_update_state(monk
     monkeypatch.setattr(integrations, "installed_addin_version", lambda _key: "2.0")
     monkeypatch.setattr(integrations, "bundled_addin_version", lambda _key: "2.0")
 
-    assert integrations.setup_action_label(unity, {}, installed_version="1.0") == "Update → v2.0"
-    assert integrations.setup_action_label(unity, {}, installed_version="2.0") == "Reinstall"
+    assert integrations.setup_action_label(unity, installed_version="1.0") == "Update → v2.0"
+    assert integrations.setup_action_label(unity, installed_version="2.0") == "Reinstall"
     assert integrations.update_available("unity", installed_version="1.0") is True
 
 

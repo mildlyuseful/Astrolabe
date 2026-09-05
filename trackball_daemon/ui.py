@@ -222,13 +222,7 @@ class SettingsWindow:
                 pass
         for key, button in self._app_action_buttons.items():
             try:
-                action = self._app_button_text(integrations.APPS_BY_KEY[key])
-                if action:
-                    button.config(text=action)
-                    if not button.winfo_manager():
-                        button.pack(side="right")
-                else:
-                    button.pack_forget()
+                button.config(text=self._app_button_text(integrations.APPS_BY_KEY[key]))
             except tk.TclError:
                 pass
 
@@ -1588,10 +1582,8 @@ class SettingsWindow:
     def _app_button_text(self, appdef):
         observed = getattr(self.app, "observed_addin_versions", {}).get(appdef.key)
         if observed is not None:
-            return integrations.setup_action_label(
-                appdef, self.cfg.snapshot().app_operational[appdef.key], installed_version=observed)
-        return integrations.setup_action_label(
-            appdef, self.cfg.snapshot().app_operational[appdef.key])
+            return integrations.setup_action_label(appdef, installed_version=observed)
+        return integrations.setup_action_label(appdef)
 
     @staticmethod
     def _compatibility_text(appdef):
@@ -1644,12 +1636,11 @@ class SettingsWindow:
 
         holder = {}
         action = self._app_button_text(appdef)
-        btn = ttk.Button(controls, text=action or "",
+        btn = ttk.Button(controls, text=action,
                          command=lambda: self._do_install(appdef, enabled, status, holder))
         holder["btn"] = btn
         self._app_action_buttons[appdef.key] = btn
-        if action:
-            btn.pack(side="right")
+        btn.pack(side="right")
 
         details = ttk.Frame(card)
         shown = tk.BooleanVar(value=False)
@@ -1818,13 +1809,7 @@ class SettingsWindow:
             enabled_var.set(bool(self.cfg.snapshot().app_operational[appdef.key]["enabled"]))
             try:
                 status_label.config(text=self._app_status_text(appdef))
-                action = self._app_button_text(appdef)
-                if action:
-                    holder["btn"].config(text=action)
-                    if not holder["btn"].winfo_manager():
-                        holder["btn"].pack(side="right")
-                else:
-                    holder["btn"].pack_forget()
+                holder["btn"].config(text=self._app_button_text(appdef))
             except tk.TclError:
                 pass
             if appdef.key == "onshape":

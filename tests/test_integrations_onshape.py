@@ -3,10 +3,25 @@
 
 """Onshape setup: what the one-time trust steps have to hand the user, and in what form."""
 
+from pathlib import Path
+import shutil
+import subprocess
 from types import SimpleNamespace
 
 from trackball_daemon import integrations, onshape_bridge
 from trackball_daemon.config import Config
+
+
+def test_userscript_browser_lifecycle():
+    node = shutil.which("node")
+    assert node, "Install Node.js to run the Onshape userscript lifecycle tests."
+    result = subprocess.run(
+        [node, str(Path(__file__).with_name("onshape_userscript.cjs")),
+         str(onshape_bridge._POINTER_TTL * 1000)],
+        input=onshape_bridge.pointer_userscript_source(), text=True,
+        capture_output=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_setup_hands_back_the_trust_steps_as_copyable_payloads(isolated_config):
@@ -43,14 +58,16 @@ def test_setup_names_the_port_the_bridge_actually_binds(isolated_config):
 
 
 def test_setup_explains_the_local_network_prompt(isolated_config):
-    """Chromium's Local Network Access permission re-asks on every request until it is remembered,
-    which reads as the prompt flickering. The steps say to remember it rather than just allow."""
+    """Site permission is separate from TLS trust and precedes cursor reporting."""
     cfg = Config().load()
     appdef = integrations.APPS_BY_KEY["onshape"]
 
     _ok, msg, _copyables = integrations.install(appdef, cfg)
 
     assert "Remember my choice for this site" in msg
+    assert "if offered" in msg
+    assert "separate from certificate trust" in msg
+    assert "waits for Onshape's grant" in msg
 
 
 def test_installed_userscript_can_be_identified_and_updated():
@@ -111,33 +128,3 @@ def test_userscript_is_published_under_the_suffix_managers_recognise():
     script = onshape_bridge.pointer_userscript_source()
     assert "// @updateURL    %s" % onshape_bridge.POINTER_SCRIPT_URL in script
     assert "pointer.user.js" in script
-
-
-def test_pointer_userscript_rate_is_decoupled_from_pointer_events():
-    """The userscript posted once per mousemove -- 120+ cross-origin requests a second, each its
-    own TLS handshake, and before the site holds the Local Network Access permission, each one a
-    fresh prompt. A timer owns the transport now; movement only updates local state."""
-    script = onshape_bridge.pointer_userscript_source()
-
-    assert script.count("fetch(ENDPOINT") == 1
-    assert "setInterval(send, SEND_MS)" in script
-    assert 'window.addEventListener("mousemove", observe' in script
-    # The resend floor has to stay inside the bridge's staleness window or a still cursor expires.
-    assert "var REFRESH_MS = 300;" in script
-    assert onshape_bridge._POINTER_TTL * 1000 > 300
-
-
-def test_userscript_backs_off_instead_of_hammering_an_unreachable_bridge():
-    """A failed post must slow the next one down, or the retry rate blocks its own fix.
-
-    Before the browser grants local-network permission every attempt re-raises the prompt; at the
-    steady send rate the prompt is recreated faster than the user can click Allow, so retrying
-    hard is what prevents the grant that would make the retries succeed."""
-    script = onshape_bridge.pointer_userscript_source()
-
-    assert "var MAX_BACKOFF_MS = 5000;" in script
-    assert "if (now < retryAt) return;" in script
-    assert "failures += 1;" in script
-    assert "Math.pow(2, failures)" in script
-    # Success has to clear the backoff, or one blip would throttle the rest of the session.
-    assert "failures = 0;" in script and "retryAt = 0;" in script
