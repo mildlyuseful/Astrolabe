@@ -67,6 +67,14 @@ def test_windows_release_includes_dynamic_winrt_projection_package():
 
 
 def test_release_build_pins_python_and_normalizes_the_user_visible_onedir():
+    import re
+    import yaml
+
+    pinned = re.search(r'\[string\]\$PythonVersion = "([^"]+)"', RELEASE_BUILD).group(1)
+    steps = yaml.safe_load(WORKFLOW)["jobs"]["onedir"]["steps"]
+    setup_python = next(step for step in steps
+                        if step.get("uses", "").startswith("actions/setup-python@"))
+    assert setup_python["with"]["python-version"] == pinned
     assert '[string]$PythonVersion = "3.13.14"' in RELEASE_BUILD
     assert "$ActualPythonVersion -ne $PythonVersion" in RELEASE_BUILD
     assert '$ReleaseDirectory = Join-Path $NuitkaArtifacts $Identity.product_name' in RELEASE_BUILD

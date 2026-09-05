@@ -29,7 +29,8 @@ git diff --check
 
 The release interpreter is pinned to Python 3.13.14. A different interpreter fails before
 dependency synchronization; pass `-BuildPython <exact path>` when it is not the first `python` on
-PATH. For installer qualification, install the pinned Inno Setup compiler and run:
+PATH. CI's unsigned onedir job must select the same exact interpreter as the release builder.
+For installer qualification, install the pinned Inno Setup compiler and run:
 
 ```powershell
 & ".\tools\build_release.ps1" -BuildInstaller -InnoCompilerPath <path-to-ISCC.exe>
