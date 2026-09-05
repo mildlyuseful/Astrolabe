@@ -68,9 +68,9 @@
 #endif
 
 // L = sensor A rows, R = sensor B rows in the dual-sensor solver.
-#define SENSOR_L_PHI    145.0f
+#define SENSOR_L_PHI    140.0f
 #define SENSOR_L_THETA  120.0f
-#define SENSOR_R_PHI    215.0f
+#define SENSOR_R_PHI    220.0f
 #define SENSOR_R_THETA  120.0f
 #define SENSOR_L_MOUNT_DEG  270.0f
 #define SENSOR_L_FLIP       1
