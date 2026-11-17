@@ -63,6 +63,20 @@ def _binding_row(chord, press, release=(), *, activation="hold", match="exact",
     return row
 
 
+_POINTER_OVERRIDES = {
+    f"test.{button}.pointer_button": _binding_row(
+        (f"ble.astrolabe:fiveway.{control}",),
+        [{"command": "pointer.button.press", "target": button}],
+        [{"command": "pointer.button.release", "target": button}],
+        match="allow_extra_modifiers")
+    for control, button in (("down", "left"), ("right", "right"))
+}
+_POINTER_OVERRIDES.update({
+    "astrolabe.down.walk": {"enabled": False},
+    "astrolabe.right.fly": {"enabled": False},
+})
+
+
 def test_profile_composition_accepts_deeply_immutable_config_snapshot_overrides():
     catalog = load_system_binding_profiles()
     overrides = MappingProxyType({
@@ -255,8 +269,8 @@ class _RecordingPointerSink(PointerButtonSink):
 def test_pointer_resource_is_identity_owned_and_reload_synthesizes_release():
     sink = _RecordingPointerSink()
     controller, _runtime_store, catalog = _controller(
-        "astrolabe_5way", pointer_sink=sink)
-    controller.update_pressed(("ble.xiao3389:button.left",))
+        "astrolabe_5way", _POINTER_OVERRIDES, pointer_sink=sink)
+    controller.update_pressed(("ble.astrolabe:fiveway.down",))
     assert sink.events[0][:2] == ("press", "left")
     controller.reload(compile_binding_profile(catalog.profile("keyboard_only"), catalog))
     assert sink.events[1][:2] == ("release", "left")
@@ -266,13 +280,13 @@ def test_pointer_resource_is_identity_owned_and_reload_synthesizes_release():
 def test_system_pointer_click_remains_active_with_pass_through_modifiers():
     sink = _RecordingPointerSink()
     controller, _runtime_store, _catalog = _controller(
-        "astrolabe_5way", pointer_sink=sink)
+        "astrolabe_5way", _POINTER_OVERRIDES, pointer_sink=sink)
 
     controller.update_pressed((
-        "keyboard:shift.left", "ble.xiao3389:button.left"))
+        "keyboard:shift.left", "ble.astrolabe:fiveway.down"))
     controller.update_pressed(("keyboard:shift.left",))
     controller.update_pressed((
-        "keyboard:ctrl.right", "ble.xiao3389:button.right"))
+        "keyboard:ctrl.right", "ble.astrolabe:fiveway.right"))
     controller.update_pressed(("keyboard:ctrl.right",))
 
     assert [(phase, button) for phase, button, _owner in sink.events] == [
@@ -286,16 +300,16 @@ def test_ble_disconnect_releases_a_real_pointer_output_sink():
     sink = SendInputPointerButtonSink(
         lambda button, pressed: events.append((button, pressed)))
     controller, _runtime_store, _catalog = _controller(
-        "astrolabe_5way", pointer_sink=sink)
+        "astrolabe_5way", _POINTER_OVERRIDES, pointer_sink=sink)
     aggregator = InputAggregator()
     aggregator.register_controls((InputControlDescriptor(
-        "ble.xiao3389", "button.left", "Left", "button"),))
+        "ble.astrolabe", "fiveway.down", "Down", "switch"),))
     aggregator.add_listener(controller.handle_transition)
 
     aggregator.accept(InputEvent(
-        "ble.xiao3389", "button.left", "pressed", 1.0))
+        "ble.astrolabe", "fiveway.down", "pressed", 1.0))
     aggregator.accept(InputEvent(
-        "ble.xiao3389", None, "disconnected", 2.0))
+        "ble.astrolabe", None, "disconnected", 2.0))
 
     assert events == [("left", True), ("left", False)]
     assert sink.held == {}

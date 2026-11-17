@@ -52,12 +52,6 @@ def test_builtin_descriptors_have_stable_distinct_control_namespaces():
         "product_string": "Astrolabe",
     })
 
-    bench = descriptors["xiao3389_3button"]
-    assert bench.matches_name("TRACKBALL BLE")
-    assert [item.control_id for item in bench.controls] == [
-        "button.left", "button.right", "button.middle"]
-    assert astrolabe.source_id != bench.source_id
-
 
 def test_descriptor_loader_rejects_code_or_unknown_schema_fields(tmp_path):
     source = {
@@ -131,8 +125,8 @@ def test_motion_sample_preserves_exact_rotation_payload_and_rejects_bad_values()
 
 def test_connection_config_keeps_legacy_tuple_boundary_and_normalizes_uuid():
     config = BleConnectionConfig.from_value((
-        "Trackball BLE", "", "2CAD0002-6E64-0146-B139-9CF2A4CD57FC"))
-    assert config.name == "Trackball BLE"
+        "Astrolabe", "", "2CAD0002-6E64-0146-B139-9CF2A4CD57FC"))
+    assert config.name == "Astrolabe"
     assert config.rotation_characteristic == "2cad0002-6e64-0146-b139-9cf2a4cd57fc"
 
 

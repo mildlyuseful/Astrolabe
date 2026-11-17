@@ -28,40 +28,6 @@ def test_ci_builds_and_smokes_wheel_outside_checkout():
     assert "--name \"astrolabe-daemon\" --version $InstalledVersion" in WORKFLOW
 
 
-# The Arduino target remains a validation bench rather than the production target. During the ZMK
-# transition it is intentionally a separate gate, so a broken protocol bench cannot be hidden by a
-# successful production-candidate build (or vice versa).
-
-
-def test_xiao_validation_gate_remains_separate_during_the_zmk_transition():
-    import yaml
-
-    jobs = yaml.safe_load(WORKFLOW)["jobs"]
-    firmware_steps = {step["name"]: step for step in jobs["firmware"]["steps"]}
-
-    assert "zmk_firmware" in jobs
-    assert "Compile XIAO PMW3389 protocol-bench firmware" in firmware_steps
-    assert "firmware/XIAO3389" in firmware_steps[
-        "Compile XIAO PMW3389 protocol-bench firmware"
-    ]["run"]
-    assert firmware_steps["Retain validation firmware artifacts"]["with"]["name"] == (
-        "validation-firmware"
-    )
-
-
-def test_linux_firmware_job_installs_the_core_packaging_tool():
-    setup = "Set up Python for the nRF packaging tool"
-    install = "Install pinned Adafruit nRF utility"
-    compile_firmware = "Compile XIAO PMW3389 protocol-bench firmware"
-
-    assert setup in WORKFLOW
-    assert 'python-version: "3.11"' in WORKFLOW
-    assert install in WORKFLOW
-    assert 'python -m pip install "adafruit-nrfutil==0.5.3.post16"' in WORKFLOW
-    assert "adafruit-nrfutil version" in WORKFLOW
-    assert WORKFLOW.index(setup) < WORKFLOW.index(install) < WORKFLOW.index(compile_firmware)
-
-
 def test_windows_release_includes_dynamic_winrt_projection_package():
     assert "--include-package=winrt" in RELEASE_BUILD
 

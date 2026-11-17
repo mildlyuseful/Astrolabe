@@ -11,8 +11,8 @@ from trackball_daemon.release_smoke import run_release_smoke
 def test_release_smoke_loads_profiles_devices_schemas_and_examples():
     result = run_release_smoke()
     assert result["status"] == "ok"
-    assert result["profiles"] == {"astrolabe_5way": 11, "keyboard_only": 4}
-    assert result["devices"] == ["astrolabe_5way", "xiao3389_3button"]
+    assert result["profiles"] == {"astrolabe_5way": 8, "keyboard_only": 4}
+    assert result["devices"] == ["astrolabe_5way"]
     assert len(result["schemas"]) == 3
     assert len(result["examples"]) == 3
     assert result["runtime_imports"] == (

@@ -2,7 +2,7 @@
   "schema": 1,
   "device": {
     "device.address": "",
-    "device.name": "Trackball BLE"
+    "device.name": "Astrolabe"
   },
   "global": {
     "hud.always_on_top": true,

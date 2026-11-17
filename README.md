@@ -40,8 +40,7 @@ released yet.
   need Python installed.
 - The Astrolabe firmware on a compatible BLE/USB trackball. The hardware is frozen: a SuperMini
   nRF52840 controller, two PMW3610 sensors on a 52 mm ball, and an ALPS SKRHADE010 five-way switch.
-  See [`docs/hardware.md`](docs/hardware.md) for the full contract. Legacy rotation-only and
-  three-button bench firmware also remain supported by the daemon.
+  See [`docs/hardware.md`](docs/hardware.md) for the full contract.
 - A supported 3D application only if you want its navigation integration.
 
 ## Install and run
@@ -295,18 +294,9 @@ fixture, where HID output, the gestures, the indicator, route handover, and the 
 fail-safe are confirmed. It is still not qualified for distribution: the development USB VID/PID is
 not product identity, and sensor pose calibration, switch bounce margin, sleep/wake, battery, and
 latency remain release blockers in [`TODO.md`](TODO.md). Hardware is frozen in
-[`docs/hardware.md`](docs/hardware.md); build and design details are in
-[`docs/zmk_migration_plan.md`](docs/zmk_migration_plan.md).
+[`docs/hardware.md`](docs/hardware.md).
 
-Three Arduino sketches are retained as diagnostics and compatibility references, not as products:
-[`firmware/PMW3610/`](firmware/PMW3610/PMW3610.ino) is the five-way validation prototype that proved
-the sensor loop and the battery service on this controller,
-[`firmware/XIAO3389/`](firmware/XIAO3389/XIAO3389.ino) is the dual-PMW3389 three-button protocol
-bench that still guards the host packet boundary in CI, and
-[`firmware/Astrolabe/`](firmware/Astrolabe/Astrolabe.ino) is a superseded placeholder. All three are
-retired once the ZMK firmware passes its live replacement gates. Legacy rotation-only firmware
-remains supported by the daemon. See [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md)
-for the packet and descriptor contract.
+See [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) for the packet and descriptor contract.
 
 ## Development and project documentation
 

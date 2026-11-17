@@ -23,7 +23,6 @@ import tkinter as tk
 from . import integrations
 from .app_registry import APP_SPECS, APP_SPECS_BY_ID, resolve_foreground_context
 from .autocad_driver import AutoCADPluginLoader
-from .ble import start_ble_thread
 from .commands import SerializedCommandQueue, SetFocusedContext
 from .control_hud import ControlHUD
 from .config import (compose_advanced_with_host_baseline, host_baseline_payload,
@@ -34,6 +33,7 @@ from .devices import (
     MotionSample,
     SnapshotInputProvider,
     builtin_device_descriptors,
+    start_ble_thread,
     start_usb_thread,
 )
 from .input import (

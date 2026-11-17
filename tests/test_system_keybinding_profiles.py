@@ -35,9 +35,6 @@ def test_packaged_profiles_are_complete_immutable_and_keyboard_only_is_device_fr
     keyboard = catalog.profile("keyboard_only")
     assert _binding(hardware, "astrolabe.center.toggle_mode").chord == (
         "ble.astrolabe:fiveway.center",)
-    assert _binding(hardware, "xiao.left.pointer_button").release_actions[0].target == "left"
-    assert all(_binding(hardware, f"xiao.{button}.pointer_button").match_policy ==
-               "allow_extra_modifiers" for button in ("left", "right", "middle"))
     assert all(token.startswith("keyboard:")
                for binding in keyboard.bindings for token in binding.chord)
     with pytest.raises(TypeError):
@@ -75,8 +72,12 @@ def test_sparse_overrides_patch_delete_and_add_without_mutating_system_data():
         "keyboard:ctrl.left"), "overlapping selectors"),
     (lambda raw: raw["profiles"][0]["bindings"][0]["press"].__setitem__(
         0, {"command": "python.eval", "target": "anything"}), "not allowlisted"),
-    (lambda raw: raw["profiles"][0]["bindings"][8].__setitem__(
-        "release", []), "paired press/release"),
+    (lambda raw: raw["profiles"][0]["bindings"].append({
+        "id": "custom.click", "label": "Click", "enabled": True,
+        "chord": ["ble.astrolabe:fiveway.down"], "match": "allow_extra_modifiers",
+        "activation": "hold", "priority": 0,
+        "press": [{"command": "pointer.button.press", "target": "left"}],
+        "release": []}), "paired press/release"),
 ])
 def test_profile_loader_rejects_unsafe_or_ambiguous_data(tmp_path, mutate, message):
     raw = _raw_profiles()
@@ -91,7 +92,13 @@ def test_pointer_buttons_cannot_be_persistent_toggles():
     catalog = load_system_binding_profiles()
     with pytest.raises(ValueError, match="momentary hold"):
         compose_binding_profile(catalog, "astrolabe_5way", {
-            "xiao.left.pointer_button": {"activation": "toggle"},
+            "custom.left.pointer_button": {
+                "label": "Left click", "enabled": True,
+                "chord": ["ble.astrolabe:fiveway.down"], "match": "exact",
+                "activation": "toggle", "priority": 0,
+                "press": [{"command": "pointer.button.press", "target": "left"}],
+                "release": [{"command": "pointer.button.release", "target": "left"}],
+            },
         })
 
 
