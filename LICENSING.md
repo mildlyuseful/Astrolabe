@@ -29,7 +29,6 @@ Every path currently tracked in this repository is licensed under Apache-2.0.
 | `docs/`, `README.md`, `AGENTS.md`, `TODO.md`, `archive/` | Documentation, contributor routing, and retained investigation records |
 | `NOTICE`, `LICENSING.md`, `CONTRIBUTING.md`, `SECURITY.md`, `TRADEMARKS.md`, `THIRD_PARTY_NOTICES.md` | This project's own policy documents |
 | `licensing.json`, `third_party.json` | Machine-readable license and attribution records |
-| `ui_demo/` | Non-shipping UI design prototypes and their first-party assets |
 | `.github/`, `.claude/` | CI workflows and repository tooling configuration |
 | `pyproject.toml`, `uv.lock`, `MANIFEST.in`, `.gitattributes`, `.gitignore` | Packaging, dependency-lock, and repository configuration |
 
@@ -65,7 +64,6 @@ Two exemptions exist, and each records its reason there:
   directory's Git tree hash, so editing these files marks the shipped DLL stale until it is rebuilt
   against AutoCAD reference assemblies. Inline headers are added the next time that DLL is rebuilt
   for a real change.
-- `ui_demo/**` — non-shipping design prototypes and their assets, which are not daemon runtime
   sources and are not distributed.
 
 `python tools/apply_license_headers.py` adds any missing header; `--check` reports without writing.

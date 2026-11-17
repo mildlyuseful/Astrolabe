@@ -18,7 +18,7 @@ from trackball_daemon.app import App
 from trackball_daemon.config import (Config, compose_advanced_with_host_baseline,
                                      default_app_profile, host_baseline_payload)
 from trackball_daemon.navbroker import NavBroker
-from trackball_daemon.ui import _PIVOT_LABELS
+from trackball_daemon.settings_ui_model import CATEGORY_TITLES, PIVOT_LABELS
 
 
 def _plain(value):
@@ -310,26 +310,13 @@ def test_every_rich_integration_consumes_per_action_axis_sources():
         assert "ActionRouting" in text or "action_routing" in text, source
 
 
-def test_ui_exposes_global_and_per_action_axis_routing():
-    source = (Path(__file__).parents[1] / "trackball_daemon/ui.py").read_text(encoding="utf-8")
-    schema = (Path(__file__).parents[1] / "trackball_daemon/settings_schema.py").read_text(
-        encoding="utf-8")
-    assert "Physical trackball orientation" in source
-    assert "Changing a source swaps axes instead of duplicating one" in source
-    assert "Action axes & directions" in schema
-    assert '"action_routing"' in schema
+def test_axis_routing_and_orientation_are_presented_settings():
+    assert CATEGORY_TITLES["routing"] and CATEGORY_TITLES["transform"]
 
 
 def test_pivot_ui_uses_one_canonical_case_sensitive_vocabulary():
-    assert _PIVOT_LABELS == {
-        "camera": "Camera",
-        "screen_center": "Screen Center",
-        "cursor": "Under Cursor (mouse)",
-        "selection": "Selection",
-        "cursor_3d": "3D Cursor",
-        "object": "Model Center",
-        "origin": "World Origin",
-    }
-    source = (Path(__file__).parents[1] / "trackball_daemon/ui.py").read_text(encoding="utf-8")
-    assert "Auto Depth" not in source and "Viewpoint" not in source
-    assert '("Selection", "object")' not in source
+    from trackball_daemon.settings_schema import SETTING_SPECS_BY_ID
+    choices = set(SETTING_SPECS_BY_ID["navigation.orbit.pivot"].choices) - {"default"}
+    assert set(PIVOT_LABELS) == choices
+    assert PIVOT_LABELS["cursor"] == "Under cursor"
+    assert PIVOT_LABELS["object"] == "Model center"

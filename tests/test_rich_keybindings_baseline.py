@@ -22,7 +22,6 @@ from trackball_daemon.navbroker import NavBroker
 from trackball_daemon.output import OutputEngine
 from trackball_daemon import tray as tray_mod
 from trackball_daemon.tray import TrayController
-from trackball_daemon.ui import SettingsWindow
 
 
 def _packet(rx=0.01, ry=0.02, rz=0.03):
@@ -148,17 +147,6 @@ def test_app_external_power_is_explicit_without_fabricating_battery_charge():
 
     with pytest.raises(TypeError, match="boolean"):
         app.set_external_power(1)
-
-
-def test_settings_battery_status_update_is_tk_thread_projection():
-    values = []
-    ui = SettingsWindow.__new__(SettingsWindow)
-    ui.win = SimpleNamespace(winfo_exists=lambda: True)
-    ui.battery_var = SimpleNamespace(set=values.append)
-
-    ui.update_battery_status("Battery: 42%")
-
-    assert values == ["Battery: 42%"]
 
 
 def test_scheme_inheritance_uses_only_the_explicit_default_sentinel():

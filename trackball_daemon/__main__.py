@@ -1,11 +1,7 @@
 # SPDX-FileCopyrightText: 2026 Dylan Lee
 # SPDX-License-Identifier: Apache-2.0
 
-"""Entry point:  python -m trackball_daemon   (use pythonw for no console).
-
-The tray app replaces the old pygame loop as `main`. --debug additionally opens the cube
-verification window; it is OFF by default.
-"""
+"""Entry point:  python -m trackball_daemon   (use pythonw for no console)."""
 import argparse
 import json
 
@@ -16,10 +12,8 @@ from .instance_lock import SingleInstanceGuard, notify_already_running
 def main(argv=None, *, instance_guard=None):
     parser = argparse.ArgumentParser(
         prog="trackball_daemon",
-        description="Trackball system-tray daemon (headless by default).",
+        description="Astrolabe tray daemon: pointer and 3D navigation for an Astrolabe controller.",
     )
-    parser.add_argument("--debug", action="store_true",
-                        help="also open the rotating-cube verification window (default off)")
     parser.add_argument(
         "--release-smoke",
         action="store_true",
@@ -36,7 +30,7 @@ def main(argv=None, *, instance_guard=None):
         notify_already_running()
         return 2
     try:
-        App(debug=args.debug).start()
+        App().start()
     finally:
         guard.close()
     return 0

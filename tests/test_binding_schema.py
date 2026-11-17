@@ -6,18 +6,18 @@
 from trackball_daemon import integrations
 from trackball_daemon.app_registry import APP_BINDING_PROFILES
 from trackball_daemon.config import Config
-from trackball_daemon.settings_schema import BINDING_SECTIONS
-from trackball_daemon.ui import _option_label
+from trackball_daemon.settings_schema import SETTING_SPECS, UI_ONLY_CAPABILITIES
+from trackball_daemon.settings_ui_model import CHOICE_LABELS
 
 
-def test_schema_covers_every_app_and_has_one_global_field_order():
+def test_every_app_feature_is_a_setting_capability():
     assert set(APP_BINDING_PROFILES) == set(integrations.APPS_BY_KEY)
-    ordered = [field for section in BINDING_SECTIONS for field in section.fields]
-    assert len(ordered) == len(set(ordered))
-    allowed = set(ordered)
+    referenced = set(UI_ONLY_CAPABILITIES)
+    for spec in SETTING_SPECS:
+        referenced |= spec.capability.referenced_capabilities
     for key, profile in APP_BINDING_PROFILES.items():
         assert profile.key == key
-        assert profile.features <= allowed
+        assert profile.features <= referenced, profile.features - referenced
         assert {"orbit_style", "orbit_pivot", "twist_action", "zoom_target"} <= profile.features
 
 
@@ -66,8 +66,8 @@ def test_capabilities_do_not_expose_controls_without_distinct_runtime_behavior()
     assert "dolly" not in APP_BINDING_PROFILES["fusion360"].twist_actions
 
 
-def test_orbit_and_zoom_dropdown_labels_follow_one_convention():
-    assert [_option_label(v) for v in ("default", "free", "turntable")] == [
-        "Default", "Free", "Turntable"]
-    assert [_option_label(v) for v in ("default", "to_center", "to_object", "to_cursor")] == [
-        "Default", "To Center", "To Object", "To Cursor"]
+def test_every_enum_choice_has_a_display_label():
+    for spec in SETTING_SPECS:
+        if spec.value_kind.value in ("enum", "string_list") and not spec.id.startswith(
+                "navigation.orbit.pivot"):
+            assert all(choice in CHOICE_LABELS for choice in spec.choices), spec.id

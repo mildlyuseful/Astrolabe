@@ -6,7 +6,7 @@ from pathlib import Path
 import tomllib
 
 from trackball_daemon.app_registry import APP_BINDING_PROFILES
-from trackball_daemon.ui import _free_orbit_needs_roll_warning
+from trackball_daemon.settings_ui_model import free_orbit_needs_roll
 
 
 ROOT = Path(__file__).parents[1]
@@ -122,11 +122,8 @@ def test_sketchup_selection_override_does_not_replace_to_object():
 
 
 def test_free_orbit_warns_without_overwriting_twist_action():
-    source = _source("trackball_daemon/ui.py")
-    assert 'Switch to "roll" for 3-axis orbit' in source
-    assert 'self._set_and_save(adv + ("twist_action",), "roll")' not in source
-    assert _free_orbit_needs_roll_warning("free", "turntable", "zoom") is True
-    assert _free_orbit_needs_roll_warning("default", "free", "none") is True
-    assert _free_orbit_needs_roll_warning("free", "free", "roll") is False
-    assert _free_orbit_needs_roll_warning("turntable", "free", "zoom") is False
-    assert _free_orbit_needs_roll_warning("free", "free", "zoom", supports_roll=False) is False
+    assert free_orbit_needs_roll("free", "zoom") is True
+    assert free_orbit_needs_roll("free", "none") is True
+    assert free_orbit_needs_roll("free", "roll") is False
+    assert free_orbit_needs_roll("turntable", "zoom") is False
+    assert free_orbit_needs_roll("free", "zoom", supports_roll=False) is False

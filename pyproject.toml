@@ -70,7 +70,6 @@ Documentation = "https://github.com/mildlyuseful/Astrolabe/blob/main/README.md"
 Security = "https://github.com/mildlyuseful/Astrolabe/blob/main/SECURITY.md"
 
 [project.optional-dependencies]
-debug = ["pygame>=2.5.0", "PyOpenGL>=3.1.7"]
 # PyYAML is here so the workflow-structure tests actually run. A workflow GitHub cannot parse is
 # rejected before any job starts, which produces no job and no readable error, so that check has to
 # happen locally or not at all.
@@ -93,13 +92,11 @@ version = {attr = "trackball_daemon.__version__"}
 # Ship the bundled CAD add-ins (e.g. the Fusion 360 add-in) inside the package so
 # "Set up" can copy them out, and so Nuitka onedir includes them.
 [tool.setuptools.package-data]
-trackball_daemon = ["host_profiles.json", "default_profiles.json", "system_defaults.json", "system_keybinding_profiles.json", "plugins/**/*", "devices/descriptor_data/*.json", "schemas/*.schema.json", "examples/*.example.json"]
+trackball_daemon = ["host_profiles.json", "default_profiles.json", "system_defaults.json", "system_keybinding_profiles.json", "plugins/**/*", "devices/descriptor_data/*.json", "schemas/*.schema.json", "examples/*.example.json", "webui/static/*"]
 
 [tool.setuptools.exclude-package-data]
 trackball_daemon = ["**/__pycache__/*", "**/*.pyc", "**/*.pyc.*", "**/*.pyo"]
 
-# Keep test collection inside tests/ -- otherwise pytest's default *_test.py glob would also
-# import the standalone cube_test.py demo (pulls in pygame, slow, side-effects).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

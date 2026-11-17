@@ -83,6 +83,12 @@ def run_release_smoke():
                     "host application without one")
             payload_notices += 1
 
+    # The settings UI is static files a freezer can drop without failing the build.
+    webui = sorted(item.name for item in root.joinpath("webui", "static").iterdir())
+    for name in ("index.html", "app.js", "app.css"):
+        if name not in webui:
+            raise ValueError(f"settings UI is missing {name}")
+
     autocad = validate_bundled_autocad_artifact(root)
     catalog = load_system_binding_profiles()
     compiled = {
@@ -101,6 +107,7 @@ def run_release_smoke():
         # The machine-readable release manifest will project the same mapping.
         "support_tiers": {tier.value: list(app_ids) for tier, app_ids in APP_IDS_BY_TIER.items()},
         "payload_notices": payload_notices,
+        "webui": webui,
         "autocad_plugin": {
             "version": autocad["version"],
             "sha256": autocad["dll_sha256"],

@@ -13,6 +13,7 @@ from trackball_daemon.app import App
 
 _START_STAGES = (
     "tray",
+    "webui",
     "broker",
     "solidworks",
     "onshape",
@@ -68,7 +69,6 @@ class _Root:
 def _lifecycle_app(monkeypatch, tmp_path, *, fail_at=None):
     events = []
     app = App.__new__(App)
-    app.debug = False
     app.first_run = False
     app.log = SimpleNamespace(
         info=lambda *_a, **_k: None,
@@ -83,7 +83,8 @@ def _lifecycle_app(monkeypatch, tmp_path, *, fail_at=None):
     app.ble_enabled_event = threading.Event()
     app.ble_enabled_event.set()
     app.transport_handover_lock = threading.RLock()
-    app.root = app.ui = app.hud = app.tray = None
+    app.root = app.hud = app.tray = None
+    app.ui_server = _Boundary("webui", events, fail_at)
     app.broker = _Boundary("broker", events, fail_at)
     app.sw_driver = _Boundary("solidworks", events, fail_at)
     app.onshape_bridge = _Boundary("onshape", events, fail_at)
@@ -108,11 +109,6 @@ def _lifecycle_app(monkeypatch, tmp_path, *, fail_at=None):
 
     root = _Root(events, fail_at)
     monkeypatch.setattr(app_module.tk, "Tk", lambda: root)
-    monkeypatch.setattr(
-        app_module,
-        "SettingsWindow",
-        lambda *_args: events.append(("ui", "settings")) or object(),
-    )
     monkeypatch.setattr(
         app_module,
         "ControlHUD",
@@ -172,7 +168,8 @@ def test_whole_application_startup_and_shutdown_smoke_uses_every_boundary(
     for name in (
             "tray", "broker", "solidworks", "onshape", "autocad", "foreground", "usb", "ble"):
         assert ("start", name) in events
-    for name in ("foreground", "broker", "solidworks", "onshape", "autocad", "tray", "hud"):
+    for name in ("foreground", "broker", "solidworks", "onshape", "autocad", "tray", "hud",
+                 "webui"):
         assert ("stop", name) in events
     assert ("ui", "destroy") in events
 

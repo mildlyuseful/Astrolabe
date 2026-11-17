@@ -56,12 +56,6 @@
       "note": "The bundled AutoCAD DLL's provenance manifest pins this directory's Git tree hash, so editing these files marks the shipped DLL stale until it is rebuilt against AutoCAD reference assemblies. Their disposition is recorded here instead, and inline headers are added the next time the DLL is legitimately rebuilt."
     },
     {
-      "match": ["ui_demo/**"],
-      "license": "Apache-2.0",
-      "headers": "mapped",
-      "note": "Non-shipping UI design prototypes and their assets. They are not daemon runtime sources and are not distributed, so their markup, styling, and image files take one directory-level disposition."
-    },
-    {
       "match": ["**"],
       "license": "Apache-2.0",
       "headers": "auto"

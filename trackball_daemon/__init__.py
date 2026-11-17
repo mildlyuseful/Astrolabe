@@ -1,10 +1,9 @@
 # SPDX-FileCopyrightText: 2026 Dylan Lee
 # SPDX-License-Identifier: Apache-2.0
 
-"""Trackball Daemon — system-tray app + settings UI around the BLE trackball.
+"""Astrolabe daemon: the tray app that turns an Astrolabe controller into pointer and 3D input.
 
-Module layout (kept deliberately separate so it bundles cleanly with Nuitka onedir
-or installs from GitHub without source changes):
+Module layout:
 
   paths        - per-user config directory
   util         - logging (file-based, safe under pythonw / no console)
@@ -12,7 +11,7 @@ or installs from GitHub without source changes):
   config       - legacy migration/normalization helpers
   runtime_state - immutable live interaction state
   output       - output/injection math (SendInput + quaternion + app-aware routing)
-  devices      - BLE/data-ingestion providers and descriptors
+  devices      - device descriptors, the Astrolabe protocol, and BLE/USB transports
   winfocus     - read-only foreground-window process detection
   navigation_router - target/revision isolation and transport delivery
   navbroker    - 127.0.0.1 socket broker streaming target-matched deltas to add-ons
@@ -22,8 +21,8 @@ or installs from GitHub without source changes):
   app_registry - canonical app identity, order, transport, modes, and capabilities
   integrations - host detection, setup, install, enable, and add-on auto-update
   tray         - pystray system-tray icon + menu (process lifecycle)
-  ui           - Tkinter settings window (hides to tray on close)
-  debugview    - optional pygame cube window (--debug only)
+  webui        - settings UI: loopback server, JSON API, and the static web front-end
+  control_hud  - the passive control panel in the screen corner
   app          - orchestrator that wires the above together
 """
 

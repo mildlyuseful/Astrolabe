@@ -1,7 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Dylan Lee
 # SPDX-License-Identifier: Apache-2.0
 
-"""UI-independent projections and typed settings actions for the barebones settings UI."""
+"""UI-independent settings projections, presentation metadata, and typed settings actions.
+
+The settings UI is generated from SETTING_SPECS. A new setting needs only a SettingSpec with an
+existing category; a new category needs one line in CATEGORIES saying where it is shown.
+"""
 
 from dataclasses import dataclass
 
@@ -15,20 +19,78 @@ from .settings_schema import (
 from .system_defaults import SYSTEM_DEFAULTS
 
 
-CATEGORY_TITLES = {
-    "device": "Device",
-    "hud": "Control panel",
-    "input": "Input",
-    "transform": "Physical transform",
-    "pointer": "Pointer",
-    "orbit": "Orbit",
-    "sensitivity": "Sensitivity & rate",
-    "pan_zoom": "Pan / Zoom",
-    "navigation": "Navigation",
-    "object": "Object",
-    "camera": "Camera",
-    "routing": "Axis routing",
+@dataclass(frozen=True)
+class Category:
+    category_id: str
+    title: str
+    page: str          # "apps": per-app capable, shown per app; "device": device-wide settings
+    summary: str = ""
+
+
+# Display order is this order. Categories missing here still render, titled from their ID.
+CATEGORIES = (
+    Category("sensitivity", "Feel", "apps", "How fast each motion moves the view."),
+    Category("orbit", "Orbit", "apps", "Where the view turns, and how."),
+    Category("pan_zoom", "Zoom & pan", "apps", "Zoom targets, holds, and pan behaviour."),
+    Category("camera", "Camera", "apps"),
+    Category("navigation", "Fly & walk", "apps", "Speeds for the first-person modes."),
+    Category("object", "Object", "apps", "Moving selected objects instead of the camera."),
+    Category("routing", "Axes", "apps", "Which ball axis drives each action, and its direction."),
+    Category("device", "Device", "device", "Applies on the next reconnect."),
+    Category("transform", "Orientation", "device",
+             "Map the sensor axes to the way the device sits on your desk."),
+    Category("pointer", "Pointer", "device", "Cursor and scroll while in Pointer mode."),
+    Category("input", "Startup", "device"),
+    Category("hud", "Control panel", "device", "The small status panel in the screen corner."),
+)
+CATEGORY_TITLES = {category.category_id: category.title for category in CATEGORIES}
+
+CHOICE_LABELS = {
+    "default": "Default", "free": "Free", "turntable": "Turntable",
+    "orbit": "Orbit", "fly": "Fly", "walk": "Walk", "object": "Object",
+    "roll": "Roll", "zoom": "Zoom", "dolly": "Dolly", "none": "None",
+    "3d": "3D", "pointer": "Pointer", "cube": "3D (legacy)", "cursor": "Pointer (legacy)",
+    "camera": "Camera", "screen_center": "Screen center", "selection": "Selection",
+    "cursor_3d": "3D cursor", "origin": "World origin",
+    "to_center": "To center", "to_object": "To object", "to_cursor": "To cursor",
+    "view": "View", "ground": "Ground",
+    "off": "Off", "linear": "Linear", "smooth": "Smooth",
 }
+# Pivot names differ from the generic labels where the same word means something else.
+PIVOT_LABELS = {
+    "camera": "Camera", "screen_center": "Screen center", "cursor": "Under cursor",
+    "selection": "Selection", "cursor_3d": "3D cursor", "object": "Model center",
+    "origin": "World origin",
+}
+
+
+def free_orbit_needs_roll(style, twist_action, supports_roll=True):
+    """Free orbit is three-axis only while twist rolls; anything else silently drops an axis."""
+    return bool(supports_roll and style == "free" and twist_action != "roll")
+
+
+def app_hints(snapshot, app_id):
+    """Advice attached to a setting row, computed here so every UI shows the same thing."""
+    app = APP_SPECS_BY_ID[app_id]
+    hints = []
+    style = snapshot.app_value(app_id, "navigation.orbit.style")
+    if style == "default":
+        style = snapshot.global_value("navigation.orbit.style")
+    twist = snapshot.app_value(app_id, "navigation.orbit.twist_action")
+    if free_orbit_needs_roll(style, twist, "roll" in app.capabilities):
+        hints.append({
+            "setting": "navigation.orbit.twist_action", "level": "warning",
+            "text": "Free orbit only rotates on all three axes while twist is set to Roll.",
+        })
+    if "onshape_userscript" in app.capabilities and \
+            snapshot.app_value(app_id, "navigation.orbit.pivot") == "cursor":
+        hints.append({
+            "setting": "navigation.orbit.pivot", "level": "info",
+            "text": "Under-cursor orbit needs the Astrolabe userscript in your Onshape browser; "
+                    "without a hit, the fallback order is used.",
+            "action": "onshape.userscript",
+        })
+    return hints
 
 
 @dataclass(frozen=True)

@@ -1,19 +1,19 @@
 # SPDX-FileCopyrightText: 2026 Dylan Lee
 # SPDX-License-Identifier: Apache-2.0
 
-"""Orchestrator: wires config + output engine + BLE thread + tray + settings window +
+"""Orchestrator: wires config + output engine + device transports + tray + settings UI +
 the nav transports (broker / SolidWorks / Onshape / AutoCAD loader).
 
 Threading model (Windows):
-  * main thread       -> hidden Tk root + mainloop (owns all GUI; window shown/hidden on demand)
+  * main thread       -> hidden Tk root + mainloop (owns the control-panel HUD)
   * tray thread       -> pystray icon loop (menu callbacks marshalled to Tk via root.after)
+  * webui threads     -> loopback HTTP server for the settings UI (webui/), one thread per request
   * ble thread        -> asyncio BLE loop and packet-boundary focus routing
   * usb thread        -> vendor-HID hotplug, ownership keepalive, and packet routing
   * broker threads    -> NavBroker accept + sender (streams frames to the socket add-ons)
   * SolidWorks worker -> its own CoInitialize'd COM thread (daemon-side direct driver)
   * AutoCAD worker    -> its own CoInitialize'd COM thread (plugin staging/NETLOAD only)
   * Onshape threads   -> TLS accept + per-connection WAMP reader + nav worker (daemon-side bridge)
-  * debug thread      -> optional pygame cube (--debug)
 The process stays alive on the Tk mainloop and exits only when tray -> Quit tears it down.
 """
 import copy
@@ -54,15 +54,14 @@ from .runtime_state import ConfigRuntimeBaseResolver, FocusedContext, RuntimeSto
 from .service_health import ServiceHealth, ServiceHealthState
 from .settings_schema import SETTING_SPECS
 from .tray import TrayController, migrate_startup_entry
-from .ui import SettingsWindow
 from .util import get_logger
+from .webui import UiServer, open_window
 from .winfocus import ForegroundMonitor, foreground_process_name
 from .windows_pointer import SendInputPointerButtonSink
 
 
 _NO_PACKET_APP = object()
 _NO_PACKET_REVISION = object()
-_NO_BATTERY_LEVEL = object()
 
 
 def _set_nested(container, path, value):
@@ -77,9 +76,9 @@ class App:
     # Class-level default so battery/power helpers stay readable. Tests build bare instances
     # via App.__new__(App) and read these before __init__ assigns them.
     _external_power = False
+    ui_server = None
 
-    def __init__(self, debug=False):
-        self.debug = debug
+    def __init__(self):
         self.log = get_logger()
         self.config = ConfigStore().load()
         self.first_run = self.config.first_run
@@ -119,12 +118,10 @@ class App:
         self._battery_state = (None, False)
         self._external_power = False
         self._last_pushed = None
-        self._last_battery_pushed = _NO_BATTERY_LEVEL
         self._health_lock = threading.Lock()
         self.service_health = {}
-        self._last_health_pushed = None
         self.root = None
-        self.ui = None
+        self.ui_server = None
         self.hud = None
         self.tray = None
         self.broker = None
@@ -184,8 +181,6 @@ class App:
         # connected host document. Preserve it after disconnect so update UX does not fall back to
         # an unrelated "primary" install destination.
         self.observed_addin_versions = {}
-        self._last_apps_pushed = None
-        self._last_hud_visible = None
         self._engine_app = None
         self._packet_app_key = _NO_PACKET_APP
         self._packet_state_revision = _NO_PACKET_REVISION
@@ -196,6 +191,11 @@ class App:
         self.foreground_monitor = ForegroundMonitor(self._on_foreground_process_changed)
         self._apply_rates()
         self._apply_schemes()
+        self.ui_server = UiServer(self)
+        self.config.add_listener(lambda _event: self.ui_server.changed("state"))
+        self.runtime.add_listener(lambda _event: self.ui_server.changed("live"))
+        self.input_aggregator.add_listener(
+            lambda transition: self.ui_server.publish_input(transition.snapshot.pressed_tokens))
 
     # --- Device wiring and packet-boundary routing --------------------------------
     def get_ble_params(self):
@@ -579,6 +579,8 @@ class App:
         if not isinstance(sample, MotionSample):
             raise TypeError("BLE device adapters must emit MotionSample values")
         self._handle_ble_packet(sample.payload, timestamp=sample.timestamp)
+        if self.ui_server is not None:
+            self.ui_server.motion.add(sample.rotation)
 
     def _nav_sink(self, ox, oy, oz, px, py, zoom):
         # Called synchronously by _handle_ble_packet after that method selected the app whose
@@ -670,11 +672,11 @@ class App:
         try:
             self.root = tk.Tk()
             self.root.withdraw()                       # headless: no window on startup
-            self.ui = SettingsWindow(self.root, self)
             self.hud = ControlHUD(self.root, self.runtime, self.config)
 
             self.tray = TrayController(self)
             self.tray.start()
+            self.ui_server.start()
 
             # Carry an earlier build's login registration onto the current value name. Done after
             # the guard has already admitted this process, so it can never race a running copy.
@@ -722,10 +724,6 @@ class App:
                 address_learned=self._remember_ble_address,
             )
 
-            if self.debug:
-                from .debugview import start_debug_view
-                start_debug_view(self.engine, self, self.stop_event)
-
             if self.first_run:
                 self.root.after(500, self.open_onboarding)
             self.root.after(300, self._poll)
@@ -737,59 +735,35 @@ class App:
             self._shutdown()
             raise
 
-    def open_settings(self):
-        # Safe from any thread: marshal the GUI work onto the Tk thread.
-        if self.root is not None:
-            self.root.after(0, self.ui.show)
+    def open_settings(self, page=""):
+        """Show the settings UI, raising the open window rather than stacking another. Any thread."""
+        if self.ui_server is not None and self.ui_server.port:
+            open_window(self.ui_server.url(page), reuse=self.ui_server.hub.client_count > 0)
 
     def open_onboarding(self):
-        # Reopenable from the tray; all UI ownership remains on the Tk thread.
-        if self.root is not None:
-            self.root.after(0, self.ui.show_onboarding)
+        self.open_settings("welcome")
 
     def set_control_hud_visible(self, visible):
         """Typed persistent visibility action safe for the tray thread."""
         self.config.set_global("hud.visible", bool(visible))
 
     def _poll(self):
-        if self._status != self._last_pushed:
-            self._last_pushed = self._status
-            if self.ui is not None:
-                self.ui.update_status(self._status)
-                self.ui.update_battery_status(self.battery_status_text())
+        """Push daemon-side changes that have no event of their own to the tray and the UI."""
+        signature = (self._status, self._battery_state, self._external_power,
+                     self.app_connection_summary(),
+                     tuple(sorted((service_id, item.state.value, item.detail)
+                                  for service_id, item in self.runtime_health_snapshot().items())),
+                     self.config.snapshot().global_value("hud.visible"))
+        if signature != self._last_pushed:
+            self._last_pushed = signature
             if self.tray is not None:
                 self.tray.refresh()
-        battery_signature = (self._battery_state, self._external_power)
-        if battery_signature != self._last_battery_pushed:
-            self._last_battery_pushed = battery_signature
-            if self.ui is not None:
-                self.ui.update_battery_status(self.battery_status_text())
-            if self.tray is not None:
-                self.tray.refresh()
-        summary = self.app_connection_summary()
-        if summary != self._last_apps_pushed:
-            self._last_apps_pushed = summary
-            if self.tray is not None:
-                self.tray.refresh()
-            if self.ui is not None:
-                self.ui.update_app_connections(self.connected_apps)
-        health = self.runtime_health_snapshot()
-        health_signature = tuple(sorted(
-            (service_id, item.state.value, item.detail)
-            for service_id, item in health.items()))
-        if health_signature != self._last_health_pushed:
-            self._last_health_pushed = health_signature
-            if self.tray is not None:
-                self.tray.refresh()
-            if self.ui is not None:
-                self.ui.update_service_health(health)
-        hud_visible = self.config.snapshot().global_value("hud.visible")
-        if hud_visible != self._last_hud_visible:
-            self._last_hud_visible = hud_visible
-            if self.tray is not None:
-                self.tray.refresh()
+            if self.ui_server is not None:
+                self.ui_server.changed("live")
+        if self.ui_server is not None:
+            self.ui_server.motion.flush()
         if not self.stop_event.is_set():
-            self.root.after(300, self._poll)
+            self.root.after(100, self._poll)
 
     def quit(self):
         # Called from the tray thread.
@@ -828,6 +802,8 @@ class App:
             stop_owned("AutoCAD loader", self.acad_loader.stop)
         if self.tray is not None:
             stop_owned("tray", self.tray.stop)
+        if self.ui_server is not None:
+            stop_owned("settings UI", self.ui_server.stop)
         if self.root is not None:
             try:
                 self.root.after(0, self._shutdown)

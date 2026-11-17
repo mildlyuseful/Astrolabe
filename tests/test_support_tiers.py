@@ -15,8 +15,6 @@ questions, and the plan this implements forbids using one as the other.
 
 from pathlib import Path
 import re
-import tkinter as tk
-from tkinter import ttk
 from types import SimpleNamespace
 
 import pytest
@@ -24,7 +22,7 @@ import pytest
 from trackball_daemon import integrations
 from trackball_daemon.config_store import ConfigStore
 from trackball_daemon.input import InputAggregator, load_system_binding_profiles
-from trackball_daemon.ui import SettingsWindow
+from trackball_daemon.webui.api import UiApi
 from trackball_daemon.app_registry import (
     APP_IDS,
     APP_IDS_BY_TIER,
@@ -152,107 +150,37 @@ def test_every_tier_has_wording_to_render():
         assert SUPPORT_TIER_SUMMARIES[tier]
 
 
-# --- what the settings panel actually shows --------------------------------------------------------
-#
-# These build the real tab and read rendered widget text. Scanning ui.py source instead would fail on
-# a comment or docstring that merely mentions the old wording, which is the wrong thing to police.
+# --- what the settings UI is told ---------------------------------------------------------------
 
-def _walk(widget):
-    yield widget
-    for child in widget.winfo_children():
-        yield from _walk(child)
-
-
-def _texts(widget):
-    values = []
-    for candidate in _walk(widget):
-        try:
-            values.append(str(candidate.cget("text")))
-        except tk.TclError:
-            pass
-    return values
-
-
-def _card(tab, display_name):
-    return next(candidate for candidate in _walk(tab)
-                if isinstance(candidate, ttk.LabelFrame)
-                and str(candidate.cget("text")) == display_name)
-
-
-@pytest.fixture(scope="module")
-def settings_ui(tmp_path_factory):
-    """One real settings window for the whole module.
-
-    Module-scoped on purpose: creating and tearing down a Tk root per test is enough churn that the
-    interpreter intermittently fails to locate tk.tcl, and a test that skips itself under load is a
-    test that stops covering anything. Nothing here toggles panel state, and the widgets the install
-    test creates hang off the window rather than the tab, so sharing is safe.
-    """
-    try:
-        root = tk.Tk()
-    except tk.TclError as exc:                    # pragma: no cover - headless non-Windows CI
-        pytest.skip(f"Tk display unavailable: {exc}")
-    root.withdraw()
+@pytest.fixture
+def ui_api(tmp_path):
     app = SimpleNamespace(
-        config=ConfigStore(tmp_path_factory.mktemp("tiers") / "config.json").load(),
+        config=ConfigStore(tmp_path / "config.json").load(),
         binding_catalog=load_system_binding_profiles(),
         input_aggregator=InputAggregator(),
-        status_text=lambda: "stopped",
-        battery_status_text=lambda: "Battery: unavailable",
-        runtime_health_snapshot=lambda: {},
+        first_run=False,
     )
-    ui = SettingsWindow(root, app)
-    try:
-        ui._build()
-        root.update()
-        yield ui
-    finally:
-        root.destroy()
+    return UiApi(app)
 
 
-@pytest.fixture(scope="module")
-def apps_tab(settings_ui):
-    notebook = next(widget for widget in settings_ui.win.winfo_children()
-                    if isinstance(widget, ttk.Notebook))
-    return next(notebook.nametowidget(tab_id) for tab_id in notebook.tabs()
-                if notebook.tab(tab_id, "text") == "3D Apps")
+def test_the_ui_states_tier_and_verified_versions_as_separate_facts(ui_api):
+    apps = {app["id"]: app for app in ui_api.state()["apps"]}
+
+    for app_id in APP_IDS:
+        spec = APP_SPECS_BY_ID[app_id]
+        assert apps[app_id]["tier"] == spec.support_tier.value
+        assert apps[app_id]["tierLabel"] == SUPPORT_TIER_LABELS[spec.support_tier]
+        assert apps[app_id]["verified"] == integrations.APPS_BY_KEY[app_id].verified_versions
+    # The experimental integration whose host version is verified: both claims, neither merged.
+    assert apps["autocad"]["tier"] == "experimental" and apps["autocad"]["verified"]
 
 
-def test_the_panel_does_not_call_the_whole_list_supported(apps_tab):
-    shown = "\n".join(_texts(apps_tab))
+def test_every_integration_appears_under_exactly_one_tier(ui_api):
+    tiers = {app["id"]: app["tier"] for app in ui_api.state()["apps"]}
 
-    assert "Supported 3D apps" not in shown
-    assert "Supported versions:" not in shown
-    assert "Verified host versions:" in shown
-
-
-def test_the_panel_states_both_claims_on_a_card(apps_tab):
-    """The plan's example: an experimental integration whose host version is verified."""
-    shown = _texts(_card(apps_tab, "AutoCAD"))
-
-    assert SUPPORT_TIER_LABELS[SupportTier.EXPERIMENTAL] in shown
-    assert any(text.startswith("Verified host versions:") for text in shown)
-
-
-def test_experimental_integrations_are_collapsed_by_default(apps_tab):
-    """An eleven-card list giving every integration equal weight is itself a support claim."""
-    texts = _texts(apps_tab)
-
-    assert f"{SUPPORT_TIER_LABELS[SupportTier.SUPPORTED]}s" in texts
-    assert any("experimental integrations" in text for text in texts)
-    # The cards themselves are packed either way; it is their group container that is withheld.
-    assert _card(apps_tab, "Blender").master.winfo_manager() == "pack"
-    assert _card(apps_tab, "AutoCAD").master.winfo_manager() == ""
-
-
-def test_every_integration_appears_under_exactly_one_tier(apps_tab):
-    containers = {app_id: _card(apps_tab, APP_SPECS_BY_ID[app_id].display_name).master
-                  for app_id in APP_IDS}
-
-    assert len({id(container) for container in containers.values()}) == len(SupportTier)
     for tier in SupportTier:
-        grouped = {id(containers[app_id]) for app_id in APP_IDS_BY_TIER[tier]}
-        assert len(grouped) == 1, tier
+        assert [app_id for app_id in APP_IDS if tiers[app_id] == tier.value] == list(
+            APP_IDS_BY_TIER[tier])
 
 
 # --- user-facing projections -----------------------------------------------------------------------
@@ -390,33 +318,20 @@ def test_an_unverified_host_version_is_not_blocked(isolated_config, blender_host
     assert integrations.unsupported_host_warning(blender) is None
 
 
-@pytest.mark.parametrize("confirmed, expected_override", [(False, None), (True, True)])
-def test_the_settings_panel_asks_before_overriding_the_host_gate(
-        settings_ui, blender_host, monkeypatch, confirmed, expected_override):
-    """The override belongs to a user who read the warning; declining must set up nothing.
+def test_the_ui_learns_the_warning_before_setup_and_overrides_only_on_request(
+        ui_api, blender_host, monkeypatch):
+    """The override belongs to a user who read the warning, so the API never defaults to it."""
+    blender_host("3.6")
+    preflight = ui_api.run("apps.preflight", {"app": "blender"})
+    assert "3.6" in preflight["unsupported"], "the warning must name the detected version"
 
-    Driven through the real handler rather than asserted against ui.py source, so a dialog whose
-    answer was collected and then ignored would fail here.
-    """
-    from trackball_daemon import ui as ui_module
-
-    blender = blender_host("3.6")
-    asked = []
-    monkeypatch.setattr(ui_module.messagebox, "askokcancel",
-                        lambda title, message, **kwargs: asked.append(message) or confirmed)
-    monkeypatch.setattr(ui_module.messagebox, "askyesnocancel",
-                        lambda *args, **kwargs: True)
     calls = []
-    monkeypatch.setattr(ui_module.integrations, "install",
+    monkeypatch.setattr(integrations, "install",
                         lambda appdef, cfg, **kwargs: calls.append(kwargs) or (True, "ok"))
-    monkeypatch.setattr(settings_ui, "_show_integration_dialog",
-                        lambda *args, **kwargs: None)
+    monkeypatch.setattr(ui_api, "detect", lambda force=False: None)
 
-    settings_ui._do_install(blender, tk.BooleanVar(value=False),
-                            ttk.Label(settings_ui.win), {"btn": ttk.Button(settings_ui.win)})
+    ui_api.run("apps.setup", {"app": "blender"})
+    ui_api.run("apps.setup", {"app": "blender", "allowUnsupported": True, "installStartup": True})
 
-    assert asked and "3.6" in asked[0], "the warning must name the detected version"
-    if expected_override is None:
-        assert calls == [], "declining the warning must not run setup"
-    else:
-        assert [call.get("allow_unsupported_host") for call in calls] == [expected_override]
+    assert [call["allow_unsupported_host"] for call in calls] == [False, True]
+    assert calls[1]["install_startup"] is True and "install_startup" not in calls[0]
