@@ -112,7 +112,7 @@ WALK_MOVE = 1.0
 WORLD_UP = Geom::Vector3d.new(0, 0, 1)
 ```
 
-The shipped factors are documented in [`../default_profiles.md`](../default_profiles.md).
+The shipped factors are documented in [`../integrations.md`](../integrations.md).
 
 - **Free orbit:** compose pitch/yaw/twist about the frame-start camera right/up/forward axes with
   `Geom::Transformation.rotation(pivot, axis, radians)`. Transform eye, target, and up, then rebuild

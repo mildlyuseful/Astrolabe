@@ -1,345 +1,149 @@
 # Astrolabe
 
-Astrolabe is a DIY dual-sensor optical trackball that works as both a normal Bluetooth mouse and a
-three-axis controller for 3D applications.
+**Make anything a 3D controller.**
 
-- The **firmware** fuses two optical sensors into true X/Y/Z ball rotation and exposes an ordinary
-  HID mouse plus a custom daemon stream over BLE or wired USB.
-- The Windows **Trackball Daemon** consumes that stream, runs from the system tray, and switches
-  between pointer input and focus-routed 3D navigation.
-- Ten integrations are included: Fusion 360, SolidWorks, AutoCAD, Onshape, Blender, FreeCAD,
-  SketchUp Desktop, Unreal Engine, Unity, and Rhino.
+Astrolabe is an open stack for 3D input. Firmware turns something you can turn — a ball, a knob, an
+IMU — into a stream of rotation; a Windows daemon routes that rotation into whichever 3D app has
+focus. The same device is an ordinary mouse the moment the daemon isn't there.
 
-The daemon is currently internal-alpha software. It is usable from source, and the repository can
-build private onedir and per-user installer artifacts, but signed end-user builds have not been
-released yet.
+The reference controller is a trackball you can build: a SuperMini nRF52840, two PMW3610 optical
+sensors watching one 52 mm ball (fused into true three-axis rotation, so twisting the ball is an
+axis too), and a five-way switch. It drives ten apps: Blender, FreeCAD, Fusion 360, SolidWorks,
+Onshape, SketchUp, Unreal Engine, Unity, Rhino, and AutoCAD.
 
-## Capabilities
+```text
+ ball / sensors                       Windows                                  apps
+┌───────────────┐  BLE or USB   ┌─────────────────────┐  loopback      ┌───────────────────┐
+│ firmware:     │ ────────────▶ │ daemon: focus,      │ ─────────────▶ │ add-on / COM /    │
+│ fusion, route │  rotation +   │ bindings, mapping,  │  nav frames    │ browser bridge    │
+│ mouse fallback│  buttons      │ settings UI, tray   │                │ moves the camera  │
+└───────────────┘               └─────────────────────┘                └───────────────────┘
+```
 
-- Cursor movement and wheel scrolling without a vendor driver.
-- Orbit, pan, zoom, and dolly controls routed to the supported app that has focus.
-- Free-orbit, turntable, fly, and walk navigation where the host camera supports them.
-- Selected-object rotation and View/Ground translation in Blender, Unity, and Unreal, with
-  independent object-axis routing, multi-selection grouping, and host undo.
-- Screen-center, under-cursor, selection, model-center, world-origin, camera, and Blender 3D-cursor
-  orbit targets, exposed only where each host has a real implementation.
-- A configurable fallback chain when a requested orbit target is unavailable.
-- Surface-aware **To Cursor** zoom. Empty-space misses keep the cursor position stable by using a
-  sensible scene-depth point; orbit misses remain strict and follow the fallback chain.
-- Global physical-axis remapping plus per-app and per-action source, inversion, and gain controls.
-- Separate orbit-pivot and cursor-zoom hold times.
-- Optional one-shot horizon leveling when entering Turntable, Lock Horizon, or Walk.
-- Per-app refresh rates with explicit System defaults, Global values, and linked app overrides.
-- Local-only integration traffic and explicit consent before certificate, trust-path, startup, or
-  project-file changes.
+> **Status: internal alpha.** It runs daily on the reference hardware, but nothing is signed or
+> released yet. [`TODO.md`](TODO.md) lists what stands between here and V1.
 
-## Requirements
+## Get started
 
-- Windows 10 or 11.
-- Python 3.13 or newer for a source install. Packaged builds embed their own runtime and do not
-  need Python installed.
-- The Astrolabe firmware on a compatible BLE/USB trackball. The hardware is frozen: a SuperMini
-  nRF52840 controller, two PMW3610 sensors on a 52 mm ball, and an ALPS SKRHADE010 five-way switch.
-  See [`docs/hardware.md`](docs/hardware.md) for the full contract.
-- A supported 3D application only if you want its navigation integration.
-
-## Install and run
-
-From a PowerShell prompt in the repository:
+**The daemon** (Windows 10/11, Python 3.13+):
 
 ```powershell
 python -m pip install .
-python -m trackball_daemon
-```
-
-The installed distribution is named `astrolabe-daemon` and provides an `astrolabe` command. Its
-import package stays `trackball_daemon`, so `python -m trackball_daemon` keeps working.
-
-For normal console-free use:
-
-```powershell
 pythonw -m trackball_daemon
 ```
 
-For the optional cube verification window:
+It lives in the tray. On first run it opens the setup guide; after that, **Open Settings** in the
+tray. Nothing is installed into any app until you press **Set up** for it, and every change is
+listed first.
+
+**The firmware** (with the [Zephyr SDK 0.16](https://github.com/zephyrproject-rtos/sdk-ng/releases/tag/v0.16.8)
+installed):
 
 ```powershell
-python -m trackball_daemon --debug
+python firmware/build.py --flash
 ```
 
-On first run the daemon opens a setup guide for device connection, input-state inspection,
-supported-versus-experimental application review, existing integration consent/instructions,
-navigation health, and the optional **Start at login** choice. It performs no host, certificate,
-startup, or project changes without the corresponding explicit action. The guide remains available
-from the tray.
+No buttons needed: it reboots running firmware into its bootloader, reads which flash layout the
+board needs, builds, and flashes. See [`firmware/README.md`](firmware/README.md).
 
-Later starts show only the passive control panel. Use the tray icon to open Settings or the setup
-guide, show/hide the control panel, inspect connection and battery status, enable **Start at login**,
-or quit. Battery Level appears in the tray tooltip, the tray menu, and beside Connection at the
-bottom of Settings when the connected firmware publishes the standard BLE Battery Service.
-Input and navigation modes are changed by the declarative bindings shown under **Keybindings**.
-One binding may target any selected set of registered apps, all non-integrated applications, or a
-combination of both. Setting cycles accept a comma-separated sequence of two or more enum or numeric
-values.
-Closing Settings or the guide hides/closes that window; it does not stop the daemon.
+## Using it
 
-The trackball may stay paired as an ordinary Windows Bluetooth mouse while the daemon runs. The
-daemon takes the rotation stream from a device Windows is already holding, and the firmware hands
-the route back on its own if the daemon exits, crashes, or the device is powered off — so the
-device never ends up connected with a dead cursor. The firmware automatically prefers its exact
-vendor USB interface when wired and falls back to BLE after USB loss. With the daemon closed, the
-firmware's ordinary HID mouse path works normally on either ZMK output.
+- **Pointer mode** — the ball is a mouse: tilt moves the cursor, twist scrolls.
+- **3D mode** — the ball moves the camera of the app in focus: tilt orbits, twist rolls (or zooms),
+  and holding **Shift** switches to pan and zoom. Mode-aware apps add Fly, Walk, and Object modes.
+- On the reference trackball, **Center** toggles Pointer/3D and **Up/Right/Down** pick Orbit/Fly/Walk.
+  Everything is rebindable under **Controls**, including keyboard chords.
 
-## First-time setup
+The settings window has four pages: **Live** (a ball that turns exactly as yours does, plus what the
+daemon is doing), **Apps** (turn apps on, set them up, and tune how each one feels — every app follows
+**All apps** unless you give it its own value), **Controls**, and **Device** (orientation, cursor
+feel, control panel). Settings live in `%APPDATA%\Mildly Useful\Astrolabe\config.json`; the log is
+`daemon.log` beside it.
 
-The first-run guide walks through this sequence and can be reopened from the tray. The detailed
-manual path remains:
+## Supported apps
 
-1. Open tray → **Settings** and configure the device name or BLE address if discovery does not find
-   the trackball. The daemon remembers the address once it has connected, which is what lets it
-   reach a device that Windows has paired and is therefore no longer advertising.
-2. Open **3D Apps**, expand an application's **Instructions**, and choose **Set up** or **Enable**.
-   The panel shows detected versions, supported/unverified status, every file or trust change, a
-   manual path, and a health check before it acts.
-3. Complete the host-side step shown by the panel, if any, then restart or reload that host.
-4. Select the hardware or keyboard-only input profile under **Keybindings**. Switch to **3D mode**,
-   focus the host's 3D viewport, and move the ball. Hold **Shift** for the active mode's secondary
-   controls (pan/zoom in Orbit); the keyboard-only profile uses **F12** to toggle Pointer/3D.
-5. Tune the app under **Per-App**. **Reset app** pins that app's concrete System values and breaks
-   its Global links; **Link all to Global** removes app overrides. Neither action disables the
-   integration or forgets its installed add-on version.
-
-Every app keeps its setup button and **Instructions** available, including after setup succeeds.
-Use **Set up** or **Enable** again to repeat local setup and reopen its steps; apps with installed
-add-ons offer **Reinstall** or **Update**. Local setup success does not confirm that browser trust
-or other host-side steps are finished.
-
-The status row and tray list the versions of add-ons that are actually connected. The tray also
-summarizes runtime health, while **3D Apps** shows the navigation broker and gated SolidWorks,
-AutoCAD, and Onshape owners as disabled, waiting, healthy, degraded, or failed with the current
-actionable detail. Bundled add-ons are versioned and copied again when a newer daemon bundle is
-available; host restart/reload is usually required before new code is active.
-
-Add-in setup stages and verifies complete payloads before replacing an installed copy. Independent
-host versions or projects are updated separately, and the result identifies any destination that
-could not be changed while leaving its previous copy intact.
-
-The 3D Apps panel uses the version reported by the currently or most recently connected host copy
-when deciding whether to show **Update**. This exposes a stale project/document-local copy even when
-another install destination is current; the update action still refreshes all destinations detected
-for that integration.
-
-## Integration summary
-
-Every integration starts disabled and is enabled explicitly. Detailed and current setup instructions
-are built into the **3D Apps** panel; the linked documents are maintainer guides for the corresponding
-driver or add-on.
-
-Two independent things are said about each integration, and they answer different questions.
-
-**Release support** is what this project promises about the integration as a whole. **Host-version
-compatibility** is whether the particular copy on your machine has been verified. Every combination
-occurs — an experimental integration commonly runs a verified host version, and a supported one can
-meet a host version known not to work — so they are never merged into one badge.
+Two separate facts are stated about each app. Its **release tier** is what this project promises
+about the integration. Its **verified host versions** say which versions of the app it has been
+tested against. They are independent — an experimental integration can run a verified version — so
+they are never merged into one badge. Setup refuses a host version known not to work unless you
+override the warning naming it.
 
 ### Supported integrations
 
-A supported integration gates the public V1 release, is advertised only for its verified host-version
-range, treats an ordinary-navigation regression as release-blocking, receives active compatibility
-maintenance, and includes its setup, update, reversal, and runtime-health behaviour in that claim.
+Supported integrations gate the V1 release: an ordinary-navigation regression is release-blocking,
+they get active compatibility maintenance, and their setup, update, and reversal are part of the
+promise.
 
-| Application | Integration and one special setup step | Maintainer guide |
+| App | How it connects | Guide |
 |---|---|---|
-| Blender | Per-user Python add-on; setup can optionally install an auto-enable startup shim. | [Blender](docs/apps/blender.md) |
-| FreeCAD | Per-user `Mod/TrackballNav` Python add-on; restart FreeCAD. | [FreeCAD](docs/apps/freecad.md) |
-| Fusion 360 | Per-user Python add-in; run it once and enable **Run on Startup** in Fusion. | [Fusion 360](docs/apps/fusion360.md) |
-| SolidWorks | Direct COM control of an already-running instance; no host add-in is installed. | [SolidWorks](docs/apps/solidworks.md) |
-| Onshape | Loopback TLS bridge; explicitly trust/accept its certificate and install the supplied pointer userscript for accurate under-cursor targeting. | [Onshape](docs/apps/onshape.md) |
-
-For Onshape, enable SpaceMouse / 3Dconnexion and open a document, then **Allow** the browser's
-local-device access prompt (remember the choice if offered). This is separate from trusting the
-certificate. The cursor userscript waits for that grant. If an older script makes the prompt
-flicker, disable it in Violentmonkey/Tampermonkey, replace it using **3D Apps → Onshape → Set up**
-or **Copy userscript**, and reload Onshape. Updating the daemon alone does not replace the running
-browser script; the [pointer status page](https://127.51.68.120:8181/trackball/pointer) shows
-`userscript_version` and `userscript_version_served`, which should match after moving over the view.
+| Blender | Python add-on; optionally auto-enabled at startup | [Blender](docs/apps/blender.md) |
+| FreeCAD | Python `Mod` add-on | [FreeCAD](docs/apps/freecad.md) |
+| Fusion 360 | Python add-in; enable **Run on Startup** once | [Fusion 360](docs/apps/fusion360.md) |
+| SolidWorks | COM control of the running app; nothing installed | [SolidWorks](docs/apps/solidworks.md) |
+| Onshape | Loopback TLS bridge plus a pointer userscript | [Onshape](docs/apps/onshape.md) |
 
 ### Experimental integrations
 
-An experimental integration is opt-in and clearly labelled, may ship with documented host
-limitations, and carries no promise for every host update. An isolated functional regression in one
-of these does not block a release. A shared security, data-loss, configuration-corruption, or
-lifecycle defect still does.
+Experimental integrations are opt-in, may carry documented limitations, and are not promised to
+survive every host update. A functional regression in one of them does not block a release; a
+security, data-loss, configuration-corruption, or lifecycle defect still does.
 
-| Application | Integration and one special setup step | Maintainer guide |
+| App | How it connects | Guide |
 |---|---|---|
-| SketchUp Desktop | Ruby extension copied into detected annual Plugins folders; restart SketchUp. | [SketchUp](docs/apps/sketchup.md) |
-| Unreal Engine | Editor Python plugin; enable it once. A project-local install avoids administrator rights. | [Unreal Engine](docs/apps/unreal.md) |
-| Unity | Editor package copied into a selected project's `Packages` folder. | [Unity](docs/apps/unity.md) |
-| Rhino 8 | Per-user Python scripts plus a startup command; restart Rhino. | [Rhino](docs/apps/rhino.md) |
-| AutoCAD | Bundled .NET plugin, staged per user and automatically `NETLOAD`ed after explicit setup. | [AutoCAD](docs/apps/autocad.md) |
+| SketchUp Desktop | Ruby extension in each detected version | [SketchUp](docs/apps/sketchup.md) |
+| Unreal Engine | Editor Python plugin, per engine or per project | [Unreal Engine](docs/apps/unreal.md) |
+| Unity | Editor package copied into a project | [Unity](docs/apps/unity.md) |
+| Rhino 8 | Python scripts plus a startup command | [Rhino](docs/apps/rhino.md) |
+| AutoCAD | .NET plugin, staged per user and `NETLOAD`ed | [AutoCAD](docs/apps/autocad.md) |
 
-### Host versions
+## Build your own controller
 
-The **3D Apps** panel states each integration's verified host versions beside its release tier, and
-flags the detected copy separately. An *unverified* version may work but has not earned a claim; a
-*known-unsupported* version is refused by setup unless you explicitly override the warning naming it.
-Tiers live in `trackball_daemon/app_registry.py` and version ranges in
-`trackball_daemon/integrations.py`; tests fail if these tables and the registry disagree.
+Anything that speaks the [device protocol](docs/protocol.md) is an Astrolabe controller: twelve bytes
+of rotation in radians, a six-byte button snapshot, and a keepalive so the device can tell a live
+daemon from a stale one. On ZMK it is two calls from your sensor driver —
 
-## Controls and configuration
+```c
+astrolabe_report_motion(rx, ry, rz);   // radians: +X right, +Y away, +Z up
+astrolabe_register_source(wake);       // optional
+```
 
-All persistent user configuration lives in `%APPDATA%\Mildly Useful\Astrolabe\config.json`; transient mode,
-pressed-control, focus, and gesture state lives only in the daemon's `RuntimeStore`. Numeric settings
-apply after a short typing pause (or immediately on Enter/focus change); other Settings changes apply
-live except for BLE device identity, which applies on reconnect, and host add-on code, which applies
-when that host reloads it.
+— and the module brings the standalone mouse, both transports, route ownership, and the gestures
+and status LED. Add a data-only descriptor naming your device's buttons and the daemon, bindings, and
+settings UI pick it up. [`firmware/README.md`](firmware/README.md) walks through it.
 
-If an earlier build left a `%APPDATA%\TrackballDaemon` directory, its contents are copied to the
-current location once, verified, and then left where they are: the old directory is never modified,
-so reverting to an earlier build only means deleting the new one. Old log files stay behind rather
-than being carried across.
-
-### Pointer and 3D modes
-
-- **Pointer mode** converts ball rotation into cursor movement or wheel input.
-- Pointer sensitivity is constant by default. Under **Global → Pointer**, an optional Linear or
-  Smooth acceleration curve can increase cursor speed from a configurable ball-speed onset to a
-  bounded maximum multiplier. Acceleration affects cursor movement only, never wheel or 3D motion.
-- **3D mode** sends primary input for the active navigation mode. With the shipped binding, holding
-  **Shift** selects that mode's secondary controls without changing the mode itself (pan/zoom in
-  Orbit, movement in Fly/Walk/Object).
-- Blender, Unity, and Unreal also offer **Object mode**. Primary motion rotates selected root objects
-  as a group around their shared center. The secondary layer translates the group: **View** moves
-  right/up in the viewport plane with twist for depth, while **Ground** mirrors Walk movement:
-  planar motion moves sideways/forward on the ground and twist moves up/down. Object Pitch/Yaw/Roll and
-  Translate X/Y/Z each have an independent source axis and invert switch, and **Movement sensitivity**
-  scales only the secondary translation layer. An empty selection is a no-op. Choose Object under the
-  app's Mode setting, or assign **Switch navigation to Object** / **Hold Object mode** in Keybindings.
-- The mode switch is global and manual. Navigation is otherwise selected by the foreground app.
-
-### Physical orientation and action routing
-
-**Global → Physical transform** maps physical sensor X/Y/Z to logical axes once, before both pointer
-and 3D routing. Source changes remain a permutation, so an axis cannot be accidentally duplicated or
-lost.
-
-Each app's **Per-App → Axis routing** category then chooses the source, inversion, and gain for
-Orbit, Pan, Zoom, and the mode-specific actions offered by richer integrations. This is the user
-layer; software-convention corrections are supplied by immutable host baselines.
-
-### Orbit targets and fallback order
-
-The app's selected **Orbit pivot** is tried first. If it is unsupported or a raycast misses, the
-daemon restarts at the beginning of the app's effective **Orbit pivot fallback order**. Edit the
-default under **Global → Orbit**, or use the link control beside the same setting under **Per-App**
-to give one host its own order. Unsupported methods are skipped, duplicates are removed, and an
-empty list means no orbit is performed after the primary target fails. **Selection overrides orbit
-center** has higher priority when enabled, except that a Camera primary remains a true turn-in-place
-operation.
-
-### Horizon entry and gesture holds
-
-**Level horizon when entering Turntable/Walk** removes existing camera roll once when entering a
-fixed-horizon mode. Each applicable app can inherit or override the Global value.
-
-**Pivot hold** controls when a ray-derived orbit target is recaptured. **Zoom hold** is independent
-and applies only to To Cursor zoom. Panning or zooming invalidates the orbit target; panning
-preserves the held cursor-zoom target, while rotating the view invalidates that zoom target.
-
-Free orbit needs **Twist action: Roll** for full three-axis rotation. Choosing Free no longer changes
-Twist automatically; if another action is selected, a red warning icon beside Twist explains how to
-restore three-axis orbit without overwriting the user's choice.
+Adding support for another app is described in [`docs/integrations.md`](docs/integrations.md).
 
 ## Troubleshooting
 
-- Confirm the tray says the device is connected over BLE or USB and the control panel reports
-  **3D** mode.
-- Confirm the intended host is foreground, its integration is enabled, and the 3D viewport has
-  focus where the host requires it.
-- Open **3D Apps** and inspect the runtime-health detail before running the listed host health
-  check. A connected row shows the loaded integration version; degraded and failed rows retain the
-  transport or protocol error that needs attention.
-- Check `%APPDATA%\Mildly Useful\Astrolabe\daemon.log`; host-specific log paths are listed in each app's
-  Instructions panel and maintainer guide.
-- Lower the app's **Viewport refresh rate** if navigation queues or stutters.
-- Restart the host after an add-on update. AutoCAD may require closing the host before a locked DLL
-  can be replaced.
-- Review [security and permissions](docs/security.md) before treating an unsigned-build, trust, or
-  certificate warning as unexpected.
+- **Not connecting over Bluetooth:** it can stay paired to Windows as a mouse — that is fine. If the
+  daemon never found it, set its address under **Device**; Windows stops advertising a device it has
+  paired, so discovery only works before the first pairing. `tools/ble_connect_probe.py` tells
+  discovery, connection, and GATT problems apart.
+- **Nothing happens in an app:** check **Live** — the app should be in focus, its integration on,
+  and the mode 3D. **Apps → Setup** shows the integration's runtime health.
+- **Choppy view:** lower that app's **Viewport refresh rate** under **Feel**.
+- **After updating:** restart or reload the app so it loads the new add-on.
 
-## Firmware
+## Documentation
 
-The production firmware is the pinned ZMK workspace under [`firmware/zmk/`](firmware/zmk/). Its
-out-of-tree Astrolabe module targets `nice_nano_v2`, reads both PMW3610 sensors over their shared
-three-wire bus, fuses them into three-axis ball rotation, and retains ZMK's ordinary BLE/USB HID
-mouse behavior. When the daemon claims ownership it instead emits the frozen rotation and five-way
-snapshots over the custom BLE service or a second vendor USB HID interface. USB preference,
-acknowledged attach, keepalive, exact session leases, and BLE fallback are implemented in the daemon.
+| | |
+|---|---|
+| [`docs/architecture.md`](docs/architecture.md) | How the parts fit and what each one owns |
+| [`docs/protocol.md`](docs/protocol.md) | The device protocol |
+| [`docs/hardware.md`](docs/hardware.md) | The reference trackball: pins, geometry, gestures, LED |
+| [`docs/integrations.md`](docs/integrations.md) | How app integrations work, adding and tuning one |
+| [`docs/keybindings.md`](docs/keybindings.md) | Binding profiles, chords, and the action language |
+| [`docs/security.md`](docs/security.md) | Listeners, permissions, and how to reverse every change |
+| [`docs/releasing.md`](docs/releasing.md) | Checks, builds, and release gates |
+| [`docs/apps/`](docs/apps/) | Per-app maintainer guides |
 
-Standing alone, the device is an ordinary mouse: Down, Right, and Center are left, right, and middle
-click, and yaw-dominant ball rotation becomes scroll. Up and Left carry no button, so they host the
-recovery and radio gestures — double-tap to toggle USB/BLE output or step BLE profile, hold three
-seconds for bootloader or bond clear. Those gestures exist only in standalone; with a daemon
-attached the same positions are plain control bits with nothing arbitrating in front of them.
-
-Because three of those gestures change radio or endpoint state with no host to report it, the
-controller's red LED blinks a short pattern naming the state the device ended up in — which output
-is active, which BLE profile, and whether the thing you selected could actually be applied. It is
-dark at rest. The vocabulary is in [`docs/hardware.md`](docs/hardware.md).
-
-The firmware builds from exact ZMK and Zephyr commits in CI and retains its UF2, ELF, effective
-configuration, DTS, frozen manifest, hashes, and license provenance. It runs on the current
-fixture, where HID output, the gestures, the indicator, route handover, and the daemon's keepalive
-fail-safe are confirmed. It is still not qualified for distribution: the development USB VID/PID is
-not product identity, and sensor pose calibration, switch bounce margin, sleep/wake, battery, and
-latency remain release blockers in [`TODO.md`](TODO.md). Hardware is frozen in
-[`docs/hardware.md`](docs/hardware.md).
-
-See [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) for the packet and descriptor contract.
-
-## Development and project documentation
-
-- [`AGENTS.md`](AGENTS.md) — task-first contributor routing and documentation ownership.
-- [`docs/architecture.md`](docs/architecture.md) — current shared firmware, daemon, state, mapping,
-  routing, lifecycle, and integration contracts.
-- [`docs/hardware.md`](docs/hardware.md) — the frozen controller, sensor, ball, and switch contract,
-  with the pin map and geometry the firmware implements.
-- [`TODO.md`](TODO.md) — open verification, parity gaps, risks, and product work.
-- [`docs/apps/`](docs/apps/) — host-specific implementation and maintenance guides.
-- [`docs/default_profiles.md`](docs/default_profiles.md) — host alignment and shipped-default data.
-- [`docs/keybindings.md`](docs/keybindings.md) — profiles, chords, dependency cascading, declarative
-  actions, schemas, and contributor examples.
-- [`docs/feature_parity.md`](docs/feature_parity.md) — the currently enforced capability contract.
-- [`docs/security.md`](docs/security.md) — local listeners, permissions, reversal steps, and release
-  hardening.
-- [`docs/release.md`](docs/release.md) — release channel and versioning rules, what the release
-  manifest records, and the daily-driver observation contract for the internal alpha.
-- [`docs/release_verification.md`](docs/release_verification.md) — automated and manual release gates
-  with explicit skip/release-impact rules.
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — inbound licensing, Developer Certificate of Origin sign-off,
-  and the checks to run before opening a pull request.
-- [`SECURITY.md`](SECURITY.md) — how to report a vulnerability privately.
-
-Run the automated checks with:
-
-```powershell
-python -m pytest -q
-python -m compileall -q trackball_daemon tests
-dotnet run --project plugin_src/autocad/NavMathTests/NavMathTests.csproj
-```
-
-Host camera behavior still requires smoke testing inside the corresponding GUI. See `TODO.md` for
-the current verification matrix rather than relying on an old test count or version snapshot.
+Contributors: start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Report vulnerabilities privately per
+[`SECURITY.md`](SECURITY.md).
 
 ## License
 
-Astrolabe is open source. Astrolabe-authored daemon, integration, firmware, tooling, test, and
-documentation source is licensed under the
-[Apache License 2.0](LICENSE). Hardware design source, once it exists, will be licensed under the
-[CERN Open Hardware Licence Version 2 - Weakly Reciprocal](LICENSES/CERN-OHL-W-v2.txt).
-[`LICENSING.md`](LICENSING.md) maps each path to its license; bundled daemon and firmware components
-are attributed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
-
-Those licenses cover code and design source, not the project's name or logos. See
-[`TRADEMARKS.md`](TRADEMARKS.md) before naming a modified build Astrolabe.
+Astrolabe's software — daemon, integrations, firmware, tools, tests, and docs — is licensed under the
+[Apache License 2.0](LICENSE). Hardware design source, once published, will be under
+[CERN-OHL-W-2.0](LICENSES/CERN-OHL-W-v2.txt). [`LICENSING.md`](LICENSING.md) maps every path to its
+license, and bundled components are attributed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
+The name and logo are covered separately by [`TRADEMARKS.md`](TRADEMARKS.md).

@@ -1,83 +1,47 @@
-# Astrolabe agent guide
+# Working on Astrolabe
 
-This file is a task router. Read [`docs/architecture.md`](docs/architecture.md) for the shared current
-firmware, daemon, state, mapping, routing, and integration contracts. Do not duplicate those contracts
-here.
+Read [`docs/architecture.md`](docs/architecture.md) first: it says what each part owns. Check
+[`TODO.md`](TODO.md) for known gaps before assuming something is a bug. Change behaviour, its tests,
+and the doc that owns it together.
 
-## Before changing code
+## Where things live
 
-1. Inspect the working tree and preserve unrelated user changes.
-2. Read the source of truth and the matching guide from the table below.
-3. Check [`TODO.md`](TODO.md) for known defects, deferred work, and open live-verification gaps.
-4. Update behavior, focused tests, and the owning current documentation together.
-
-## Task router
-
-| Task | Read and update |
+| Task | Start here |
 |---|---|
-| Cross-component architecture, ownership, data flow, or invariants | [`docs/architecture.md`](docs/architecture.md) |
-| User capabilities, installation, operation, or troubleshooting | [`README.md`](README.md) |
-| Open defects, deferred work, release blockers, or unverified behavior | [`TODO.md`](TODO.md) |
-| Firmware, BLE transport, input snapshots, or device descriptors | [`firmware/zmk/`](firmware/zmk/) and [`docs/ble_device_adapters.md`](docs/ble_device_adapters.md) |
-| Controller, sensors, ball, switch, pin map, or geometry | [`docs/hardware.md`](docs/hardware.md); the shield data under [`firmware/zmk/`](firmware/zmk/) stays authoritative for values |
-| Settings, defaults, config resolution, or migration | `trackball_daemon/settings_schema.py`, `trackball_daemon/app_registry.py`, `trackball_daemon/config_store.py`, `trackball_daemon/config_resolver.py`, packaged default data, and [`docs/default_profiles.md`](docs/default_profiles.md) |
-| Input providers, chords, actions, dependencies, or live control state | `trackball_daemon/input/`, `trackball_daemon/commands.py`, `trackball_daemon/runtime_state.py`, and [`docs/keybindings.md`](docs/keybindings.md) |
-| App identity, capabilities, focus selection, or feature exposure | `trackball_daemon/app_registry.py`, `trackball_daemon/settings_schema.py`, and [`docs/feature_parity.md`](docs/feature_parity.md) |
-| A specific host integration, installer, camera model, or host API | The matching guide under [`docs/apps/`](docs/apps/) plus its driver/add-on and `trackball_daemon/integrations.py` |
-| Permissions, listeners, COM, Raw Input, certificates, trust, or reversal | [`docs/security.md`](docs/security.md) |
-| Build artifacts, release gates, or manual/live verification claims | [`docs/release_verification.md`](docs/release_verification.md) |
-| Licensing, notices, contribution terms, trademarks, or vulnerability reporting | [`LICENSING.md`](LICENSING.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md), and [`TRADEMARKS.md`](TRADEMARKS.md) |
-| Investigation results, rejected approaches, or retired implementations | [`archive/`](archive/) |
-| UI design prototypes | `ui_demo/`; prototypes are not daemon runtime sources |
+| Firmware, motion sources, route, transports | [`firmware/README.md`](firmware/README.md), `firmware/module/` |
+| The wire protocol | [`docs/protocol.md`](docs/protocol.md) and `firmware/module/include/astrolabe/protocol.h` |
+| Pins, geometry, gestures, LED | [`docs/hardware.md`](docs/hardware.md); the shield overlay holds the values |
+| A setting, its default, or where it shows | `settings_schema.py`, `system_defaults.json`, `settings_ui_model.py` |
+| The settings UI | `trackball_daemon/webui/` (API in `api.py`, pages in `static/`) |
+| Bindings, input, live state | `input/`, `commands.py`, `runtime_state.py`, [`docs/keybindings.md`](docs/keybindings.md) |
+| An app integration | [`docs/integrations.md`](docs/integrations.md), its guide in [`docs/apps/`](docs/apps/), `integrations.py`, `app_registry.py` |
+| Listeners, permissions, reversal | [`docs/security.md`](docs/security.md) |
+| Builds and releases | [`docs/releasing.md`](docs/releasing.md) |
+| Licensing and notices | [`LICENSING.md`](LICENSING.md), [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 
-## Working rules
+## Rules
 
 - **Read the API before theorising about it.** When behaviour does not match what a call obviously
-  does, open the implementation — `firmware/zmk/zmk/`, `firmware/zmk/zephyr/`, or the installed
-  Python package — before proposing a cause. Three separate faults in one session came from
-  assuming instead, and each was answered by ten lines of somebody else's source:
-  `zmk_hid_mouse_button_press` is reference counted rather than idempotent, so re-asserting a held
-  button every cycle left a click down for exactly as long as it was held; bleak's `BleakClient`
-  does not resolve a bare address string up front but defers a scan into `connect()`, so a
-  "direct" connection still failed for a device that was not advertising; and `config/boards/`
-  registers a board root, not per-board overlays, so an opt-in flash override silently never
-  applied. Symptoms that look like design questions are usually contract questions.
-- **Evidence from your own build is not evidence.** A measurement is only as good as the artifact
-  that produced it. A UF2 built without the shield's flash override reported an application address
-  that was then used to "correct" documentation that had been right all along. Before treating an
-  observation as ground truth, confirm the thing you measured is the thing you meant to build.
-- Build toward an open-source-quality foundation before release. Fix defects at the layer that owns
-  the broken invariant, remove compensating workarounds once the root cause is understood, and do not
-  accept avoidable lifecycle, latency, or maintenance debt merely because a patch passes the current
-  test.
-- Due to the open-source goals of the project, prefer brief code solutions. Create systems in
-  simplistic frameworks that allow later contributors to add apps and functionality with minimal
-  refactoring or churn. Avoid writing needlessly verbose comments and docs.
-- **One device, one clone, no installed base.** Exactly one functional trackball exists and exactly
-  one working copy of this repository exists. Nothing has ever been released, so there is no old
-  firmware in the field, no other developer's checkout, and no user whose configuration predates a
-  change. Do not write backwards-compatibility shims, version negotiation, or elaborate migration
-  paths for states that cannot exist. Change the format, change every reader in the same commit, and
-  reflash. A protocol or schema is "frozen" only where something outside this repository actually
-  depends on it — say which thing, or treat it as editable. Re-pairing the device, wiping its
-  settings, and rebuilding the daemon's configuration are all acceptable costs. This rule stops
-  applying at public V1; until then, prefer deleting the old path to supporting it.
-- Code and packaged data are authoritative. Documentation explains current contracts and earned
-  behavior that code alone cannot establish.
-- `trackball_daemon/app_registry.py` is the only supported-app identity, order, transport, and
-  capability registry. `trackball_daemon/settings_schema.py` is the stable setting and command
-  registry. Do not create parallel tables.
-- Put shared invariants in `docs/architecture.md`, frozen hardware selections in `docs/hardware.md`,
-  host-specific facts in `docs/apps/`, user instructions in `README.md`, and unresolved work only in
-  `TODO.md`.
-- `LICENSING.md` is the only per-path license authority. Every tracked path must have exactly one
-  disposition there, and the copied license texts under `LICENSE`, `LICENSES/`, and `DCO` are
-  verbatim published documents that are never edited.
-- Keep evergreen docs free of copied release numbers, test counts, dated execution logs, completed
-  phase history, and "next action" ledgers.
-- Treat automated, mocked, headless-host, and live-viewport verification as distinct claims. Never
-  describe one as another.
-- Do not edit user configuration or installed host copies as the source of a fix. Change repository
-  source or packaged data and exercise the supported setup/update path.
-- Preserve compatibility and safe release behavior across config migration, provider loss, focus
-  changes, profile reload, owner replacement, and shutdown.
+  does, open its source — ZMK, Zephyr, bleak, the host SDK — before proposing a cause. ZMK's mouse
+  buttons are reference counted, not idempotent; bleak resolves a bare address by scanning; west
+  resolves paths through junctions. Each looked like a design question and was a contract question.
+- **Evidence from your own build is not evidence** until you have confirmed the thing you measured
+  is the thing you meant to build.
+- **One device, no installed base.** Nothing has shipped. Don't write compatibility shims, version
+  negotiation, or migrations for states that cannot exist: change the format and every reader in
+  the same commit, and reflash. This stops applying at public V1.
+- **Fix the layer that owns the broken invariant** and remove the workaround it needed. Prefer
+  short, plain code that lets the next contributor add an app, a setting, or a device without
+  refactoring. Comments explain why, briefly.
+- **Don't regress press jitter.** Control presses and releases must keep reopening the sensor's
+  active window (the motion source's wake hook), the MOTION interrupt must only restart a stopped
+  poll chain, standalone output classifies whole delivery windows in radians, and buttons are
+  latched until sent, driven as edges, and released before a daemon claim. See
+  [`docs/hardware.md`](docs/hardware.md).
+- **One authority per fact.** `app_registry.py` for apps, `settings_schema.py` for settings,
+  `protocol.h` for the wire format, `LICENSING.md` for licenses. Don't build parallel tables.
+- **Automated, mocked, and live are different claims.** Never describe one as another.
+- **Fix the source, not the install.** Don't edit a user's config or an installed add-on to fix a
+  bug; change the repository and go through setup.
+- **Firmware builds with `python firmware/build.py`**, which handles the Zephyr workspace. Zephyr
+  cannot build from a path with spaces or through a junction; the script works around both.

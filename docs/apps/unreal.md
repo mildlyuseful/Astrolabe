@@ -99,7 +99,7 @@ sends the envelope only to clients whose hello identity is `unreal`.
 **Contract:** the daemon sends Unreal's immutable correction in `adv.host_baseline`; the add-on
 applies it after mode-specific user action routing. `tbnav_unreal_camera.py` is deliberately neutral
 and `adv` is part of Unreal's supported wire contract. See
-[`../default_profiles.md`](../default_profiles.md).
+[`../integrations.md`](../integrations.md).
 
 ---
 
@@ -143,7 +143,7 @@ sub.set_level_viewport_camera_info(unreal.Vector(*loc), new_rot)
 **Orbit magnitude is 1.0** (full ball angle = true 1:1), like the other **eye+target** apps
 (Fusion/SolidWorks/Onshape/FreeCAD). Do **not** copy Blender's `0.5` — that is specific to its
 `RegionView3D` (see [`blender.md`](blender.md) and
-[`../default_profiles.md`](../default_profiles.md)). Locked by
+[`../integrations.md`](../integrations.md)). Locked by
 `tests/test_unreal_nav_math.py::test_orbit_scale_is_unity_full_angle`.
 
 ---
@@ -362,7 +362,7 @@ plugin** and `install_unreal` copies it into each detected engine's **`Engine/Pl
 
 A throwaway project with `PythonScriptPlugin` enabled is sufficient for unattended API-surface,
 basis, rotator, trace, bounds, callback, and plugin-startup probes. Use the version-neutral command in
-§0 and record completed run evidence under `archive/release-evidence/`.
+§0 and keep completed run evidence with the release it qualifies.
 
 Headless commandlets have no level-editor perspective viewport, so they cannot prove visible camera
 movement, viewport focus behavior, or physical sign/feel. Those claims require a disposable GUI

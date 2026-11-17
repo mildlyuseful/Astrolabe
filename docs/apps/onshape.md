@@ -166,7 +166,7 @@ The local math constants are neutral. `OutputEngine` composes Onshape's immutabl
 alignment from `trackball_daemon/host_profiles.json` with the user's Source/Invert/Gain settings
 before calling the bridge. Keep camera-model facts such as `WORLD_UP` and the affine layout here;
 keep suite calibration in the host profile so it is not applied twice. See
-[`../default_profiles.md`](../default_profiles.md).
+[`../integrations.md`](../integrations.md).
 
 ---
 
@@ -262,8 +262,8 @@ does not manufacture a transition, and the straight-up/down singularity is skipp
 
 ## 8. Load-bearing warnings
 
-These are current protocol and camera invariants. Completed probe narratives and rejected approaches
-belong under `archive/`; keep this section concise.
+These are current protocol and camera invariants. Probe narratives and rejected approaches belong in
+git history; keep this section concise.
 
 ### 8.1 Decode `view.affine` as a row-vector transform
 
@@ -393,7 +393,7 @@ A TLS rejection with a working status page means the rejecting client is a diffe
 context than the browser showing the page — typically Firefox, whose store is separate from
 Windows'. Offline tests cover
 parsing, TTL, ray construction, targeting, and fallback behavior; current live qualification belongs
-in [`TODO.md`](../../TODO.md), with completed evidence under `archive/release-evidence/`.
+in [`TODO.md`](../../TODO.md), with completed evidence kept with the release it qualifies.
 
 ### 8.15 Site permission and TLS trust are separate browser gates
 
@@ -426,7 +426,7 @@ Certificate trust remains a separate requirement from both. Use browser DevTools
 
 The bridge's local motion multipliers are neutral because the daemon has already composed the
 developer-owned Onshape profile with the user's bindings. Effective calibration lives in
-`trackball_daemon/host_profiles.json`; see [`../default_profiles.md`](../default_profiles.md).
+`trackball_daemon/host_profiles.json`; see [`../integrations.md`](../integrations.md).
 
 | Constant | Value | Meaning |
 |---|---|---|

@@ -1,4 +1,4 @@
-# Frozen hardware contract
+# Reference hardware
 
 This is the product hardware contract for V1. The controller, sensor count and model, and five-way
 switch below are frozen: they are no longer open design questions, and a change to any of them is a
@@ -10,7 +10,7 @@ live gates in [`../TODO.md`](../TODO.md); freezing them fixes what those gates a
 not assert they have passed.
 
 Firmware remains the authority for the values themselves. Every number here is transcribed from
-[`../firmware/zmk/module/boards/shields/astrolabe/astrolabe.overlay`](../firmware/zmk/module/boards/shields/astrolabe/astrolabe.overlay)
+[`../firmware/module/boards/shields/astrolabe/astrolabe.overlay`](../firmware/module/boards/shields/astrolabe/astrolabe.overlay)
 and its keymap; when they disagree, the shield data is correct and this document is stale.
 
 ## Frozen selections
@@ -19,7 +19,7 @@ and its keymap; when they disagree, the shield data is correct and this document
 |---|---|
 | Controller | SuperMini nRF52840 |
 | ZMK board target | Upstream `nice_nano_v2`; no in-tree board fork |
-| Bootloader | Adafruit nRF52 UF2 bundling SoftDevice S140 7.3.0; application at `0x27000`, `0xC5000` long |
+| Bootloader | Adafruit nRF52 UF2. The reference board bundles S140 7.3.0 (application at `0x27000`); clones vary, see below |
 | Motion sensors | Two PMW3610, sharing one bit-banged three-wire bus |
 | Directional switch | ALPS SKRHADE010 five-way (four directions plus center push) |
 | Status indicator | The controller's red user LED, P0.15 active-high (`blue_led` in the board definition — the label is the nice!nano's colour, not this board's) |
@@ -33,22 +33,24 @@ peripherals**. It does **not** match it in flash layout, and that difference is 
 | Board | SoftDevice | Occupies through | Application starts at |
 |---|---|---|---|
 | nice!nano v2 | S140 6.1.1 | `0x26000` | `0x26000` |
-| SuperMini (ours) | S140 7.3.0 | `0x27000` | `0x27000` |
+| SuperMini (reference) | S140 7.3.0 | `0x27000` | `0x27000` |
 
 S140 7.x is one 4 KB page larger. A UF2 built with upstream's unmodified `0x26000` partition lands
 *inside* the SoftDevice, so the bootloader refuses to start it and the board drops straight back to
 bootloader mode without ever enumerating. There is no partial symptom — it either boots or it is
 invisible.
 
-The shield therefore overrides `code_partition` to `0x27000`/`0xC5000` in
-[`astrolabe.overlay`](../firmware/zmk/module/boards/shields/astrolabe/astrolabe.overlay). This was
-previously an opt-in overlay passed with `-DEXTRA_DTC_OVERLAY_FILE`, and CI, the documented build
-command, and a hand build each independently forgot it, because nothing fails until the image
-reaches hardware. It now travels with the shield and applies by construction. Do not make it
-conditional; a genuine nice!nano v2 would need its own target.
+The shield therefore defaults `code_partition` to `0x27000`/`0xC5000` in
+[`astrolabe.overlay`](../firmware/module/boards/shields/astrolabe/astrolabe.overlay), and CI reads the
+address back out of every UF2 it builds.
 
-Verify the assumption on any new board before flashing: `INFO_UF2.TXT` on the bootloader drive
-reports the SoftDevice version.
+SuperMini clones are not consistent about this: some ship S140 6.x bootloaders. So the layout is
+read from the board rather than assumed. [`firmware/build.py`](../firmware/build.py) parses the
+SoftDevice from `INFO_UF2.TXT` (clones word it differently — `S140 7.3.0` and
+`S140 version 6.1.1` both occur) and builds the matching layout, applying
+[`s140-v6.overlay`](../firmware/module/boards/shields/astrolabe/s140-v6.overlay) when needed. Over
+serial DFU, where the bootloader cannot be asked, each package declares the SoftDevice IDs its
+image was linked for, and the bootloader rejects a mismatch before writing anything.
 
 ## Pin map
 
@@ -112,10 +114,19 @@ larger ball sweeps more surface for the same angle, and the conversion absorbs e
 ZMK owns system idle and deep sleep, bonding, host profiles, endpoint selection, UF2 recovery, VDDH
 battery sensing, and the standard BLE Battery Service.
 
-The PMW3610 pair stays in its automatic Run/Rest policy (`FMODE=0`). A MOTION or button interrupt
-opens the active polling window; when the window closes the MCU waits for the next interrupt. Device
-suspend cancels polling and resume reopens the window without resetting the sensors or forcing a
-performance mode.
+The PMW3610 pair stays in its automatic Run/Rest policy (`FMODE=0`). A MOTION interrupt or any
+control press or release opens a 2 s active polling window; when the window closes the MCU waits for
+the next interrupt. Device suspend cancels polling and resume reopens the window without resetting
+the sensors or forcing a performance mode.
+
+**Presses must not jerk the cursor.** A PMW3610 waking from rest re-locks its exposure and
+reports a short burst of false lockstep motion, and pressing a switch is exactly when that
+happens. Two things keep it out of the output, and both are load-bearing: the active window spans
+ordinary pauses in use so the sensors stay in run mode, and every control press and release
+reopens it (the driver's wake hook). The poll is paced, never pulled forward by an interrupt — a
+chain rescheduled on every MOTION edge free-runs and starves the standalone output thread, which
+shows up as lumpy, laggy cursor motion. To check: with the ball still, click each direction
+repeatedly in standalone and in 3D; the cursor and the Live page's ball must not move.
 
 SQUAL and shutter are parsed as diagnostics only. No validity filter, magnitude cap, or wake-settle
 discard is applied in the shipped path; adding one requires the physical sleep/wake, surface-loss,
@@ -148,9 +159,8 @@ slot, so without a bond clear all five profile slots eventually become unusable.
 
 The board carries two LEDs and only one of them is ours:
 
-- **Red — the status indicator.** The user LED, driven by firmware. It is the LED the Arduino
-  prototype drove through `LED_BUILTIN` and then disabled, and the one the UF2 bootloader flashes on
-  reset and during bootload. This is the device's only output that does not require a host, so it
+- **Red — the status indicator.** The user LED, driven by firmware, and the one the UF2 bootloader
+  flashes on reset and during bootload. This is the device's only output that does not require a host, so it
   carries BLE connection state, the active profile, and the selected endpoint — which is what makes
   the three non-bootloader gestures observable.
 - **Blue — not ours.** A battery-charge indicator, lit by the charging circuit rather than by
@@ -196,20 +206,14 @@ dead-looking device:
 - Clearing a bond on an already-unbonded profile emits nothing, because `clear_profile_bond()`
   returns early when the peer is already unset.
 
-**The LED is safe to drive, and a prior comment claiming otherwise is wrong.** It was disabled during
-normal operation in the Arduino prototype on the theory that its light reached both sensors off the
-ball and corrupted their auto-exposure — see the note still standing at
-[`../firmware/PMW3610/PMW3610.ino`](../firmware/PMW3610/PMW3610.ino). The phantom motion that
-diagnosis was built on had a different cause: a rest-to-run wake transient, where the sensor's servo
-re-locks and reports a decaying lockstep artifact. Fixing that at the source removed the symptom with
-the LED still lit. Do not re-disable the LED on interference grounds without new evidence that
-distinguishes it from the wake transient.
+**The LED is safe to drive.** An earlier prototype disabled it on the theory that its light reached
+the sensors and corrupted their exposure. The phantom motion behind that theory was the rest-to-run
+wake transient above, and fixing that removed it with the LED lit. Do not re-disable the LED on
+interference grounds without evidence that distinguishes it from the wake transient.
 
-Implemented in
-[`indicator.c`](../firmware/zmk/module/src/indicator.c) behind `CONFIG_ASTROLABE_INDICATOR`. Every
-pattern above is confirmed on hardware
-([evidence](../archive/release-evidence/zmk-hardware-freeze-live-2026-08-06.md)); what the LED costs
-at the battery is not, and stays a gate in [`../TODO.md`](../TODO.md).
+Implemented in [`indicator.c`](../firmware/module/src/indicator.c) behind
+`CONFIG_ASTROLABE_INDICATOR`. Every pattern above is confirmed on hardware; what the LED costs at the
+battery is not, and stays a gate in [`../TODO.md`](../TODO.md).
 
 ## What is not frozen
 

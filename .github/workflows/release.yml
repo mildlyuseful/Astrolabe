@@ -14,7 +14,7 @@ name: Release
 # The channel comes from the version, exactly as it does for a local build. A pre-release version
 # produces an unsigned internal-alpha artifact, which is the whole of what this project can currently
 # produce. A final version requires signing, and this workflow fails closed rather than emit an
-# unsigned artifact under a released name. See docs/release.md.
+# unsigned artifact under a released name. See docs/releasing.md.
 
 on:
   workflow_dispatch:

@@ -38,21 +38,21 @@ launch a supported 3D application. Shared ownership and lifecycle rules are defi
   browser's Permissions API and waits for Onshape's native client to obtain the grant; it does not
   grant permission or modify browser security settings. Browsers without a queryable network
   permission use serialized requests.
-- The first-run setup guide is observational by default. Its only direct choices are selecting the
-  existing keyboard-only input profile and, on Finish, applying the existing current-user
-  **Start at login** toggle. Host setup remains in the 3D Apps panel with the same consent and
-  reversal text described below.
+- The first-run guide changes nothing by itself. It offers the input-profile switch and the same
+  per-app Enable and Set up actions as the Apps page, with the same consent and reversal text
+  described below.
 
 ## Runtime and installation inventory
 
 | Component | Action | Scope and reversal |
 |---|---|---|
-| BLE input | Connects to the configured Trackball BLE device, and records the address it connected to in per-user configuration so it can still reach a device that Windows has paired and that has therefore stopped advertising. It never overwrites an address set by hand. | No driver or service installed. Clear the address in Settings, or remove/forget the device normally. |
+| BLE input | Connects to the configured Astrolabe device, and records the address it connected to in per-user configuration so it can still reach a device that Windows has paired and that has therefore stopped advertising. It never overwrites an address set by hand. | No driver or service installed. Clear the address in Settings, or remove/forget the device normally. |
 | USB vendor-HID input | Opens the device's second HID interface when VID, PID, usage page, usage, and product string all match, then sends an acknowledged attach to take ownership. | No driver or service installed. Read/write is confined to that one matched interface; unplugging it or stopping the daemon releases ownership. |
 | Keyboard bindings | Lazily registers the standard Windows keyboard device class through Raw Input only while an enabled compiled binding references keyboard controls. | No driver, hook, service, key suppression, or startup registration. Disable all keyboard bindings or stop the daemon to unregister it and synthesize releases. |
 | Start at login | When explicitly toggled in the tray, writes `Astrolabe` under the current user's Windows `Run` key. An earlier build's `TrackballDaemon` value is carried onto that name at startup and then removed, so only one registration ever fires at login. | No service or scheduled task. Toggle it off or delete the HKCU value. |
 | Configuration directory | Per-user state under `%APPDATA%\Mildly Useful\Astrolabe`. An earlier build's `%APPDATA%\TrackballDaemon` is copied there once, verified, and then left in place unmodified as the rollback copy. | Delete either directory. Deleting the new one reverts to the preserved copy. |
 | Navigation broker | TCP JSON listener on `127.0.0.1:<configured port>`. | Loopback only; stops with the daemon. No firewall rule created. |
+| Settings UI | HTTP listener on `127.0.0.1` at an ephemeral port, shown in an Edge or Chrome app window with its own profile under `%APPDATA%\Mildly Useful\Astrolabe\ui-profile`. | Loopback only; stops with the daemon. Delete `ui-profile` to forget the window's size and theme. |
 | Blender | Copies Python add-on and, only after a separate confirmation, an auto-enable startup shim. | Current-user Blender scripts. Delete `trackball_nav` and `trackball_nav_startup.py`. |
 | FreeCAD | Copies a Python Mod add-on. | Current-user FreeCAD Mod folder; delete `TrackballNav`. |
 | SketchUp | Copies a Ruby extension. | Current-user Plugins folder; delete loader and `trackball_nav`. |
@@ -142,12 +142,26 @@ interface can issue the same ownership commands, and the current VID/PID are ups
 development defaults shared by other devices, so the product string carries the match. That is
 acceptable for a local input peripheral whose worst case is pointer motion, and it is the reason a
 production VID/PID allocation is a release gate in `TODO.md`. It is not a confidentiality boundary.
+The same holds for the reboot-to-bootloader command `firmware/build.py` uses to flash without
+buttons: any local process could put the device into its bootloader, which costs a replug and
+nothing more — the bootloader accepts only an image copied to it.
+
+## Settings UI listener
+
+The settings page is static and public on loopback; the API behind it is not. Every API request
+needs the token minted for this daemon run (handed to the window in the URL fragment, which is never
+sent to a server) and a `Host` header naming exactly `127.0.0.1:<port>` or `localhost:<port>`, so a
+web page that rebinds its own domain to 127.0.0.1 is refused. Actions are POST-only and refused from
+a foreign `Origin`. The page loads nothing external, and its Content-Security-Policy allows scripts,
+styles, and connections only from itself. The API can do what the settings window always could —
+change settings and bindings, enable and set up integrations — and nothing that skips the consent
+steps above.
 
 ## Release security gates
 
 Release blockers and unfinished hardening are tracked only in [`TODO.md`](../TODO.md). The evergreen
 artifact, signing, listener, trust, reversibility, and packaged-behavior checks are in
-[`release_verification.md`](release_verification.md).
+[`releasing.md`](releasing.md).
 
 Keep these requirements invariant across releases:
 
@@ -162,5 +176,5 @@ Keep these requirements invariant across releases:
   exact packaged artifact.
 
 Source inspection cannot prove SmartScreen reputation, host trust prompts, GUI behavior, or
-third-party antivirus classification. Store completed release-run evidence as dated archive material,
-not as current status in this guide.
+third-party antivirus classification. Keep release-run evidence with the release it describes, not
+as current status in this guide.

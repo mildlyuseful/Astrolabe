@@ -9,20 +9,19 @@ codes, or scancodes. Shared input, state, and lifecycle ownership is defined in
 
 `trackball_daemon/system_keybinding_profiles.json` contains the two developer-owned System profiles:
 
-- `astrolabe_5way` includes the production five-way controls, the XIAO three-button test-bench
-  controls, and keyboard fallbacks.
-- `keyboard_only` contains only keyboard controls and is usable with legacy rotation-only firmware.
+- `astrolabe_5way` binds the five-way switch plus Ctrl/Shift keyboard modifiers.
+- `keyboard_only` uses the keyboard alone (F12 toggles Pointer/3D).
 
 Fresh installs select `astrolabe_5way`; `keyboard_only` is an explicit user choice. Selecting a
 profile does not copy or rewrite it. User edits are sparse patches stored under that profile ID in
 `%APPDATA%\Mildly Useful\Astrolabe\config.json`. Switching profiles preserves each profile's own patches.
 The daemon never changes profiles merely because BLE hardware appears or disappears.
 
-The ordinary Keybindings editor exposes the control chord, any number of registered app contexts,
-plain-language action or setting, and setting behavior/value. No selected app means the binding is
-global. It generates paired release/restoration actions for holds. Advanced DSL exposes executable
-and profile contexts, explicit priority, low-level activation, and custom action lists. Invalid
-edits are rejected before the live compiled profile changes.
+The Controls page edits a binding as a chord (recorded from the keyboard or the device), the apps it
+applies in, and a plain-language action or setting behaviour. No selected app means everywhere.
+Holds get their paired release actions generated. Edit as JSON exposes executable and profile
+contexts, priority, activation, and custom action lists. An invalid edit is rejected before the live
+profile changes.
 
 ## Matching and dependency behavior
 
@@ -112,7 +111,7 @@ python -m trackball_daemon.validate_bindings
 python -m trackball_daemon.validate_bindings --config "$env:APPDATA\Mildly Useful\Astrolabe\config.json"
 ```
 
-See [`ble_device_adapters.md`](ble_device_adapters.md) for the data-only BLE descriptor and snapshot
+See [`protocol.md`](protocol.md) for the data-only device descriptor and snapshot
 protocol. A community device using that protocol can contribute reviewed descriptor data. A device
 with a different wire protocol requires reviewed adapter code; the daemon never imports adapter
 modules named by descriptor JSON.

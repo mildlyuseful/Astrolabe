@@ -86,8 +86,7 @@ artifact must carry.
 Automated, mocked, headless-host, and live-viewport results are distinct claims, and this project
 treats describing one as another as a defect. If you could not exercise a path — no host installed,
 no hardware, no clean account — say so and record the release impact instead of implying a pass.
-[`docs/release_verification.md`](docs/release_verification.md) is the durable gate and lists the
-exact commands.
+[`docs/releasing.md`](docs/releasing.md) lists the checks and the release gates.
 
 ## Checks to run
 

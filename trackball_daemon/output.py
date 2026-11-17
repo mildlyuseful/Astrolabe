@@ -3,9 +3,8 @@
 
 """Output / injection layer.
 
-The SendInput primitive and quaternion helpers originate in cube_test.py. A validated global
-raw-to-logical axis orientation is applied once at packet ingress; cursor and per-app mappings then
-consume the same logical XYZ vector. Identity defaults preserve the original behavior exactly.
+A validated global raw-to-logical axis orientation is applied once at packet ingress; cursor and
+per-app mappings then consume the same logical XYZ vector.
 """
 from dataclasses import dataclass, replace
 import math

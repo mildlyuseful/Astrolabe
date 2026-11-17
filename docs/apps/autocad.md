@@ -22,9 +22,8 @@ copy release numbers into this guide.
 
 > **Warning: the NETLOAD plugin is the sole AutoCAD camera transport.** Do not restore the retired
 > daemon-side COM navigation path as a fallback. The transports raced during plugin startup and could
-> apply stale camera state after ownership changed. The retired implementation and historical ActiveX
-> evidence live under
-> [`archive/autocad_com_transport/`](../../archive/autocad_com_transport/).
+> apply stale camera state after ownership changed. The retired implementation and its ActiveX
+> evidence are in git history.
 
 ## Architecture
 
@@ -176,9 +175,8 @@ fallback to full capability or infer Paper space from `TILEMODE` alone.
 
 ### Do not probe against production modules or user drawings
 
-Never copy files from `archive/autocad_com_transport/` over active `trackball_daemon` modules. If a
-historical COM fact must be reproduced, use an isolated checkout and import the archived code under a
-non-production module name. Probe only a disposable drawing and close it without saving.
+Never restore the retired COM navigation code into `trackball_daemon`. If a historical COM fact must
+be reproduced, check it out from history into an isolated tree under a non-production module name. Probe only a disposable drawing and close it without saving.
 
 ## Testing and evidence
 
@@ -201,8 +199,7 @@ python tools/verify_autocad_artifact.py
 ```
 
 A current live claim requires the built DLL loaded into a disposable AutoCAD session. Record completed
-run evidence in a dated file under `archive/release-evidence/`; keep only durable API invariants and
-warnings here. Unresolved qualification and parity work belongs only in [`TODO.md`](../../TODO.md).
+run evidence with the release it qualifies; keep only durable API invariants and warnings here. Unresolved qualification and parity work belongs only in [`TODO.md`](../../TODO.md).
 
 ## Diagnostics
 

@@ -85,7 +85,7 @@ identity is `freecad`.
 
 **Contract:** the daemon composes FreeCAD's immutable host alignment with the saved user mapping
 before broker output. `tbnav_camera.py` is deliberately neutral to prevent double application. See
-[`../default_profiles.md`](../default_profiles.md).
+[`../integrations.md`](../integrations.md).
 
 ---
 
@@ -264,8 +264,8 @@ with synthetic pointer events.
 
 `SoLocation2Event` and `getObjectInfo` use device pixels with a bottom-left origin. Events must target
 the viewer's `viewport()` widget, and the observer must be rebound when `ActiveView` identity changes.
-Those are durable invariants; dated probe transcripts and completed run evidence belong under
-`archive/release-evidence/`.
+Those are durable invariants; probe transcripts and run evidence belong with the release they
+qualify, not here.
 
 FreeCAD's eye-and-target camera uses a neutral full-angle orbit scale. Do not copy Blender-specific
 `RegionView3D` compensation into this add-on; suite alignment belongs in `host_profiles.json`.

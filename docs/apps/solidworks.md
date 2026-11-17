@@ -186,8 +186,8 @@ the worker loop. They do not establish real COM behavior or visible viewport mot
 
 A current live claim requires an installed SolidWorks instance with a disposable unsaved part or
 assembly. Exercise the production driver, observe the viewport, inspect camera state independently,
-and record host version, projection mode, source revision/artifact, and result in a dated file under
-`archive/release-evidence/`. Do not infer a live pass from self-consistent matrix round-trips or mocked
+and record host version, projection mode, source revision/artifact, and result with the release it
+qualifies. Do not infer a live pass from self-consistent matrix round-trips or mocked
 tests.
 
 ## Current limitations

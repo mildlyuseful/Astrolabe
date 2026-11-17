@@ -26,7 +26,7 @@ Every path currently tracked in this repository is licensed under Apache-2.0.
 | `installer/` | Per-user Windows installer definition |
 | `tools/` | Build, release, calibration, probe, and acceptance tooling |
 | `tests/`, `conftest.py`, `cube_test.py` | Automated suite and the standalone cube verification demo |
-| `docs/`, `README.md`, `AGENTS.md`, `TODO.md`, `archive/` | Documentation, contributor routing, and retained investigation records |
+| `docs/`, `README.md`, `AGENTS.md`, `TODO.md` | Documentation and contributor routing |
 | `NOTICE`, `LICENSING.md`, `CONTRIBUTING.md`, `SECURITY.md`, `TRADEMARKS.md`, `THIRD_PARTY_NOTICES.md` | This project's own policy documents |
 | `licensing.json`, `third_party.json` | Machine-readable license and attribution records |
 | `.github/`, `.claude/` | CI workflows and repository tooling configuration |

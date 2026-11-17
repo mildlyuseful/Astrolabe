@@ -79,7 +79,7 @@ enumerated from the dependency lock:
 | Microsoft Visual C++ Runtime | Microsoft Software License Terms | Copyright Microsoft Corporation. | <https://learn.microsoft.com/en-us/cpp/windows/redistributing-visual-cpp-files> |
 | zlib | Zlib | Copyright (c) 1995-2011 Jean-loup Gailly and Mark Adler. | <https://docs.python.org/3.13/license.html#zlib> |
 
-Tcl/Tk is embedded because the settings window and control panel are Tkinter. Nuitka is a build
+Tcl/Tk is embedded because the control panel is Tkinter. Nuitka is a build
 tool, but its runtime support code is compiled into the produced executable. OpenSSL and libffi are
 the dynamic libraries carried by the pinned CPython distribution for its standard-library TLS,
 hashing, and `ctypes` extensions. The application-local Visual C++ runtime files remain subject to

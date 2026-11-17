@@ -84,7 +84,7 @@ BLE trackball
 Key contract: the daemon applies global physical orientation and the saved user layer, then sends
 Blender's immutable host correction in `adv.host_baseline`. The add-on applies that correction after
 mode-specific action routing. Its camera-math constants are neutral so the baseline is never
-double-applied. See [`../default_profiles.md`](../default_profiles.md).
+double-applied. See [`../integrations.md`](../integrations.md).
 
 ---
 
@@ -202,7 +202,7 @@ remains true turn-in-place.
 Blender's intrinsic signs/scales live in `host_profiles.json`, not editable add-on constants. The
 add-on camera math is neutral and `adv.host_baseline` is the only source of suite alignment. Do not
 copy the numeric profile into this document; inspect the packaged JSON or
-[`../default_profiles.md`](../default_profiles.md). Runtime constants that remain local include:
+[`../integrations.md`](../integrations.md). Runtime constants that remain local include:
 
 | Const | Meaning |
 |---|---|
