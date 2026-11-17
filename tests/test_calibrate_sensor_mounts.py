@@ -20,6 +20,9 @@ SPEC.loader.exec_module(calib)
 
 def test_parse_calib_line_accepts_firmware_and_csv():
     assert calib.parse_calib_line("CALIB,1,-2,3,-4") == (1.0, -2.0, 3.0, -4.0)
+    assert calib.parse_calib_line(
+        "[00:00:01.234,000] <inf> astrolabe_pmw3610: CALIB,1,-2,3,-4,90,88") == (
+            1.0, -2.0, 3.0, -4.0)
     assert calib.parse_calib_line("10,11,12,13") == (10.0, 11.0, 12.0, 13.0)
     assert calib.parse_calib_line("peak ips L=1") is None
 
@@ -53,12 +56,20 @@ def test_residual_search_recovers_known_mount_and_flip():
             r_theta0=calib.DEFAULT_R_THETA,
         ),
     )
-    best = ranked[0].config
-    assert best.left.mount == truth.left.mount
-    assert best.right.mount == truth.right.mount
-    assert best.left.flip == truth.left.flip
-    assert best.right.flip == truth.right.flip
-    assert ranked[0].rms < ranked[1].rms
+    # Turning both mounts by 180 degrees negates every delta and so the solved rotation, which no
+    # residual can see: the search recovers the pose up to that global sign, and the sign is the
+    # separate "which way is up" step.
+    def turned(cfg):
+        return (cfg.left.mount % 360, cfg.right.mount % 360, cfg.left.flip, cfg.right.flip)
+
+    def opposite(cfg):
+        return ((cfg.left.mount + 180) % 360, (cfg.right.mount + 180) % 360,
+                cfg.left.flip, cfg.right.flip)
+
+    assert turned(ranked[0].config) in (turned(truth), opposite(truth))
+    first_distinct = next(item for item in ranked
+                          if turned(item.config) not in (turned(truth), opposite(truth)))
+    assert ranked[0].rms < first_distinct.rms
 
 
 def test_filter_samples_requires_both_sensors_by_default():

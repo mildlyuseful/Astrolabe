@@ -14,18 +14,19 @@ is up" step after the sensors agree with each other.
 
 Capture
 -------
-1. In firmware/PMW3610/PMW3610.ino set ``#define CALIB_SERIAL 1``, flash.
-2. Open the SuperMini USB serial port at 115200.
-3. Roll the ball through pitch, yaw, and roll for ~20–30 s (vary axes; avoid pure spin
+1. Flash the logging firmware: ``python firmware/build.py --logging --flash``. Its USB serial
+   console prints one ``CALIB,dxL,dyL,dxR,dyR,squalL,squalR`` line per motion poll.
+2. Roll the ball through pitch, yaw, and roll for ~20-30 s (vary axes; avoid pure spin
    about one axis only).
-4. Run::
+3. Run::
 
      python tools/calibrate_sensor_mounts.py --serial auto --seconds 30
      python tools/calibrate_sensor_mounts.py --serial COM21 --seconds 30 --save-csv capture.csv
      python tools/calibrate_sensor_mounts.py --list-ports
      python tools/calibrate_sensor_mounts.py --csv capture.csv
 
-Output is ranked configs plus the ``#define`` block to paste into the sketch.
+Output is ranked configs plus the devicetree properties to paste into the shield overlay
+(firmware/module/boards/shields/astrolabe/astrolabe.overlay). Reflash the normal build afterwards.
 """
 
 from __future__ import annotations
@@ -40,11 +41,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-# Nominal PCB geometry from the current PMW3610 sketch (degrees).
+# Nominal geometry from the shield overlay (degrees).
 DEFAULT_L_PHI = 140.0
-DEFAULT_L_THETA = 130.0
-DEFAULT_R_PHI = 230.0
-DEFAULT_R_THETA = 130.0
+DEFAULT_L_THETA = 120.0
+DEFAULT_R_PHI = 220.0
+DEFAULT_R_THETA = 120.0
 MOUNT_GRID = (0.0, 90.0, 180.0, 270.0)
 PHI_OFFSETS = (0.0, 90.0, 180.0, 270.0)
 THETA_OFFSETS = (0.0, -90.0, 90.0)
@@ -68,17 +69,18 @@ class Config:
     swapped: bool = False
 
     def firmware_defines(self) -> str:
+        """Devicetree properties for the shield's astrolabe,dual-pmw3610 node."""
         l, r = self.left, self.right
+
+        def mdeg(*values):
+            return " ".join(str(round(value * 1000)) for value in values)
+
         return "\n".join([
-            f"#define SENSOR_L_PHI    {l.phi:.1f}f",
-            f"#define SENSOR_L_THETA  {l.theta:.1f}f",
-            f"#define SENSOR_R_PHI    {r.phi:.1f}f",
-            f"#define SENSOR_R_THETA  {r.theta:.1f}f",
-            f"#define SENSOR_L_MOUNT_DEG  {l.mount:.1f}f",
-            f"#define SENSOR_L_FLIP       {1 if l.flip else 0}",
-            f"#define SENSOR_R_MOUNT_DEG  {r.mount:.1f}f",
-            f"#define SENSOR_R_FLIP       {1 if r.flip else 0}",
-            f"// swapped_channels={self.swapped}",
+            f"sensor-phi-mdeg = <{mdeg(l.phi, r.phi)}>;",
+            f"sensor-theta-mdeg = <{mdeg(l.theta, r.theta)}>;",
+            f"sensor-mount-mdeg = <{mdeg(l.mount, r.mount)}>;",
+            f"sensor-flipped = <{int(l.flip)} {int(r.flip)}>;",
+            f"/* swapped_channels={self.swapped} */",
         ])
 
 
@@ -237,10 +239,10 @@ def parse_calib_line(line: str) -> tuple[float, float, float, float] | None:
     line = line.strip()
     if not line:
         return None
-    if line.startswith("CALIB,"):
-        # CALIB,dxL,dyL,dxR,dyR with optional trailing telemetry columns (SQUAL pair on
-        # current firmware) — only the four deltas participate in the residual search.
-        parts = line.split(",")
+    if "CALIB," in line:
+        # CALIB,dxL,dyL,dxR,dyR plus optional telemetry columns (the SQUAL pair), after whatever
+        # prefix the log console adds. Only the four deltas enter the residual search.
+        parts = line[line.index("CALIB,"):].split(",")
         if len(parts) < 5:
             return None
         try:
@@ -333,7 +335,7 @@ def resolve_serial_port(requested: str | None) -> str:
     raise SystemExit(
         "Could not auto-select a serial port. Available ports:\n"
         f"{listed}\n"
-        "Pass --serial COMx explicitly (close Arduino Serial Monitor first)."
+        "Pass --serial COMx explicitly (close any other serial monitor first)."
     )
 
 
@@ -355,7 +357,7 @@ def capture_serial(port: str, seconds: float, baud: int = 115200) -> list[tuple[
         raise SystemExit(
             f"could not open {port!r}: {exc}\n"
             f"Available ports:\n{listed}\n"
-            "Close Arduino Serial Monitor / other apps using the port, then retry "
+            "Close other apps using the port, then retry "
             "(SuperMini often renumerates after flash — try --serial auto)."
         ) from exc
 

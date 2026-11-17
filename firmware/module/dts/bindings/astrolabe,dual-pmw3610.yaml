@@ -1,0 +1,30 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Two PMW3610 sensors on a shared three-wire bus viewing one ball. Poses are spherical angles of
+  each sensor's normal in millidegrees; see docs/hardware.md.
+
+compatible: "astrolabe,dual-pmw3610"
+
+include: base.yaml
+
+properties:
+  sclk-gpios: {type: phandle-array, required: true}
+  sdio-gpios: {type: phandle-array, required: true}
+  cs-gpios: {type: phandle-array, required: true}
+  motion-gpios: {type: phandle-array, required: true}
+  cpi: {type: int, required: true}
+  ball-diameter-um: {type: int, required: true}
+  sensor-phi-mdeg: {type: array, required: true}
+  sensor-theta-mdeg: {type: array, required: true}
+  sensor-mount-mdeg: {type: array, required: true}
+  sensor-flipped: {type: array, required: true}
+  frame-tilt-mdeg: {type: int, required: true}
+  poll-interval-us: {type: int, default: 1000}
+  active-window-ms:
+    type: int
+    default: 2000
+    description: |
+      Keep polling this long after the last motion or control press. Long enough to span pauses
+      in ordinary use, so the sensors stay in run mode instead of re-waking on every touch.

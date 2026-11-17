@@ -1,0 +1,107 @@
+// SPDX-FileCopyrightText: 2026 Dylan Lee
+// SPDX-License-Identifier: Apache-2.0
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/zmk/matrix_transform.h>
+#include <dt-bindings/zmk/pointing.h>
+#include "astrolabe-layouts.dtsi"
+
+/* The SuperMini's UF2 bootloader bundles SoftDevice S140 7.3.0, one 4 KB page larger than the
+ * 6.1.1 a genuine nice!nano ships, so the application starts at 0x27000, not upstream's 0x26000.
+ * An image linked for the wrong one lands inside the SoftDevice and the board never enumerates.
+ * Clones vary: firmware/build.py reads the attached bootloader and passes the matching layout
+ * (layouts/s140-v6.overlay); this default is the reference board's. */
+&code_partition {
+    /* 0x27000..0xec000, ending where storage_partition begins, as upstream does. */
+    reg = <0x27000 0xc5000>;
+};
+
+/ {
+    chosen {
+        zmk,kscan = &astrolabe_kscan;
+        zmk,physical-layout = &astrolabe_layout;
+    };
+
+    aliases {
+        /* Upstream calls this node blue_led; on the SuperMini the same pin drives the red LED. */
+        astrolabe-status-led = &blue_led;
+    };
+
+    astrolabe_transform: astrolabe_transform {
+        compatible = "zmk,matrix-transform";
+        rows = <1>;
+        columns = <5>;
+        map = <RC(0, 0) RC(0, 1) RC(0, 2) RC(0, 3) RC(0, 4)>;
+    };
+
+    astrolabe_kscan: astrolabe_kscan {
+        compatible = "zmk,kscan-gpio-direct";
+        debounce-press-ms = <8>;
+        debounce-release-ms = <8>;
+        wakeup-source;
+        input-gpios =
+            <&gpio0 29 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+            <&gpio1 13 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+            <&gpio0 2  (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+            <&gpio0 31 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+            <&gpio1 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+    };
+
+    astrolabe_controller: astrolabe_controller {
+        compatible = "astrolabe,controller";
+        /* Center, held through boot. Same pin as kscan input 4: the core samples it once at
+         * POST_KERNEL/40, before kscan claims it at POST_KERNEL/90. Keep that order. */
+        force-standalone-gpios = <&gpio1 15 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+        /* Up, Down, Left, Right, Center. Up and Left carry no click: they host the gestures. */
+        control-buttons = <0 MB1 0 MB2 MB3>;
+        send-interval-ms = <7>;
+        /* Per radian of ball rotation, the same units as the daemon's profile. */
+        cursor-gain-milli = <200000>;
+        scroll-gain-milli = <400000>;
+        scroll-divisor = <60>;
+        yaw-deadzone-milli = <4>;
+        yaw-dominance-milli = <1700>;
+        scroll-hold-ms = <80>;
+    };
+
+    astrolabe_pmw: astrolabe_pmw {
+        compatible = "astrolabe,dual-pmw3610";
+        status = "okay";
+        wakeup-source;
+
+        sclk-gpios = <&gpio0 22 GPIO_ACTIVE_HIGH>;
+        sdio-gpios = <&gpio0 24 GPIO_ACTIVE_HIGH>;
+        cs-gpios = <&gpio1 0 GPIO_ACTIVE_LOW>, <&gpio0 20 GPIO_ACTIVE_LOW>;
+        motion-gpios = <&gpio0 11 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
+                       <&gpio0 17 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
+
+        cpi = <1600>;
+        ball-diameter-um = <52000>;
+        sensor-phi-mdeg = <140000 220000>;
+        sensor-theta-mdeg = <120000 120000>;
+        sensor-mount-mdeg = <270000 270000>;
+        sensor-flipped = <1 1>;
+        frame-tilt-mdeg = <(-25000)>;
+
+        poll-interval-us = <1000>;
+        active-window-ms = <2000>;
+    };
+
+    behaviors {
+        astro: astrolabe_control {
+            compatible = "astrolabe,behavior-control";
+            #binding-cells = <1>;
+            display-name = "Astrolabe Control";
+        };
+
+        astro_out: astrolabe_output_toggle {
+            compatible = "astrolabe,behavior-output-toggle";
+            #binding-cells = <0>;
+            display-name = "Astrolabe Output Toggle";
+        };
+    };
+};
+
+&astrolabe_layout {
+    transform = <&astrolabe_transform>;
+};

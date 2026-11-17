@@ -19,7 +19,7 @@ import yaml
 
 
 ROOT = Path(__file__).parents[1]
-ZMK_ROOT = ROOT / "firmware" / "zmk"
+ZMK_ROOT = ROOT / "firmware"
 MANIFEST_PATH = ZMK_ROOT / "config" / "west.yml"
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "ci.yml"
 THIRD_PARTY_PATH = ROOT / "third_party.json"
@@ -89,6 +89,7 @@ def test_out_of_tree_module_declares_sources_that_exist():
         "module/Kconfig",
         "module/boards/shields/astrolabe/astrolabe.overlay",
         "module/boards/shields/astrolabe/astrolabe.zmk.yml",
+        "module/boards/shields/astrolabe/s140-v6.overlay",
     ):
         assert (ZMK_ROOT / relative).is_file(), relative
 

@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+description: Reports an Astrolabe control bit. Parameter is the protocol bit index.
+compatible: "astrolabe,behavior-control"
+include: one_param.yaml

@@ -1,0 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+description: Toggles USB/BLE output and reports the outcome on the status LED.
+compatible: "astrolabe,behavior-output-toggle"
+include: zero_param.yaml

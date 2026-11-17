@@ -1,0 +1,8 @@
+// SPDX-FileCopyrightText: 2026 Dylan Lee
+// SPDX-License-Identifier: Apache-2.0
+
+/* For bootloaders that bundle SoftDevice S140 6.x (genuine nice!nano and some SuperMini clones):
+ * the application starts at 0x26000. build.py selects this from the attached bootloader. */
+&code_partition {
+    reg = <0x26000 0xc6000>;
+};

@@ -1,0 +1,71 @@
+// SPDX-FileCopyrightText: 2026 Dylan Lee
+// SPDX-License-Identifier: Apache-2.0
+
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/bt.h>
+#include <dt-bindings/zmk/outputs.h>
+
+// Two layers, selected by the route (CONFIG_ASTROLABE_DAEMON_LAYER), never by a binding:
+//
+//   0 standalone  the device is its own mouse. Up and Left carry no click, so they host gestures.
+//   1 daemon      plain control bits with nothing in front of them, so host-side chords are
+//                 immediate. A tap-dance must wait out its term to know a tap was single; paying
+//                 that on a daemon control would delay every press.
+//
+//   double-tap Up     toggle USB/BLE output          hold Up 3 s     bootloader
+//   double-tap Left   next BLE profile                hold Left 3 s   clear this profile's bond
+//
+// The status LED reports the three radio gestures (src/indicator.c); the bootloader announces
+// itself with its UF2 drive. Bond clear needs a gesture because ZMK pairs only onto an open slot:
+// without it, all five slots eventually fill for good.
+
+/ {
+    behaviors {
+        // The tap-dance below charges its 400 ms before this term starts: 2600 + 400 = 3 s.
+        // A hold-tap passes one parameter to each binding, which is why &astro takes one.
+        up_recover: up_recover {
+            compatible = "zmk,behavior-hold-tap";
+            #binding-cells = <2>;
+            tapping-term-ms = <2600>;
+            flavor = "tap-preferred";
+            bindings = <&bootloader>, <&astro>;
+        };
+
+        left_recover: left_recover {
+            compatible = "zmk,behavior-hold-tap";
+            #binding-cells = <2>;
+            tapping-term-ms = <2600>;
+            flavor = "tap-preferred";
+            bindings = <&bt>, <&astro>;
+        };
+
+        // The window runs from the first press, so it must cover press-release-press on a stiff
+        // five-way; the second tap fires immediately on keydown.
+        up_gestures: up_gestures {
+            compatible = "zmk,behavior-tap-dance";
+            #binding-cells = <0>;
+            tapping-term-ms = <400>;
+            bindings = <&up_recover 0 0>, <&astro_out>;
+        };
+
+        left_gestures: left_gestures {
+            compatible = "zmk,behavior-tap-dance";
+            #binding-cells = <0>;
+            tapping-term-ms = <400>;
+            bindings = <&left_recover BT_CLR_CMD 2>, <&bt BT_NXT>;
+        };
+    };
+
+    keymap {
+        compatible = "zmk,keymap";
+
+        // Up, Down, Left, Right, Center. &astro's parameter is the protocol control bit.
+        standalone_layer {
+            bindings = <&up_gestures &astro 1 &left_gestures &astro 3 &astro 4>;
+        };
+
+        daemon_layer {
+            bindings = <&astro 0 &astro 1 &astro 2 &astro 3 &astro 4>;
+        };
+    };
+};

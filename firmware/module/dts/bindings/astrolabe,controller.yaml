@@ -1,0 +1,41 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  The Astrolabe controller core: delivery pacing, the standalone HID mouse it falls back to, and
+  the forced-standalone escape. Rotation values are in radians; gains are per radian.
+
+compatible: "astrolabe,controller"
+
+include: base.yaml
+
+properties:
+  force-standalone-gpios:
+    type: phandle-array
+    description: Held through boot, daemon claims are refused until reboot.
+  control-buttons:
+    type: array
+    description: Standalone HID button mask (MB1..MB5) per control bit; 0 for no click.
+  send-interval-ms:
+    type: int
+    default: 7
+    description: Delivery window; motion is accumulated and sent at most this often.
+  cursor-gain-milli:
+    type: int
+    required: true
+  scroll-gain-milli:
+    type: int
+    required: true
+  scroll-divisor:
+    type: int
+    required: true
+    description: Scroll accumulator units per wheel detent.
+  yaw-deadzone-milli:
+    type: int
+    required: true
+  yaw-dominance-milli:
+    type: int
+    required: true
+  scroll-hold-ms:
+    type: int
+    required: true

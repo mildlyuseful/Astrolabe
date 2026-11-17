@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: 2026 Dylan Lee
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig ASTROLABE
+    bool "Astrolabe 3D controller"
+    default y if SHIELD_ASTROLABE
+    select GPIO
+    select ZMK_POINTING
+    help
+      The controller core: routes motion and controls to a host HID mouse, or to a daemon that
+      claims the route over BLE or USB.
+
+if ASTROLABE
+
+config ASTROLABE_BLE
+    bool "BLE daemon transport"
+    default y
+    depends on ZMK_BLE
+
+config ASTROLABE_USB
+    bool "USB vendor-HID daemon transport"
+    default y
+    depends on ZMK_USB
+
+config ASTROLABE_DAEMON_LAYER
+    int "Keymap layer active while a daemon owns the route"
+    default 1
+    help
+      The route is the only writer of this layer; never bind a layer behavior to it. The route
+      changes with no user action (cable pull, daemon exit, keepalive timeout), and a second
+      writer would leave the two out of step.
+
+config ASTROLABE_INDICATOR
+    bool "Status LED for endpoint and BLE profile changes"
+    default y
+    depends on ZMK_BLE
+    help
+      Drives the LED aliased astrolabe-status-led. Event-driven: dark at rest.
+
+config ASTROLABE_DUAL_PMW3610
+    bool "Dual PMW3610 trackball motion source"
+    default y
+    depends on DT_HAS_ASTROLABE_DUAL_PMW3610_ENABLED
+
+config ASTROLABE_CALIBRATION_LOG
+    bool "Log raw sensor deltas for tools/calibrate_sensor_mounts.py"
+    depends on ASTROLABE_DUAL_PMW3610 && LOG
+
+config ASTROLABE_LOG_LEVEL
+    int "Astrolabe log level"
+    range 0 4
+    default 2
+
+endif

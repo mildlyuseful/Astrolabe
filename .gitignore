@@ -14,13 +14,15 @@ env/
 .uv-cache/
 .tmp/
 
-# Generated when west initializes from firmware/zmk/config/west.yml.
-/firmware/zmk/.west/
-/firmware/zmk/zmk/
-/firmware/zmk/zephyr/
-/firmware/zmk/modules/
-/firmware/zmk/tools/
-/firmware/zmk/bootloader/
+# The firmware west workspace: upstream checkouts, the build directory, and the tool venv.
+/firmware/.west/
+/firmware/.venv/
+/firmware/build/
+/firmware/zmk/
+/firmware/zephyr/
+/firmware/modules/
+/firmware/tools/
+/firmware/bootloader/
 
 # .NET build outputs (plugin_src is source; the shipping DLL is bundled under
 # trackball_daemon/plugins/ and IS committed)
