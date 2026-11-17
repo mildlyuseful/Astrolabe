@@ -228,8 +228,15 @@ static bool sensor_init(const struct pmw_config *config, uint8_t sensor) {
     write_register(config, sensor, REG_POWER_UP_RESET, 0x5AU);
     k_msleep(50);
 
-    if (read_register(config, sensor, REG_PRODUCT_ID) != PMW3610_PRODUCT_ID ||
-        read_register(config, sensor, REG_NOT_PRODUCT_ID) != PMW3610_NOT_PRODUCT_ID) {
+    const uint8_t product = read_register(config, sensor, REG_PRODUCT_ID);
+    const uint8_t inverse = read_register(config, sensor, REG_NOT_PRODUCT_ID);
+    if (product != PMW3610_PRODUCT_ID || inverse != PMW3610_NOT_PRODUCT_ID) {
+        /* The bytes are the diagnosis. 0x00/0xff means nothing drove SDIO: an undriven line keeps
+         * the last address bit the MCU wrote (0 for 0x00, 1 for 0x3f), so the sensor never
+         * answered -- check its SCLK, SDIO and CS wiring against the overlay. Anything else means
+         * something answered, garbled: bus timing, or another device on the line. */
+        LOG_WRN("PMW3610 %u: id 0x%02x/0x%02x, expected 0x%02x/0x%02x", sensor, product, inverse,
+                PMW3610_PRODUCT_ID, PMW3610_NOT_PRODUCT_ID);
         return false;
     }
 

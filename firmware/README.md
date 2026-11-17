@@ -31,6 +31,11 @@ before writing anything. `--layout s140-v6|s140-v7` forces one.
 
 `--logging` builds a diagnostic image with a USB serial console and raw sensor output for
 [`../tools/calibrate_sensor_mounts.py`](../tools/calibrate_sensor_mounts.py). Don't ship it.
+The console holds its log for five seconds after boot so the boot messages survive enumeration;
+open the board's COM port in any serial terminal within that window. The first line to look for
+is `PMW3610 sensors ready: 0=1 1=1`. A sensor that does not identify logs the ID bytes it read:
+`0x00/0xff` means nothing answered on SDIO at all, which is a wiring fault on SCLK, SDIO or that
+sensor's CS, not a firmware or tuning one.
 
 ## Layout
 
