@@ -11,11 +11,6 @@ import {h, icon, debounce, formatNumber, titleCase} from './ui.js';
 
 const AXES = ['X', 'Y', 'Z'];
 
-export function specsIn(state, category, appId) {
-  return state.schema.settings.filter(spec => spec.category === category &&
-    (appId ? spec.apps.includes(appId) : spec.scope !== 'global_and_app' || true));
-}
-
 export function choiceLabel(state, spec, value) {
   if (value === null || value === undefined) return 'Inherit';
   if (spec.id.includes('pivot') && state.schema.pivotLabels[value]) return state.schema.pivotLabels[value];
@@ -232,18 +227,17 @@ export function categoryRows(ctx, category, appId, hints = []) {
     (appId ? spec.apps.includes(appId) : true));
   const paired = specs.filter(spec => /\.(source|invert)$/.test(spec.id) &&
     specs.some(other => other.id === spec.id.replace(/\.(source|invert)$/, '.source')));
-  if (paired.length && paired.length === specs.length) {
-    if (category === 'transform') {
-      return specs.filter(spec => spec.id.endsWith('.source')).map(spec => {
-        const axis = spec.id.split('.').at(-2).toUpperCase();
-        return axisRow(ctx, `Logical ${axis}`, spec,
-          specs.find(other => other.id === spec.id.replace('.source', '.invert')), appId);
-      });
-    }
-    return axisGroups(ctx, specs, appId);
-  }
-  return specs.filter(spec => !paired.includes(spec)).map(spec =>
+  const plain = specs.filter(spec => !paired.includes(spec)).map(spec =>
     settingRow(ctx, spec, appId, {hint: hints.find(hint => hint.setting === spec.id)}));
+  if (!paired.length) return plain;
+  if (category === 'transform') {
+    return [...paired.filter(spec => spec.id.endsWith('.source')).map(spec => {
+      const axis = spec.id.split('.').at(-2).toUpperCase();
+      return axisRow(ctx, `Logical ${axis}`, spec,
+        specs.find(other => other.id === spec.id.replace('.source', '.invert')), appId);
+    }), ...plain];
+  }
+  return [...plain, ...axisGroups(ctx, paired, appId)];
 }
 
 export function categoriesFor(ctx, page, appId) {

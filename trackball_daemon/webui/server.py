@@ -243,6 +243,9 @@ class _Handler(BaseHTTPRequestHandler):
         payload = result if isinstance(result, dict) and "ok" in result else {
             "ok": True, "result": result if isinstance(result, (dict, list, str, int, float,
                                                                   bool, type(None))) else None}
+        # Not every action changes config (start at login lives in the registry), so always tell
+        # clients to refresh rather than relying on a config event that may not come.
+        self.ui.changed("state")
         return self._json(200, payload)
 
     def _events(self):
