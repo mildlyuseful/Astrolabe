@@ -122,7 +122,7 @@ def build(layout, logging):
     run(*args, cwd=WORKSPACE, env=tool_env())
 
     OUT.mkdir(exist_ok=True)
-    uf2 = OUT / f"astrolabe-{layout}.uf2"
+    uf2 = OUT / f"astrolabe-{layout}{'-logging' if logging else ''}.uf2"
     shutil.copyfile(build_dir / "zephyr" / "zmk.uf2", uf2)
     shutil.copyfile(build_dir / "zephyr" / "zmk.hex", uf2.with_suffix(".hex"))
     start = uf2_start(uf2)
